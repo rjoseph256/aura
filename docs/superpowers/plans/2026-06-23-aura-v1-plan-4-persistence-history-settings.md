@@ -371,7 +371,7 @@ git commit -m "feat(kit): SettingsStore (units/voice/map style)"
 
 - [ ] **Step 1: Create a shared on-disk container in `AuraApp`**
 
-In `AuraApp.swift`, build a `RideStore` backed by a persistent `ModelContainer(for: RideRecord.self)` and inject it (via `.environment` or a simple shared instance). Keep a `SettingsStore()` available too.
+In `AuraApp.swift`, build a `RideStore` backed by a persistent `ModelContainer(for: RideRecord.self)` and a `SettingsStore()`. Inject both with `.environment(...)` (same pattern as Plan 3's `AppRouter`, for one consistent injection style across the app). Views read them via `@Environment(RideStore.self)` / `@Environment(SettingsStore.self)` — make both `@Observable` (or pass explicitly to the screens that need them).
 
 - [ ] **Step 2: Save on ride end**
 
@@ -500,7 +500,7 @@ struct SettingsView: View {
 }
 ```
 
-- [ ] **Step 2: Apply settings** — read `settings.voiceEnabled` in `NavigateHUDView` (mute the SDK voice when off), and `settings.units` in `SpeedRail`/`RideSummaryView`/preview (branch metric vs imperial via `UnitConverter`). For v1, imperial is the default path; metric branches use `m`/`km` (add `UnitConverter.km(fromMeters:)` if needed, with a test).
+- [ ] **Step 2: Apply settings** — read `settings.voiceEnabled` in `NavigateHUDView` (mute the SDK voice when off), and `settings.units` in `SpeedRail`/`RideSummaryView`/preview (branch metric vs imperial via `UnitConverter`). Imperial is the default path. If you implement the metric branch, add `UnitConverter.km(fromMeters:)` to **`AuraCore`** test-first (extend `AuraCoreTests/UnitConverterTests`, run `cd AuraCore && swift test --filter UnitConverterTests`) before wiring the UI, and commit that change with the package paths (`AuraCore/Sources/AuraCore/Units`, `AuraCore/Tests/AuraCoreTests/UnitConverterTests.swift`).
 
 - [ ] **Step 3: Build + run; toggle settings and confirm they take effect and persist**
 
