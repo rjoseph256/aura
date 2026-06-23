@@ -17,6 +17,7 @@
 - **Mapbox API drift:** the deep research flagged Mapbox SDK versions/APIs as fast-moving. The map/annotation code below targets Maps SDK **v11** SwiftUI APIs; **verify symbol names against the installed SDK version's docs** before assuming a step is wrong. The *testable* logic in `AuraKit` does not depend on Mapbox and is the source of truth for correctness.
 - **HUD visual implementation:** when building the SwiftUI HUD (Tasks 6–7), run the UI work through the design skills per the project's standing instruction — `impeccable` (entry point) and `emil-design-eng` (motion/polish). This plan specifies layout, data, and tokens; those skills guide the craft.
 - Keep `AuraCore` pure — all CoreLocation code lives in `AuraKit` or the app.
+- **`SimulatedLocationProvider.task` is written without synchronization** (the class is `@unchecked Sendable`). It's deterministic under the tests, but before wiring `stop()` to real UI controls in later work, harden it (a small lock or convert to an `actor`) to remove the latent data race.
 
 ---
 
@@ -453,14 +454,9 @@ And under the `Aura` target `dependencies:` add:
         product: MapboxMaps
 ```
 
-- [ ] **Step 2: Provide the public access token**
+- [ ] **Step 2: Provide the public access token (concrete approach for v1)**
 
-Create `Aura/Resources/MapboxAccessToken` (untracked) containing only your `pk.…` token. Add to `Info.plist`:
-```xml
-  <key>MBXAccessToken</key>
-  <string>$(MAPBOX_ACCESS_TOKEN)</string>
-```
-…and document in `.mapbox-setup.md` how the token is injected (xcconfig or a build phase reading the token file). For the simplest local path, you may instead hardcode the token via `MapboxOptions.accessToken = "pk.…"` at app launch in DEBUG — but never commit it. Record the chosen approach in `.mapbox-setup.md`.
+Create `Aura/Resources/MapboxAccessToken` (untracked — already in `.gitignore` from Task 3) containing only your `pk.…` token on a single line. The app reads it at launch and sets `MapboxOptions.accessToken` (wired in Step 4). The file is bundled from local disk at build time but never committed. Record this in `.mapbox-setup.md`. No `MBXAccessToken` Info.plist key is needed with this approach.
 
 - [ ] **Step 3: A Mapbox map view that draws a track**
 
@@ -506,14 +502,23 @@ import MapboxMaps
 
 @main
 struct AuraApp: App {
-    init() {
-        // If not using xcconfig injection, set the token here in DEBUG (never commit a real token):
-        // MapboxOptions.accessToken = "pk.…"
-    }
+    init() { AuraApp.configureMapbox() }
+
     var body: some Scene {
         WindowGroup {
             RideMapView(track: [])
         }
+    }
+
+    /// Reads the untracked bundled token file and configures Mapbox. See .mapbox-setup.md.
+    static func configureMapbox() {
+        guard let url = Bundle.main.url(forResource: "MapboxAccessToken", withExtension: nil),
+              let token = try? String(contentsOf: url, encoding: .utf8)
+                  .trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else {
+            assertionFailure("Missing Mapbox token — see .mapbox-setup.md")
+            return
+        }
+        MapboxOptions.accessToken = token
     }
 }
 ```
@@ -672,6 +677,10 @@ struct RideHUDView: View {
                 try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
+        .onDisappear {
+            streamTask?.cancel()
+            provider?.stop()
+        }
     }
 
     private var controls: some View {
@@ -721,7 +730,7 @@ struct RideHUDView: View {
 
 - [ ] **Step 4: Wire the HUD with the simulator as the default provider (live provider arrives in Task 8)**
 
-Update `Aura/Sources/AuraApp.swift` body:
+Update `Aura/Sources/AuraApp.swift` body (keep `configureMapbox()` from Task 4):
 ```swift
 import SwiftUI
 import AuraCore
@@ -730,10 +739,22 @@ import MapboxMaps
 
 @main
 struct AuraApp: App {
+    init() { AuraApp.configureMapbox() }
+
     var body: some Scene {
         WindowGroup {
             RideHUDView(makeProvider: Self.simulatedProvider)
         }
+    }
+
+    static func configureMapbox() {
+        guard let url = Bundle.main.url(forResource: "MapboxAccessToken", withExtension: nil),
+              let token = try? String(contentsOf: url, encoding: .utf8)
+                  .trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else {
+            assertionFailure("Missing Mapbox token — see .mapbox-setup.md")
+            return
+        }
+        MapboxOptions.accessToken = token
     }
 
     /// Loads the bundled GPX and replays it at 10× for a quick desk demo.
@@ -895,18 +916,16 @@ Add inside the `Info.plist` `<dict>`:
   <array><string>location</string></array>
 ```
 
-- [ ] **Step 3: Add a simple chooser so the app uses real GPS by default, with a debug "Simulate" path**
+- [ ] **Step 3: Switch the default provider to real GPS**
 
-Update `AuraApp.swift` to default to `LiveLocationProvider`, keeping the simulator available behind a DEBUG toggle:
+Update `AuraApp.swift`'s `body` to use `LiveLocationProvider` (keep `configureMapbox()` and `simulatedProvider()`):
 ```swift
+    var body: some Scene {
         WindowGroup {
-            #if DEBUG
+            // Real GPS by default. For a desk demo without moving, swap to: Self.simulatedProvider
             RideHUDView(makeProvider: { LiveLocationProvider() })
-                // To demo without moving, temporarily swap to: RideHUDView(makeProvider: Self.simulatedProvider)
-            #else
-            RideHUDView(makeProvider: { LiveLocationProvider() })
-            #endif
         }
+    }
 ```
 
 - [ ] **Step 4: Build + run; on the simulator use Features ▸ Location ▸ City Bicycle Ride to feed motion**
