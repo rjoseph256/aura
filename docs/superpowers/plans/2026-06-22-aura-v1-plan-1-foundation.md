@@ -12,6 +12,11 @@
 
 **This is Plan 1 of 4** (see spec / brainstorm summary). It produces a tested library, not a runnable app — that arrives in Plan 2.
 
+### Notes for implementers
+- **`Ride.kind` vs spec's `type`:** the spec (§6) calls this field `type`; the model uses `kind` (with a `Kind` enum) to avoid shadowing Swift's `type` semantics. When Plan 2/4 wires SwiftData persistence, map `kind` ⇄ the spec's intent — they refer to the same concept.
+- **`Ride.stats` is optional** (`RideStats?`) to model "not yet computed" (stats are filled when a ride ends); `RideStatsCalculator.stats(from:)` itself returns a non-optional value.
+- **Keep `swift-tools-version: 5.10`** in `Package.swift`. This intentionally builds in Swift 5 language mode; bumping to Swift 6 language mode would enable strict-concurrency-as-error and could trip the `-warnings-as-errors` build step (Task 9) on `Sendable` edge cases. Revisit deliberately, not incidentally.
+
 ---
 
 ## File Structure
@@ -93,12 +98,12 @@ import XCTest
 @testable import AuraCore
 
 final class GeoTests: XCTestCase {
-    func test_distance_betweenTwoKnownPoints_isAccurateWithinOnePercent() {
-        // ~1.5 km apart in Pittsburgh (Point State Park → PNC Park area)
+    func test_distance_betweenTwoKnownPoints_isAccurateWithinTwoPercent() {
+        // ~0.67 km apart near downtown Pittsburgh
         let a = Coordinate(latitude: 40.4417, longitude: -80.0098)
         let b = Coordinate(latitude: 40.4469, longitude: -80.0057)
         let meters = Geo.distance(a, b)
-        XCTAssertEqual(meters, 645, accuracy: 645 * 0.02) // within 2%
+        XCTAssertEqual(meters, 675, accuracy: 675 * 0.02) // within 2%
     }
 
     func test_distance_betweenIdenticalPoints_isZero() {
