@@ -1,109 +1,174 @@
 import SwiftUI
 import AuraCore
+import AuraKit
 
-// MARK: - PlanView (Home / Plan screen)
+// MARK: - PlanView (Home / dashboard)
 
 struct PlanView: View {
     @Environment(AppRouter.self) private var router
+    @Environment(RideStore.self) private var rideStore
+    @Environment(SettingsStore.self) private var settings
     @State private var query: String = ""
+    @State private var rides: [Ride] = []
+
+    private var weekStats: WeeklyRideStats {
+        RideAggregator.weekToDate(rides, now: Date())
+    }
+    private var lastRide: Ride? { RideAggregator.mostRecent(rides) }
 
     var body: some View {
         ZStack {
-            AuraTheme.bg
-                .ignoresSafeArea()
+            AuraTheme.bg.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // ── Top bar: wordmark
-                VStack(spacing: 6) {
-                    Text("Aura")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
-                        .foregroundColor(AuraTheme.text)
+                header
+                    .padding(.top, 16)
+                    .padding(.bottom, 20)
 
-                    Text("Plan your ride in Pittsburgh")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundColor(AuraTheme.muted)
-                }
-                .padding(.top, 20)
-                .padding(.bottom, 24)
-
-                // ── Search field (DestinationSearchView)
                 DestinationSearchView(query: $query) { place in
                     router.remember(place)
                     router.screen = .preview(destination: place)
                 }
 
-                // ── Recents / empty state list area — hidden while actively searching
+                // Dashboard is hidden while actively searching (results take over).
                 if query.isEmpty {
-                    recentsSection
-                        .padding(.top, 16)
+                    dashboard
                 }
 
                 Spacer(minLength: 0)
 
-                // ── Bottom CTA: Free ride
                 freeRideButton
-                    .padding(.bottom, 0) // safe area handled by safeAreaInset
             }
-            .safeAreaInset(edge: .bottom) {
-                Color.clear.frame(height: 0)
+        }
+        .task { await loadRides() }
+    }
+
+    // MARK: Data
+
+    private func loadRides() async {
+        rides = (try? rideStore.allRides()) ?? []
+    }
+
+    // MARK: Header
+
+    private var header: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(greeting)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(AuraTheme.muted)
+                Text("Aura")
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .foregroundColor(AuraTheme.text)
             }
+            Spacer()
+        }
+        .padding(.horizontal, 24)
+    }
+
+    private var greeting: String {
+        switch Calendar.current.component(.hour, from: Date()) {
+        case 5..<12:  return "Good morning"
+        case 12..<17: return "Good afternoon"
+        case 17..<22: return "Good evening"
+        default:      return "Late ride?"
         }
     }
 
-    // MARK: - Recents section
+    // MARK: Dashboard
 
-    @ViewBuilder
-    private var recentsSection: some View {
-        if router.recents.isEmpty {
-            emptyState
-        } else {
-            VStack(spacing: 0) {
-                HStack {
-                    Text("Recents")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(AuraTheme.muted)
-                        .textCase(.uppercase)
-                        .tracking(0.5)
-                    Spacer()
-                }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 8)
+    private var dashboard: some View {
+        ScrollView {
+            VStack(spacing: 28) {
+                weeklyBlock
+                    .padding(.top, 24)
 
-                VStack(spacing: 0) {
-                    ForEach(router.recents) { place in
-                        RecentRow(place: place) {
-                            router.screen = .preview(destination: place)
-                        }
-                        if place.id != router.recents.last?.id {
-                            Divider()
-                                .background(AuraTheme.surface)
-                                .padding(.leading, 60)
-                                .padding(.horizontal, 24)
-                        }
-                    }
+                if let lastRide {
+                    lastRideSection(lastRide)
                 }
-                .background(AuraTheme.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .padding(.horizontal, 24)
+
+                if !router.recents.isEmpty {
+                    recentsSection
+                }
             }
+            .padding(.bottom, 16)
         }
+        .scrollIndicators(.hidden)
     }
 
-    // MARK: - Empty state
+    // MARK: Weekly block (ring + caption)
 
-    private var emptyState: some View {
-        VStack(spacing: 0) {
-            Spacer().frame(height: 48)
-            Text("Search a place to plan a route —\nor start a free ride.")
-                .font(.system(size: 15))
+    private var weeklyBlock: some View {
+        VStack(spacing: 14) {
+            WeeklyRing(stats: weekStats,
+                       goalMeters: settings.weeklyGoalMeters,
+                       units: settings.units)
+            Text(weeklyCaption)
+                .font(.system(size: 13, weight: .medium))
                 .foregroundColor(AuraTheme.muted)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Spacer().frame(height: 48)
         }
     }
 
-    // MARK: - Free ride CTA
+    private var weeklyCaption: String {
+        guard weekStats.rideCount > 0 else { return "Plan a ride to start your week" }
+        let rides = "\(weekStats.rideCount) ride\(weekStats.rideCount == 1 ? "" : "s")"
+        return "\(weekStats.goalPercent(goalMeters: settings.weeklyGoalMeters))% of \(goalLabel) · \(rides)"
+    }
+
+    /// Whole-unit goal label, e.g. "40 km" / "25 mi" (no decimals — it's a target).
+    private var goalLabel: String {
+        let value = settings.units == .metric
+            ? settings.weeklyGoalMeters / 1000
+            : settings.weeklyGoalMeters / 1609.344
+        let unit = settings.units == .metric ? "km" : "mi"
+        return "\(Int(value.rounded())) \(unit)"
+    }
+
+    // MARK: Last-ride section
+
+    private func lastRideSection(_ ride: Ride) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("Last ride")
+            LastRideCard(ride: ride, units: settings.units) {
+                router.selectedTab = .history
+            }
+        }
+        .padding(.horizontal, 24)
+    }
+
+    // MARK: Recents
+
+    private var recentsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionHeader("Recents")
+            VStack(spacing: 0) {
+                ForEach(router.recents) { place in
+                    RecentRow(place: place) {
+                        router.screen = .preview(destination: place)
+                    }
+                    if place.id != router.recents.last?.id {
+                        Divider()
+                            .background(AuraTheme.bg)
+                            .padding(.leading, 58)
+                    }
+                }
+            }
+            .background(AuraTheme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .padding(.horizontal, 24)
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(AuraTheme.muted)
+            .textCase(.uppercase)
+            .tracking(0.5)
+    }
+
+    // MARK: Free-ride CTA
 
     private var freeRideButton: some View {
         Button {
@@ -122,6 +187,7 @@ struct PlanView: View {
         .buttonStyle(.plain)
         .padding(.horizontal, 24)
         .padding(.bottom, 24)
+        .padding(.top, 8)
     }
 }
 
