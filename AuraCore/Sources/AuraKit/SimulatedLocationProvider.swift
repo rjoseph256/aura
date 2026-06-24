@@ -2,7 +2,8 @@ import Foundation
 import AuraCore
 
 /// Replays a GPX track as a timed stream of TrackPoints. `speedMultiplier > 1` plays faster.
-public final class SimulatedLocationProvider: LocationStreaming, @unchecked Sendable {
+@MainActor
+public final class SimulatedLocationProvider: LocationStreaming {
     private let schedule: [GPXLocationPlayer.ScheduledPoint]
     private var task: Task<Void, Never>?
 

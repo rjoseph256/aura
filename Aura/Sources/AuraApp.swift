@@ -49,6 +49,7 @@ struct AuraApp: App {
     }
 
     /// Loads the bundled GPX and replays it at 10× for a quick desk demo.
+    @MainActor
     static func simulatedProvider() -> LocationStreaming {
         guard let url = Bundle.main.url(forResource: "sample-ride-pittsburgh", withExtension: "gpx"),
               let xml = try? String(contentsOf: url, encoding: .utf8),

@@ -2,19 +2,19 @@ import XCTest
 @testable import AuraKit
 
 final class RouteMetricsTests: XCTestCase {
-    func test_offRoadFraction_isDistanceWeighted() {
-        let segments: [(distanceMeters: Double, isOffRoad: Bool)] = [
-            (300, true),   // path
-            (100, false),  // road
-            (100, true),   // path
+    func test_walkFraction_isDistanceWeighted() {
+        let segments: [(distanceMeters: Double, isWalking: Bool)] = [
+            (300, true),   // pushing the bike
+            (100, false),  // riding
+            (100, true),   // pushing the bike
         ]
-        // 400 off-road of 500 total = 0.8
-        XCTAssertEqual(RouteMetrics.offRoadFraction(segments: segments), 0.8, accuracy: 0.0001)
+        // 400 walked of 500 total = 0.8
+        XCTAssertEqual(RouteMetrics.walkFraction(segments: segments), 0.8, accuracy: 0.0001)
     }
 
-    func test_offRoadFraction_emptyOrZeroDistance_isZero() {
-        XCTAssertEqual(RouteMetrics.offRoadFraction(segments: []), 0, accuracy: 0.0001)
-        XCTAssertEqual(RouteMetrics.offRoadFraction(segments: [(0, true)]), 0, accuracy: 0.0001)
+    func test_walkFraction_emptyOrZeroDistance_isZero() {
+        XCTAssertEqual(RouteMetrics.walkFraction(segments: []), 0, accuracy: 0.0001)
+        XCTAssertEqual(RouteMetrics.walkFraction(segments: [(0, true)]), 0, accuracy: 0.0001)
     }
 
     func test_elevationGain_sumsPositiveDeltasAboveNoise() {
