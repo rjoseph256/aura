@@ -81,23 +81,34 @@ final class RideStatsCalculatorEdgeTests: XCTestCase {
 
     // MARK: Partial-nil elevation
 
-    func test_partialNilElevation_noCrashAndGainSkippedAcrossNilGap() {
-        // Middle point has nil elevation. The `if let e1, let e2` guard means any
-        // segment touching a nil elevation contributes no gain. So the +100 m
-        // climb that "straddles" the nil point is NOT counted; only a contiguous
-        // non-nil pair counts.
+    func test_partialNilElevation_carriesLastKnownElevationAcrossNilGap() {
+        // Middle point has nil elevation. Gain is measured against the last *known*
+        // elevation (carry-forward), so the climb that "straddles" the nil point is
+        // bridged rather than lost: 100 → (nil) → 200 counts as +100, then 200 → 210
+        // counts as +10.
         let track = [
             pt(40.4400, -80.0000, ele: 100, t: 0),
-            pt(40.4410, -80.0000, ele: nil, t: 20),   // nil → both adjacent segments skipped
-            pt(40.4420, -80.0000, ele: 200, t: 40),   // would be +100 vs first point, but skipped
-            pt(40.4430, -80.0000, ele: 210, t: 60),   // +10 vs previous non-nil → counted
+            pt(40.4410, -80.0000, ele: nil, t: 20),   // nil → carried over, last known stays 100
+            pt(40.4420, -80.0000, ele: 200, t: 40),   // +100 vs last known (100) → counted
+            pt(40.4430, -80.0000, ele: 210, t: 60),   // +10 vs previous (200) → counted
         ]
         let s = RideStatsCalculator.stats(from: track)
 
-        // Only the contiguous 200 → 210 pair contributes (+10). The 100 → 200
-        // climb is lost across the nil gap.
-        XCTAssertEqual(s.elevationGainMeters, 10, accuracy: 1e-6)
+        // Carry-forward bridges the gap: 100 + 10 = 110 m total gain.
+        XCTAssertEqual(s.elevationGainMeters, 110, accuracy: 1e-6)
         XCTAssertGreaterThan(s.distanceMeters, 0)
+    }
+
+    func test_leadingNilElevation_establishesBaselineFromFirstKnown() {
+        // Ride starts before elevation fixes. The first known elevation sets the
+        // baseline (no gain attributed for reaching it); subsequent climbs count.
+        let track = [
+            pt(40.4400, -80.0000, ele: nil, t: 0),
+            pt(40.4410, -80.0000, ele: 100, t: 20),   // first known → baseline, no gain
+            pt(40.4420, -80.0000, ele: 105, t: 40),   // +5 vs baseline → counted
+        ]
+        let s = RideStatsCalculator.stats(from: track)
+        XCTAssertEqual(s.elevationGainMeters, 5, accuracy: 1e-6)
     }
 
     func test_allNilElevation_zeroGainNoCrash() {

@@ -13,6 +13,9 @@ public enum RideStatsCalculator {
         var movingTime = 0.0
         var maxSpeed = 0.0
         var elevationGain = 0.0
+        // Carry the last known elevation forward across points that lack one, so a
+        // climb straddling a nil-elevation sample is bridged rather than dropped.
+        var lastElevation = points[0].elevation
 
         for i in 1..<points.count {
             let prev = points[i - 1], curr = points[i]
@@ -28,9 +31,12 @@ public enum RideStatsCalculator {
                 }
             }
 
-            if let e1 = prev.elevation, let e2 = curr.elevation {
-                let delta = e2 - e1
-                if delta >= elevationNoiseThreshold { elevationGain += delta }
+            if let e2 = curr.elevation {
+                if let e1 = lastElevation {
+                    let delta = e2 - e1
+                    if delta >= elevationNoiseThreshold { elevationGain += delta }
+                }
+                lastElevation = e2
             }
         }
 
