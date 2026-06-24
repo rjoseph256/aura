@@ -6,17 +6,13 @@ struct RideSummaryView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var stats: RideStats { ride.stats ?? .zero }
-    private var duration: TimeInterval {
-        guard let end = ride.endedAt else { return 0 }
-        return end.timeIntervalSince(ride.startedAt)
-    }
 
     var body: some View {
         VStack(spacing: 20) {
             Text("Nice ride").font(.largeTitle.bold()).foregroundStyle(AuraTheme.text)
             HStack(spacing: 26) {
                 stat(String(format: "%.1f", UnitConverter.miles(fromMeters: stats.distanceMeters)), "miles")
-                stat(String(format: "%d min", Int(duration / 60)), "moving")
+                stat(String(format: "%d min", Int(stats.movingTimeSeconds / 60)), "moving")
                 stat(String(format: "%.0f", UnitConverter.feet(fromMeters: stats.elevationGainMeters)), "ft climbed")
             }
             stat(String(format: "%.1f", UnitConverter.mph(fromMetersPerSecond: stats.maxSpeedMetersPerSecond)), "mph top")
