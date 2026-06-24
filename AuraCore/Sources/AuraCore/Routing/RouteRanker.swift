@@ -6,14 +6,14 @@ public struct CandidateRoute: Equatable, Sendable {
     public var distanceMeters: Double
     public var estimatedDurationSeconds: Double
     public var elevationGainMeters: Double
-    public var offRoadFraction: Double   // 0...1 — share of the route on paths/trails
+    public var walkFraction: Double   // 0...1 — distance-weighted share you must walk (push the bike)
     public var elevationProfile: [Double]  // sampled elevations along geometry (for the sparkline)
 
     public init(geometry: [Coordinate], distanceMeters: Double, estimatedDurationSeconds: Double,
-                elevationGainMeters: Double, offRoadFraction: Double, elevationProfile: [Double] = []) {
+                elevationGainMeters: Double, walkFraction: Double, elevationProfile: [Double] = []) {
         self.geometry = geometry; self.distanceMeters = distanceMeters
         self.estimatedDurationSeconds = estimatedDurationSeconds
-        self.elevationGainMeters = elevationGainMeters; self.offRoadFraction = offRoadFraction
+        self.elevationGainMeters = elevationGainMeters; self.walkFraction = walkFraction
         self.elevationProfile = elevationProfile
     }
 }
@@ -25,9 +25,11 @@ public enum RouteRanker {
                              candidates: [CandidateRoute]) -> [Route] {
         guard !candidates.isEmpty else { return [] }
 
-        // (profile, winning index) in priority order.
+        // (profile, winning index) in priority order. "Most paths" goes to the most
+        // rideable candidate — the one with the least forced walking — since a
+        // dismount-and-push segment is a negative signal, not a positive one.
         let winners: [(Route.Profile, Int)] = [
-            (.mostPaths, indexOfMax(candidates) { $0.offRoadFraction }),
+            (.mostPaths, indexOfMin(candidates) { $0.walkFraction }),
             (.flattest, indexOfMin(candidates) { $0.elevationGainMeters }),
             (.fastest, indexOfMin(candidates) { $0.estimatedDurationSeconds }),
         ]
@@ -50,11 +52,6 @@ public enum RouteRanker {
     private static func indexOfMin(_ items: [CandidateRoute], _ key: (CandidateRoute) -> Double) -> Int {
         var best = 0
         for i in items.indices where key(items[i]) < key(items[best]) { best = i }
-        return best
-    }
-    private static func indexOfMax(_ items: [CandidateRoute], _ key: (CandidateRoute) -> Double) -> Int {
-        var best = 0
-        for i in items.indices where key(items[i]) > key(items[best]) { best = i }
         return best
     }
 }

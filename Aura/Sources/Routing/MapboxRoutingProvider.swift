@@ -153,52 +153,45 @@ public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
         // meaningfully pick the flattest candidate.
         let elevationGain = RouteMetrics.elevationGain(elevations: elevations)
 
-        // --- offRoadFraction (best-effort from step transportType) ---
-        // Each RouteStep's `.transportType` identifies the travel mode.  For a
-        // cycling profile, `.cycling` == on-road/path, `.walking` == pushing the
-        // bike (treated as off-road / non-motor path), and anything else is handled
-        // conservatively.
+        // --- walkFraction (best-effort from step transportType) ---
+        // Each RouteStep's `.transportType` identifies the travel mode. On a cycling
+        // profile, `.walking` means you must dismount and push the bike (stairs,
+        // pedestrian-only links); `.cycling` is normal riding. A higher walk fraction
+        // is a *worse* route to ride, so RouteRanker uses it as a penalty when picking
+        // the "Most paths" (most rideable) option, not a reward.
         //
-        // NOTE: Richer classification (OSM path tags, road classes) requires the
-        //       Mapbox Directions annotations extension or an OSM-tag-aware engine.
-        //       This v1 proxy gives *some* signal so RouteRanker has something to
-        //       differentiate on, but may collapse the "mostPaths" label to
-        //       whichever candidate has the most walking steps.
-        let offRoad = offRoadFraction(for: mbRoute)
+        // NOTE: This is the only path/road signal the Directions response exposes
+        //       without the annotations extension or an OSM-tag-aware engine; it can
+        //       only penalize forced walking, not reward dedicated bike paths (those
+        //       come back as ordinary `.cycling` steps). Richer classification is a
+        //       future step (see docs/ROADMAP.md).
+        let walk = walkFraction(for: mbRoute)
 
         return AuraCore.CandidateRoute(
             geometry: geometry,
             distanceMeters: distanceMeters,
             estimatedDurationSeconds: durationSeconds,
             elevationGainMeters: elevationGain,
-            offRoadFraction: offRoad,
+            walkFraction: walk,
             elevationProfile: elevations
         )
     }
 
-    /// Derives a distance-weighted off-road fraction from step transport types.
-    private func offRoadFraction(for route: MapboxDirections.Route) -> Double {
-        var segments: [(distanceMeters: Double, isOffRoad: Bool)] = []
+    /// Derives a distance-weighted walk (forced-dismount) fraction from step transport types.
+    private func walkFraction(for route: MapboxDirections.Route) -> Double {
+        var segments: [(distanceMeters: Double, isWalking: Bool)] = []
 
         for leg in route.legs {
             for step in leg.steps {
-                let isOffRoad: Bool
-                switch step.transportType {
-                case .walking:
-                    // "pushing bike" in Directions v5 maps to .walking — treat as off-road.
-                    isOffRoad = true
-                case .cycling:
-                    // On a cycling profile this is normal on-road/path cycling.
-                    isOffRoad = false
-                default:
-                    // Ferry, train, automobile segments — not off-road trails.
-                    isOffRoad = false
-                }
-                segments.append((distanceMeters: step.distance, isOffRoad: isOffRoad))
+                // On a cycling profile, `.walking` is a forced dismount (pushing the
+                // bike); everything else (cycling, and the rare ferry/automobile leg)
+                // is ridden, so it does not count toward the walk fraction.
+                let isWalking = step.transportType == .walking
+                segments.append((distanceMeters: step.distance, isWalking: isWalking))
             }
         }
 
-        return RouteMetrics.offRoadFraction(segments: segments)
+        return RouteMetrics.walkFraction(segments: segments)
     }
 }
 

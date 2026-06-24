@@ -2,6 +2,7 @@ import XCTest
 import AuraCore
 @testable import AuraKit
 
+@MainActor
 final class SimulatedLocationProviderTests: XCTestCase {
     private func pt(_ lat: Double, t: TimeInterval) -> TrackPoint {
         TrackPoint(coordinate: .init(latitude: lat, longitude: -80.0), elevation: 250,
