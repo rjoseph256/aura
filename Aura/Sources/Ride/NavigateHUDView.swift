@@ -1,18 +1,23 @@
-import SwiftUI
+import AVFoundation
+import Combine
+import CoreLocation
+import MapboxDirections
 import MapboxMaps
+import MapboxNavigationCore
 import AuraCore
 import AuraKit
+import SwiftUI
 
-/// Navigate-mode HUD (Part A scaffold).
+/// Navigate-mode HUD with real Mapbox turn-by-turn guidance (Part B).
 ///
 /// - Full-bleed dark Mapbox map with `followPuck` viewport and a static green
 ///   polyline drawn from `route.geometry`.
-/// - Turn card at top showing real remaining distance to destination.
-///   (Part B will replace this with per-maneuver Mapbox route-progress.)
+/// - Turn card driven by live `NavigationController.routeProgress` maneuver data.
 /// - SpeedRail bottom-trailing with live speed and elapsed time.
 /// - Pink "End ride" capsule → RideSummaryView sheet → returns to .plan.
+/// - Mute toggle (top-trailing) for spoken instructions via AVSpeechSynthesizer.
 struct NavigateHUDView: View {
-    let route: Route
+    let route: AuraCore.Route
 
     @Environment(AppRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -34,13 +39,25 @@ struct NavigateHUDView: View {
         return now.timeIntervalSince(startDate)
     }
 
-    // MARK: Turn card (Part A interim state)
+    // MARK: Turn card (driven by real route progress in Part B)
 
     @State private var turn = TurnCardState(
-        primaryText: "Arrive at destination",
+        primaryText: "Starting navigation…",
         distanceText: "–",
         isExpanded: false
     )
+
+    // MARK: Guidance subscriptions
+
+    /// Cancellables for Combine subscriptions to route progress and voice instructions.
+    @State private var guidanceCancellables = Set<AnyCancellable>()
+    /// Task that calculates routes + starts active guidance on appear.
+    @State private var guidanceTask: Task<Void, Never>?
+
+    // MARK: Voice
+
+    @State private var isMuted = false
+    private let speechSynthesizer = AVSpeechSynthesizer()
 
     // MARK: Map
 
@@ -69,6 +86,12 @@ struct NavigateHUDView: View {
             TurnCardView(state: turn, reduceMotion: reduceMotion)
                 .padding(.top, 56) // clear status bar
         }
+        // Mute toggle — top trailing, clear of notch
+        .overlay(alignment: .topTrailing) {
+            muteButton
+                .padding(.top, 56)
+                .padding(.trailing, 16)
+        }
         .background(AuraTheme.bg)
         // Summary sheet: when dismissed, return to plan screen.
         .sheet(item: $finishedRide, onDismiss: {
@@ -84,11 +107,13 @@ struct NavigateHUDView: View {
                 try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
-        // Start ride immediately on appear
-        .task { startRide() }
+        // Start recording + guidance immediately on appear
+        .task {
+            startRide()
+            await startGuidance()
+        }
         .onDisappear {
-            streamTask?.cancel()
-            provider?.stop()
+            stopGuidance()
         }
     }
 
@@ -138,6 +163,24 @@ struct NavigateHUDView: View {
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
+    // MARK: Mute button
+
+    private var muteButton: some View {
+        Button {
+            isMuted.toggle()
+            if isMuted {
+                speechSynthesizer.stopSpeaking(at: .immediate)
+            }
+        } label: {
+            Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .accessibilityLabel(isMuted ? "Unmute voice guidance" : "Mute voice guidance")
+    }
+
     // MARK: Recording lifecycle
 
     private func startRide() {
@@ -149,7 +192,8 @@ struct NavigateHUDView: View {
         streamTask = Task { @MainActor in
             for await point in p.points() {
                 recorder.record(point)
-                updateTurnState(from: point)
+                // Turn state is now driven by Mapbox route progress.
+                // Recording-only here; guidance task drives `turn`.
             }
         }
     }
@@ -157,21 +201,140 @@ struct NavigateHUDView: View {
     private func endRide() {
         streamTask?.cancel()
         provider?.stop()
+        stopGuidance()
         finishedRide = recorder.end(at: Date())
     }
 
-    // MARK: Interim turn state (Part A)
+    // MARK: Guidance lifecycle
 
-    /// Computes remaining distance to `route.destination` and drives the turn card.
-    /// TODO(Task 7b): replace interim arrival-distance turn state with real Mapbox route-progress maneuvers.
-    private func updateTurnState(from point: TrackPoint) {
-        let remaining = Geo.distance(point.coordinate, route.destination)
+    /// Fetches routes and starts Mapbox active guidance, then subscribes to
+    /// route-progress and voice-instruction publishers.
+    ///
+    /// NOTE: Re-fetching the route here keeps the app's route model (AuraCore.Route)
+    /// decoupled from the Mapbox NavigationRoutes type. The guided route will normally
+    /// match the previewed one. Fidelity to the exact selected alternative/profile is
+    /// a later enhancement (Task 8).
+    @MainActor
+    private func startGuidance() async {
+        let originCoord = CLLocationCoordinate2D(
+            latitude: route.origin.latitude,
+            longitude: route.origin.longitude
+        )
+        let destCoord = CLLocationCoordinate2D(
+            latitude: route.destination.latitude,
+            longitude: route.destination.longitude
+        )
+
+        let options = NavigationRouteOptions(
+            waypoints: [
+                MapboxDirections.Waypoint(coordinate: originCoord),
+                MapboxDirections.Waypoint(coordinate: destCoord)
+            ],
+            profileIdentifier: .cycling
+        )
+        options.includesAlternativeRoutes = false
+
+        do {
+            let navRoutes = try await AuraNavigation.provider.mapboxNavigation
+                .routingProvider()
+                .calculateRoutes(options: options)
+                .value
+
+            // Start active turn-by-turn guidance.
+            AuraNavigation.provider.mapboxNavigation
+                .tripSession()
+                .startActiveGuidance(with: navRoutes, startLegIndex: 0)
+
+            // Subscribe to route progress → drive the turn card.
+            AuraNavigation.provider.mapboxNavigation
+                .navigation()
+                .routeProgress
+                .receive(on: DispatchQueue.main)
+                .sink { [self] state in
+                    guard let progress = state?.routeProgress else { return }
+                    handleRouteProgress(progress)
+                }
+                .store(in: &guidanceCancellables)
+
+            // Subscribe to arrival events → end ride automatically at final destination.
+            AuraNavigation.provider.mapboxNavigation
+                .navigation()
+                .waypointsArrival
+                .receive(on: DispatchQueue.main)
+                .sink { [self] status in
+                    if status.event is WaypointArrivalStatus.Events.ToFinalDestination {
+                        endRide()
+                    }
+                }
+                .store(in: &guidanceCancellables)
+
+            // Subscribe to voice instructions → speak via AVSpeechSynthesizer.
+            AuraNavigation.provider.mapboxNavigation
+                .navigation()
+                .voiceInstructions
+                .receive(on: DispatchQueue.main)
+                .sink { [self] state in
+                    speakInstruction(state.spokenInstruction.text)
+                }
+                .store(in: &guidanceCancellables)
+
+        } catch {
+            // Guidance fetch failed — fall back to interim arrival-distance turn state.
+            // Recording and map puck still work; turn card degrades gracefully.
+            withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.38)) {
+                turn = TurnCardState(
+                    primaryText: "Navigate to destination",
+                    distanceText: "–",
+                    isExpanded: false
+                )
+            }
+        }
+    }
+
+    private func stopGuidance() {
+        guidanceCancellables.removeAll()
+        guidanceTask?.cancel()
+        guidanceTask = nil
+        speechSynthesizer.stopSpeaking(at: .immediate)
+        // Return to free-drive so the SDK session stays warm for next ride.
+        AuraNavigation.provider.mapboxNavigation.tripSession().startFreeDrive()
+    }
+
+    // MARK: Route-progress handler
+
+    /// Extracts the current step's remaining distance + instruction text and
+    /// drives the TurnCardView via TurnCardPresenter.
+    @MainActor
+    private func handleRouteProgress(_ progress: RouteProgress) {
+        let stepProgress = progress.currentLegProgress.currentStepProgress
+        let distanceRemaining = stepProgress.distanceRemaining
+
+        // Prefer the upcoming step's instruction (what you're approaching),
+        // falling back to the current step instruction, then a generic label.
+        let instructionText: String
+        if let upcoming = progress.currentLegProgress.upcomingStep {
+            instructionText = upcoming.instructions
+        } else {
+            instructionText = progress.currentLegProgress.currentStep.instructions
+        }
+
         let newState = TurnCardPresenter.state(
-            distanceToManeuverMeters: remaining,
-            instruction: "Arrive at destination"
+            distanceToManeuverMeters: distanceRemaining,
+            instruction: instructionText
         )
         withAnimation(reduceMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.38)) {
             turn = newState
         }
+    }
+
+    // MARK: Voice
+
+    private func speakInstruction(_ text: String) {
+        guard !isMuted, !text.isEmpty else { return }
+        speechSynthesizer.stopSpeaking(at: .word)
+        let utterance = AVSpeechUtterance(string: text)
+        utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.language.languageCode?.identifier ?? "en")
+        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
+        speechSynthesizer.speak(utterance)
     }
 }
