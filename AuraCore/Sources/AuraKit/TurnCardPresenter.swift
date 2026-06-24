@@ -11,6 +11,15 @@ public struct TurnCardState: Equatable, Sendable {
         self.distanceText = distanceText
         self.isExpanded = isExpanded
     }
+
+    /// Shown before the first progress update arrives.
+    public static let starting = TurnCardState(
+        primaryText: "Starting navigation…", distanceText: "–", isExpanded: false)
+
+    /// Shown when guidance can't be established — recording and the map still work,
+    /// the turn card just degrades to a generic prompt.
+    public static let unavailable = TurnCardState(
+        primaryText: "Navigate to destination", distanceText: "–", isExpanded: false)
 }
 
 /// Adaptive turn-card display logic (the "option C" behavior). Pure + Mapbox-independent.
@@ -29,5 +38,13 @@ public enum TurnCardPresenter {
         return TurnCardState(primaryText: instruction,
                              distanceText: distanceText,
                              isExpanded: distanceToManeuverMeters <= expandWithinMeters)
+    }
+
+    /// Convenience overload mapping a pure `GuidanceUpdate` straight to card state.
+    public static func state(for update: GuidanceUpdate,
+                             expandWithinMeters: Double = 150) -> TurnCardState {
+        state(distanceToManeuverMeters: update.distanceToManeuverMeters,
+              instruction: update.instruction,
+              expandWithinMeters: expandWithinMeters)
     }
 }
