@@ -7,11 +7,19 @@ import AuraCore
 @Observable
 public final class RideStore {
     private let container: ModelContainer
-    public init(container: ModelContainer) { self.container = container }
+    /// True when rides live in a throwaway in-memory store (the on-disk container failed),
+    /// so the UI can warn that rides won't persist across launches.
+    public let isEphemeral: Bool
+
+    public init(container: ModelContainer, isEphemeral: Bool = false) {
+        self.container = container
+        self.isEphemeral = isEphemeral
+    }
 
     public static func inMemory() throws -> RideStore {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        return RideStore(container: try ModelContainer(for: RideRecord.self, configurations: config))
+        return RideStore(container: try ModelContainer(for: RideRecord.self, configurations: config),
+                         isEphemeral: true)
     }
 
     public func save(_ ride: Ride) throws {

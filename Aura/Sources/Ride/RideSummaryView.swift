@@ -4,6 +4,9 @@ import AuraKit
 
 struct RideSummaryView: View {
     let ride: Ride
+    /// When true, the ride finished but couldn't be persisted — warn the rider rather
+    /// than letting it silently vanish from History.
+    var saveFailed: Bool = false
     @Environment(\.dismiss) private var dismiss
     @Environment(SettingsStore.self) private var settings
 
@@ -32,7 +35,24 @@ struct RideSummaryView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            Text("Nice ride").font(.largeTitle.bold()).foregroundStyle(AuraTheme.text)
+            VStack(spacing: 6) {
+                Text("Nice ride").font(.largeTitle.bold()).foregroundStyle(AuraTheme.text)
+                if let name = ride.destinationName, !name.isEmpty {
+                    Text("to \(name)")
+                        .font(.subheadline)
+                        .foregroundStyle(AuraTheme.muted)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                }
+            }
+            if saveFailed {
+                Label("Couldn't save this ride — it won't appear in History.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(AuraTheme.pink)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+            }
             HStack(spacing: 26) {
                 stat(String(format: "%.1f", distanceValue), distanceLabel)
                 stat(String(format: "%d min", Int(stats.movingTimeSeconds / 60)), "moving")

@@ -11,6 +11,7 @@ public enum RideMapper {
             endedAt: ride.endedAt,
             trackData: try encoder.encode(ride.track),
             statsData: try ride.stats.map { try encoder.encode($0) },
+            destinationName: ride.destinationName,
             routeId: ride.routeId,
             destinationPlaceId: ride.destinationPlaceId)
     }
@@ -24,6 +25,7 @@ public enum RideMapper {
             endedAt: record.endedAt,
             track: try decoder.decode([TrackPoint].self, from: record.trackData),
             stats: try record.statsData.map { try decoder.decode(RideStats.self, from: $0) },
+            destinationName: record.destinationName,
             routeId: record.routeId,
             destinationPlaceId: record.destinationPlaceId)
     }

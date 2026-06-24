@@ -74,9 +74,9 @@ private struct RootView: View {
             case .preview(let destination):
                 RoutePreviewView(destination: destination)
 
-            case .ride(let route):
+            case .ride(let route, let destination):
                 if let route {
-                    NavigateHUDView(route: route)
+                    NavigateHUDView(route: route, destination: destination)
                 } else {
                     // Free ride — unchanged path
                     RideHUDView(makeProvider: { LiveLocationProvider() })

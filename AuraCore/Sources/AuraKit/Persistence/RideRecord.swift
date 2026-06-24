@@ -9,13 +9,16 @@ public final class RideRecord {
     public var endedAt: Date?
     public var trackData: Data        // JSON-encoded [TrackPoint]
     public var statsData: Data?       // JSON-encoded RideStats
+    public var destinationName: String?
     public var routeId: UUID?
     public var destinationPlaceId: UUID?
 
     public init(id: UUID, kindRaw: String, startedAt: Date, endedAt: Date?,
-                trackData: Data, statsData: Data?, routeId: UUID?, destinationPlaceId: UUID?) {
+                trackData: Data, statsData: Data?, destinationName: String? = nil,
+                routeId: UUID?, destinationPlaceId: UUID?) {
         self.id = id; self.kindRaw = kindRaw; self.startedAt = startedAt; self.endedAt = endedAt
         self.trackData = trackData; self.statsData = statsData
+        self.destinationName = destinationName
         self.routeId = routeId; self.destinationPlaceId = destinationPlaceId
     }
 }

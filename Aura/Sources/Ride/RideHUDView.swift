@@ -12,6 +12,7 @@ struct RideHUDView: View {
     @State private var provider: LocationStreaming?
     @State private var streamTask: Task<Void, Never>?
     @State private var finishedRide: Ride?
+    @State private var saveFailed = false
     @State private var startDate: Date?
     @State private var now = Date()
 
@@ -40,7 +41,7 @@ struct RideHUDView: View {
         // Returning from the summary (or backing out) drops to the plan/tab shell,
         // mirroring NavigateHUDView.
         .sheet(item: $finishedRide, onDismiss: { router.screen = .plan }) {
-            RideSummaryView(ride: $0)
+            RideSummaryView(ride: $0, saveFailed: saveFailed)
         }
         .task(id: recorder.isRecording) {
             guard recorder.isRecording else { return }
@@ -98,7 +99,7 @@ struct RideHUDView: View {
         streamTask?.cancel()
         provider?.stop()
         let ride = recorder.end(at: Date())
-        try? rideStore.save(ride)
+        do { try rideStore.save(ride) } catch { saveFailed = true }
         finishedRide = ride
     }
 }
