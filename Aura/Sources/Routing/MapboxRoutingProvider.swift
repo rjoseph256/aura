@@ -20,7 +20,14 @@ import AuraKit
 /// ```
 public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
 
-    public init() {}
+    /// Best-effort terrain elevation source. Defaults to the Mapbox Tilequery
+    /// impl; swap for a `NullElevationProvider` (or a future Valhalla/BRouter
+    /// engine) without touching callers.
+    private let elevationProvider: any AuraCore.ElevationProvider
+
+    public init(elevationProvider: any AuraCore.ElevationProvider = MapboxTilequeryElevationProvider()) {
+        self.elevationProvider = elevationProvider
+    }
 
     // MARK: - AuraCore.RoutingProvider
 
@@ -70,9 +77,27 @@ public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
             mbRoutes.append(alt.route)
         }
 
-        // 6. Map each Mapbox route → AuraCore.CandidateRoute.
-        let candidates: [AuraCore.CandidateRoute] = mbRoutes.map { mbRoute in
-            candidateRoute(from: mbRoute)
+        // 6. Fetch terrain elevations for all candidates CONCURRENTLY (so the
+        //    total added latency ≈ one route's sampling, not the sum), then map
+        //    each Mapbox route → AuraCore.CandidateRoute with its real climb.
+        let geometries: [[AuraCore.Coordinate]] = mbRoutes.map { mbRoute in
+            mbRoute.shape?.coordinates.map {
+                AuraCore.Coordinate(latitude: $0.latitude, longitude: $0.longitude)
+            } ?? []
+        }
+        let elevationProvider = self.elevationProvider
+        var elevationsByIndex = [[Double]](repeating: [], count: geometries.count)
+        await withTaskGroup(of: (Int, [Double]).self) { group in
+            for (i, geometry) in geometries.enumerated() {
+                group.addTask { (i, await elevationProvider.elevations(along: geometry)) }
+            }
+            for await (i, elevs) in group {
+                elevationsByIndex[i] = elevs
+            }
+        }
+
+        let candidates: [AuraCore.CandidateRoute] = mbRoutes.enumerated().map { (i, mbRoute) in
+            candidateRoute(from: mbRoute, geometry: geometries[i], elevations: elevationsByIndex[i])
         }
 
         guard !candidates.isEmpty else {
@@ -111,25 +136,22 @@ public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
 
     // MARK: - Private helpers
 
-    /// Converts a single `MapboxDirections.Route` into an `AuraCore.CandidateRoute`.
-    private func candidateRoute(from mbRoute: MapboxDirections.Route) -> AuraCore.CandidateRoute {
-        // --- geometry (required; from LineString shape) ---
-        let geometry: [AuraCore.Coordinate] = mbRoute.shape?.coordinates.map {
-            AuraCore.Coordinate(latitude: $0.latitude, longitude: $0.longitude)
-        } ?? []
-
+    /// Converts a single `MapboxDirections.Route` into an `AuraCore.CandidateRoute`,
+    /// using the precomputed `geometry` and best-effort `elevations` sampled along it.
+    private func candidateRoute(from mbRoute: MapboxDirections.Route,
+                                geometry: [AuraCore.Coordinate],
+                                elevations: [Double]) -> AuraCore.CandidateRoute {
         // --- distance & duration (reliable; always present in the Directions response) ---
         let distanceMeters = mbRoute.distance
         let durationSeconds = mbRoute.expectedTravelTime
 
         // --- elevationGainMeters (best-effort) ---
-        // The standard Mapbox Directions API does not return an elevation profile
-        // via the Swift SDK attributes. Returning 0 here; a future task should
-        // integrate a terrain/elevation source (e.g. Mapbox Tilequery or a
-        // Valhalla/BRouter engine that natively provides elevation profiles).
-        // TODO: wire a real elevation source so RouteRanker can meaningfully
-        //       separate "flattest" candidates.
-        let elevationGain = RouteMetrics.elevationGain(elevations: [])
+        // `elevations` is sampled along the geometry by the ElevationProvider (Mapbox
+        // Tilequery terrain contours). It may be empty on any network/parse failure or
+        // missing token, in which case elevationGain is 0 — the prior behavior — and
+        // "Flattest" simply has no signal to separate on. With data, RouteRanker can
+        // meaningfully pick the flattest candidate.
+        let elevationGain = RouteMetrics.elevationGain(elevations: elevations)
 
         // --- offRoadFraction (best-effort from step transportType) ---
         // Each RouteStep's `.transportType` identifies the travel mode.  For a
