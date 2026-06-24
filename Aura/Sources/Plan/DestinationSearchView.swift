@@ -1,6 +1,7 @@
 import SwiftUI
 import MapboxSearch
 import MapboxMaps
+import CoreLocation
 import AuraCore
 
 // MARK: - DestinationSearchView
@@ -257,7 +258,3 @@ private struct SuggestionRow: View {
         }
     }
 }
-
-// MARK: - CLLocationCoordinate2DIsValid import helper
-
-import CoreLocation

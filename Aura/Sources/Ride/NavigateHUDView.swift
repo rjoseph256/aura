@@ -51,8 +51,6 @@ struct NavigateHUDView: View {
 
     /// Cancellables for Combine subscriptions to route progress and voice instructions.
     @State private var guidanceCancellables = Set<AnyCancellable>()
-    /// Task that calculates routes + starts active guidance on appear.
-    @State private var guidanceTask: Task<Void, Never>?
 
     // MARK: Voice
 
@@ -199,6 +197,9 @@ struct NavigateHUDView: View {
     }
 
     private func endRide() {
+        // Idempotent: arrival (waypointsArrival) and the End-ride button can both
+        // call this; once recording has stopped there's nothing more to do.
+        guard recorder.isRecording else { return }
         streamTask?.cancel()
         provider?.stop()
         stopGuidance()
@@ -216,6 +217,11 @@ struct NavigateHUDView: View {
     /// a later enhancement (Task 8).
     @MainActor
     private func startGuidance() async {
+        // Defensive: guarantee a single set of subscriptions / one active guidance session
+        // even if this is ever invoked more than once.
+        guidanceCancellables.removeAll()
+        configureAudioSession()
+
         let originCoord = CLLocationCoordinate2D(
             latitude: route.origin.latitude,
             longitude: route.origin.longitude
@@ -293,9 +299,8 @@ struct NavigateHUDView: View {
 
     private func stopGuidance() {
         guidanceCancellables.removeAll()
-        guidanceTask?.cancel()
-        guidanceTask = nil
         speechSynthesizer.stopSpeaking(at: .immediate)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         // Return to free-drive so the SDK session stays warm for next ride.
         AuraNavigation.provider.mapboxNavigation.tripSession().startFreeDrive()
     }
@@ -329,11 +334,20 @@ struct NavigateHUDView: View {
 
     // MARK: Voice
 
+    /// Configures the audio session so spoken turn prompts duck the rider's music
+    /// politely instead of stopping it. `.voicePrompt` is the navigation-prompt mode.
+    private func configureAudioSession() {
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .voicePrompt, options: [.duckOthers, .mixWithOthers])
+        try? session.setActive(true)
+    }
+
     private func speakInstruction(_ text: String) {
         guard !isMuted, !text.isEmpty else { return }
         speechSynthesizer.stopSpeaking(at: .word)
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.language.languageCode?.identifier ?? "en")
+            ?? AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         speechSynthesizer.speak(utterance)
     }
