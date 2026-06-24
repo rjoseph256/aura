@@ -13,14 +13,19 @@ public struct Route: Identifiable, Codable, Equatable, Sendable {
     public var distanceMeters: Double
     public var estimatedDurationSeconds: Double
     public var elevationGainMeters: Double
+    /// Elevation (meters) sampled at evenly-spaced points along `geometry` — the source
+    /// for the route's preview sparkline. Empty when terrain elevation was unavailable.
+    public var elevationProfile: [Double]
 
     public init(id: UUID = UUID(), origin: Coordinate, destination: Coordinate,
                 waypoints: [Coordinate], geometry: [Coordinate], profile: Profile,
-                distanceMeters: Double, estimatedDurationSeconds: Double, elevationGainMeters: Double) {
+                distanceMeters: Double, estimatedDurationSeconds: Double, elevationGainMeters: Double,
+                elevationProfile: [Double] = []) {
         self.id = id; self.origin = origin; self.destination = destination
         self.waypoints = waypoints; self.geometry = geometry; self.profile = profile
         self.distanceMeters = distanceMeters
         self.estimatedDurationSeconds = estimatedDurationSeconds
         self.elevationGainMeters = elevationGainMeters
+        self.elevationProfile = elevationProfile
     }
 }

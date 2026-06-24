@@ -53,13 +53,14 @@ struct LastRideCard: View {
     @ViewBuilder
     private var thumbnail: some View {
         let coords = ride.track.map(\.coordinate)
-        if coords.count > 1 {
-            StaticRouteMap(coordinates: coords)
-        } else {
-            // No track to draw (e.g. a free ride with no GPS fix) — show an icon tile
-            // rather than an empty basemap.
-            ZStack {
-                AuraTheme.bg
+        let accent = ride.kind == .navigate ? AuraTheme.cyan : AuraTheme.route
+        ZStack {
+            AuraTheme.bg
+            if coords.count > 1 {
+                RouteThumbnail(coordinates: coords, lineColor: accent, lineWidth: 2.5)
+                    .padding(6)
+            } else {
+                // No track to draw (e.g. a free ride with no GPS fix) — show an icon.
                 Image(systemName: ride.kind == .navigate ? "location.fill" : "bicycle")
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(AuraTheme.muted)
