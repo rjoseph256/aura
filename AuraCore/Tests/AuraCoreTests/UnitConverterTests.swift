@@ -12,4 +12,12 @@ final class UnitConverterTests: XCTestCase {
     func test_metersToFeet() {
         XCTAssertEqual(UnitConverter.feet(fromMeters: 100), 328.084, accuracy: 0.01)
     }
+
+    func test_metersToKilometers() {
+        XCTAssertEqual(UnitConverter.km(fromMeters: 2500), 2.5, accuracy: 1e-9)
+    }
+
+    func test_metersPerSecondToKMH() {
+        XCTAssertEqual(UnitConverter.kmh(fromMetersPerSecond: 10), 36, accuracy: 1e-9)
+    }
 }
