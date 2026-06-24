@@ -14,7 +14,8 @@ public enum GPXParser {
 
     private final class Delegate: NSObject, XMLParserDelegate {
         var points: [TrackPoint] = []
-        private var lat = 0.0, lon = 0.0
+        private var lat: Double?
+        private var lon: Double?
         private var ele: Double?
         private var time: Date?
         private var buffer = ""
@@ -26,8 +27,10 @@ public enum GPXParser {
                     qualifiedName: String?, attributes attrs: [String: String]) {
             buffer = ""
             if el == "trkpt" {
-                lat = Double(attrs["lat"] ?? "") ?? 0
-                lon = Double(attrs["lon"] ?? "") ?? 0
+                // nil when the attribute is missing or non-numeric; an explicit
+                // "0" still parses to 0.0, so legitimate (0,0) points survive.
+                lat = Double(attrs["lat"] ?? "")
+                lon = Double(attrs["lon"] ?? "")
                 ele = nil; time = nil
             }
         }
@@ -37,8 +40,15 @@ public enum GPXParser {
             case "ele": ele = Double(buffer.trimmingCharacters(in: .whitespacesAndNewlines))
             case "time": time = Self.iso.date(from: buffer.trimmingCharacters(in: .whitespacesAndNewlines))
             case "trkpt":
+                // Skip incomplete trackpoints instead of fabricating data. A missing
+                // lat/lon would otherwise become (0,0) ("null island"), injecting a
+                // bogus transcontinental segment; a missing/unparseable timestamp
+                // would become the 1970 epoch, creating a ~50-year `dt` that wrecks
+                // moving time and average speed in RideStatsCalculator. Elevation
+                // stays optional by contract, so its absence does not skip the point.
+                guard let lat, let lon, let time else { break }
                 points.append(TrackPoint(coordinate: Coordinate(latitude: lat, longitude: lon),
-                                         elevation: ele, timestamp: time ?? Date(timeIntervalSince1970: 0)))
+                                         elevation: ele, timestamp: time))
             default: break
             }
         }
