@@ -5,12 +5,14 @@ import MapboxMaps
 
 @main
 struct AuraApp: App {
+    @State private var router = AppRouter()
+
     init() { AuraApp.configureMapbox() }
 
     var body: some Scene {
         WindowGroup {
-            // Real GPS by default. For a desk demo without moving, swap to: Self.simulatedProvider
-            RideHUDView(makeProvider: { LiveLocationProvider() })
+            RootView()
+                .environment(router)
         }
     }
 
@@ -33,5 +35,111 @@ struct AuraApp: App {
             return SimulatedLocationProvider(track: GPXTrack(points: []))
         }
         return SimulatedLocationProvider(track: track, speedMultiplier: 10)
+    }
+}
+
+// MARK: - RootView
+
+/// Routes the window to the correct screen based on AppRouter.screen.
+private struct RootView: View {
+    @Environment(AppRouter.self) private var router
+
+    var body: some View {
+        Group {
+            switch router.screen {
+            case .plan:
+                PlanView()
+
+            case .preview(let destination):
+                // TODO(Task 6): replace with RoutePreviewView
+                PreviewPlaceholderView(destination: destination)
+
+            case .ride(let route):
+                if route == nil {
+                    // Free ride — unchanged path
+                    RideHUDView(makeProvider: { LiveLocationProvider() })
+                } else {
+                    // TODO(Task 7): replace with NavigateHUDView
+                    NavigatePlaceholderView()
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: router.screen)
+    }
+}
+
+// MARK: - Placeholder: Route Preview (Task 6)
+
+/// Temporary stand-in for the full RoutePreviewView.
+/// TODO(Task 6): replace with RoutePreviewView
+private struct PreviewPlaceholderView: View {
+    let destination: Place
+    @Environment(AppRouter.self) private var router
+
+    var body: some View {
+        ZStack {
+            AuraTheme.bg.ignoresSafeArea()
+            VStack(spacing: 24) {
+                Spacer()
+                Text(destination.name)
+                    .font(.title2.bold())
+                    .foregroundColor(AuraTheme.text)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Text("Route options coming up…")
+                    .font(.subheadline)
+                    .foregroundColor(AuraTheme.muted)
+                Spacer()
+                Button {
+                    router.screen = .plan
+                } label: {
+                    Text("Back")
+                        .font(.headline)
+                        .foregroundColor(AuraTheme.text)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(AuraTheme.surface)
+                        .clipShape(Capsule())
+                        .padding(.horizontal, 24)
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 32)
+            }
+        }
+    }
+}
+
+// MARK: - Placeholder: Navigate HUD (Task 7)
+
+/// Temporary stand-in for the full NavigateHUDView.
+/// TODO(Task 7): replace with NavigateHUDView
+private struct NavigatePlaceholderView: View {
+    @Environment(AppRouter.self) private var router
+
+    var body: some View {
+        ZStack {
+            AuraTheme.bg.ignoresSafeArea()
+            VStack(spacing: 24) {
+                Spacer()
+                Text("Navigate mode coming soon")
+                    .font(.title2.bold())
+                    .foregroundColor(AuraTheme.text)
+                Spacer()
+                Button {
+                    router.screen = .plan
+                } label: {
+                    Text("End")
+                        .font(.headline)
+                        .foregroundColor(AuraTheme.text)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(AuraTheme.surface)
+                        .clipShape(Capsule())
+                        .padding(.horizontal, 24)
+                }
+                .buttonStyle(.plain)
+                .padding(.bottom, 32)
+            }
+        }
     }
 }
