@@ -1,5 +1,6 @@
 import SwiftUI
 import MapboxSearch
+import MapboxMaps
 import AuraCore
 
 // MARK: - DestinationSearchView
@@ -16,7 +17,9 @@ struct DestinationSearchView: View {
     @State private var errorMessage: String? = nil
     @State private var debounceTask: Task<Void, Never>? = nil
 
-    private let placeAutocomplete = PlaceAutocomplete()
+    // The Search SDK does NOT read MapboxOptions.accessToken; it requires an explicit
+    // token (or Info.plist MBXAccessToken). We pass the token configured at launch.
+    private let placeAutocomplete = PlaceAutocomplete(accessToken: MapboxOptions.accessToken)
 
     var body: some View {
         VStack(spacing: 0) {
