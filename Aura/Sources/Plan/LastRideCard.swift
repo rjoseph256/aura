@@ -21,21 +21,21 @@ struct LastRideCard: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.callout.weight(.semibold))
                         .foregroundStyle(AuraTheme.text)
                         .lineLimit(1)
                     Text(statsLine)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.footnote.weight(.medium))
                         .foregroundStyle(AuraTheme.muted)
                     Text(relativeDate)
-                        .font(.system(size: 12))
+                        .font(.caption)
                         .foregroundStyle(AuraTheme.muted.opacity(0.85))
                 }
 
                 Spacer(minLength: 4)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(AuraTheme.muted)
             }
             .padding(12)
@@ -62,7 +62,7 @@ struct LastRideCard: View {
             } else {
                 // No track to draw (e.g. a free ride with no GPS fix) — show an icon.
                 Image(systemName: ride.kind == .navigate ? "location.fill" : "bicycle")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.title2.weight(.semibold))
                     .foregroundStyle(AuraTheme.muted)
             }
         }

@@ -15,6 +15,8 @@ enum AuraTheme {
         colors: [cyan, violet, pink], startPoint: .leading, endPoint: .trailing)
 
     // Glanceable numerics — large, rounded, high-contrast for sunlight.
+    // `size` is expected to come from a caller's @ScaledMetric so the hero number
+    // still tracks Dynamic Type; the unit label rides the caption2 metric directly.
     static func heroNumber(_ size: CGFloat = 52) -> Font { .system(size: size, weight: .heavy, design: .rounded) }
-    static let unitLabel = Font.system(size: 11, weight: .bold, design: .rounded)
+    static let unitLabel = Font.system(.caption2, design: .rounded).weight(.bold)
 }

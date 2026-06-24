@@ -3,6 +3,7 @@ import SwiftUI
 /// Premium, dark offline-map screen: download the Pittsburgh region for low-signal rides.
 struct OfflineMapsView: View {
     @StateObject private var manager = OfflineMapManager()
+    @ScaledMetric(relativeTo: .largeTitle) private var glyphSize: CGFloat = 52
 
     var body: some View {
         ZStack {
@@ -12,15 +13,15 @@ struct OfflineMapsView: View {
                 Spacer()
 
                 Image(systemName: "arrow.down.circle")
-                    .font(.system(size: 52, weight: .regular))
+                    .font(.system(size: glyphSize, weight: .regular))
                     .foregroundStyle(AuraTheme.auroraGradient)
 
                 Text("Pittsburgh, offline")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .font(.system(.title2, design: .rounded).weight(.bold))
                     .foregroundColor(AuraTheme.text)
 
                 Text("Download the Pittsburgh map for offline rides on low-signal trails.")
-                    .font(.system(size: 14))
+                    .font(.subheadline)
                     .foregroundColor(AuraTheme.muted)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 300)
@@ -49,18 +50,18 @@ struct OfflineMapsView: View {
                     .tint(AuraTheme.cyan)
                     .frame(maxWidth: 300)
                 Text("\(Int(manager.progress * 100))%")
-                    .font(.system(size: 13))
+                    .font(.footnote)
                     .foregroundColor(AuraTheme.muted)
             }
 
         case .finished:
             Label("Downloaded", systemImage: "checkmark.circle.fill")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundColor(AuraTheme.route)
 
         case .failed(let msg):
             Text("Download failed. \(msg)")
-                .font(.system(size: 13))
+                .font(.footnote)
                 .foregroundColor(AuraTheme.pink)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)

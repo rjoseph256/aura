@@ -84,7 +84,7 @@ struct RideSummaryView: View {
 
     private func stat(_ value: String, _ label: String) -> some View {
         VStack(spacing: 3) {
-            Text(value).font(.system(size: 26, weight: .heavy, design: .rounded)).foregroundStyle(AuraTheme.text)
+            Text(value).font(.system(.title, design: .rounded).weight(.heavy)).foregroundStyle(AuraTheme.text)
             Text(label).font(.caption).foregroundStyle(AuraTheme.muted)
         }
     }

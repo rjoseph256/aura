@@ -14,6 +14,7 @@ struct WeeklyRing: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animatedFraction: Double = 0
+    @ScaledMetric(relativeTo: .largeTitle) private var centerSize: CGFloat = 50
 
     private var fmt: RideStatsFormatter { RideStatsFormatter(units: units) }
     private var fraction: Double { stats.goalFraction(goalMeters: goalMeters) }
@@ -44,14 +45,19 @@ struct WeeklyRing: View {
             // Center readout
             VStack(spacing: 1) {
                 Text(fmt.distanceValue(stats.distanceMeters))
-                    .font(.system(size: 50, weight: .heavy, design: .rounded))
+                    .font(.system(size: centerSize, weight: .heavy, design: .rounded))
                     .foregroundStyle(AuraTheme.text)
                     .monospacedDigit()
                     .contentTransition(.numericText())
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)   // never overflow the fixed ring
                 Text("\(fmt.distanceUnit) this week")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.footnote.weight(.medium))
                     .foregroundStyle(AuraTheme.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
+            .frame(maxWidth: diameter - stroke * 2)   // keep the readout inside the ring
         }
         .frame(width: diameter, height: diameter)
         .onAppear { animate(to: fraction) }

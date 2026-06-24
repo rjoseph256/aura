@@ -33,7 +33,7 @@ struct RideHUDView: View {
         .overlay(alignment: .topLeading) {
             if !recorder.isRecording {
                 backButton
-                    .padding(.top, 56)
+                    .padding(.top, 8)   // sits in the safe area; no hardcoded status-bar inset
                     .padding(.leading, 16)
             }
         }
@@ -75,7 +75,7 @@ struct RideHUDView: View {
             router.screen = .plan
         } label: {
             Image(systemName: "chevron.left")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
                 .background(.ultraThinMaterial, in: Circle())
