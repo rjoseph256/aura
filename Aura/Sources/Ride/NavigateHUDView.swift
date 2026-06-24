@@ -95,6 +95,23 @@ struct NavigateHUDView: View {
             GPSSignalChip(signal: location.signal)
                 .padding(.top, 8).padding(.leading, 16)
         }
+        // Rerouting cue — centered below the turn card (top 8 pt + ~80 pt card ≈ 88 pt;
+        // 96 pt padding gives a comfortable gap). Shown only while guidance is rerouting.
+        .overlay(alignment: .top) {
+            if guidance.isRerouting {
+                Label("Rerouting…", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.black.opacity(0.6), in: Capsule())
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
+                    .padding(.top, 96)
+                    .transition(.opacity)
+                    .accessibilityLabel("Rerouting")
+            }
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: guidance.isRerouting)
         .background(AuraTheme.bg)
         // Summary sheet: when dismissed, return to plan screen.
         .sheet(item: $finishedRide, onDismiss: {
@@ -149,22 +166,24 @@ struct NavigateHUDView: View {
         }
     }
 
-    // MARK: Map view (puck follow + static route polyline)
+    // MARK: Map view (puck follow + live route polyline)
 
     private var navigateMapView: some View {
         Map(viewport: $viewport) {
             // Rider puck follows heading
             Puck2D(bearing: .heading)
 
-            // Static green route polyline drawn from geometry
-            if route.geometry.count > 1 {
+            // Live route polyline: switches to the post-reroute geometry when available.
+            // guidance.routeGeometry is updated by GuidanceViewModel on each reroute event.
+            if (guidance.routeGeometry ?? route.geometry).count > 1 {
                 PolylineAnnotationGroup {
                     PolylineAnnotation(
-                        lineCoordinates: route.geometry.map {
+                        lineCoordinates: (guidance.routeGeometry ?? route.geometry).map {
                             CLLocationCoordinate2D(latitude: $0.latitude,
                                                    longitude: $0.longitude)
                         }
                     )
+                    // TODO(Wave 2): replace hardcoded route color with an AuraTheme StyleColor bridge
                     .lineColor(StyleColor(UIColor(red: 43 / 255,
                                                   green: 224 / 255,
                                                   blue: 138 / 255,
