@@ -96,8 +96,8 @@ public final class LocationService: NSObject, LocationStreaming {
         signal = .good
     }
 
-    /// One-shot origin for the plan/preview, with a Pittsburgh fallback. Folds in
-    /// the old `CurrentLocationProvider` role. Never throws; resolves quickly: a fresh
+    /// One-shot origin for the plan/preview, with a Pittsburgh fallback. Never throws;
+    /// resolves quickly: a fresh
     /// cached fix wins immediately, otherwise it races a single live update against a
     /// 3s timeout and falls back rather than hanging the UI.
     public func current() async -> Coordinate {

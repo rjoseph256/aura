@@ -11,6 +11,7 @@ struct RoutePreviewView: View {
 
     @Environment(AppRouter.self) private var router
     @Environment(SettingsStore.self) private var settings
+    @Environment(LocationService.self) private var location
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let provider: any AuraCore.RoutingProvider = MapboxRoutingProvider()
@@ -240,7 +241,7 @@ struct RoutePreviewView: View {
 
     private func loadRoutes() async {
         phase = .loading
-        let origin = await CurrentLocationProvider.shared.current()
+        let origin = await location.current()
         let request = RouteRequest(origin: origin, destination: destination.coordinate)
         do {
             let fetched = try await provider.routes(for: request)
