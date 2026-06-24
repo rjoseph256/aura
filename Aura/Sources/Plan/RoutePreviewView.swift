@@ -139,6 +139,7 @@ struct RoutePreviewView: View {
             ForEach(routes) { route in
                 RouteOptionRow(
                     route: route,
+                    units: settings.units,
                     isSelected: selected?.id == route.id,
                     reduceMotion: reduceMotion
                 ) {
@@ -280,9 +281,12 @@ struct RoutePreviewView: View {
 
 private struct RouteOptionRow: View {
     let route: Route
+    let units: DistanceUnits
     let isSelected: Bool
     let reduceMotion: Bool
     let onTap: () -> Void
+
+    private var fmt: RideStatsFormatter { RideStatsFormatter(units: units) }
 
     private var label: String {
         switch route.profile {
@@ -301,12 +305,9 @@ private struct RouteOptionRow: View {
     }
 
     private var metricText: String {
-        let miles = UnitConverter.miles(fromMeters: route.distanceMeters)
-        let minutes = Int(route.estimatedDurationSeconds / 60)
-        var text = String(format: "%.1f mi · %d min", miles, minutes)
+        var text = "\(fmt.distanceValue(route.distanceMeters)) \(fmt.distanceUnit) · \(fmt.minutes(route.estimatedDurationSeconds))"
         if route.elevationGainMeters > 0 {
-            let feet = UnitConverter.feet(fromMeters: route.elevationGainMeters)
-            text += String(format: " · %d ft↑", Int(feet))
+            text += " · \(fmt.elevationValue(route.elevationGainMeters)) \(fmt.elevationUnit)↑"
         }
         return text
     }
