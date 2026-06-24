@@ -20,6 +20,7 @@ struct NavigateHUDView: View {
     let route: AuraCore.Route
 
     @Environment(AppRouter.self) private var router
+    @Environment(RideStore.self) private var rideStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // MARK: Recording
@@ -203,7 +204,9 @@ struct NavigateHUDView: View {
         streamTask?.cancel()
         provider?.stop()
         stopGuidance()
-        finishedRide = recorder.end(at: Date())
+        let ride = recorder.end(at: Date())
+        try? rideStore.save(ride)
+        finishedRide = ride
     }
 
     // MARK: Guidance lifecycle

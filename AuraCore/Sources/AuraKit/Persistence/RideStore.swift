@@ -1,8 +1,10 @@
 import Foundation
 import SwiftData
+import Observation
 import AuraCore
 
 @MainActor
+@Observable
 public final class RideStore {
     private let container: ModelContainer
     public init(container: ModelContainer) { self.container = container }

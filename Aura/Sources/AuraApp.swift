@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import AuraCore
 import AuraKit
 import MapboxMaps
@@ -6,6 +7,8 @@ import MapboxMaps
 @main
 struct AuraApp: App {
     @State private var router = AppRouter()
+    @State private var rideStore = AuraApp.makeRideStore()
+    @State private var settings = SettingsStore()
 
     init() { AuraApp.configureMapbox() }
 
@@ -13,6 +16,23 @@ struct AuraApp: App {
         WindowGroup {
             RootView()
                 .environment(router)
+                .environment(rideStore)
+                .environment(settings)
+        }
+    }
+
+    /// Builds the app's persistent SwiftData-backed RideStore. Falls back to an
+    /// in-memory store if the on-disk container can't be created, so the app still runs.
+    @MainActor static func makeRideStore() -> RideStore {
+        do {
+            let container = try ModelContainer(for: RideRecord.self)
+            return RideStore(container: container)
+        } catch {
+            assertionFailure("Failed to build persistent ModelContainer: \(error)")
+            return (try? RideStore.inMemory()) ?? {
+                // Last-resort: an in-memory store should never fail; if it does, crash loudly.
+                fatalError("Could not create any RideStore: \(error)")
+            }()
         }
     }
 

@@ -5,6 +5,7 @@ import AuraKit
 struct RideHUDView: View {
     let makeProvider: () -> LocationStreaming
 
+    @Environment(RideStore.self) private var rideStore
     @State private var recorder = RideRecorder(kind: .freeRide)
     @State private var provider: LocationStreaming?
     @State private var streamTask: Task<Void, Never>?
@@ -66,6 +67,8 @@ struct RideHUDView: View {
     private func endRide() {
         streamTask?.cancel()
         provider?.stop()
-        finishedRide = recorder.end(at: Date())
+        let ride = recorder.end(at: Date())
+        try? rideStore.save(ride)
+        finishedRide = ride
     }
 }

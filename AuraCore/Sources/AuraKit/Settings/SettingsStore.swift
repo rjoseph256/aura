@@ -1,8 +1,10 @@
 import Foundation
+import Observation
 
 public enum DistanceUnits: String, Sendable { case imperial, metric }
 public enum MapStyle: String, Sendable { case dark, standard }
 
+@Observable
 public final class SettingsStore {
     private let defaults: UserDefaults
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
