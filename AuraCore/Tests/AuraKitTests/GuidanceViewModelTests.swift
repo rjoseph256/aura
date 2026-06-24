@@ -100,4 +100,28 @@ final class GuidanceViewModelTests: XCTestCase {
 
         XCTAssertTrue(session.didStop)
     }
+
+    @MainActor
+    func test_rerouting_setsFlag_thenReroutedSwapsGeometryAndClears() async {
+        let geo = [Coordinate(latitude: 40.1, longitude: -80.0),
+                   Coordinate(latitude: 40.2, longitude: -80.1)]
+        let session = ScriptedGuidanceSession(script: [
+            .rerouting,
+            .rerouted(geo),
+            .progress(GuidanceUpdate(distanceToManeuverMeters: 100, instruction: "Turn"))
+        ])
+        let vm = GuidanceViewModel(session: session)
+        await vm.run(route: makeRoute())
+        XCTAssertEqual(vm.routeGeometry, geo)
+        XCTAssertFalse(vm.isRerouting)
+    }
+
+    @MainActor
+    func test_rerouting_withoutRerouted_leavesFlagSet() async {
+        let session = ScriptedGuidanceSession(script: [.rerouting])
+        let vm = GuidanceViewModel(session: session)
+        await vm.run(route: makeRoute())
+        XCTAssertTrue(vm.isRerouting)
+        XCTAssertNil(vm.routeGeometry)
+    }
 }

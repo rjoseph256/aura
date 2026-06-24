@@ -25,6 +25,10 @@ public enum GuidanceEvent: Equatable, Sendable {
     case spokenInstruction(String)
     /// The rider reached the final destination → end the ride.
     case arrivedAtDestination
+    /// The engine started recalculating after the rider went off-route → show a cue.
+    case rerouting
+    /// A new route is available after a reroute → swap the drawn polyline.
+    case rerouted([Coordinate])
 }
 
 /// The swappable turn-by-turn guidance interface. v1 ships a Mapbox-backed

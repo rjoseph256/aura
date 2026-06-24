@@ -24,6 +24,12 @@ public final class GuidanceViewModel {
     /// progress update.
     public private(set) var lastUpdate: GuidanceUpdate?
 
+    /// True while the engine is recalculating after going off-route.
+    public private(set) var isRerouting = false
+    /// The live route shape after a reroute; the HUD draws this in place of the
+    /// original `route.geometry`. `nil` until the first reroute.
+    public private(set) var routeGeometry: [Coordinate]?
+
     /// Invoked for each spoken prompt; the view decides whether to actually speak
     /// (honoring the mute toggle and the voice setting).
     @ObservationIgnored public var onSpeak: (String) -> Void = { _ in }
@@ -63,11 +69,17 @@ public final class GuidanceViewModel {
         for await event in stream {
             switch event {
             case .progress(let update):
+                isRerouting = false
                 sawProgress = true
                 lastUpdate = update
                 turn = TurnCardPresenter.state(for: update)
             case .spokenInstruction(let text):
                 onSpeak(text)
+            case .rerouting:
+                isRerouting = true
+            case .rerouted(let geometry):
+                routeGeometry = geometry
+                isRerouting = false
             case .arrivedAtDestination:
                 // `onArrive` ends the ride, which tears down this very session. Stop
                 // consuming by returning rather than letting teardown cancel the task
