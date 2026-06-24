@@ -46,6 +46,8 @@ targets:
         product: MapboxNavigationCore
       - package: MapboxNavigation
         product: MapboxNavigationUIKit
+      - package: MapboxNavigation
+        product: MapboxDirections
       - package: MapboxSearch
         product: MapboxSearch
       - package: MapboxSearch
