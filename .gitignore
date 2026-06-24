@@ -1,3 +1,4 @@
 .superpowers/
 .DS_Store
 .build/
+Aura/Resources/MapboxAccessToken
