@@ -51,8 +51,7 @@ private struct RootView: View {
                 PlanView()
 
             case .preview(let destination):
-                // TODO(Task 6): replace with RoutePreviewView
-                PreviewPlaceholderView(destination: destination)
+                RoutePreviewView(destination: destination)
 
             case .ride(let route):
                 if route == nil {
@@ -65,47 +64,6 @@ private struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: router.screen)
-    }
-}
-
-// MARK: - Placeholder: Route Preview (Task 6)
-
-/// Temporary stand-in for the full RoutePreviewView.
-/// TODO(Task 6): replace with RoutePreviewView
-private struct PreviewPlaceholderView: View {
-    let destination: Place
-    @Environment(AppRouter.self) private var router
-
-    var body: some View {
-        ZStack {
-            AuraTheme.bg.ignoresSafeArea()
-            VStack(spacing: 24) {
-                Spacer()
-                Text(destination.name)
-                    .font(.title2.bold())
-                    .foregroundColor(AuraTheme.text)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                Text("Route options coming up…")
-                    .font(.subheadline)
-                    .foregroundColor(AuraTheme.muted)
-                Spacer()
-                Button {
-                    router.screen = .plan
-                } label: {
-                    Text("Back")
-                        .font(.headline)
-                        .foregroundColor(AuraTheme.text)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(AuraTheme.surface)
-                        .clipShape(Capsule())
-                        .padding(.horizontal, 24)
-                }
-                .buttonStyle(.plain)
-                .padding(.bottom, 32)
-            }
-        }
     }
 }
 
