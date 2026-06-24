@@ -27,6 +27,21 @@ final class GuidanceViewModelTests: XCTestCase {
         XCTAssertEqual(vm.turn.primaryText, "Right onto Penn Ave")
         XCTAssertEqual(vm.turn.distanceText, "390 ft") // 120 m → nearest 10 ft
         XCTAssertTrue(vm.turn.isExpanded)              // within 150 m threshold
+
+        // Raw numbers behind that update are exposed for the Live Activity.
+        XCTAssertEqual(vm.lastUpdate?.distanceToManeuverMeters, 120)
+        XCTAssertEqual(vm.lastUpdate?.instruction, "Right onto Penn Ave")
+    }
+
+    func test_lastUpdate_nilUntilFirstProgress() async {
+        let session = ScriptedGuidanceSession(script: [
+            .spokenInstruction("Head north")  // no progress event
+        ])
+        let vm = GuidanceViewModel(session: session)
+
+        await vm.run(route: makeRoute())
+
+        XCTAssertNil(vm.lastUpdate)
     }
 
     func test_spokenInstructions_forwardedToOnSpeak() async {

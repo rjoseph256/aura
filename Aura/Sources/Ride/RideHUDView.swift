@@ -47,6 +47,9 @@ struct RideHUDView: View {
             guard recorder.isRecording else { return }
             while !Task.isCancelled {
                 now = Date()
+                // The controller throttles internally — ticking it here keeps the Live
+                // Activity fresh without an extra timer.
+                RideLiveActivityController.shared.update(stats: recorder.stats, maneuver: nil)
                 try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
@@ -88,6 +91,8 @@ struct RideHUDView: View {
         provider = p
         startDate = Date()
         recorder.start(at: startDate!)
+        RideLiveActivityController.shared.start(
+            mode: .freeRide, startedAt: startDate!, units: settings.units, destinationName: nil)
         streamTask = Task { @MainActor in
             for await point in p.points() { recorder.record(point) }
         }
@@ -98,6 +103,7 @@ struct RideHUDView: View {
         guard recorder.isRecording else { return }
         streamTask?.cancel()
         provider?.stop()
+        RideLiveActivityController.shared.end()
         let ride = recorder.end(at: Date())
         do { try rideStore.save(ride) } catch { saveFailed = true }
         finishedRide = ride

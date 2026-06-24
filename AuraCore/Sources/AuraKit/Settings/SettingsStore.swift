@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-public enum DistanceUnits: String, Sendable { case imperial, metric }
+public enum DistanceUnits: String, Codable, Hashable, Sendable { case imperial, metric }
 public enum MapStyle: String, Sendable { case dark, standard }
 
 /// Stored (not computed) properties so the `@Observable` macro actually tracks them —

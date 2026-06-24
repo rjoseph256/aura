@@ -17,6 +17,13 @@ public final class GuidanceViewModel {
     /// Current turn-card state — the view renders this.
     public private(set) var turn: TurnCardState = .starting
 
+    /// Raw numbers behind the latest `.progress` event (maneuver distance in meters,
+    /// instruction). Exposed alongside the formatted `turn` so surfaces that need the
+    /// unprocessed values — the ride Live Activity, which formats them unit-aware itself —
+    /// can read them without re-deriving from the display string. `nil` until the first
+    /// progress update.
+    public private(set) var lastUpdate: GuidanceUpdate?
+
     /// Invoked for each spoken prompt; the view decides whether to actually speak
     /// (honoring the mute toggle and the voice setting).
     @ObservationIgnored public var onSpeak: (String) -> Void = { _ in }
@@ -57,6 +64,7 @@ public final class GuidanceViewModel {
             switch event {
             case .progress(let update):
                 sawProgress = true
+                lastUpdate = update
                 turn = TurnCardPresenter.state(for: update)
             case .spokenInstruction(let text):
                 onSpeak(text)

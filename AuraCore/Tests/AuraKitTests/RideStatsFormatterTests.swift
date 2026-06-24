@@ -33,4 +33,18 @@ final class RideStatsFormatterTests: XCTestCase {
         XCTAssertEqual(RideStatsFormatter.clock(125), "2:05")
         XCTAssertEqual(RideStatsFormatter.clock(5), "0:05")
     }
+
+    func test_maneuverDistance_imperial() {
+        let f = RideStatsFormatter(units: .imperial)
+        XCTAssertEqual(f.maneuverDistance(120), "390 ft")    // 120 m → nearest 10 ft
+        XCTAssertEqual(f.maneuverDistance(8), "30 ft")       // rounds to nearest 10 ft
+        XCTAssertEqual(f.maneuverDistance(1609.344), "1.0 mi") // ≥1000 ft rolls up to miles
+    }
+
+    func test_maneuverDistance_metric() {
+        let f = RideStatsFormatter(units: .metric)
+        XCTAssertEqual(f.maneuverDistance(120), "120 m")     // nearest 10 m
+        XCTAssertEqual(f.maneuverDistance(8), "10 m")        // rounds to nearest 10 m
+        XCTAssertEqual(f.maneuverDistance(2500), "2.5 km")   // ≥1000 m rolls up to km
+    }
 }

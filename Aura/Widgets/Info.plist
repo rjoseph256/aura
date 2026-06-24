@@ -4,6 +4,8 @@
 <dict>
   <key>CFBundleDevelopmentRegion</key>
   <string>$(DEVELOPMENT_LANGUAGE)</string>
+  <key>CFBundleDisplayName</key>
+  <string>Aura</string>
   <key>CFBundleExecutable</key>
   <string>$(EXECUTABLE_NAME)</string>
   <key>CFBundleIdentifier</key>
@@ -18,26 +20,10 @@
   <string>1.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
-  <key>LSRequiresIPhoneOS</key>
-  <true/>
-  <key>NSSupportsLiveActivities</key>
-  <true/>
-  <key>NSLocationWhenInUseUsageDescription</key>
-  <string>Aura uses your location to follow your ride on the map and record your route.</string>
-  <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-  <string>Aura keeps tracking your ride when the screen is off so your route and stats stay accurate.</string>
-  <key>UIBackgroundModes</key>
-  <array><string>location</string></array>
-  <key>UIApplicationSceneManifest</key>
+  <key>NSExtension</key>
   <dict>
-    <key>UIApplicationSupportsMultipleScenes</key>
-    <true/>
+    <key>NSExtensionPointIdentifier</key>
+    <string>com.apple.widgetkit-extension</string>
   </dict>
-  <key>UILaunchScreen</key>
-  <dict/>
-  <key>UISupportedInterfaceOrientations</key>
-  <array>
-    <string>UIInterfaceOrientationPortrait</string>
-  </array>
 </dict>
 </plist>

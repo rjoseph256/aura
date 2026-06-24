@@ -101,6 +101,11 @@ struct NavigateHUDView: View {
             guard recorder.isRecording else { return }
             while !Task.isCancelled {
                 now = Date()
+                // The controller throttles internally and pushes immediately on a new
+                // maneuver, so ticking it here keeps the next turn current on the
+                // Lock Screen / Dynamic Island without a separate timer.
+                RideLiveActivityController.shared.update(
+                    stats: recorder.stats, maneuver: guidance.lastUpdate)
                 try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
@@ -111,6 +116,11 @@ struct NavigateHUDView: View {
             guidance.onSpeak = { speakInstruction($0) }
             guidance.onArrive = { endRide() }
             startRide()
+            if let startDate {
+                RideLiveActivityController.shared.start(
+                    mode: .navigate, startedAt: startDate, units: settings.units,
+                    destinationName: destination?.name)
+            }
             guidance.start(route: route)
         }
         .onDisappear {
@@ -205,6 +215,7 @@ struct NavigateHUDView: View {
         streamTask?.cancel()
         provider?.stop()
         teardownGuidance()
+        RideLiveActivityController.shared.end()
         let ride = recorder.end(at: Date(), destinationName: destination?.name)
         do { try rideStore.save(ride) } catch { saveFailed = true }
         finishedRide = ride
