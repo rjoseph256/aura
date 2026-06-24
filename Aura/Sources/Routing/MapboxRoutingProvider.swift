@@ -20,7 +20,14 @@ import AuraKit
 /// ```
 public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
 
-    public init() {}
+    /// Best-effort terrain elevation source. Defaults to the Mapbox Tilequery
+    /// impl; swap for a `NullElevationProvider` (or a future Valhalla/BRouter
+    /// engine) without touching callers.
+    private let elevationProvider: any AuraCore.ElevationProvider
+
+    public init(elevationProvider: any AuraCore.ElevationProvider = MapboxTerrainRGBElevationProvider()) {
+        self.elevationProvider = elevationProvider
+    }
 
     // MARK: - AuraCore.RoutingProvider
 
@@ -70,9 +77,27 @@ public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
             mbRoutes.append(alt.route)
         }
 
-        // 6. Map each Mapbox route → AuraCore.CandidateRoute.
-        let candidates: [AuraCore.CandidateRoute] = mbRoutes.map { mbRoute in
-            candidateRoute(from: mbRoute)
+        // 6. Fetch terrain elevations for all candidates CONCURRENTLY (so the
+        //    total added latency ≈ one route's sampling, not the sum), then map
+        //    each Mapbox route → AuraCore.CandidateRoute with its real climb.
+        let geometries: [[AuraCore.Coordinate]] = mbRoutes.map { mbRoute in
+            mbRoute.shape?.coordinates.map {
+                AuraCore.Coordinate(latitude: $0.latitude, longitude: $0.longitude)
+            } ?? []
+        }
+        let elevationProvider = self.elevationProvider
+        var elevationsByIndex = [[Double]](repeating: [], count: geometries.count)
+        await withTaskGroup(of: (Int, [Double]).self) { group in
+            for (i, geometry) in geometries.enumerated() {
+                group.addTask { (i, await elevationProvider.elevations(along: geometry)) }
+            }
+            for await (i, elevs) in group {
+                elevationsByIndex[i] = elevs
+            }
+        }
+
+        let candidates: [AuraCore.CandidateRoute] = mbRoutes.enumerated().map { (i, mbRoute) in
+            candidateRoute(from: mbRoute, geometry: geometries[i], elevations: elevationsByIndex[i])
         }
 
         guard !candidates.isEmpty else {
@@ -80,34 +105,53 @@ public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
         }
 
         // 7. Rank and label candidates → up to 3 distinct AuraCore.Route values.
-        return AuraCore.RouteRanker.label(
+        let labeled = AuraCore.RouteRanker.label(
             origin: request.origin,
             destination: request.destination,
             candidates: candidates
         )
+
+        // 8. Correlate each labeled AuraCore.Route back to its mbRoutes index
+        //    (0 = main, k = alternativeRoutes[k-1]) by matching distance AND the
+        //    first geometry coordinate (to break ties), then record the mapping so
+        //    the ride can navigate THAT exact Mapbox route instead of re-fetching.
+        var indexByRouteId: [UUID: Int] = [:]
+        for route in labeled {
+            if let i = mbRoutes.firstIndex(where: { mb in
+                mb.distance == route.distanceMeters &&
+                mb.shape?.coordinates.first.map { abs($0.latitude - (route.geometry.first?.latitude ?? .nan)) < 1e-9
+                                               && abs($0.longitude - (route.geometry.first?.longitude ?? .nan)) < 1e-9 } ?? false
+            }) {
+                indexByRouteId[route.id] = i
+            }
+        }
+        let routesToRecord = navigationRoutes
+        let indexByRouteIdToRecord = indexByRouteId
+        await MainActor.run {
+            NavigationRouteRegistry.shared.record(navigationRoutes: routesToRecord, mbRouteIndexByRouteId: indexByRouteIdToRecord)
+        }
+
+        return labeled
     }
 
     // MARK: - Private helpers
 
-    /// Converts a single `MapboxDirections.Route` into an `AuraCore.CandidateRoute`.
-    private func candidateRoute(from mbRoute: MapboxDirections.Route) -> AuraCore.CandidateRoute {
-        // --- geometry (required; from LineString shape) ---
-        let geometry: [AuraCore.Coordinate] = mbRoute.shape?.coordinates.map {
-            AuraCore.Coordinate(latitude: $0.latitude, longitude: $0.longitude)
-        } ?? []
-
+    /// Converts a single `MapboxDirections.Route` into an `AuraCore.CandidateRoute`,
+    /// using the precomputed `geometry` and best-effort `elevations` sampled along it.
+    private func candidateRoute(from mbRoute: MapboxDirections.Route,
+                                geometry: [AuraCore.Coordinate],
+                                elevations: [Double]) -> AuraCore.CandidateRoute {
         // --- distance & duration (reliable; always present in the Directions response) ---
         let distanceMeters = mbRoute.distance
         let durationSeconds = mbRoute.expectedTravelTime
 
         // --- elevationGainMeters (best-effort) ---
-        // The standard Mapbox Directions API does not return an elevation profile
-        // via the Swift SDK attributes. Returning 0 here; a future task should
-        // integrate a terrain/elevation source (e.g. Mapbox Tilequery or a
-        // Valhalla/BRouter engine that natively provides elevation profiles).
-        // TODO: wire a real elevation source so RouteRanker can meaningfully
-        //       separate "flattest" candidates.
-        let elevationGain = RouteMetrics.elevationGain(elevations: [])
+        // `elevations` is sampled along the geometry by the ElevationProvider (Mapbox
+        // Tilequery terrain contours). It may be empty on any network/parse failure or
+        // missing token, in which case elevationGain is 0 — the prior behavior — and
+        // "Flattest" simply has no signal to separate on. With data, RouteRanker can
+        // meaningfully pick the flattest candidate.
+        let elevationGain = RouteMetrics.elevationGain(elevations: elevations)
 
         // --- offRoadFraction (best-effort from step transportType) ---
         // Each RouteStep's `.transportType` identifies the travel mode.  For a

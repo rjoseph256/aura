@@ -239,20 +239,32 @@ struct NavigateHUDView: View {
             longitude: route.destination.longitude
         )
 
-        let options = NavigationRouteOptions(
-            waypoints: [
-                MapboxDirections.Waypoint(coordinate: originCoord),
-                MapboxDirections.Waypoint(coordinate: destCoord)
-            ],
-            profileIdentifier: .cycling
-        )
-        options.includesAlternativeRoutes = false
-
         do {
-            let navRoutes = try await AuraNavigation.provider.mapboxNavigation
-                .routingProvider()
-                .calculateRoutes(options: options)
-                .value
+            // Prefer the routes already fetched in preview so we navigate the
+            // EXACT alternative the rider selected (Flattest / Most paths / etc.)
+            // instead of re-fetching and getting Mapbox's default main route.
+            let navRoutes: NavigationRoutes
+            if let entry = NavigationRouteRegistry.shared.entry(for: route.id) {
+                if entry.mbRouteIndex == 0 {
+                    navRoutes = entry.routes
+                } else {
+                    navRoutes = await entry.routes.selectingAlternativeRoute(at: entry.mbRouteIndex - 1) ?? entry.routes
+                }
+            } else {
+                // Fallback: registry miss (e.g. relaunch mid-flow) — re-fetch as before.
+                let options = NavigationRouteOptions(
+                    waypoints: [
+                        MapboxDirections.Waypoint(coordinate: originCoord),
+                        MapboxDirections.Waypoint(coordinate: destCoord)
+                    ],
+                    profileIdentifier: .cycling
+                )
+                options.includesAlternativeRoutes = false
+                navRoutes = try await AuraNavigation.provider.mapboxNavigation
+                    .routingProvider()
+                    .calculateRoutes(options: options)
+                    .value
+            }
 
             // Start active turn-by-turn guidance.
             AuraNavigation.provider.mapboxNavigation
