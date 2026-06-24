@@ -5,12 +5,14 @@ import MapboxMaps
 
 @main
 struct AuraApp: App {
+    @State private var router = AppRouter()
+
     init() { AuraApp.configureMapbox() }
 
     var body: some Scene {
         WindowGroup {
-            // Real GPS by default. For a desk demo without moving, swap to: Self.simulatedProvider
-            RideHUDView(makeProvider: { LiveLocationProvider() })
+            RootView()
+                .environment(router)
         }
     }
 
@@ -35,3 +37,32 @@ struct AuraApp: App {
         return SimulatedLocationProvider(track: track, speedMultiplier: 10)
     }
 }
+
+// MARK: - RootView
+
+/// Routes the window to the correct screen based on AppRouter.screen.
+private struct RootView: View {
+    @Environment(AppRouter.self) private var router
+
+    var body: some View {
+        Group {
+            switch router.screen {
+            case .plan:
+                PlanView()
+
+            case .preview(let destination):
+                RoutePreviewView(destination: destination)
+
+            case .ride(let route):
+                if let route {
+                    NavigateHUDView(route: route)
+                } else {
+                    // Free ride — unchanged path
+                    RideHUDView(makeProvider: { LiveLocationProvider() })
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: router.screen)
+    }
+}
+
