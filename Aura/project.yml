@@ -1,0 +1,26 @@
+name: Aura
+options:
+  bundleIdPrefix: app.aura
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  AuraCore:
+    path: ../AuraCore
+targets:
+  Aura:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+      - Resources
+    dependencies:
+      - package: AuraCore
+        product: AuraCore
+      - package: AuraCore
+        product: AuraKit
+    settings:
+      base:
+        INFOPLIST_FILE: Resources/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: app.aura.ios
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
