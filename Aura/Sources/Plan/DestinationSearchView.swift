@@ -28,14 +28,14 @@ struct DestinationSearchView: View {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(AuraTheme.muted)
-                    .font(.system(size: 17, weight: .medium))
+                    .font(.body.weight(.medium))
 
                 TextField("", text: $query, prompt:
                     Text("Where to?")
                         .foregroundColor(AuraTheme.text.opacity(0.65))
                 )
                 .foregroundColor(AuraTheme.text)
-                .font(.system(size: 17, weight: .regular))
+                .font(.body)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
@@ -48,7 +48,7 @@ struct DestinationSearchView: View {
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundColor(AuraTheme.muted)
-                            .font(.system(size: 16))
+                            .font(.callout)
                     }
                 }
 
@@ -217,18 +217,18 @@ private struct SuggestionRow: View {
         Button(action: onTap) {
             HStack(spacing: 14) {
                 Image(systemName: rowIcon)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.subheadline.weight(.medium))
                     .foregroundColor(AuraTheme.cyan)
                     .frame(width: 28)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(suggestion.name)
-                        .font(.system(size: 16, weight: .medium))
+                        .font(.callout.weight(.medium))
                         .foregroundColor(AuraTheme.text)
                         .lineLimit(1)
                     if let desc = suggestion.description, !desc.isEmpty {
                         Text(desc)
-                            .font(.system(size: 13))
+                            .font(.footnote)
                             .foregroundColor(AuraTheme.muted)
                             .lineLimit(1)
                     }

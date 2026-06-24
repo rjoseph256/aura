@@ -41,7 +41,8 @@ struct RoutePreviewView: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .ignoresSafeArea(edges: .top)
+        // The map ignores the safe area on its own (see mapPane); the VStack respects
+        // it, so the back button lands below the status bar without a magic inset.
         .task { await loadRoutes() }
         .onChange(of: selected) { _, newRoute in
             if let route = newRoute {
@@ -79,13 +80,13 @@ struct RoutePreviewView: View {
                 router.screen = .plan
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.headline)
                     .foregroundStyle(AuraTheme.text)
                     .frame(width: 44, height: 44)
                     .background(.ultraThinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
-            .padding(.top, 56)   // below status bar
+            .padding(.top, 8)   // sits in the safe area
             .padding(.leading, 16)
         }
     }
@@ -316,7 +317,7 @@ private struct RouteOptionRow: View {
         Button(action: onTap) {
             HStack(spacing: 14) {
                 Image(systemName: glyph)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(isSelected ? Color.black : AuraTheme.text)
                     .frame(width: 24)
 
@@ -343,7 +344,7 @@ private struct RouteOptionRow: View {
 
                 if isSelected {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.subheadline.weight(.bold))
                         .foregroundStyle(Color.black)
                 }
             }

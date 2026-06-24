@@ -10,6 +10,7 @@ struct PlanView: View {
     @Environment(SettingsStore.self) private var settings
     @State private var query: String = ""
     @State private var rides: [Ride] = []
+    @ScaledMetric(relativeTo: .title) private var brandSize: CGFloat = 24
 
     private var weekStats: WeeklyRideStats {
         RideAggregator.weekToDate(rides, now: Date())
@@ -55,10 +56,10 @@ struct PlanView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(greeting)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.footnote.weight(.medium))
                     .foregroundColor(AuraTheme.muted)
                 Text("Aura")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .font(.system(size: brandSize, weight: .bold, design: .rounded))
                     .foregroundColor(AuraTheme.text)
             }
             Spacer()
@@ -104,7 +105,7 @@ struct PlanView: View {
                        goalMeters: settings.weeklyGoalMeters,
                        units: settings.units)
             Text(weeklyCaption)
-                .font(.system(size: 13, weight: .medium))
+                .font(.footnote.weight(.medium))
                 .foregroundColor(AuraTheme.muted)
                 .multilineTextAlignment(.center)
         }
@@ -162,7 +163,7 @@ struct PlanView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 12, weight: .semibold))
+            .font(.caption.weight(.semibold))
             .foregroundColor(AuraTheme.muted)
             .textCase(.uppercase)
             .tracking(0.5)
@@ -201,24 +202,24 @@ private struct RecentRow: View {
         Button(action: onTap) {
             HStack(spacing: 14) {
                 Image(systemName: categoryIcon)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.subheadline.weight(.medium))
                     .foregroundColor(AuraTheme.violet)
                     .frame(width: 28)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(place.name)
-                        .font(.system(size: 16, weight: .medium))
+                        .font(.callout.weight(.medium))
                         .foregroundColor(AuraTheme.text)
                         .lineLimit(1)
 
                     Text(categoryLabel)
-                        .font(.system(size: 13))
+                        .font(.footnote)
                         .foregroundColor(AuraTheme.muted)
                 }
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundColor(AuraTheme.muted)
             }
             .frame(minHeight: 56)

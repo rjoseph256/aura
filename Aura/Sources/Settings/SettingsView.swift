@@ -83,7 +83,7 @@ struct SettingsView: View {
 
     private func iconView(_ name: String, _ tint: Color) -> some View {
         Image(systemName: name)
-            .font(.system(size: 15, weight: .semibold))
+            .font(.subheadline.weight(.semibold))
             .foregroundStyle(tint)
             .frame(width: 26)
     }

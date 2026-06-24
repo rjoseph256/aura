@@ -79,14 +79,14 @@ struct NavigateHUDView: View {
         // Turn card pinned below the status bar
         .overlay(alignment: .top) {
             TurnCardView(state: guidance.turn, reduceMotion: reduceMotion)
-                .padding(.top, 56) // clear status bar
+                .padding(.top, 8) // sits in the safe area; no hardcoded status-bar inset
                 .animation(reduceMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.38),
                            value: guidance.turn)
         }
         // Mute toggle — top trailing, clear of notch
         .overlay(alignment: .topTrailing) {
             muteButton
-                .padding(.top, 56)
+                .padding(.top, 8)
                 .padding(.trailing, 16)
         }
         .background(AuraTheme.bg)
@@ -174,7 +174,7 @@ struct NavigateHUDView: View {
             }
         } label: {
             Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
                 .frame(width: 44, height: 44)
                 .background(.ultraThinMaterial, in: Circle())

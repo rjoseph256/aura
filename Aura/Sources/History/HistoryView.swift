@@ -12,6 +12,7 @@ struct HistoryView: View {
     @State private var rides: [Ride] = []
     @State private var selected: Ride?
     @State private var appeared = false
+    @ScaledMetric(relativeTo: .largeTitle) private var emptyGlyph: CGFloat = 56
 
     var body: some View {
         ZStack {
@@ -87,17 +88,17 @@ struct HistoryView: View {
                     .blur(radius: 44)
 
                 Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
-                    .font(.system(size: 56, weight: .regular))
+                    .font(.system(size: emptyGlyph, weight: .regular))
                     .foregroundStyle(AuraTheme.auroraGradient)
             }
             .padding(.bottom, 6)
 
             Text("No rides yet")
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .font(.system(.title3, design: .rounded).weight(.semibold))
                 .foregroundStyle(AuraTheme.text)
 
             Text("Start a free ride or navigate somewhere — your rides land here.")
-                .font(.system(size: 14))
+                .font(.subheadline)
                 .foregroundStyle(AuraTheme.muted)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 260)
@@ -158,7 +159,7 @@ private struct RideRow: View {
             RouteThumbnail(coordinates: coords, lineColor: accent, lineWidth: 2)
         } else {
             Image(systemName: symbol)
-                .font(.system(size: 17, weight: .semibold))
+                .font(.headline)
                 .foregroundStyle(accent)
         }
     }
@@ -175,11 +176,11 @@ private struct RideRow: View {
             // Middle — date + summary caption.
             VStack(alignment: .leading, spacing: 3) {
                 Text(ride.startedAt.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.callout.weight(.semibold))
                     .foregroundStyle(AuraTheme.text)
                     .lineLimit(1)
                 Text(caption)
-                    .font(.system(size: 13))
+                    .font(.footnote)
                     .foregroundStyle(AuraTheme.muted)
                     .lineLimit(1)
             }
@@ -189,7 +190,7 @@ private struct RideRow: View {
             // Trailing — hero distance numeral.
             VStack(alignment: .trailing, spacing: 0) {
                 Text(distance)
-                    .font(.system(size: 23, weight: .heavy, design: .rounded))
+                    .font(.system(.title2, design: .rounded).weight(.heavy))
                     .foregroundStyle(AuraTheme.text)
                     .monospacedDigit()
                 Text(distanceUnit)

@@ -16,11 +16,11 @@ struct TurnCardView: View {
 
     // MARK: Layout constants
 
-    private let arrowCollapsed: CGFloat = 24
-    private let arrowExpanded:  CGFloat = 34
+    @ScaledMetric(relativeTo: .title2)     private var arrowCollapsed: CGFloat = 24
+    @ScaledMetric(relativeTo: .largeTitle) private var arrowExpanded:  CGFloat = 34
 
-    private let distCollapsed:  CGFloat = 22
-    private let distExpanded:   CGFloat = 36
+    @ScaledMetric(relativeTo: .title2)     private var distCollapsed:  CGFloat = 22
+    @ScaledMetric(relativeTo: .largeTitle) private var distExpanded:   CGFloat = 36
 
     // MARK: Body
 
@@ -61,7 +61,7 @@ struct TurnCardView: View {
 
                 // Street / instruction text — fades on change.
                 Text(state.primaryText)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(
                         state.isExpanded ? Color.black.opacity(0.75) : AuraTheme.text.opacity(0.9)
                     )
