@@ -5,6 +5,12 @@ public struct TurnCardState: Equatable, Sendable {
     public var primaryText: String     // maneuver instruction, e.g. "Right onto Penn Ave"
     public var distanceText: String    // distance to the maneuver, e.g. "390 ft" or "0.2 mi"
     public var isExpanded: Bool         // true when the maneuver is near → the card grows
+
+    public init(primaryText: String, distanceText: String, isExpanded: Bool) {
+        self.primaryText = primaryText
+        self.distanceText = distanceText
+        self.isExpanded = isExpanded
+    }
 }
 
 /// Adaptive turn-card display logic (the "option C" behavior). Pure + Mapbox-independent.

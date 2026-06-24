@@ -54,12 +54,11 @@ private struct RootView: View {
                 RoutePreviewView(destination: destination)
 
             case .ride(let route):
-                if route == nil {
+                if let route {
+                    NavigateHUDView(route: route)
+                } else {
                     // Free ride — unchanged path
                     RideHUDView(makeProvider: { LiveLocationProvider() })
-                } else {
-                    // TODO(Task 7): replace with NavigateHUDView
-                    NavigatePlaceholderView()
                 }
             }
         }
@@ -67,37 +66,3 @@ private struct RootView: View {
     }
 }
 
-// MARK: - Placeholder: Navigate HUD (Task 7)
-
-/// Temporary stand-in for the full NavigateHUDView.
-/// TODO(Task 7): replace with NavigateHUDView
-private struct NavigatePlaceholderView: View {
-    @Environment(AppRouter.self) private var router
-
-    var body: some View {
-        ZStack {
-            AuraTheme.bg.ignoresSafeArea()
-            VStack(spacing: 24) {
-                Spacer()
-                Text("Navigate mode coming soon")
-                    .font(.title2.bold())
-                    .foregroundColor(AuraTheme.text)
-                Spacer()
-                Button {
-                    router.screen = .plan
-                } label: {
-                    Text("End")
-                        .font(.headline)
-                        .foregroundColor(AuraTheme.text)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(AuraTheme.surface)
-                        .clipShape(Capsule())
-                        .padding(.horizontal, 24)
-                }
-                .buttonStyle(.plain)
-                .padding(.bottom, 32)
-            }
-        }
-    }
-}
