@@ -7,43 +7,18 @@ struct SpeedRail: View {
     let elapsed: TimeInterval
     let units: DistanceUnits
 
-    private func fmt(_ t: TimeInterval) -> String {
-        let s = Int(t); return String(format: "%d:%02d", s / 60, s % 60)
-    }
-
-    // MARK: Unit-aware values
-
-    private var speedValue: Double {
-        units == .metric
-            ? UnitConverter.kmh(fromMetersPerSecond: stats.averageSpeedMetersPerSecond)
-            : UnitConverter.mph(fromMetersPerSecond: stats.averageSpeedMetersPerSecond)
-    }
-    private var speedLabel: String { units == .metric ? "KM/H" : "MPH" }
-
-    private var distanceValue: Double {
-        units == .metric
-            ? UnitConverter.km(fromMeters: stats.distanceMeters)
-            : UnitConverter.miles(fromMeters: stats.distanceMeters)
-    }
-    private var distanceLabel: String { units == .metric ? "KM" : "MI" }
-
-    private var elevationValue: Double {
-        units == .metric
-            ? stats.elevationGainMeters
-            : UnitConverter.feet(fromMeters: stats.elevationGainMeters)
-    }
-    private var elevationLabel: String { units == .metric ? "M ↑" : "FT ↑" }
+    private var fmt: RideStatsFormatter { RideStatsFormatter(units: units) }
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
-            Text(String(format: "%.0f", speedValue))
+            Text(fmt.speedValue(stats.averageSpeedMetersPerSecond))
                 .font(AuraTheme.heroNumber())
                 .foregroundStyle(AuraTheme.text)
-            Text(speedLabel).font(AuraTheme.unitLabel).foregroundStyle(AuraTheme.muted)
+            Text(fmt.speedUnit.uppercased()).font(AuraTheme.unitLabel).foregroundStyle(AuraTheme.muted)
             HStack(spacing: 12) {
-                metric(String(format: "%.1f", distanceValue), distanceLabel)
-                metric(fmt(elapsed), "TIME")
-                metric(String(format: "%.0f", elevationValue), elevationLabel)
+                metric(fmt.distanceValue(stats.distanceMeters), fmt.distanceUnit.uppercased())
+                metric(RideStatsFormatter.clock(elapsed), "TIME")
+                metric(fmt.elevationValue(stats.elevationGainMeters), "\(fmt.elevationUnit.uppercased()) ↑")
             }.padding(.top, 6)
         }
         .padding(14)
