@@ -93,6 +93,7 @@ public final class LocationService: NSObject, LocationStreaming {
         #endif
         continuation?.finish(); continuation = nil
         setMode(.idle)
+        signal = .good
     }
 
     /// One-shot origin for the plan/preview, with a Pittsburgh fallback. Folds in
