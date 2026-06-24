@@ -145,6 +145,7 @@ struct NavigateHUDView: View {
         .onDisappear {
             teardownGuidance()
             location.stop()
+            RideScreen.keepAwake(false)
         }
     }
 

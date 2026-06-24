@@ -64,6 +64,7 @@ struct RideHUDView: View {
         .onDisappear {
             streamTask?.cancel()
             location.stop()
+            RideScreen.keepAwake(false)
         }
     }
 
