@@ -17,10 +17,18 @@ struct HistoryView: View {
         ZStack {
             AuraTheme.bg.ignoresSafeArea()
 
-            if rides.isEmpty {
-                emptyState
-            } else {
-                rideList
+            VStack(spacing: 0) {
+                if store.isEphemeral {
+                    ephemeralBanner
+                }
+                Group {
+                    if rides.isEmpty {
+                        emptyState
+                    } else {
+                        rideList
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .navigationTitle("Rides")
@@ -97,6 +105,23 @@ struct HistoryView: View {
         }
         .padding()
     }
+
+    // MARK: - Ephemeral-store banner
+
+    private var ephemeralBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.icloud")
+                .foregroundStyle(AuraTheme.pink)
+            Text("Rides aren't being saved on this device.")
+                .font(.footnote)
+                .foregroundStyle(AuraTheme.text)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
+        .background(AuraTheme.surface)
+    }
 }
 
 // MARK: - Row
@@ -112,7 +137,12 @@ private struct RideRow: View {
     private var metric: Bool { units == .metric }
 
     private var caption: String {
-        let kind = isNavigate ? "Navigated" : "Free ride"
+        let kind: String
+        if let name = ride.destinationName, !name.isEmpty {
+            kind = name
+        } else {
+            kind = isNavigate ? "Navigated" : "Free ride"
+        }
         let minutes = Int(stats.movingTimeSeconds / 60)
         let climb = metric
             ? "\(Int(stats.elevationGainMeters.rounded())) m"

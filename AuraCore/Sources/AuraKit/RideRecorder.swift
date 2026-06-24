@@ -30,9 +30,10 @@ public final class RideRecorder {
     }
 
     @discardableResult
-    public func end(at date: Date) -> Ride {
+    public func end(at date: Date, destinationName: String? = nil) -> Ride {
         isRecording = false
         return Ride(kind: kind, startedAt: startedAt ?? date, endedAt: date,
-                    track: track, stats: stats, routeId: nil, destinationPlaceId: nil)
+                    track: track, stats: stats, destinationName: destinationName,
+                    routeId: nil, destinationPlaceId: nil)
     }
 }

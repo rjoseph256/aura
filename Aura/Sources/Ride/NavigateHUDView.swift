@@ -18,6 +18,8 @@ import SwiftUI
 /// - Mute toggle (top-trailing) for spoken instructions via AVSpeechSynthesizer.
 struct NavigateHUDView: View {
     let route: AuraCore.Route
+    /// The place the rider chose in search, denormalized onto the saved ride for History.
+    var destination: Place?
 
     @Environment(AppRouter.self) private var router
     @Environment(RideStore.self) private var rideStore
@@ -30,6 +32,7 @@ struct NavigateHUDView: View {
     @State private var provider: (any LocationStreaming)?
     @State private var streamTask: Task<Void, Never>?
     @State private var finishedRide: Ride?
+    @State private var saveFailed = false
 
     // MARK: Elapsed-time ticker
 
@@ -97,7 +100,7 @@ struct NavigateHUDView: View {
         .sheet(item: $finishedRide, onDismiss: {
             router.screen = .plan
         }) { ride in
-            RideSummaryView(ride: ride)
+            RideSummaryView(ride: ride, saveFailed: saveFailed)
         }
         // Elapsed-time ticker (mirrors RideHUDView pattern)
         .task(id: recorder.isRecording) {
@@ -142,7 +145,7 @@ struct NavigateHUDView: View {
                 }
             }
         }
-        .mapStyle(.dark)
+        .mapStyle(settings.mapStyle.mapboxStyle)
     }
 
     // MARK: End-ride button
@@ -206,8 +209,8 @@ struct NavigateHUDView: View {
         streamTask?.cancel()
         provider?.stop()
         stopGuidance()
-        let ride = recorder.end(at: Date())
-        try? rideStore.save(ride)
+        let ride = recorder.end(at: Date(), destinationName: destination?.name)
+        do { try rideStore.save(ride) } catch { saveFailed = true }
         finishedRide = ride
     }
 

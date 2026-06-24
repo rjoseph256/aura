@@ -107,7 +107,7 @@ struct PlanView: View {
 
     private var freeRideButton: some View {
         Button {
-            router.screen = .ride(route: nil)
+            router.screen = .ride(route: nil, destination: nil)
         } label: {
             ZStack {
                 AuraTheme.auroraGradient

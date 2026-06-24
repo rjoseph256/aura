@@ -1,10 +1,12 @@
 import SwiftUI
 import MapboxMaps
 import AuraCore
+import AuraKit
 
-/// Dark Mapbox map that follows the rider and draws the live track.
+/// Mapbox map that follows the rider and draws the live track, in the user's chosen style.
 struct RideMapView: View {
     let track: [TrackPoint]
+    @Environment(SettingsStore.self) private var settings
     @State private var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
 
     var body: some View {
@@ -21,7 +23,7 @@ struct RideMapView: View {
                 }
             }
         }
-        .mapStyle(.dark)
+        .mapStyle(settings.mapStyle.mapboxStyle)
         .ignoresSafeArea()
     }
 }

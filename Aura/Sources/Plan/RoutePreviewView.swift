@@ -10,6 +10,7 @@ struct RoutePreviewView: View {
     let destination: Place
 
     @Environment(AppRouter.self) private var router
+    @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let provider: any AuraCore.RoutingProvider = MapboxRoutingProvider()
@@ -70,7 +71,7 @@ struct RoutePreviewView: View {
                     }
                 }
             }
-            .mapStyle(.dark)
+            .mapStyle(settings.mapStyle.mapboxStyle)
             .ignoresSafeArea()
 
             // Back chevron — ≥44pt hit area
@@ -214,7 +215,7 @@ struct RoutePreviewView: View {
 
     private var startButton: some View {
         Button {
-            router.screen = .ride(route: selected)
+            router.screen = .ride(route: selected, destination: destination)
         } label: {
             Text("Start RIDE")
                 .font(.headline)

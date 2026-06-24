@@ -8,7 +8,7 @@ final class AppRouter {
     enum Screen: Equatable {
         case plan
         case preview(destination: Place)
-        case ride(route: Route?)   // nil => free ride
+        case ride(route: Route?, destination: Place?)   // nil route => free ride
     }
     var screen: Screen = .plan
 
