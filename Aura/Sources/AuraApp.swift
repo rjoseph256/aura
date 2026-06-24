@@ -9,7 +9,8 @@ struct AuraApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RideHUDView(makeProvider: Self.simulatedProvider)
+            // Real GPS by default. For a desk demo without moving, swap to: Self.simulatedProvider
+            RideHUDView(makeProvider: { LiveLocationProvider() })
         }
     }
 
