@@ -19,10 +19,15 @@ targets:
         excludes:
           - Info.plist
           - MapboxAccessToken
+          - sample-ride-pittsburgh.gpx
       # Extension-less token file: force it into the resources copy phase
       # so the bundled pk.… token ships in the .app (XcodeGen won't classify
       # an extension-less file as a resource on its own).
       - path: Resources/MapboxAccessToken
+        buildPhase: resources
+      # Sample GPX that drives the simulated free ride — force it into the
+      # resources copy phase so Bundle.main can load it at runtime.
+      - path: Resources/sample-ride-pittsburgh.gpx
         buildPhase: resources
     dependencies:
       - package: AuraCore

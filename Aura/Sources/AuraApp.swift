@@ -1,4 +1,6 @@
 import SwiftUI
+import AuraCore
+import AuraKit
 import MapboxMaps
 
 @main
@@ -7,7 +9,7 @@ struct AuraApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RideMapView(track: [])
+            RideHUDView(makeProvider: Self.simulatedProvider)
         }
     }
 
@@ -20,5 +22,15 @@ struct AuraApp: App {
             return
         }
         MapboxOptions.accessToken = token
+    }
+
+    /// Loads the bundled GPX and replays it at 10× for a quick desk demo.
+    static func simulatedProvider() -> LocationStreaming {
+        guard let url = Bundle.main.url(forResource: "sample-ride-pittsburgh", withExtension: "gpx"),
+              let xml = try? String(contentsOf: url, encoding: .utf8),
+              let track = try? GPXParser.parse(xml) else {
+            return SimulatedLocationProvider(track: GPXTrack(points: []))
+        }
+        return SimulatedLocationProvider(track: track, speedMultiplier: 10)
     }
 }
