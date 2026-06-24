@@ -171,7 +171,8 @@ public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
             distanceMeters: distanceMeters,
             estimatedDurationSeconds: durationSeconds,
             elevationGainMeters: elevationGain,
-            offRoadFraction: offRoad
+            offRoadFraction: offRoad,
+            elevationProfile: elevations
         )
     }
 

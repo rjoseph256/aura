@@ -7,12 +7,14 @@ public struct CandidateRoute: Equatable, Sendable {
     public var estimatedDurationSeconds: Double
     public var elevationGainMeters: Double
     public var offRoadFraction: Double   // 0...1 — share of the route on paths/trails
+    public var elevationProfile: [Double]  // sampled elevations along geometry (for the sparkline)
 
     public init(geometry: [Coordinate], distanceMeters: Double, estimatedDurationSeconds: Double,
-                elevationGainMeters: Double, offRoadFraction: Double) {
+                elevationGainMeters: Double, offRoadFraction: Double, elevationProfile: [Double] = []) {
         self.geometry = geometry; self.distanceMeters = distanceMeters
         self.estimatedDurationSeconds = estimatedDurationSeconds
         self.elevationGainMeters = elevationGainMeters; self.offRoadFraction = offRoadFraction
+        self.elevationProfile = elevationProfile
     }
 }
 
@@ -39,7 +41,8 @@ public enum RouteRanker {
                                 geometry: c.geometry, profile: profile,
                                 distanceMeters: c.distanceMeters,
                                 estimatedDurationSeconds: c.estimatedDurationSeconds,
-                                elevationGainMeters: c.elevationGainMeters))
+                                elevationGainMeters: c.elevationGainMeters,
+                                elevationProfile: c.elevationProfile))
         }
         return routes
     }

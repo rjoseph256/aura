@@ -328,7 +328,17 @@ private struct RouteOptionRow: View {
                         .foregroundStyle(isSelected ? Color.black.opacity(0.65) : AuraTheme.muted)
                 }
 
-                Spacer()
+                Spacer(minLength: 8)
+
+                // Elevation profile — lets the rider compare hilliness across options.
+                if route.elevationProfile.count > 1 {
+                    ElevationSparkline(
+                        elevations: route.elevationProfile,
+                        stroke: isSelected ? Color.black.opacity(0.7) : AuraTheme.cyan,
+                        fill: isSelected ? Color.black.opacity(0.14) : AuraTheme.cyan.opacity(0.16)
+                    )
+                    .frame(width: 54, height: 26)
+                }
 
                 if isSelected {
                     Image(systemName: "checkmark")

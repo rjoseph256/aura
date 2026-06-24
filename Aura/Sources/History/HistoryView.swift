@@ -151,17 +151,26 @@ private struct RideRow: View {
 
     private var distanceUnit: String { fmt.distanceUnit.uppercased() }
 
+    @ViewBuilder
+    private var leadingThumbnail: some View {
+        let coords = ride.track.map(\.coordinate)
+        if coords.count > 1 {
+            RouteThumbnail(coordinates: coords, lineColor: accent, lineWidth: 2)
+        } else {
+            Image(systemName: symbol)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(accent)
+        }
+    }
+
     var body: some View {
         HStack(spacing: 14) {
-            // Leading icon badge — tinted square of the kind's accent.
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(accent.opacity(0.16))
-                Image(systemName: symbol)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(accent)
-            }
-            .frame(width: 40, height: 40)
+            // Leading — a thumbnail of the actual route (or a tinted kind badge when
+            // the ride has no recorded track), in the kind's accent.
+            leadingThumbnail
+                .frame(width: 54, height: 42)
+                .background(accent.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
 
             // Middle — date + summary caption.
             VStack(alignment: .leading, spacing: 3) {
