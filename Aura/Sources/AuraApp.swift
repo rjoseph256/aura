@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 import AuraCore
 import AuraKit
 import MapboxMaps
@@ -6,6 +7,8 @@ import MapboxMaps
 @main
 struct AuraApp: App {
     @State private var router = AppRouter()
+    @State private var rideStore = AuraApp.makeRideStore()
+    @State private var settings = SettingsStore()
 
     init() { AuraApp.configureMapbox() }
 
@@ -13,6 +16,24 @@ struct AuraApp: App {
         WindowGroup {
             RootView()
                 .environment(router)
+                .environment(rideStore)
+                .environment(settings)
+                .preferredColorScheme(.dark)
+        }
+    }
+
+    /// Builds the app's persistent SwiftData-backed RideStore. Falls back to an
+    /// in-memory store if the on-disk container can't be created, so the app still runs.
+    @MainActor static func makeRideStore() -> RideStore {
+        do {
+            let container = try ModelContainer(for: RideRecord.self)
+            return RideStore(container: container)
+        } catch {
+            assertionFailure("Failed to build persistent ModelContainer: \(error)")
+            return (try? RideStore.inMemory()) ?? {
+                // Last-resort: an in-memory store should never fail; if it does, crash loudly.
+                fatalError("Could not create any RideStore: \(error)")
+            }()
         }
     }
 
@@ -48,7 +69,7 @@ private struct RootView: View {
         Group {
             switch router.screen {
             case .plan:
-                PlanView()
+                AuraTabView()
 
             case .preview(let destination):
                 RoutePreviewView(destination: destination)
@@ -63,6 +84,28 @@ private struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: router.screen)
+    }
+}
+
+// MARK: - AuraTabView
+
+/// Three-tab shell shown on the plan screen. History & Settings get their own
+/// NavigationStacks (sheets / NavigationLinks need them); the Ride tab hosts the
+/// router-driven plan→preview→ride flow's entry point (PlanView), which manages
+/// its own layout and needs no nav bar.
+private struct AuraTabView: View {
+    var body: some View {
+        TabView {
+            PlanView()
+                .tabItem { Label("Ride", systemImage: "bicycle") }
+
+            NavigationStack { HistoryView() }
+                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+
+            NavigationStack { SettingsView() }
+                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+        }
+        .tint(AuraTheme.cyan)
     }
 }
 

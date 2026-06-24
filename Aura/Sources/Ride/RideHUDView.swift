@@ -5,6 +5,8 @@ import AuraKit
 struct RideHUDView: View {
     let makeProvider: () -> LocationStreaming
 
+    @Environment(RideStore.self) private var rideStore
+    @Environment(SettingsStore.self) private var settings
     @State private var recorder = RideRecorder(kind: .freeRide)
     @State private var provider: LocationStreaming?
     @State private var streamTask: Task<Void, Never>?
@@ -20,7 +22,7 @@ struct RideHUDView: View {
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
             RideMapView(track: recorder.track)
-            SpeedRail(stats: recorder.stats, elapsed: elapsed)
+            SpeedRail(stats: recorder.stats, elapsed: elapsed, units: settings.units)
                 .padding(.trailing, 14).padding(.bottom, 90)
             controls
         }
@@ -64,8 +66,12 @@ struct RideHUDView: View {
     }
 
     private func endRide() {
+        // Idempotent: only end+save once even if invoked again.
+        guard recorder.isRecording else { return }
         streamTask?.cancel()
         provider?.stop()
-        finishedRide = recorder.end(at: Date())
+        let ride = recorder.end(at: Date())
+        try? rideStore.save(ride)
+        finishedRide = ride
     }
 }

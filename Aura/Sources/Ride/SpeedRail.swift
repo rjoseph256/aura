@@ -1,24 +1,49 @@
 import SwiftUI
 import AuraCore
+import AuraKit
 
 struct SpeedRail: View {
     let stats: RideStats
     let elapsed: TimeInterval
+    let units: DistanceUnits
 
     private func fmt(_ t: TimeInterval) -> String {
         let s = Int(t); return String(format: "%d:%02d", s / 60, s % 60)
     }
 
+    // MARK: Unit-aware values
+
+    private var speedValue: Double {
+        units == .metric
+            ? UnitConverter.kmh(fromMetersPerSecond: stats.averageSpeedMetersPerSecond)
+            : UnitConverter.mph(fromMetersPerSecond: stats.averageSpeedMetersPerSecond)
+    }
+    private var speedLabel: String { units == .metric ? "KM/H" : "MPH" }
+
+    private var distanceValue: Double {
+        units == .metric
+            ? UnitConverter.km(fromMeters: stats.distanceMeters)
+            : UnitConverter.miles(fromMeters: stats.distanceMeters)
+    }
+    private var distanceLabel: String { units == .metric ? "KM" : "MI" }
+
+    private var elevationValue: Double {
+        units == .metric
+            ? stats.elevationGainMeters
+            : UnitConverter.feet(fromMeters: stats.elevationGainMeters)
+    }
+    private var elevationLabel: String { units == .metric ? "M ↑" : "FT ↑" }
+
     var body: some View {
         VStack(alignment: .trailing, spacing: 2) {
-            Text(String(format: "%.0f", UnitConverter.mph(fromMetersPerSecond: stats.averageSpeedMetersPerSecond)))
+            Text(String(format: "%.0f", speedValue))
                 .font(AuraTheme.heroNumber())
                 .foregroundStyle(AuraTheme.text)
-            Text("MPH").font(AuraTheme.unitLabel).foregroundStyle(AuraTheme.muted)
+            Text(speedLabel).font(AuraTheme.unitLabel).foregroundStyle(AuraTheme.muted)
             HStack(spacing: 12) {
-                metric(String(format: "%.1f", UnitConverter.miles(fromMeters: stats.distanceMeters)), "MI")
+                metric(String(format: "%.1f", distanceValue), distanceLabel)
                 metric(fmt(elapsed), "TIME")
-                metric(String(format: "%.0f", UnitConverter.feet(fromMeters: stats.elevationGainMeters)), "FT ↑")
+                metric(String(format: "%.0f", elevationValue), elevationLabel)
             }.padding(.top, 6)
         }
         .padding(14)
