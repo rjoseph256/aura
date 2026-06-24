@@ -16,8 +16,6 @@ public final class LocationService: NSObject, LocationStreaming {
     #if os(iOS)
     @ObservationIgnored private var backgroundSession: CLBackgroundActivitySession?
     #endif
-    @ObservationIgnored private var mode: LocationAccuracyMode = .idle
-
     public override init() {
         super.init()
         manager.delegate = self
@@ -42,7 +40,6 @@ public final class LocationService: NSObject, LocationStreaming {
     /// no auto-pause, visible background indicator) are guarded so the package still
     /// builds for macOS.
     public func setMode(_ mode: LocationAccuracyMode) {
-        self.mode = mode
         manager.desiredAccuracy = (mode == .navigating)
             ? kCLLocationAccuracyNearestTenMeters : kCLLocationAccuracyHundredMeters
         #if os(iOS)
@@ -53,6 +50,7 @@ public final class LocationService: NSObject, LocationStreaming {
     }
 
     public func points() -> AsyncStream<TrackPoint> {
+        stop()
         if manager.authorizationStatus == .notDetermined {
             manager.requestWhenInUseAuthorization()
         }
@@ -74,7 +72,10 @@ public final class LocationService: NSObject, LocationStreaming {
                         self.signal = .lost
                     }
                 }
-            } catch {}
+            } catch {
+                // A thrown error ends the stream (e.g. authorization revoked mid-ride); reflect it.
+                signal = .lost
+            }
             continuation.finish()
         }
         continuation.onTermination = { [weak self] _ in
