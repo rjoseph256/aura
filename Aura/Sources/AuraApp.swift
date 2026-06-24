@@ -82,7 +82,7 @@ private struct RootView: View {
                     NavigateHUDView(route: route, destination: destination)
                 } else {
                     // Free ride — unchanged path
-                    RideHUDView(makeProvider: { LiveLocationProvider() })
+                    RideHUDView()
                 }
             }
         }
