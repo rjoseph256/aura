@@ -6,6 +6,7 @@ import AuraKit
 /// Each row glances: a tinted icon badge, date + summary caption, and the hero distance numeral.
 struct HistoryView: View {
     @Environment(RideStore.self) private var store
+    @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var rides: [Ride] = []
@@ -42,7 +43,7 @@ struct HistoryView: View {
     private var rideList: some View {
         List {
             ForEach(Array(rides.enumerated()), id: \.element.id) { index, ride in
-                RideRow(ride: ride)
+                RideRow(ride: ride, units: settings.units)
                     .contentShape(Rectangle())
                     .onTapGesture { selected = ride }
                     .listRowBackground(Color.clear)
@@ -102,22 +103,30 @@ struct HistoryView: View {
 
 private struct RideRow: View {
     let ride: Ride
+    let units: DistanceUnits
 
     private var stats: RideStats { ride.stats ?? .zero }
     private var isNavigate: Bool { ride.kind == .navigate }
     private var accent: Color { isNavigate ? AuraTheme.cyan : AuraTheme.route }
     private var symbol: String { isNavigate ? "location.north.line.fill" : "bicycle" }
+    private var metric: Bool { units == .metric }
 
     private var caption: String {
         let kind = isNavigate ? "Navigated" : "Free ride"
         let minutes = Int(stats.movingTimeSeconds / 60)
-        let feet = Int(UnitConverter.feet(fromMeters: stats.elevationGainMeters).rounded())
-        return "\(kind) · \(minutes) min · ↑ \(feet) ft"
+        let climb = metric
+            ? "\(Int(stats.elevationGainMeters.rounded())) m"
+            : "\(Int(UnitConverter.feet(fromMeters: stats.elevationGainMeters).rounded())) ft"
+        return "\(kind) · \(minutes) min · ↑ \(climb)"
     }
 
     private var distance: String {
-        String(format: "%.1f", UnitConverter.miles(fromMeters: stats.distanceMeters))
+        String(format: "%.1f", metric
+            ? UnitConverter.km(fromMeters: stats.distanceMeters)
+            : UnitConverter.miles(fromMeters: stats.distanceMeters))
     }
+
+    private var distanceUnit: String { metric ? "KM" : "MI" }
 
     var body: some View {
         HStack(spacing: 14) {
@@ -151,7 +160,7 @@ private struct RideRow: View {
                     .font(.system(size: 23, weight: .heavy, design: .rounded))
                     .foregroundStyle(AuraTheme.text)
                     .monospacedDigit()
-                Text("MI")
+                Text(distanceUnit)
                     .font(AuraTheme.unitLabel)
                     .foregroundStyle(AuraTheme.muted)
             }
