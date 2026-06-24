@@ -34,4 +34,15 @@ final class LocationServiceTests: XCTestCase {
         XCTAssertNil(svc.ingest(loc, now: Date()))
         XCTAssertEqual(svc.signal, .lost)
     }
+
+    func test_ingest_staleButAccurateFix_signalLost_butStillRecorded() {
+        let svc = LocationService()
+        let t = Date()
+        let loc = CLLocation(coordinate: .init(latitude: 40.44, longitude: -79.99),
+                             altitude: 10, horizontalAccuracy: 8, verticalAccuracy: 5,
+                             timestamp: t)
+        let point = svc.ingest(loc, now: t.addingTimeInterval(30)) // 30s old
+        XCTAssertNotNil(point)            // accuracy-only acceptance keeps it
+        XCTAssertEqual(svc.signal, .lost) // but quality is lost due to age
+    }
 }
