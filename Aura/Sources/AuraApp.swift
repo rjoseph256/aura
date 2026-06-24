@@ -9,6 +9,7 @@ struct AuraApp: App {
     @State private var router = AppRouter()
     @State private var rideStore = AuraApp.makeRideStore()
     @State private var settings = SettingsStore()
+    @State private var location = LocationService()
 
     init() { AuraApp.configureMapbox() }
 
@@ -18,6 +19,7 @@ struct AuraApp: App {
                 .environment(router)
                 .environment(rideStore)
                 .environment(settings)
+                .environment(location)
                 .preferredColorScheme(.dark)
         }
     }
