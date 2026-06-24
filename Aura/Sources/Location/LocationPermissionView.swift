@@ -23,6 +23,7 @@ struct LocationPermissionView: View {
                 .background(AuraTheme.auroraGradient, in: Capsule())
             Button("Not now") { dismiss() }
                 .font(.subheadline).foregroundStyle(AuraTheme.muted)
+                .frame(maxWidth: .infinity, minHeight: 44)
         }
         .padding(28)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

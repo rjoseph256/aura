@@ -23,15 +23,16 @@ struct NavigateHUDView: View {
     @Environment(AppRouter.self) private var router
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
+    @Environment(LocationService.self) private var location
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // MARK: Recording
 
     @State private var recorder = RideRecorder(kind: .navigate)
-    @State private var provider: (any LocationStreaming)?
     @State private var streamTask: Task<Void, Never>?
     @State private var finishedRide: Ride?
     @State private var saveFailed = false
+    @State private var showPermission = false
 
     // MARK: Guidance
 
@@ -89,12 +90,20 @@ struct NavigateHUDView: View {
                 .padding(.top, 8)
                 .padding(.trailing, 16)
         }
+        // GPS signal chip — top leading, clear of the turn card (top-center) and mute button (top-trailing)
+        .overlay(alignment: .topLeading) {
+            GPSSignalChip(signal: location.signal)
+                .padding(.top, 8).padding(.leading, 16)
+        }
         .background(AuraTheme.bg)
         // Summary sheet: when dismissed, return to plan screen.
         .sheet(item: $finishedRide, onDismiss: {
             router.screen = .plan
         }) { ride in
             RideSummaryView(ride: ride, saveFailed: saveFailed)
+        }
+        .sheet(isPresented: $showPermission) {
+            LocationPermissionView(onOpenSettings: openSettings)
         }
         // Elapsed-time ticker (mirrors RideHUDView pattern)
         .task(id: recorder.isRecording) {
@@ -115,6 +124,16 @@ struct NavigateHUDView: View {
             configureAudioSession()
             guidance.onSpeak = { speakInstruction($0) }
             guidance.onArrive = { endRide() }
+
+            // Gate: do not start recording or guidance when permission is denied.
+            switch location.authorization {
+            case .denied, .restricted:
+                showPermission = true
+                return
+            default:
+                break
+            }
+
             startRide()
             if let startDate {
                 RideLiveActivityController.shared.start(
@@ -125,6 +144,7 @@ struct NavigateHUDView: View {
         }
         .onDisappear {
             teardownGuidance()
+            location.stop()
         }
     }
 
@@ -195,13 +215,12 @@ struct NavigateHUDView: View {
     // MARK: Recording lifecycle
 
     private func startRide() {
-        let p = LiveLocationProvider()
-        provider = p
         startDate = Date()
         recorder.start(at: startDate!)
+        RideScreen.keepAwake(true)
 
         streamTask = Task { @MainActor in
-            for await point in p.points() {
+            for await point in location.points() {
                 recorder.record(point)
                 // Turn state is driven by the GuidanceViewModel; recording only here.
             }
@@ -213,7 +232,8 @@ struct NavigateHUDView: View {
         // recording has stopped there's nothing more to do.
         guard recorder.isRecording else { return }
         streamTask?.cancel()
-        provider?.stop()
+        location.stop()
+        RideScreen.keepAwake(false)
         teardownGuidance()
         RideLiveActivityController.shared.end()
         let ride = recorder.end(at: Date(), destinationName: destination?.name)
@@ -249,5 +269,11 @@ struct NavigateHUDView: View {
             ?? AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         speechSynthesizer.speak(utterance)
+    }
+
+    // MARK: Settings deep-link
+
+    private func openSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
     }
 }
