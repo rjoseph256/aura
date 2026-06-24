@@ -134,29 +134,22 @@ private struct RideRow: View {
     private var isNavigate: Bool { ride.kind == .navigate }
     private var accent: Color { isNavigate ? AuraTheme.cyan : AuraTheme.route }
     private var symbol: String { isNavigate ? "location.north.line.fill" : "bicycle" }
-    private var metric: Bool { units == .metric }
+    private var fmt: RideStatsFormatter { RideStatsFormatter(units: units) }
 
     private var caption: String {
-        let kind: String
+        let lead: String
         if let name = ride.destinationName, !name.isEmpty {
-            kind = name
+            lead = name
         } else {
-            kind = isNavigate ? "Navigated" : "Free ride"
+            lead = isNavigate ? "Navigated" : "Free ride"
         }
-        let minutes = Int(stats.movingTimeSeconds / 60)
-        let climb = metric
-            ? "\(Int(stats.elevationGainMeters.rounded())) m"
-            : "\(Int(UnitConverter.feet(fromMeters: stats.elevationGainMeters).rounded())) ft"
-        return "\(kind) · \(minutes) min · ↑ \(climb)"
+        let climb = "\(fmt.elevationValue(stats.elevationGainMeters)) \(fmt.elevationUnit)"
+        return "\(lead) · \(fmt.minutes(stats.movingTimeSeconds)) · ↑ \(climb)"
     }
 
-    private var distance: String {
-        String(format: "%.1f", metric
-            ? UnitConverter.km(fromMeters: stats.distanceMeters)
-            : UnitConverter.miles(fromMeters: stats.distanceMeters))
-    }
+    private var distance: String { fmt.distanceValue(stats.distanceMeters) }
 
-    private var distanceUnit: String { metric ? "KM" : "MI" }
+    private var distanceUnit: String { fmt.distanceUnit.uppercased() }
 
     var body: some View {
         HStack(spacing: 14) {
