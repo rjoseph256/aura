@@ -49,28 +49,15 @@ public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
         // Request full-resolution polyline so geometry is detailed.
         options.shapeFormat = .polyline6
 
-        // 3. Create the provider hierarchy (per the v3 SDK example pattern).
+        // 3. Obtain the shared navigation provider and calculate routes.
         //
-        //    The Aura app loads its Mapbox token from a bundled file (not Info.plist),
-        //    then writes it to MapboxOptions.accessToken in AuraApp.configureMapbox().
-        //    NavigationCoreApiConfiguration.init() tries to read from Info.plist and
-        //    will crash if the key is absent, so we pass the token explicitly from
-        //    MapboxOptions.accessToken (which is already set at this call-site).
-        //
-        //    IMPORTANT: MapboxNavigationProvider enforces a singleton guard and
-        //    will crash on a second simultaneous instance. For v1 route requests
-        //    are infrequent and do not overlap, so constructing per-call is safe.
-        //    A future task should hoist this to a shared singleton if needed.
-        let token = MapboxOptions.accessToken
-        let coreConfig = CoreConfig(credentials: .init(accessToken: token))
-        let navigationProvider = MapboxNavigationProvider(coreConfig: coreConfig)
-
-        // routingProvider() is on @MainActor (the MapboxNavigation protocol is
-        // @MainActor-isolated).  We hop to MainActor to grab the provider, then
-        // immediately call calculateRoutes (which is Sendable and async).
+        //    AuraNavigation.provider is the process-level singleton for the Mapbox
+        //    v3 stack — constructing a second MapboxNavigationProvider would crash.
+        //    We hop to MainActor to call routingProvider() (which is @MainActor-
+        //    isolated), then await the FetchTask outside the hop.
         let fetchTask: MapboxNavigationCore.RoutingProvider.FetchTask =
             await MainActor.run {
-                navigationProvider.mapboxNavigation.routingProvider()
+                AuraNavigation.provider.mapboxNavigation.routingProvider()
                     .calculateRoutes(options: options)
             }
 
