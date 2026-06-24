@@ -18,6 +18,7 @@ struct AuraApp: App {
                 .environment(router)
                 .environment(rideStore)
                 .environment(settings)
+                .preferredColorScheme(.dark)
         }
     }
 
@@ -68,7 +69,7 @@ private struct RootView: View {
         Group {
             switch router.screen {
             case .plan:
-                PlanView()
+                AuraTabView()
 
             case .preview(let destination):
                 RoutePreviewView(destination: destination)
@@ -83,6 +84,28 @@ private struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: router.screen)
+    }
+}
+
+// MARK: - AuraTabView
+
+/// Three-tab shell shown on the plan screen. History & Settings get their own
+/// NavigationStacks (sheets / NavigationLinks need them); the Ride tab hosts the
+/// router-driven plan→preview→ride flow's entry point (PlanView), which manages
+/// its own layout and needs no nav bar.
+private struct AuraTabView: View {
+    var body: some View {
+        TabView {
+            PlanView()
+                .tabItem { Label("Ride", systemImage: "bicycle") }
+
+            NavigationStack { HistoryView() }
+                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+
+            NavigationStack { SettingsView() }
+                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+        }
+        .tint(AuraTheme.cyan)
     }
 }
 
