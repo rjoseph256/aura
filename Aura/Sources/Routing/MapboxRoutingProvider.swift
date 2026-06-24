@@ -80,11 +80,33 @@ public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
         }
 
         // 7. Rank and label candidates → up to 3 distinct AuraCore.Route values.
-        return AuraCore.RouteRanker.label(
+        let labeled = AuraCore.RouteRanker.label(
             origin: request.origin,
             destination: request.destination,
             candidates: candidates
         )
+
+        // 8. Correlate each labeled AuraCore.Route back to its mbRoutes index
+        //    (0 = main, k = alternativeRoutes[k-1]) by matching distance AND the
+        //    first geometry coordinate (to break ties), then record the mapping so
+        //    the ride can navigate THAT exact Mapbox route instead of re-fetching.
+        var indexByRouteId: [UUID: Int] = [:]
+        for route in labeled {
+            if let i = mbRoutes.firstIndex(where: { mb in
+                mb.distance == route.distanceMeters &&
+                mb.shape?.coordinates.first.map { abs($0.latitude - (route.geometry.first?.latitude ?? .nan)) < 1e-9
+                                               && abs($0.longitude - (route.geometry.first?.longitude ?? .nan)) < 1e-9 } ?? false
+            }) {
+                indexByRouteId[route.id] = i
+            }
+        }
+        let routesToRecord = navigationRoutes
+        let indexByRouteIdToRecord = indexByRouteId
+        await MainActor.run {
+            NavigationRouteRegistry.shared.record(navigationRoutes: routesToRecord, mbRouteIndexByRouteId: indexByRouteIdToRecord)
+        }
+
+        return labeled
     }
 
     // MARK: - Private helpers
