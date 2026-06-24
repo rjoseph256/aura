@@ -5,6 +5,7 @@ import AuraKit
 struct RideHUDView: View {
     let makeProvider: () -> LocationStreaming
 
+    @Environment(AppRouter.self) private var router
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
     @State private var recorder = RideRecorder(kind: .freeRide)
@@ -26,8 +27,21 @@ struct RideHUDView: View {
                 .padding(.trailing, 14).padding(.bottom, 90)
             controls
         }
+        // Back-to-home affordance, shown before a ride starts so the screen can be
+        // abandoned without having to start and then end a ride.
+        .overlay(alignment: .topLeading) {
+            if !recorder.isRecording {
+                backButton
+                    .padding(.top, 56)
+                    .padding(.leading, 16)
+            }
+        }
         .background(AuraTheme.bg)
-        .sheet(item: $finishedRide) { RideSummaryView(ride: $0) }
+        // Returning from the summary (or backing out) drops to the plan/tab shell,
+        // mirroring NavigateHUDView.
+        .sheet(item: $finishedRide, onDismiss: { router.screen = .plan }) {
+            RideSummaryView(ride: $0)
+        }
         .task(id: recorder.isRecording) {
             guard recorder.isRecording else { return }
             while !Task.isCancelled {
@@ -53,6 +67,19 @@ struct RideHUDView: View {
         }
         .padding(.horizontal, 24).padding(.bottom, 28)
         .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var backButton: some View {
+        Button {
+            router.screen = .plan
+        } label: {
+            Image(systemName: "chevron.left")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+        }
+        .accessibilityLabel("Back to home")
     }
 
     private func startRide() {
