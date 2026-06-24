@@ -25,7 +25,7 @@ public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
     /// engine) without touching callers.
     private let elevationProvider: any AuraCore.ElevationProvider
 
-    public init(elevationProvider: any AuraCore.ElevationProvider = MapboxTilequeryElevationProvider()) {
+    public init(elevationProvider: any AuraCore.ElevationProvider = MapboxTerrainRGBElevationProvider()) {
         self.elevationProvider = elevationProvider
     }
 
