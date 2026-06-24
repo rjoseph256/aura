@@ -5,6 +5,7 @@ import AuraCore
 
 struct PlanView: View {
     @Environment(AppRouter.self) private var router
+    @State private var query: String = ""
 
     var body: some View {
         ZStack {
@@ -26,14 +27,16 @@ struct PlanView: View {
                 .padding(.bottom, 24)
 
                 // ── Search field (DestinationSearchView)
-                DestinationSearchView { place in
+                DestinationSearchView(query: $query) { place in
                     router.remember(place)
                     router.screen = .preview(destination: place)
                 }
 
-                // ── Recents / empty state list area
-                recentsSection
-                    .padding(.top, 16)
+                // ── Recents / empty state list area — hidden while actively searching
+                if query.isEmpty {
+                    recentsSection
+                        .padding(.top, 16)
+                }
 
                 Spacer(minLength: 0)
 

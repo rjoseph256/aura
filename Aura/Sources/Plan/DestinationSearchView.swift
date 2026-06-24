@@ -8,9 +8,9 @@ import AuraCore
 /// Debounces keystrokes (~300 ms), fetches suggestions for queries ≥ 2 chars,
 /// then resolves the coordinate on selection via `placeAutocomplete.select(suggestion:)`.
 struct DestinationSearchView: View {
+    @Binding var query: String
     let onPick: (Place) -> Void
 
-    @State private var query: String = ""
     @State private var suggestions: [PlaceAutocomplete.Suggestion] = []
     @State private var isLoading: Bool = false
     @State private var errorMessage: String? = nil
