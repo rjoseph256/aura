@@ -24,7 +24,11 @@ public final class LiveLocationProvider: NSObject, LocationStreaming, CLLocation
             manager.requestWhenInUseAuthorization()
             manager.startUpdatingLocation()
             continuation.onTermination = { [weak self] _ in
-                Task { @MainActor in self?.manager.stopUpdatingLocation() }
+                // Hop to main to touch CLLocationManager. DispatchQueue's @Sendable
+                // closure can capture the (@unchecked Sendable) provider without the
+                // isolation-crossing error a `Task { @MainActor in self? }` triggers
+                // under strict concurrency checking.
+                DispatchQueue.main.async { self?.manager.stopUpdatingLocation() }
             }
         }
     }
