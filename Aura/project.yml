@@ -6,18 +6,31 @@ options:
 packages:
   AuraCore:
     path: ../AuraCore
+  MapboxMaps:
+    url: https://github.com/mapbox/mapbox-maps-ios.git
+    majorVersion: 11.0.0
 targets:
   Aura:
     type: application
     platform: iOS
     sources:
       - Sources
-      - Resources
+      - path: Resources
+        excludes:
+          - Info.plist
+          - MapboxAccessToken
+      # Extension-less token file: force it into the resources copy phase
+      # so the bundled pk.… token ships in the .app (XcodeGen won't classify
+      # an extension-less file as a resource on its own).
+      - path: Resources/MapboxAccessToken
+        buildPhase: resources
     dependencies:
       - package: AuraCore
         product: AuraCore
       - package: AuraCore
         product: AuraKit
+      - package: MapboxMaps
+        product: MapboxMaps
     settings:
       base:
         INFOPLIST_FILE: Resources/Info.plist
