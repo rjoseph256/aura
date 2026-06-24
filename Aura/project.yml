@@ -9,6 +9,12 @@ packages:
   MapboxMaps:
     url: https://github.com/mapbox/mapbox-maps-ios.git
     majorVersion: 11.0.0
+  MapboxNavigation:
+    url: https://github.com/mapbox/mapbox-navigation-ios.git
+    majorVersion: 3.0.0
+  MapboxSearch:
+    url: https://github.com/mapbox/search-ios.git
+    majorVersion: 2.0.0
 targets:
   Aura:
     type: application
@@ -36,6 +42,14 @@ targets:
         product: AuraKit
       - package: MapboxMaps
         product: MapboxMaps
+      - package: MapboxNavigation
+        product: MapboxNavigationCore
+      - package: MapboxNavigation
+        product: MapboxNavigationUIKit
+      - package: MapboxSearch
+        product: MapboxSearch
+      - package: MapboxSearch
+        product: MapboxSearchUI
     settings:
       base:
         INFOPLIST_FILE: Resources/Info.plist
