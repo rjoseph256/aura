@@ -35,6 +35,28 @@ public struct RideStatsFormatter {
 
     public func minutes(_ seconds: Double) -> String { "\(Int(seconds / 60)) min" }
 
+    /// Short distance-to-maneuver string for the next turn, e.g. "390 ft" / "0.2 mi"
+    /// (imperial) or "120 m" / "0.3 km" (metric). Near distances round to the nearest
+    /// 10 of the short unit; once past ~1000 short units it rolls up to the long unit
+    /// with one decimal. Mirrors the turn card's rounding, but unit-aware so the Live
+    /// Activity honors the rider's distance-units setting.
+    public func maneuverDistance(_ meters: Double) -> String {
+        if metric {
+            if meters >= 1000 {
+                return String(format: "%.1f km", UnitConverter.km(fromMeters: meters))
+            }
+            let rounded = Int((meters / 10).rounded()) * 10
+            return "\(rounded) m"
+        } else {
+            let feet = UnitConverter.feet(fromMeters: meters)
+            if feet >= 1000 {
+                return String(format: "%.1f mi", UnitConverter.miles(fromMeters: meters))
+            }
+            let rounded = Int((feet / 10).rounded()) * 10
+            return "\(rounded) ft"
+        }
+    }
+
     /// "m:ss" elapsed clock, e.g. 125 -> "2:05".
     public static func clock(_ t: TimeInterval) -> String {
         let s = Int(t)

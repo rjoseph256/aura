@@ -36,6 +36,8 @@ targets:
       - path: Resources/sample-ride-pittsburgh.gpx
         buildPhase: resources
     dependencies:
+      # Embeds the Live Activity / widget extension into the app bundle.
+      - target: AuraWidgets
       - package: AuraCore
         product: AuraCore
       - package: AuraCore
@@ -58,3 +60,30 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.aura.ios
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
+
+  # Live Activity / Dynamic Island host. WidgetKit extension that renders the
+  # in-progress-ride Live Activity. Depends only on the pure AuraKit/AuraCore layers
+  # (no Mapbox); shares the ActivityAttributes contract and AuraTheme with the app so
+  # the activity reads like a slice of the HUD.
+  AuraWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+        excludes:
+          - Info.plist
+      # Shared with the app so both sides compile the same Live Activity contract / theme.
+      - path: Sources/LiveActivity/RideActivityAttributes.swift
+      - path: Sources/Theme/AuraTheme.swift
+    dependencies:
+      - package: AuraCore
+        product: AuraCore
+      - package: AuraCore
+        product: AuraKit
+    settings:
+      base:
+        INFOPLIST_FILE: Widgets/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: app.aura.ios.AuraWidgets
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
