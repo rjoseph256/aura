@@ -21,6 +21,7 @@ struct NavigateHUDView: View {
 
     @Environment(AppRouter.self) private var router
     @Environment(RideStore.self) private var rideStore
+    @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // MARK: Recording
@@ -71,7 +72,7 @@ struct NavigateHUDView: View {
                 .ignoresSafeArea()
 
             // Speed stats — bottom-trailing mirror of RideHUDView
-            SpeedRail(stats: recorder.stats, elapsed: elapsed)
+            SpeedRail(stats: recorder.stats, elapsed: elapsed, units: settings.units)
                 .padding(.trailing, 14)
                 .padding(.bottom, 90)
                 .frame(maxWidth: .infinity, maxHeight: .infinity,
@@ -108,6 +109,7 @@ struct NavigateHUDView: View {
         }
         // Start recording + guidance immediately on appear
         .task {
+            isMuted = !settings.voiceEnabled
             startRide()
             await startGuidance()
         }
@@ -346,7 +348,7 @@ struct NavigateHUDView: View {
     }
 
     private func speakInstruction(_ text: String) {
-        guard !isMuted, !text.isEmpty else { return }
+        guard settings.voiceEnabled, !isMuted, !text.isEmpty else { return }
         speechSynthesizer.stopSpeaking(at: .word)
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: Locale.current.language.languageCode?.identifier ?? "en")
