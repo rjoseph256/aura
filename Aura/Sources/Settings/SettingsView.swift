@@ -4,38 +4,34 @@ import AuraKit
 struct SettingsView: View {
     @Environment(SettingsStore.self) private var settings
 
-    @State private var units: DistanceUnits = .imperial
-    @State private var voice = true
-    @State private var mapStyle: MapStyle = .dark
-    @State private var loaded = false
-
     var body: some View {
-        List {
+        // Bind controls straight to the observable store — each change persists via the
+        // store's didSet, and any view reading these settings re-renders reactively.
+        @Bindable var settings = settings
+
+        return List {
             Section("Ride") {
                 row(icon: "ruler", tint: AuraTheme.cyan, title: "Distance units") {
-                    Picker("", selection: $units) {
+                    Picker("", selection: $settings.units) {
                         Text("Miles").tag(DistanceUnits.imperial)
                         Text("Kilometers").tag(DistanceUnits.metric)
                     }
                     .labelsHidden().pickerStyle(.menu).tint(AuraTheme.cyan)
-                    .onChange(of: units) { _, v in settings.units = v }
                 }
                 row(icon: "speaker.wave.2.fill", tint: AuraTheme.route, title: "Voice guidance") {
-                    Toggle("", isOn: $voice)
+                    Toggle("", isOn: $settings.voiceEnabled)
                         .labelsHidden().tint(AuraTheme.route)
-                        .onChange(of: voice) { _, v in settings.voiceEnabled = v }
                 }
             }
             .listRowBackground(AuraTheme.surface)
 
             Section("Map") {
                 row(icon: "map.fill", tint: AuraTheme.violet, title: "Map style") {
-                    Picker("", selection: $mapStyle) {
+                    Picker("", selection: $settings.mapStyle) {
                         Text("Dark").tag(MapStyle.dark)
                         Text("Standard").tag(MapStyle.standard)
                     }
                     .labelsHidden().pickerStyle(.menu).tint(AuraTheme.cyan)
-                    .onChange(of: mapStyle) { _, v in settings.mapStyle = v }
                 }
                 NavigationLink {
                     OfflineMapsView()
@@ -57,11 +53,6 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(AuraTheme.bg.ignoresSafeArea())
         .navigationTitle("Settings")
-        .task {
-            guard !loaded else { return }
-            units = settings.units; voice = settings.voiceEnabled; mapStyle = settings.mapStyle
-            loaded = true
-        }
     }
 
     // A settings row: colored icon badge + title + trailing control.

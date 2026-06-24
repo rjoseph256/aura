@@ -66,6 +66,8 @@ struct RideHUDView: View {
     }
 
     private func endRide() {
+        // Idempotent: only end+save once even if invoked again.
+        guard recorder.isRecording else { return }
         streamTask?.cancel()
         provider?.stop()
         let ride = recorder.end(at: Date())

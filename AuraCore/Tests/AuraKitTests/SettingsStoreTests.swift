@@ -1,4 +1,5 @@
 import XCTest
+import Observation
 @testable import AuraKit
 
 final class SettingsStoreTests: XCTestCase {
@@ -21,5 +22,16 @@ final class SettingsStoreTests: XCTestCase {
         s.voiceEnabled = false
         XCTAssertEqual(s.units, .metric)
         XCTAssertFalse(s.voiceEnabled)
+    }
+
+    /// Guards the @Observable contract: mutating a setting must fire an observation
+    /// change so SwiftUI views reading it re-render. (A computed-property store would
+    /// silently fail this.)
+    func test_unitsChange_firesObservation() {
+        let s = freshStore()
+        var fired = false
+        withObservationTracking { _ = s.units } onChange: { fired = true }
+        s.units = .metric
+        XCTAssertTrue(fired)
     }
 }

@@ -46,16 +46,16 @@ final class OfflineMapManager: ObservableObject {
         download = tileStore.loadTileRegion(
             forId: Self.regionId,
             loadOptions: loadOptions,
-            progress: { progress in
+            progress: { [weak self] progress in
                 let fraction = progress.requiredResourceCount > 0
                     ? Double(progress.completedResourceCount) / Double(progress.requiredResourceCount) : 0
-                Task { @MainActor in self.progress = min(max(fraction, 0), 1) }
+                Task { @MainActor in self?.progress = min(max(fraction, 0), 1) }
             },
-            completion: { result in
+            completion: { [weak self] result in
                 Task { @MainActor in
                     switch result {
-                    case .success: self.progress = 1; self.phase = .finished
-                    case .failure(let error): self.phase = .failed(error.localizedDescription)
+                    case .success: self?.progress = 1; self?.phase = .finished
+                    case .failure(let error): self?.phase = .failed(error.localizedDescription)
                     }
                 }
             })
@@ -64,5 +64,13 @@ final class OfflineMapManager: ObservableObject {
         if let stylePackOptions = StylePackLoadOptions(glyphsRasterizationMode: .ideographsRasterizedLocally) {
             offlineManager.loadStylePack(for: .dark, loadOptions: stylePackOptions, completion: { _ in })
         }
+    }
+
+    /// Cancels an in-flight download so the manager isn't kept alive by the tile store
+    /// after its view goes away. Safe to call when idle.
+    func cancel() {
+        download?.cancel()
+        download = nil
+        if phase == .downloading { phase = .idle }
     }
 }

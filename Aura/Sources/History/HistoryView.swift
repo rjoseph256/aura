@@ -23,10 +23,14 @@ struct HistoryView: View {
             }
         }
         .navigationTitle("Rides")
-        .task {
+        .onAppear {
+            // Reload on every appearance (e.g. returning from a finished ride).
+            // onAppear runs synchronously and isn't cancellable like .task, so rows
+            // are never left gated invisible behind an interrupted entrance flag.
             rides = (try? store.allRides()) ?? []
-            // First-appear entrance flag; harmless if reduce-motion short-circuits it.
-            withAnimation(.easeOut(duration: 0.45)) { appeared = true }
+            if !appeared {
+                withAnimation(.easeOut(duration: 0.45)) { appeared = true }
+            }
         }
         .sheet(item: $selected) { ride in
             RideSummaryView(ride: ride)

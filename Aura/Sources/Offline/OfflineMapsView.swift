@@ -35,6 +35,7 @@ struct OfflineMapsView: View {
             .padding(.bottom, 24)
         }
         .navigationTitle("Offline maps")
+        .onDisappear { manager.cancel() }
     }
 
     // MARK: - State area
