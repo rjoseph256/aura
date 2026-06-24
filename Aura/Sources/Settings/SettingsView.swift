@@ -22,6 +22,14 @@ struct SettingsView: View {
                     Toggle("", isOn: $settings.voiceEnabled)
                         .labelsHidden().tint(AuraTheme.route)
                 }
+                row(icon: "target", tint: AuraTheme.pink, title: "Weekly goal") {
+                    Stepper(value: goalBinding(settings), in: 5...200, step: 5) {
+                        Text(goalLabel(settings))
+                            .foregroundStyle(AuraTheme.muted)
+                            .monospacedDigit()
+                    }
+                    .fixedSize()
+                }
             }
             .listRowBackground(AuraTheme.surface)
 
@@ -78,5 +86,21 @@ struct SettingsView: View {
             .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(tint)
             .frame(width: 26)
+    }
+
+    // MARK: - Weekly goal (stored in meters; edited in the rider's chosen unit)
+
+    /// Bridges the meters-backed goal to a whole-unit value the stepper edits in
+    /// 5 mi / 5 km steps. `get` rounds so the stepper always lands on round numbers.
+    private func goalBinding(_ s: SettingsStore) -> Binding<Double> {
+        Binding(
+            get: { (s.units == .metric ? s.weeklyGoalMeters / 1000 : s.weeklyGoalMeters / 1609.344).rounded() },
+            set: { s.weeklyGoalMeters = $0 * (s.units == .metric ? 1000 : 1609.344) }
+        )
+    }
+
+    private func goalLabel(_ s: SettingsStore) -> String {
+        let v = (s.units == .metric ? s.weeklyGoalMeters / 1000 : s.weeklyGoalMeters / 1609.344).rounded()
+        return "\(Int(v)) \(s.units == .metric ? "km" : "mi")"
     }
 }

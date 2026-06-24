@@ -94,16 +94,22 @@ private struct RootView: View {
 /// router-driven plan→preview→ride flow's entry point (PlanView), which manages
 /// its own layout and needs no nav bar.
 private struct AuraTabView: View {
+    @Environment(AppRouter.self) private var router
+
     var body: some View {
-        TabView {
+        @Bindable var router = router
+        TabView(selection: $router.selectedTab) {
             PlanView()
                 .tabItem { Label("Ride", systemImage: "bicycle") }
+                .tag(AppRouter.Tab.ride)
 
             NavigationStack { HistoryView() }
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
+                .tag(AppRouter.Tab.history)
 
             NavigationStack { SettingsView() }
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                .tag(AppRouter.Tab.settings)
         }
         .tint(AuraTheme.cyan)
     }
