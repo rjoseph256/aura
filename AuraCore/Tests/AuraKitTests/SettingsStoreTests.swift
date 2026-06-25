@@ -1,5 +1,6 @@
 import XCTest
 import Observation
+import os
 @testable import AuraKit
 
 final class SettingsStoreTests: XCTestCase {
@@ -29,9 +30,12 @@ final class SettingsStoreTests: XCTestCase {
     /// silently fail this.)
     func test_unitsChange_firesObservation() {
         let s = freshStore()
-        var fired = false
-        withObservationTracking { _ = s.units } onChange: { fired = true }
+        // Swift 6: the onChange closure is @Sendable, so a captured local `var`
+        // cannot be mutated from inside it. A lock-protected flag is genuinely
+        // Sendable and records the one-shot change without an unsafe escape hatch.
+        let fired = OSAllocatedUnfairLock(initialState: false)
+        withObservationTracking { _ = s.units } onChange: { fired.withLock { $0 = true } }
         s.units = .metric
-        XCTAssertTrue(fired)
+        XCTAssertTrue(fired.withLock { $0 })
     }
 }

@@ -110,23 +110,34 @@ public final class LocationService: NSObject, LocationStreaming {
         default: break
         }
         return await withTaskGroup(of: Coordinate?.self) { group in
-            group.addTask { @MainActor in
-                if let u = try? await CLLocationUpdate.liveUpdates().first(where: { $0.location != nil }),
-                   let l = u.location {
-                    return Coordinate(latitude: l.coordinate.latitude, longitude: l.coordinate.longitude)
-                }
-                return nil
-            }
+            group.addTask { await self.firstLiveCoordinate() }
             group.addTask { try? await Task.sleep(nanoseconds: 3_000_000_000); return nil }
             let first = await group.next() ?? nil
             group.cancelAll()
             return first ?? fallback
         }
     }
+
+    /// Await a single live fix that carries a location and project it to a `Coordinate`.
+    /// Extracted as a `nonisolated` helper so the `withTaskGroup` child task is a plain
+    /// awaited call: the closure passed to `first(where:)` is also nonisolated,
+    /// so no main-actor value crosses an isolation boundary (Swift 6 region-isolation safe).
+    /// `nonisolated` by design: a one-shot location await runs off the main actor and only
+    /// the `Sendable` `Coordinate` crosses back.
+    private nonisolated func firstLiveCoordinate() async -> Coordinate? {
+        guard let update = try? await CLLocationUpdate.liveUpdates().first(where: { $0.location != nil }),
+              let location = update.location else {
+            return nil
+        }
+        return Coordinate(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
+    }
 }
 
 extension LocationService: CLLocationManagerDelegate {
     nonisolated public func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
-        Task { @MainActor in self.authorization = LocationAuthorization(m.authorizationStatus) }
+        // Snapshot the Sendable status synchronously so the non-Sendable manager `m`
+        // never crosses into the main-actor Task (Swift 6 region isolation).
+        let status = m.authorizationStatus
+        Task { @MainActor in self.authorization = LocationAuthorization(status) }
     }
 }
