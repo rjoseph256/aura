@@ -18,7 +18,7 @@ Trust these findings; they were measured on this worktree:
 
 - **Toolchain:** Swift 6.2.4, Xcode 26.3, xcodegen 2.45.4, SwiftLint 0.64.1 (all installed). iOS Simulator runtime present: iOS 26.3.
 - **Swift 6 package blocker is exactly one site:** `AuraCore/Sources/AuraCore/Playback/GPXParser.swift:22`, a `private static let iso = ISO8601DateFormatter()`. Nothing else in AuraCore or AuraKit fails under Swift 6 (library targets were probed with `-swift-version 6`). The test targets were not probed, so Task 3 must fix anything that surfaces there.
-- **SwiftLint default-rule landscape: 187 violations.** 137 are `identifier_name`, all idiomatic short names (`s`, `t`, `i`, `p`, `vm`, `dx`, `px`, `dt`, `el`, …) — tune `min_length`, do not rename. ~31 are autocorrectable (`trailing_comma` 19, `redundant_optional_initialization` 3, `comma_spacing` 3, `colon` 3, `trailing_newline` 2, `statement_position` 1). The remaining manual set is small and enumerated in Task 1.
+- **SwiftLint default-rule landscape: 187 violations.** 137 are `identifier_name`, all idiomatic short names (`s`, `t`, `i`, `p`, `vm`, `dx`, `px`, `dt`, `el`, …) — tune `min_length`, do not rename. ~31 are autocorrectable (`trailing_comma` 19, `implicit_optional_initialization` 3, `comma_spacing` 3, `colon` 3, `trailing_newline` 2, `statement_position` 1). After autocorrect and the config tunings, exactly 6 manual fixes remain (see Task 1 Step 6).
 - **Local build prerequisites are in place:** `Aura/Resources/MapboxAccessToken` exists in this worktree, and `~/.netrc` has the `api.mapbox.com` machine, so `xcodebuild` resolves Mapbox locally without extra setup.
 
 ## Cross-cutting rules for every task
@@ -122,7 +122,7 @@ Then `chmod +x scripts/lint.sh`.
 swiftlint --fix
 ```
 
-Expected: roughly 31 violations corrected (`trailing_comma`, `redundant_optional_initialization`, `comma_spacing`, `colon`, `trailing_newline`, `statement_position`). Review the diff — every change should be pure formatting, no semantic change.
+Expected: roughly 31 violations corrected (`trailing_comma`, `implicit_optional_initialization`, `comma_spacing`, `colon`, `trailing_newline`, `statement_position`). Review the diff — every change should be pure formatting, no semantic change.
 
 - [ ] **Step 5: Commit config + autocorrect**
 
@@ -141,8 +141,8 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 swiftlint lint --strict
 ```
 
-Expected residual violations (from recon, after the config tunings and autocorrect remove the rest):
-- `line_length` (a few lines over 140): wrap them. Candidate sites: `Aura/Sources/Routing/MapboxRoutingProvider.swift:123,131`, `Aura/Sources/Plan/RoutePreviewView.swift:310`, `Aura/Sources/Routing/MapboxTerrainRGBElevationProvider.swift:108`, `AuraCore/Tests/AuraKitTests/TurnCardPresenterTests.swift:13,14,18` (only those that still exceed 140 after the threshold bump).
+Expected residual violations (exactly 6, verified against the tuned config — after the `line_length: 140` bump, all the other long lines from the default-120 run are already clean):
+- `line_length` (1, at 162 chars): `Aura/Sources/Plan/WeeklyRing.swift:67`. Wrap it. (Re-run the lint to confirm no other line exceeds 140; if one does, wrap it too.)
 - `multiple_closures_with_trailing_closure` (2): `Aura/Sources/Ride/RideHUDView.swift:48`, `Aura/Sources/Ride/NavigateHUDView.swift:119`. Rewrite so no closure uses trailing-closure syntax when more than one closure is passed (give the final closure an explicit argument label).
 - `vertical_parameter_alignment` (1): `Aura/Widgets/RideLiveActivity.swift:109`. Align the wrapped parameters.
 - `function_body_length` (2): `Aura/Sources/Routing/MapboxRoutingProvider.swift:34`, `Aura/Sources/Routing/MapboxGuidanceSession.swift:29`. These are linear Mapbox-v3 setup blocks where splitting would obscure the configuration sequence. Add a targeted suppression with a reason on each, e.g. `// swiftlint:disable:next function_body_length // Mapbox v3 setup is one linear configuration block; splitting hides the sequence`.
