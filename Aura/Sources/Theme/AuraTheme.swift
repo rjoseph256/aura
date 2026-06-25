@@ -21,6 +21,7 @@ enum AuraTheme {
     static let destructive   = Palette.pink
     static let onAccent      = Palette.inkOnLime
     static let onDestructive = Palette.inkOnPink
+    static let border = Color.white.opacity(0.08)
 
     // MARK: - Spacing scale (pt)
     enum Spacing {
