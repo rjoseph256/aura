@@ -60,6 +60,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: app.aura.ios
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "6.0"
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
 
   # Live Activity / Dynamic Island host. WidgetKit extension that renders the
   # in-progress-ride Live Activity. Depends only on the pure AuraKit/AuraCore layers
@@ -87,3 +90,6 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "6.0"
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
