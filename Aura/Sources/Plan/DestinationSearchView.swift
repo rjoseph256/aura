@@ -50,6 +50,7 @@ struct DestinationSearchView: View {
                             .foregroundStyle(AuraTheme.textSecondary)
                             .font(.callout)
                     }
+                    .accessibilityLabel("Clear search")
                 }
 
                 if isLoading {
