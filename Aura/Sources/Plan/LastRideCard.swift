@@ -14,33 +14,33 @@ struct LastRideCard: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 14) {
+            HStack(spacing: AuraTheme.Spacing.lg) {
                 thumbnail
                     .frame(width: 88, height: 64)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.md, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
                     Text(title)
                         .font(.callout.weight(.semibold))
-                        .foregroundStyle(AuraTheme.text)
+                        .foregroundStyle(AuraTheme.textPrimary)
                         .lineLimit(1)
                     Text(statsLine)
                         .font(.footnote.weight(.medium))
-                        .foregroundStyle(AuraTheme.muted)
+                        .foregroundStyle(AuraTheme.textSecondary)
                     Text(relativeDate)
                         .font(.caption)
-                        .foregroundStyle(AuraTheme.muted.opacity(0.85))
+                        .foregroundStyle(AuraTheme.textSecondary.opacity(0.85))
                 }
 
-                Spacer(minLength: 4)
+                Spacer(minLength: AuraTheme.Spacing.xs)
 
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(AuraTheme.muted)
+                    .foregroundStyle(AuraTheme.textSecondary)
             }
-            .padding(12)
+            .padding(AuraTheme.Spacing.md)
             .background(AuraTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -53,17 +53,23 @@ struct LastRideCard: View {
     @ViewBuilder
     private var thumbnail: some View {
         let coords = ride.track.map(\.coordinate)
-        let accent = ride.kind == .navigate ? AuraTheme.cyan : AuraTheme.route
+        let isNavigate = ride.kind == .navigate
         ZStack {
-            AuraTheme.bg
+            AuraTheme.background
             if coords.count > 1 {
-                RouteThumbnail(coordinates: coords, lineColor: accent, lineWidth: 2.5)
-                    .padding(6)
+                // Both ride kinds draw the route in lime; the navigate-vs-free distinction
+                // is carried non-chromatically by the line weight (a navigated route reads
+                // heavier than a casual free ride), not by hue.
+                RouteThumbnail(coordinates: coords,
+                               lineColor: AuraTheme.accent,
+                               lineWidth: isNavigate ? 3 : 2)
+                    .padding(AuraTheme.Spacing.xs)
             } else {
                 // No track to draw (e.g. a free ride with no GPS fix) — show an icon.
-                Image(systemName: ride.kind == .navigate ? "location.fill" : "bicycle")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(AuraTheme.muted)
+                // The glyph alone distinguishes the kind: a directional bearing vs a bike.
+                Image(systemName: isNavigate ? "location.north.line.fill" : "bicycle")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(AuraTheme.textSecondary)
             }
         }
     }
