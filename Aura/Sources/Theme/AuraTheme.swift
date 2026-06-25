@@ -33,7 +33,23 @@ enum AuraTheme {
         static let xs: CGFloat = 4, sm: CGFloat = 8, md: CGFloat = 12, lg: CGFloat = 16, xl: CGFloat = 20
     }
 
-    // MARK: - Typography roles (cockpit Saira variants added in the next task)
+    // MARK: - Cockpit font faces
+    /// The bundled Saira Condensed faces, addressed by exact PostScript name.
+    /// These are three separate static files; their legacy name-table entries are
+    /// inconsistent across faces, so `.custom(family).weight()` can't reliably
+    /// select one. Naming the PostScript face directly is deterministic.
+    enum CockpitFace {
+        case medium, semibold, bold
+        var postScriptName: String {
+            switch self {
+            case .medium: "SairaCondensed-Medium"
+            case .semibold: "SairaCondensed-SemiBold"
+            case .bold: "SairaCondensed-Bold"
+            }
+        }
+    }
+
+    // MARK: - Typography roles
     enum Typography {
         /// Brand numerals (chrome): SF Pro Rounded. Pass a @ScaledMetric size for Dynamic Type.
         static func metricBrand(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
@@ -42,6 +58,19 @@ enum AuraTheme {
         static let unit = Font.system(.caption2, design: .rounded).weight(.bold)
         static func title(_ style: Font.TextStyle = .title2) -> Font {
             .system(style, design: .rounded).weight(.semibold)
+        }
+        /// Cockpit numerals (Saira Condensed). Scales with Dynamic Type via `relativeTo:`,
+        /// so pass a plain base point size — NOT a `@ScaledMetric` value (that scales twice).
+        static func metricCockpit(_ size: CGFloat,
+                                  face: CockpitFace = .bold,
+                                  relativeTo style: Font.TextStyle = .body) -> Font {
+            .custom(face.postScriptName, size: size, relativeTo: style)
+        }
+
+        /// The large cockpit speed readout (Saira Condensed Bold). Scales with Dynamic
+        /// Type via `relativeTo:`; pass a plain base point size, not a `@ScaledMetric` value.
+        static func speedHero(_ size: CGFloat, relativeTo style: Font.TextStyle = .largeTitle) -> Font {
+            .custom(CockpitFace.bold.postScriptName, size: size, relativeTo: style)
         }
     }
 
