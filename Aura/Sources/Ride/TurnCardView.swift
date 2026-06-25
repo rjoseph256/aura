@@ -5,7 +5,7 @@ import AuraKit
 ///
 /// Two visual states keyed by `state.isExpanded`:
 /// - **Collapsed** (calm): compact dark card, small arrow + distance + street name.
-/// - **Expanded** (imminent): grows, shifts to brand-green fill, black text, glow.
+/// - **Expanded** (imminent): grows, shifts to solid lime fill, ink-on-lime text, glow.
 ///
 /// Motion is driven by a single `.smooth(duration: 0.38)` animation so the whole
 /// card morphs together — no overshoot, calm and decisive. `reduceMotion` gates
