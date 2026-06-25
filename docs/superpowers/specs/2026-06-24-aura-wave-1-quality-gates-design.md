@@ -1,9 +1,9 @@
 # Aura Wave 1 — Quality gates design
 
 **Goal:** Put the CI safety net in place before the rest of Wave 1. After this
-sub-project, the app target compiles in CI on every pull request, the whole
-codebase builds under Swift 6 language mode, and SwiftLint enforces a tuned
-default rule set under `--strict`.
+sub-project, the app target (and its embedded widget extension) compiles in CI on
+every pull request, the whole codebase builds under Swift 6 language mode, and
+SwiftLint enforces a tuned default rule set under `--strict`.
 
 **Status:** approved design, ready to plan.
 
