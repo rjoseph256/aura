@@ -21,25 +21,25 @@ struct RideSummaryView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 20) {
+            VStack(spacing: AuraTheme.Spacing.xl) {
                 if hasRoute {
                     StaticRouteMap(coordinates: ride.track.map(\.coordinate))
                         .frame(height: 240)
-                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                .strokeBorder(AuraTheme.surface, lineWidth: 1)
+                            RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous)
+                                .strokeBorder(AuraTheme.border, lineWidth: 1)
                         )
-                        .padding(.horizontal, 20)
-                        .padding(.top, 16)
+                        .padding(.horizontal, AuraTheme.Spacing.xl)
+                        .padding(.top, AuraTheme.Spacing.lg)
                 }
 
-                VStack(spacing: 6) {
-                    Text("Nice ride").font(.largeTitle.bold()).foregroundStyle(AuraTheme.text)
+                VStack(spacing: AuraTheme.Spacing.xs) {
+                    Text("Nice ride").font(.largeTitle.bold()).foregroundStyle(AuraTheme.textPrimary)
                     if let name = ride.destinationName, !name.isEmpty {
                         Text("to \(name)")
                             .font(.subheadline)
-                            .foregroundStyle(AuraTheme.muted)
+                            .foregroundStyle(AuraTheme.textSecondary)
                             .multilineTextAlignment(.center)
                             .lineLimit(2)
                     }
@@ -48,21 +48,21 @@ struct RideSummaryView: View {
                 if isLongest {
                     Label("Longest ride yet", systemImage: "trophy.fill")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AuraTheme.route)
-                        .padding(.horizontal, 14).padding(.vertical, 7)
-                        .background(AuraTheme.route.opacity(0.14), in: Capsule())
+                        .foregroundStyle(AuraTheme.accent)
+                        .padding(.horizontal, AuraTheme.Spacing.lg).padding(.vertical, AuraTheme.Spacing.sm)
+                        .background(AuraTheme.accent.opacity(0.14), in: Capsule())
                 }
 
                 if saveFailed {
                     Label("Couldn't save this ride — it won't appear in History.",
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote)
-                        .foregroundStyle(AuraTheme.pink)
+                        .foregroundStyle(AuraTheme.destructive)
                         .multilineTextAlignment(.center)
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, AuraTheme.Spacing.sm)
                 }
 
-                HStack(spacing: 26) {
+                HStack(spacing: AuraTheme.Spacing.xxl) {
                     stat(fmt.distanceValue(stats.distanceMeters), metric ? "km" : "miles")
                     stat(fmt.minutes(stats.movingTimeSeconds), "moving")
                     stat(fmt.elevationValue(stats.elevationGainMeters), metric ? "m climbed" : "ft climbed")
@@ -70,23 +70,22 @@ struct RideSummaryView: View {
                 stat(fmt.speedValue(stats.maxSpeedMetersPerSecond, decimals: 1), metric ? "km/h top" : "mph top")
 
                 Button("Done") { dismiss() }
-                    .font(.headline).foregroundStyle(.black)
-                    .padding(.vertical, 12).padding(.horizontal, 40)
-                    .background(AuraTheme.auroraGradient, in: Capsule())
-                    .padding(.top, 4)
+                    .buttonStyle(.ctaPrimary)
+                    .padding(.horizontal, AuraTheme.Spacing.xl)
+                    .padding(.top, AuraTheme.Spacing.xs)
             }
             .frame(maxWidth: .infinity)
-            .padding(.bottom, 32)
+            .padding(.bottom, AuraTheme.Spacing.xxxl)
         }
-        .background(AuraTheme.bg.ignoresSafeArea())
+        .background(AuraTheme.background.ignoresSafeArea())
         .onAppear(perform: computeRecord)
     }
 
+    /// One value+label metric cell. Combined into a single VoiceOver element so it reads
+    /// as a unit (e.g. "21.6, km/h top") instead of two separate stops.
     private func stat(_ value: String, _ label: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value).font(.system(.title, design: .rounded).weight(.heavy)).foregroundStyle(AuraTheme.text)
-            Text(label).font(.caption).foregroundStyle(AuraTheme.muted)
-        }
+        StatPair(value: value, label: label, context: .brand)
+            .accessibilityElement(children: .combine)
     }
 
     /// "Longest ride yet" when this ride's distance is the max across all saved rides

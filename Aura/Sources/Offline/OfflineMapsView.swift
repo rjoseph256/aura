@@ -7,22 +7,22 @@ struct OfflineMapsView: View {
 
     var body: some View {
         ZStack {
-            AuraTheme.bg.ignoresSafeArea()
+            AuraTheme.background.ignoresSafeArea()
 
-            VStack(spacing: 20) {
+            VStack(spacing: AuraTheme.Spacing.xl) {
                 Spacer()
 
                 Image(systemName: "arrow.down.circle")
                     .font(.system(size: glyphSize, weight: .regular))
-                    .foregroundStyle(AuraTheme.auroraGradient)
+                    .foregroundStyle(AuraTheme.accent)
 
                 Text("Pittsburgh, offline")
                     .font(.system(.title2, design: .rounded).weight(.bold))
-                    .foregroundColor(AuraTheme.text)
+                    .foregroundStyle(AuraTheme.textPrimary)
 
                 Text("Download the Pittsburgh map for offline rides on low-signal trails.")
                     .font(.subheadline)
-                    .foregroundColor(AuraTheme.muted)
+                    .foregroundStyle(AuraTheme.textSecondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 300)
 
@@ -33,7 +33,7 @@ struct OfflineMapsView: View {
 
                 downloadButton
             }
-            .padding(.bottom, 24)
+            .padding(.bottom, AuraTheme.Spacing.xxl)
         }
         .navigationTitle("Offline maps")
         .onDisappear { manager.cancel() }
@@ -45,24 +45,24 @@ struct OfflineMapsView: View {
     private var stateArea: some View {
         switch manager.phase {
         case .downloading:
-            VStack(spacing: 8) {
+            VStack(spacing: AuraTheme.Spacing.sm) {
                 ProgressView(value: manager.progress)
-                    .tint(AuraTheme.cyan)
+                    .tint(AuraTheme.accent)
                     .frame(maxWidth: 300)
                 Text("\(Int(manager.progress * 100))%")
                     .font(.footnote)
-                    .foregroundColor(AuraTheme.muted)
+                    .foregroundStyle(AuraTheme.textSecondary)
             }
 
         case .finished:
             Label("Downloaded", systemImage: "checkmark.circle.fill")
                 .font(.subheadline.weight(.semibold))
-                .foregroundColor(AuraTheme.route)
+                .foregroundStyle(AuraTheme.accent)
 
         case .failed(let msg):
             Text("Download failed. \(msg)")
                 .font(.footnote)
-                .foregroundColor(AuraTheme.pink)
+                .foregroundStyle(AuraTheme.destructive)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 300)
 
@@ -74,22 +74,11 @@ struct OfflineMapsView: View {
     // MARK: - CTA
 
     private var downloadButton: some View {
-        Button {
+        Button(manager.phase == .finished ? "Download again" : "Download Pittsburgh") {
             manager.downloadPittsburgh()
-        } label: {
-            ZStack {
-                AuraTheme.auroraGradient
-                Text(manager.phase == .finished ? "Download again" : "Download Pittsburgh")
-                    .font(.headline)
-                    .foregroundColor(.black)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 56)
-            .clipShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.ctaPrimary)
         .disabled(manager.phase == .downloading)
-        .opacity(manager.phase == .downloading ? 0.6 : 1)
-        .padding(.horizontal, 32)
+        .padding(.horizontal, AuraTheme.Spacing.xxl)
     }
 }

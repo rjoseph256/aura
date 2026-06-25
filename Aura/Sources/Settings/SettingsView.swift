@@ -11,21 +11,21 @@ struct SettingsView: View {
 
         return List {
             Section("Ride") {
-                row(icon: "ruler", tint: AuraTheme.cyan, title: "Distance units") {
+                row(icon: "ruler", tint: AuraTheme.accent, title: "Distance units") {
                     Picker("", selection: $settings.units) {
                         Text("Miles").tag(DistanceUnits.imperial)
                         Text("Kilometers").tag(DistanceUnits.metric)
                     }
-                    .labelsHidden().pickerStyle(.menu).tint(AuraTheme.cyan)
+                    .labelsHidden().pickerStyle(.menu).tint(AuraTheme.accent)
                 }
-                row(icon: "speaker.wave.2.fill", tint: AuraTheme.route, title: "Voice guidance") {
+                row(icon: "speaker.wave.2.fill", tint: AuraTheme.accent, title: "Voice guidance") {
                     Toggle("", isOn: $settings.voiceEnabled)
-                        .labelsHidden().tint(AuraTheme.route)
+                        .labelsHidden().tint(AuraTheme.accent)
                 }
-                row(icon: "target", tint: AuraTheme.pink, title: "Weekly goal") {
+                row(icon: "target", tint: AuraTheme.accent, title: "Weekly goal") {
                     Stepper(value: goalBinding(settings), in: 5...200, step: 5) {
                         Text(goalLabel(settings))
-                            .foregroundStyle(AuraTheme.muted)
+                            .foregroundStyle(AuraTheme.textSecondary)
                             .monospacedDigit()
                     }
                     .fixedSize()
@@ -34,17 +34,17 @@ struct SettingsView: View {
             .listRowBackground(AuraTheme.surface)
 
             Section("Map") {
-                row(icon: "map.fill", tint: AuraTheme.violet, title: "Map style") {
+                row(icon: "map.fill", tint: AuraTheme.accent, title: "Map style") {
                     Picker("", selection: $settings.mapStyle) {
                         Text("Dark").tag(MapStyle.dark)
                         Text("Standard").tag(MapStyle.standard)
                     }
-                    .labelsHidden().pickerStyle(.menu).tint(AuraTheme.cyan)
+                    .labelsHidden().pickerStyle(.menu).tint(AuraTheme.accent)
                 }
                 NavigationLink {
                     OfflineMapsView()
                 } label: {
-                    linkLabel(icon: "arrow.down.circle.fill", tint: AuraTheme.cyan, title: "Offline maps")
+                    linkLabel(icon: "arrow.down.circle.fill", tint: AuraTheme.accent, title: "Offline maps")
                 }
             }
             .listRowBackground(AuraTheme.surface)
@@ -53,31 +53,31 @@ struct SettingsView: View {
                 NavigationLink {
                     AttributionView()
                 } label: {
-                    linkLabel(icon: "info.circle.fill", tint: AuraTheme.muted, title: "Attribution & data")
+                    linkLabel(icon: "info.circle.fill", tint: AuraTheme.textSecondary, title: "Attribution & data")
                 }
             }
             .listRowBackground(AuraTheme.surface)
         }
         .scrollContentBackground(.hidden)
-        .background(AuraTheme.bg.ignoresSafeArea())
+        .background(AuraTheme.background.ignoresSafeArea())
         .navigationTitle("Settings")
     }
 
     // A settings row: colored icon badge + title + trailing control.
     private func row<Control: View>(icon: String, tint: Color, title: String,
                                     @ViewBuilder control: () -> Control) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: AuraTheme.Spacing.md) {
             iconView(icon, tint)
-            Text(title).foregroundStyle(AuraTheme.text)
+            Text(title).foregroundStyle(AuraTheme.textPrimary)
             Spacer()
             control()
         }
     }
 
     private func linkLabel(icon name: String, tint: Color, title: String) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: AuraTheme.Spacing.md) {
             iconView(name, tint)
-            Text(title).foregroundStyle(AuraTheme.text)
+            Text(title).foregroundStyle(AuraTheme.textPrimary)
         }
     }
 
