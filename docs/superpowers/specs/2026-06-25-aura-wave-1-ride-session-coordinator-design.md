@@ -245,11 +245,18 @@ The control flow per HUD:
 - **Free ride:** the Start button calls `coordinator.start(...)`; on `.permissionDenied` it
   sets `showPermission = true`. The End button calls `coordinator.finish()`. `onDisappear`
   calls `coordinator.cancel()`.
-- **Navigate:** the appear `.task` calls `coordinator.start(...)`, and on `.started` it
-  starts guidance (`guidance.start(route:)`). It keeps `coordinator.maneuver` synced with
-  `.onChange(of: guidance.lastUpdate)`. A thin `endRide()` calls `teardownGuidance()` then
-  `coordinator.finish()`, and `guidance.onArrive = { endRide() }` stays as is. `onDisappear`
-  calls `teardownGuidance()` then `coordinator.cancel()`.
+- **Navigate:** the appear `.task` keeps its existing front matter ahead of the coordinator
+  call, in order: set `isMuted` from the voice setting, configure the audio session, and wire
+  `guidance.onSpeak`/`guidance.onArrive`. Then it calls `coordinator.start(...)`, and on
+  `.started` it starts guidance (`guidance.start(route:)`). It keeps `coordinator.maneuver`
+  synced with `.onChange(of: guidance.lastUpdate)`. A thin `endRide()` calls
+  `teardownGuidance()` then `coordinator.finish()`, and `guidance.onArrive = { endRide() }`
+  stays as is. `onDisappear` calls `teardownGuidance()` then `coordinator.cancel()`.
+
+The `track` passthrough exists for the free-ride map only (`RideMapView(track:)`).
+`NavigateHUDView` draws from `guidance.routeGeometry ?? route.geometry` and does not read it,
+so the rewire leaves navigate's map binding as it is rather than pointing it at the
+coordinator.
 
 The duplicated `openSettings()` becomes one app-target helper that both permission sheets
 call.
