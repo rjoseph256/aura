@@ -8,10 +8,11 @@ import AuraKit
 ///
 /// - **Free ride:** identity header, then a row of glanceable stats — elapsed, distance,
 ///   speed.
-/// - **Navigate:** the next turn as the hero (distance + instruction, green when imminent),
+/// - **Navigate:** the next turn as the hero (distance + instruction, lime when imminent),
 ///   then a quiet row of elapsed + distance.
 ///
-/// Near-black surface with a soft aurora glow; white/cyan numerals stay high-contrast.
+/// Near-black surface; lime accents and high-contrast cockpit numerals stay legible over
+/// the Lock Screen's variable backdrop.
 struct RideLockScreenView: View {
     let context: ActivityViewContext<RideActivityAttributes>
 
@@ -38,7 +39,7 @@ struct RideLockScreenView: View {
 
     private var freeRide: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header(title: "Free ride", glyph: "bicycle", solid: nil)
+            header(title: "Free ride", glyph: "bicycle", imminent: false)
 
             HStack(alignment: .top, spacing: 12) {
                 RideTimerStatCell(start: attributes.startedAt, label: "TIME")
@@ -61,21 +62,21 @@ struct RideLockScreenView: View {
 
     private var navigate: some View {
         let imminent = rideActivityIsImminent(state.turnDistanceMeters)
-        let turnTint = imminent ? AuraTheme.route : AuraTheme.text
+        let turnTint = imminent ? AuraTheme.accent : AuraTheme.textPrimary
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                AuroraGlyph(systemName: rideActivityManeuverSymbol(for: state.turnInstruction),
-                            solid: imminent ? AuraTheme.route : nil, size: 38)
+                AuraGlyph(systemName: rideActivityManeuverSymbol(for: state.turnInstruction),
+                          imminent: imminent, size: 38)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(turnDistanceText)
-                        .font(.system(size: 30, weight: .heavy, design: .rounded))
+                        .font(AuraTheme.Typography.metricCockpit(30, relativeTo: .title))
                         .foregroundStyle(turnTint)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .contentTransition(.numericText())
                     Text(instructionText)
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AuraTheme.text.opacity(0.9))
+                        .foregroundStyle(AuraTheme.textPrimary.opacity(0.9))
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
@@ -103,36 +104,30 @@ struct RideLockScreenView: View {
         VStack(alignment: .leading, spacing: 1) {
             Text(name)
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(AuraTheme.text)
+                .foregroundStyle(AuraTheme.textPrimary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             Text("DESTINATION")
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(AuraTheme.muted)
+                .foregroundStyle(AuraTheme.textSecondary)
         }
     }
 
     // MARK: Shared
 
-    private func header(title: String, glyph: String, solid: Color?) -> some View {
+    private func header(title: String, glyph: String, imminent: Bool) -> some View {
         HStack(spacing: 10) {
-            AuroraGlyph(systemName: glyph, solid: solid, size: 30)
+            AuraGlyph(systemName: glyph, imminent: imminent, size: 30)
             Text(title)
                 .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                .foregroundStyle(AuraTheme.text)
+                .foregroundStyle(AuraTheme.textPrimary)
             Spacer(minLength: 8)
             RideStatusPill(isStale: context.isStale)
         }
     }
 
     private var background: some View {
-        ZStack {
-            AuraTheme.bg
-            RadialGradient(colors: [AuraTheme.violet.opacity(0.28), .clear],
-                           center: .topLeading, startRadius: 4, endRadius: 240)
-            RadialGradient(colors: [AuraTheme.cyan.opacity(0.12), .clear],
-                           center: .bottomTrailing, startRadius: 4, endRadius: 220)
-        }
+        AuraTheme.background
     }
 
     private var turnDistanceText: String {

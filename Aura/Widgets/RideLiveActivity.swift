@@ -24,7 +24,7 @@ struct RideLiveActivity: Widget {
     private func dynamicIsland(_ context: ActivityViewContext<RideActivityAttributes>) -> DynamicIsland {
         let nav = context.attributes.mode == .navigate
         let imminent = rideActivityIsImminent(context.state.turnDistanceMeters)
-        let accent = imminent ? AuraTheme.route : AuraTheme.cyan
+        let accent = AuraTheme.accent
 
         return DynamicIsland {
             DynamicIslandExpandedRegion(.leading) {
@@ -49,7 +49,7 @@ struct RideLiveActivity: Widget {
                 Text(context.attributes.startedAt, style: .timer)
                     .font(.system(.body, design: .rounded).weight(.bold))
                     .monospacedDigit()
-                    .foregroundStyle(AuraTheme.cyan)
+                    .foregroundStyle(AuraTheme.accent)
                     .frame(maxWidth: 56)
             }
         } minimal: {
@@ -64,15 +64,15 @@ struct RideLiveActivity: Widget {
     private func expandedLeading(_ context: ActivityViewContext<RideActivityAttributes>,
                                  nav: Bool, imminent: Bool) -> some View {
         HStack(spacing: 8) {
-            AuroraGlyph(systemName: nav ? rideActivityManeuverSymbol(for: context.state.turnInstruction) : "bicycle",
-                        solid: nav && imminent ? AuraTheme.route : nil, size: 30)
+            AuraGlyph(systemName: nav ? rideActivityManeuverSymbol(for: context.state.turnInstruction) : "bicycle",
+                      imminent: nav && imminent, size: 30)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Aura")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(AuraTheme.cyan)
+                    .foregroundStyle(AuraTheme.accent)
                 Text(nav ? "Next turn" : "Free ride")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(AuraTheme.muted)
+                    .foregroundStyle(AuraTheme.textSecondary)
             }
         }
     }
@@ -82,24 +82,24 @@ struct RideLiveActivity: Widget {
         VStack(alignment: .trailing, spacing: 1) {
             if nav {
                 Text(turnDistanceText(context))
-                    .font(.system(size: 30, weight: .heavy, design: .rounded))
-                    .foregroundStyle(imminent ? AuraTheme.route : AuraTheme.text)
+                    .font(AuraTheme.Typography.metricCockpit(30, relativeTo: .title))
+                    .foregroundStyle(imminent ? AuraTheme.accent : AuraTheme.textPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                     .contentTransition(.numericText())
                 Text("TO TURN")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(AuraTheme.muted)
+                    .foregroundStyle(AuraTheme.textSecondary)
             } else {
                 Text(context.attributes.startedAt, style: .timer)
                     .font(.system(size: 30, weight: .heavy, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(AuraTheme.cyan)
+                    .foregroundStyle(AuraTheme.accent)
                     .lineLimit(1)
                     .multilineTextAlignment(.trailing)
                 Text("ELAPSED")
                     .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(AuraTheme.muted)
+                    .foregroundStyle(AuraTheme.textSecondary)
             }
         }
     }
@@ -115,7 +115,7 @@ struct RideLiveActivity: Widget {
             VStack(alignment: .leading, spacing: 8) {
                 Text(state.turnInstruction ?? "Navigating…")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AuraTheme.text)
+                    .foregroundStyle(AuraTheme.textPrimary)
                     .lineLimit(1)
                 HStack(alignment: .top, spacing: 16) {
                     RideTimerStatCell(start: context.attributes.startedAt, label: "TIME")
@@ -126,12 +126,12 @@ struct RideLiveActivity: Widget {
                         VStack(alignment: .leading, spacing: 1) {
                             Text(destination)
                                 .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundStyle(AuraTheme.text)
+                                .foregroundStyle(AuraTheme.textPrimary)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.7)
                             Text("TO")
                                 .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(AuraTheme.muted)
+                                .foregroundStyle(AuraTheme.textSecondary)
                         }
                     }
                     Spacer(minLength: 0)
