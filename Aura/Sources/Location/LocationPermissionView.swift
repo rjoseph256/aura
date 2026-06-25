@@ -8,25 +8,27 @@ struct LocationPermissionView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: AuraTheme.Spacing.xl) {
             Image(systemName: "location.slash")
                 .font(.system(size: 44, weight: .semibold))
-                .foregroundStyle(AuraTheme.cyan)
+                .foregroundStyle(AuraTheme.accent)
             Text("Location needed to ride")
-                .font(.title2.weight(.bold)).foregroundStyle(AuraTheme.text)
+                .font(.title2.weight(.bold)).foregroundStyle(AuraTheme.textPrimary)
             Text("Aura records your route and follows you on the map. Turn on location access in Settings to start a ride.")
-                .font(.subheadline).foregroundStyle(AuraTheme.muted)
+                .font(.subheadline).foregroundStyle(AuraTheme.textSecondary)
                 .multilineTextAlignment(.center)
             Button("Open Settings") { onOpenSettings() }
-                .font(.headline).foregroundStyle(.black)
-                .padding(.vertical, 14).frame(maxWidth: .infinity)
-                .background(AuraTheme.auroraGradient, in: Capsule())
+                .buttonStyle(.ctaPrimary)
+            // .ctaTertiary is only 40pt tall — add vertical padding + a full-width
+            // content shape so the "Not now" hit area clears the 44pt minimum.
             Button("Not now") { dismiss() }
-                .font(.subheadline).foregroundStyle(AuraTheme.muted)
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .buttonStyle(.ctaTertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, AuraTheme.Spacing.xs)
+                .contentShape(Rectangle())
         }
-        .padding(28)
+        .padding(AuraTheme.Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(AuraTheme.bg)
+        .background(AuraTheme.background)
     }
 }

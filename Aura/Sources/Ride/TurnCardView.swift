@@ -5,7 +5,7 @@ import AuraKit
 ///
 /// Two visual states keyed by `state.isExpanded`:
 /// - **Collapsed** (calm): compact dark card, small arrow + distance + street name.
-/// - **Expanded** (imminent): grows, shifts to brand-green fill, black text, glow.
+/// - **Expanded** (imminent): grows, shifts to solid lime fill, ink-on-lime text, glow.
 ///
 /// Motion is driven by a single `.smooth(duration: 0.38)` animation so the whole
 /// card morphs together — no overshoot, calm and decisive. `reduceMotion` gates
@@ -16,23 +16,25 @@ struct TurnCardView: View {
 
     // MARK: Layout constants
 
+    // Arrow sizes stay @ScaledMetric (SF Symbol point size). Distance numerals use the
+    // Saira cockpit face, which self-scales via `relativeTo:` — so those are plain base sizes.
     @ScaledMetric(relativeTo: .title2)     private var arrowCollapsed: CGFloat = 24
     @ScaledMetric(relativeTo: .largeTitle) private var arrowExpanded: CGFloat = 34
 
-    @ScaledMetric(relativeTo: .title2)     private var distCollapsed: CGFloat = 22
-    @ScaledMetric(relativeTo: .largeTitle) private var distExpanded: CGFloat = 36
+    private let distCollapsed: CGFloat = 22
+    private let distExpanded: CGFloat = 36
 
     // MARK: Body
 
     var body: some View {
-        HStack(spacing: state.isExpanded ? 14 : 10) {
+        HStack(spacing: state.isExpanded ? AuraTheme.Spacing.md : AuraTheme.Spacing.sm) {
             // Maneuver arrow
             Image(systemName: "arrow.turn.up.right")
                 .font(.system(
                     size: state.isExpanded ? arrowExpanded : arrowCollapsed,
                     weight: .bold
                 ))
-                .foregroundStyle(state.isExpanded ? Color.black : AuraTheme.text)
+                .foregroundStyle(state.isExpanded ? AuraTheme.onAccent : AuraTheme.accent)
                 // Scale instead of animating .font size (font size doesn't interpolate).
                 .scaleEffect(reduceMotion ? 1 : (state.isExpanded ? 1.0 : 0.72))
                 .animation(
@@ -40,15 +42,14 @@ struct TurnCardView: View {
                     value: state.isExpanded
                 )
 
-            VStack(alignment: .leading, spacing: state.isExpanded ? 4 : 2) {
-                // Distance countdown — rolls digit-by-digit.
+            VStack(alignment: .leading, spacing: state.isExpanded ? AuraTheme.Spacing.xs : 2) {
+                // Distance countdown — Saira cockpit numerals, lime; rolls digit-by-digit.
                 Text(state.distanceText)
-                    .font(.system(
-                        size: state.isExpanded ? distExpanded : distCollapsed,
-                        weight: .heavy,
-                        design: .rounded
+                    .font(AuraTheme.Typography.metricCockpit(
+                        state.isExpanded ? distExpanded : distCollapsed,
+                        relativeTo: state.isExpanded ? .largeTitle : .title2
                     ))
-                    .foregroundStyle(state.isExpanded ? Color.black : AuraTheme.text)
+                    .foregroundStyle(state.isExpanded ? AuraTheme.onAccent : AuraTheme.accent)
                     .contentTransition(.numericText())
                     .scaleEffect(
                         reduceMotion ? 1 : (state.isExpanded ? 1.0 : 0.72),
@@ -63,7 +64,7 @@ struct TurnCardView: View {
                 Text(state.primaryText)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(
-                        state.isExpanded ? Color.black.opacity(0.75) : AuraTheme.text.opacity(0.9)
+                        state.isExpanded ? AuraTheme.onAccent.opacity(0.75) : AuraTheme.textPrimary.opacity(0.9)
                     )
                     .contentTransition(.opacity)
                     .lineLimit(2)
@@ -71,25 +72,25 @@ struct TurnCardView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, state.isExpanded ? 20 : 14)
-        .padding(.vertical, state.isExpanded ? 18 : 12)
-        // Background shifts from near-opaque dark → brand green.
+        .padding(.horizontal, state.isExpanded ? AuraTheme.Spacing.xl : AuraTheme.Spacing.lg)
+        .padding(.vertical, state.isExpanded ? AuraTheme.Spacing.lg : AuraTheme.Spacing.md)
+        // Background shifts from near-opaque dark → lime.
         .background(
-            state.isExpanded ? AuraTheme.route : AuraTheme.surface.opacity(0.92),
-            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            state.isExpanded ? AuraTheme.accent : AuraTheme.surface.opacity(0.92),
+            in: RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous)
         )
         // Hairline border visible in collapsed state only.
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous)
                 .strokeBorder(
-                    state.isExpanded ? Color.clear : Color.white.opacity(0.08),
+                    state.isExpanded ? Color.clear : AuraTheme.border,
                     lineWidth: 0.5
                 )
         )
         // Static glow in expanded state only — NOT a repeating pulse.
         .shadow(
             color: reduceMotion ? .clear : (state.isExpanded
-                   ? AuraTheme.route.opacity(0.55)
+                   ? AuraTheme.accent.opacity(0.55)
                    : .clear),
             radius: 18
         )

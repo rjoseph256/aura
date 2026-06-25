@@ -25,16 +25,16 @@ struct DestinationSearchView: View {
     var body: some View {
         VStack(spacing: 0) {
             // Search field
-            HStack(spacing: 10) {
+            HStack(spacing: AuraTheme.Spacing.sm) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundColor(AuraTheme.muted)
+                    .foregroundStyle(AuraTheme.textSecondary)
                     .font(.body.weight(.medium))
 
                 TextField("", text: $query, prompt:
                     Text("Where to?")
-                        .foregroundColor(AuraTheme.text.opacity(0.65))
+                        .foregroundColor(AuraTheme.textPrimary.opacity(0.65))
                 )
-                .foregroundColor(AuraTheme.text)
+                .foregroundStyle(AuraTheme.textPrimary)
                 .font(.body)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
@@ -47,31 +47,32 @@ struct DestinationSearchView: View {
                         errorMessage = nil
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(AuraTheme.muted)
+                            .foregroundStyle(AuraTheme.textSecondary)
                             .font(.callout)
                     }
+                    .accessibilityLabel("Clear search")
                 }
 
                 if isLoading {
                     ProgressView()
-                        .tint(AuraTheme.cyan)
+                        .tint(AuraTheme.accent)
                         .scaleEffect(0.85)
                 }
             }
             .frame(minHeight: 56)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, AuraTheme.Spacing.lg)
             .background(AuraTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.horizontal, 24)
+            .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous))
+            .padding(.horizontal, AuraTheme.Spacing.xxl)
 
             // Results list (only visible when typing)
             if !query.isEmpty {
                 if let error = errorMessage {
                     Text(error)
                         .font(.subheadline)
-                        .foregroundColor(AuraTheme.muted)
-                        .padding(.vertical, 20)
-                        .padding(.horizontal, 24)
+                        .foregroundStyle(AuraTheme.textSecondary)
+                        .padding(.vertical, AuraTheme.Spacing.xl)
+                        .padding(.horizontal, AuraTheme.Spacing.xxl)
                 } else {
                     LazyVStack(spacing: 0) {
                         ForEach(Array(suggestions.enumerated()), id: \.offset) { _, suggestion in
@@ -80,15 +81,15 @@ struct DestinationSearchView: View {
                             }
                             if suggestion.name != suggestions.last?.name {
                                 Divider()
-                                    .background(AuraTheme.surface)
+                                    .background(AuraTheme.border)
                                     .padding(.leading, 60)
                             }
                         }
                     }
                     .background(AuraTheme.surface.opacity(0.5))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                    .padding(.horizontal, 24)
-                    .padding(.top, 8)
+                    .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.md, style: .continuous))
+                    .padding(.horizontal, AuraTheme.Spacing.xxl)
+                    .padding(.top, AuraTheme.Spacing.sm)
                 }
             }
         }
@@ -215,28 +216,28 @@ private struct SuggestionRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 14) {
+            HStack(spacing: AuraTheme.Spacing.lg) {
                 Image(systemName: rowIcon)
                     .font(.subheadline.weight(.medium))
-                    .foregroundColor(AuraTheme.cyan)
+                    .foregroundStyle(AuraTheme.accent)
                     .frame(width: 28)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(suggestion.name)
                         .font(.callout.weight(.medium))
-                        .foregroundColor(AuraTheme.text)
+                        .foregroundStyle(AuraTheme.textPrimary)
                         .lineLimit(1)
                     if let desc = suggestion.description, !desc.isEmpty {
                         Text(desc)
                             .font(.footnote)
-                            .foregroundColor(AuraTheme.muted)
+                            .foregroundStyle(AuraTheme.textSecondary)
                             .lineLimit(1)
                     }
                 }
                 Spacer()
             }
             .frame(minHeight: 56)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, AuraTheme.Spacing.lg)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -16,7 +16,7 @@ struct HistoryView: View {
 
     var body: some View {
         ZStack {
-            AuraTheme.bg.ignoresSafeArea()
+            AuraTheme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 if store.isEphemeral {
@@ -79,27 +79,27 @@ struct HistoryView: View {
     // MARK: - Empty state
 
     private var emptyState: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: AuraTheme.Spacing.lg) {
             ZStack {
-                // Faint aurora glow behind the glyph.
+                // Faint accent glow behind the glyph.
                 Circle()
-                    .fill(AuraTheme.violet.opacity(0.18))
+                    .fill(AuraTheme.accent.opacity(0.18))
                     .frame(width: 140, height: 140)
                     .blur(radius: 44)
 
                 Image(systemName: "point.topleft.down.curvedto.point.bottomright.up")
                     .font(.system(size: emptyGlyph, weight: .regular))
-                    .foregroundStyle(AuraTheme.auroraGradient)
+                    .foregroundStyle(AuraTheme.accent)
             }
-            .padding(.bottom, 6)
+            .padding(.bottom, AuraTheme.Spacing.xs)
 
             Text("No rides yet")
                 .font(.system(.title3, design: .rounded).weight(.semibold))
-                .foregroundStyle(AuraTheme.text)
+                .foregroundStyle(AuraTheme.textPrimary)
 
             Text("Start a free ride or navigate somewhere — your rides land here.")
                 .font(.subheadline)
-                .foregroundStyle(AuraTheme.muted)
+                .foregroundStyle(AuraTheme.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 260)
                 .lineSpacing(2)
@@ -110,16 +110,16 @@ struct HistoryView: View {
     // MARK: - Ephemeral-store banner
 
     private var ephemeralBanner: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: AuraTheme.Spacing.sm) {
             Image(systemName: "exclamationmark.icloud")
-                .foregroundStyle(AuraTheme.pink)
+                .foregroundStyle(AuraTheme.destructive)
             Text("Rides aren't being saved on this device.")
                 .font(.footnote)
-                .foregroundStyle(AuraTheme.text)
+                .foregroundStyle(AuraTheme.textPrimary)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, AuraTheme.Spacing.lg)
+        .padding(.vertical, AuraTheme.Spacing.sm)
         .frame(maxWidth: .infinity)
         .background(AuraTheme.surface)
     }
@@ -133,8 +133,10 @@ private struct RideRow: View {
 
     private var stats: RideStats { ride.stats ?? .zero }
     private var isNavigate: Bool { ride.kind == .navigate }
-    private var accent: Color { isNavigate ? AuraTheme.cyan : AuraTheme.route }
     private var symbol: String { isNavigate ? "location.north.line.fill" : "bicycle" }
+    // Mono-lime: both ride kinds share the accent. The free/navigate distinction is
+    // carried non-chromatically — by the differing SF Symbol and its weight, not hue.
+    private var symbolWeight: Font.Weight { isNavigate ? .semibold : .medium }
     private var fmt: RideStatsFormatter { RideStatsFormatter(units: units) }
 
     private var caption: String {
@@ -156,49 +158,49 @@ private struct RideRow: View {
     private var leadingThumbnail: some View {
         let coords = ride.track.map(\.coordinate)
         if coords.count > 1 {
-            RouteThumbnail(coordinates: coords, lineColor: accent, lineWidth: 2)
+            RouteThumbnail(coordinates: coords, lineColor: AuraTheme.accent, lineWidth: 2)
         } else {
             Image(systemName: symbol)
-                .font(.headline)
-                .foregroundStyle(accent)
+                .font(.headline.weight(symbolWeight))
+                .foregroundStyle(AuraTheme.accent)
         }
     }
 
     var body: some View {
-        HStack(spacing: 14) {
-            // Leading — a thumbnail of the actual route (or a tinted kind badge when
-            // the ride has no recorded track), in the kind's accent.
+        HStack(spacing: AuraTheme.Spacing.lg) {
+            // Leading — a thumbnail of the actual route (or an accent kind badge when
+            // the ride has no recorded track). Kind is shown by the symbol, not by hue.
             leadingThumbnail
                 .frame(width: 54, height: 42)
-                .background(accent.opacity(0.10))
-                .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                .background(AuraTheme.accent.opacity(0.10))
+                .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.md, style: .continuous))
 
             // Middle — date + summary caption.
             VStack(alignment: .leading, spacing: 3) {
                 Text(ride.startedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.callout.weight(.semibold))
-                    .foregroundStyle(AuraTheme.text)
+                    .foregroundStyle(AuraTheme.textPrimary)
                     .lineLimit(1)
                 Text(caption)
                     .font(.footnote)
-                    .foregroundStyle(AuraTheme.muted)
+                    .foregroundStyle(AuraTheme.textSecondary)
                     .lineLimit(1)
             }
 
-            Spacer(minLength: 8)
+            Spacer(minLength: AuraTheme.Spacing.sm)
 
             // Trailing — hero distance numeral.
             VStack(alignment: .trailing, spacing: 0) {
                 Text(distance)
-                    .font(.system(.title2, design: .rounded).weight(.heavy))
-                    .foregroundStyle(AuraTheme.text)
+                    .font(AuraTheme.Typography.metricBrand(22))
+                    .foregroundStyle(AuraTheme.textPrimary)
                     .monospacedDigit()
                 Text(distanceUnit)
-                    .font(AuraTheme.unitLabel)
-                    .foregroundStyle(AuraTheme.muted)
+                    .font(AuraTheme.Typography.unit)
+                    .foregroundStyle(AuraTheme.textSecondary)
             }
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, AuraTheme.Spacing.md)
         .frame(minHeight: 64)
     }
 }

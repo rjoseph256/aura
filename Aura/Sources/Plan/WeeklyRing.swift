@@ -3,10 +3,9 @@ import AuraKit
 
 /// Weekly-distance goal ring — the home screen's signature glance.
 ///
-/// The arc encodes progress toward the rider's weekly goal (a cool slice of the aurora,
-/// so the full cyan→violet→pink gradient stays reserved for the primary CTA). The center
-/// shows the distance ridden this week. The arc fills on appear (reduce-motion aware) —
-/// a single, meaningful state reveal, not decoration.
+/// The arc encodes progress toward the rider's weekly goal as a solid lime accent
+/// over a faint track. The center shows the distance ridden this week. The arc fills
+/// on appear (reduce-motion aware) — a single, meaningful state reveal, not decoration.
 struct WeeklyRing: View {
     let stats: WeeklyRideStats
     let goalMeters: Double
@@ -24,20 +23,15 @@ struct WeeklyRing: View {
 
     var body: some View {
         ZStack {
-            // Track — light enough to read as a ring waiting to fill.
+            // Track — faint enough to read as a ring waiting to fill.
             Circle()
-                .stroke(Color.white.opacity(0.08), lineWidth: stroke)
+                .stroke(AuraTheme.border, lineWidth: stroke)
 
-            // Progress arc — cool aurora slice, rounded caps, starting at 12 o'clock.
+            // Progress arc — solid lime accent, rounded caps, starting at 12 o'clock.
             Circle()
                 .trim(from: 0, to: animatedFraction)
                 .stroke(
-                    AngularGradient(
-                        colors: [AuraTheme.cyan, AuraTheme.violet],
-                        center: .center,
-                        startAngle: .degrees(-90),
-                        endAngle: .degrees(270)
-                    ),
+                    AuraTheme.accent,
                     style: StrokeStyle(lineWidth: stroke, lineCap: .round)
                 )
                 .rotationEffect(.degrees(-90))
@@ -45,15 +39,15 @@ struct WeeklyRing: View {
             // Center readout
             VStack(spacing: 1) {
                 Text(fmt.distanceValue(stats.distanceMeters))
-                    .font(.system(size: centerSize, weight: .heavy, design: .rounded))
-                    .foregroundStyle(AuraTheme.text)
+                    .font(AuraTheme.Typography.metricBrand(centerSize, weight: .heavy))
+                    .foregroundStyle(AuraTheme.textPrimary)
                     .monospacedDigit()
                     .contentTransition(.numericText())
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)   // never overflow the fixed ring
                 Text("\(fmt.distanceUnit) this week")
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(AuraTheme.muted)
+                    .foregroundStyle(AuraTheme.textSecondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }

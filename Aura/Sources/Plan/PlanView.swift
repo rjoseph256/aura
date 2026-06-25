@@ -19,12 +19,12 @@ struct PlanView: View {
 
     var body: some View {
         ZStack {
-            AuraTheme.bg.ignoresSafeArea()
+            AuraTheme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 header
-                    .padding(.top, 16)
-                    .padding(.bottom, 20)
+                    .padding(.top, AuraTheme.Spacing.lg)
+                    .padding(.bottom, AuraTheme.Spacing.xl)
 
                 DestinationSearchView(query: $query) { place in
                     router.remember(place)
@@ -57,14 +57,14 @@ struct PlanView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(greeting)
                     .font(.footnote.weight(.medium))
-                    .foregroundColor(AuraTheme.muted)
+                    .foregroundStyle(AuraTheme.textSecondary)
                 Text("Aura")
-                    .font(.system(size: brandSize, weight: .bold, design: .rounded))
-                    .foregroundColor(AuraTheme.text)
+                    .font(AuraTheme.Typography.metricBrand(brandSize))
+                    .foregroundStyle(AuraTheme.textPrimary)
             }
             Spacer()
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, AuraTheme.Spacing.xxl)
     }
 
     private var greeting: String {
@@ -80,9 +80,9 @@ struct PlanView: View {
 
     private var dashboard: some View {
         ScrollView {
-            VStack(spacing: 28) {
+            VStack(spacing: AuraTheme.Spacing.xxxl) {
                 weeklyBlock
-                    .padding(.top, 24)
+                    .padding(.top, AuraTheme.Spacing.xxl)
 
                 if let lastRide {
                     lastRideSection(lastRide)
@@ -92,7 +92,7 @@ struct PlanView: View {
                     recentsSection
                 }
             }
-            .padding(.bottom, 16)
+            .padding(.bottom, AuraTheme.Spacing.lg)
         }
         .scrollIndicators(.hidden)
     }
@@ -100,13 +100,13 @@ struct PlanView: View {
     // MARK: Weekly block (ring + caption)
 
     private var weeklyBlock: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: AuraTheme.Spacing.lg) {
             WeeklyRing(stats: weekStats,
                        goalMeters: settings.weeklyGoalMeters,
                        units: settings.units)
             Text(weeklyCaption)
                 .font(.footnote.weight(.medium))
-                .foregroundColor(AuraTheme.muted)
+                .foregroundStyle(AuraTheme.textSecondary)
                 .multilineTextAlignment(.center)
         }
     }
@@ -129,19 +129,19 @@ struct PlanView: View {
     // MARK: Last-ride section
 
     private func lastRideSection(_ ride: Ride) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: AuraTheme.Spacing.sm) {
             sectionHeader("Last ride")
             LastRideCard(ride: ride, units: settings.units) {
                 router.selectedTab = .history
             }
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, AuraTheme.Spacing.xxl)
     }
 
     // MARK: Recents
 
     private var recentsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: AuraTheme.Spacing.sm) {
             sectionHeader("Recents")
             VStack(spacing: 0) {
                 ForEach(router.recents) { place in
@@ -150,21 +150,21 @@ struct PlanView: View {
                     }
                     if place.id != router.recents.last?.id {
                         Divider()
-                            .background(AuraTheme.bg)
+                            .background(AuraTheme.border)
                             .padding(.leading, 58)
                     }
                 }
             }
             .background(AuraTheme.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous))
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, AuraTheme.Spacing.xxl)
     }
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
             .font(.caption.weight(.semibold))
-            .foregroundColor(AuraTheme.muted)
+            .foregroundStyle(AuraTheme.textSecondary)
             .textCase(.uppercase)
             .tracking(0.5)
     }
@@ -172,23 +172,13 @@ struct PlanView: View {
     // MARK: Free-ride CTA
 
     private var freeRideButton: some View {
-        Button {
+        Button("Free ride") {
             router.screen = .ride(route: nil, destination: nil)
-        } label: {
-            ZStack {
-                AuraTheme.auroraGradient
-                Text("Free ride")
-                    .font(.headline)
-                    .foregroundColor(.black)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 56)
-            .clipShape(Capsule())
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 24)
-        .padding(.bottom, 24)
-        .padding(.top, 8)
+        .buttonStyle(.ctaPrimary)
+        .padding(.horizontal, AuraTheme.Spacing.xxl)
+        .padding(.bottom, AuraTheme.Spacing.xxl)
+        .padding(.top, AuraTheme.Spacing.sm)
     }
 }
 
@@ -200,30 +190,30 @@ private struct RecentRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 14) {
+            HStack(spacing: AuraTheme.Spacing.lg) {
                 Image(systemName: categoryIcon)
                     .font(.subheadline.weight(.medium))
-                    .foregroundColor(AuraTheme.violet)
+                    .foregroundStyle(AuraTheme.accent)
                     .frame(width: 28)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(place.name)
                         .font(.callout.weight(.medium))
-                        .foregroundColor(AuraTheme.text)
+                        .foregroundStyle(AuraTheme.textPrimary)
                         .lineLimit(1)
 
                     Text(categoryLabel)
                         .font(.footnote)
-                        .foregroundColor(AuraTheme.muted)
+                        .foregroundStyle(AuraTheme.textSecondary)
                 }
                 Spacer()
 
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
-                    .foregroundColor(AuraTheme.muted)
+                    .foregroundStyle(AuraTheme.textSecondary)
             }
             .frame(minHeight: 56)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, AuraTheme.Spacing.lg)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

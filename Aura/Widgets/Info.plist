@@ -20,6 +20,12 @@
   <string>1.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>UIAppFonts</key>
+  <array>
+    <string>SairaCondensed-Medium.ttf</string>
+    <string>SairaCondensed-SemiBold.ttf</string>
+    <string>SairaCondensed-Bold.ttf</string>
+  </array>
   <key>NSExtension</key>
   <dict>
     <key>NSExtensionPointIdentifier</key>

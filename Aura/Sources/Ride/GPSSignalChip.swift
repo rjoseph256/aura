@@ -10,10 +10,10 @@ struct GPSSignalChip: View {
             Label(signal == .lost ? "GPS lost" : "GPS weak",
                   systemImage: "location.slash.fill")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(.black.opacity(0.55), in: Capsule())
-                .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
+                .foregroundStyle(AuraTheme.textPrimary)
+                .padding(.horizontal, AuraTheme.Spacing.sm).padding(.vertical, AuraTheme.Spacing.xs)
+                .background(AuraTheme.surface.opacity(0.55), in: Capsule())
+                .overlay(Capsule().strokeBorder(AuraTheme.border))
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(signal == .lost ? "GPS signal lost" : "GPS signal weak")
         }

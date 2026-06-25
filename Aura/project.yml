@@ -26,6 +26,10 @@ targets:
           - Info.plist
           - MapboxAccessToken
           - sample-ride-pittsburgh.gpx
+          - Fonts
+      # Bundled Saira Condensed faces (OFL) — classified as resources and
+      # registered via UIAppFonts in Resources/Info.plist.
+      - path: Resources/Fonts
       # Extension-less token file: force it into the resources copy phase
       # so the bundled pk.… token ships in the .app (XcodeGen won't classify
       # an extension-less file as a resource on its own).
@@ -78,6 +82,11 @@ targets:
       # Shared with the app so both sides compile the same Live Activity contract / theme.
       - path: Sources/LiveActivity/RideActivityAttributes.swift
       - path: Sources/Theme/AuraTheme.swift
+      - path: Sources/Theme/StatPair.swift
+      - path: Sources/Theme/SpeedReadout.swift
+      # Bundled Saira Condensed faces (OFL), registered via Widgets/Info.plist
+      # UIAppFonts so the Live Activity can render cockpit numerals.
+      - path: Resources/Fonts
     dependencies:
       - package: AuraCore
         product: AuraCore

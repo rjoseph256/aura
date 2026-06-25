@@ -29,7 +29,7 @@ struct RoutePreviewView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            AuraTheme.bg.ignoresSafeArea()
+            AuraTheme.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Top ~55 %: map pane
@@ -65,10 +65,7 @@ struct RoutePreviewView: View {
                                                        longitude: $0.longitude)
                             }
                         )
-                        .lineColor(StyleColor(UIColor(red: 43 / 255,
-                                                      green: 224 / 255,
-                                                      blue: 138 / 255,
-                                                      alpha: 1)))
+                        .lineColor(StyleColor(AuraTheme.routeUIColor))
                         .lineWidth(5)
                     }
                 }
@@ -76,19 +73,17 @@ struct RoutePreviewView: View {
             .mapStyle(settings.mapStyle.mapboxStyle)
             .ignoresSafeArea()
 
-            // Back chevron — ≥44pt hit area
+            // Back chevron — HUDControlButton carries the 44pt hit area and the
+            // Reduce Transparency fallback.
             Button {
                 router.screen = .plan
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.headline)
-                    .foregroundStyle(AuraTheme.text)
-                    .frame(width: 44, height: 44)
-                    .background(.ultraThinMaterial, in: Circle())
             }
-            .buttonStyle(.plain)
-            .padding(.top, 8)   // sits in the safe area
-            .padding(.leading, 16)
+            .buttonStyle(HUDControlButton())
+            .accessibilityLabel("Back")
+            .padding(.top, AuraTheme.Spacing.sm)   // sits in the safe area
+            .padding(.leading, AuraTheme.Spacing.lg)
         }
     }
 
@@ -100,15 +95,15 @@ struct RoutePreviewView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(destination.name)
                     .font(.title3.bold())
-                    .foregroundStyle(AuraTheme.text)
+                    .foregroundStyle(AuraTheme.textPrimary)
                     .lineLimit(1)
                 Text("Choose a route")
                     .font(.subheadline)
-                    .foregroundStyle(AuraTheme.muted)
+                    .foregroundStyle(AuraTheme.textSecondary)
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 20)
-            .padding(.bottom, 14)
+            .padding(.horizontal, AuraTheme.Spacing.xxl)
+            .padding(.top, AuraTheme.Spacing.xl)
+            .padding(.bottom, AuraTheme.Spacing.lg)
 
             // Route options / skeleton / error
             Group {
@@ -128,16 +123,16 @@ struct RoutePreviewView: View {
 
             // CTA
             startButton
-                .padding(.horizontal, 24)
-                .padding(.bottom, 24)
+                .padding(.horizontal, AuraTheme.Spacing.xxl)
+                .padding(.bottom, AuraTheme.Spacing.xxl)
         }
-        .background(AuraTheme.bg)
+        .background(AuraTheme.background)
     }
 
     // MARK: Route rows
 
     private var routeRows: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: AuraTheme.Spacing.sm) {
             ForEach(routes) { route in
                 RouteOptionRow(
                     route: route,
@@ -149,51 +144,51 @@ struct RoutePreviewView: View {
                 }
             }
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, AuraTheme.Spacing.xxl)
     }
 
     // MARK: Skeleton rows
 
     private var skeletonRows: some View {
         VStack(spacing: 0) {
-            VStack(spacing: 10) {
+            VStack(spacing: AuraTheme.Spacing.sm) {
                 ForEach(0..<3, id: \.self) { _ in
                     SkeletonRow(reduceMotion: reduceMotion)
                 }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, AuraTheme.Spacing.xxl)
 
             // Calm loading label below skeletons
             Text("Finding bike routes…")
                 .font(.footnote)
-                .foregroundStyle(AuraTheme.muted)
+                .foregroundStyle(AuraTheme.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.top, 8)
-                .padding(.horizontal, 24)
+                .padding(.top, AuraTheme.Spacing.sm)
+                .padding(.horizontal, AuraTheme.Spacing.xxl)
         }
     }
 
     // MARK: Empty / failed states
 
     private var emptyMessage: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: AuraTheme.Spacing.lg) {
             Text("No bike route found to here — try another destination.")
                 .font(.subheadline)
-                .foregroundStyle(AuraTheme.muted)
+                .foregroundStyle(AuraTheme.textSecondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, AuraTheme.Spacing.xxl)
             backButton
         }
         .frame(maxWidth: .infinity)
     }
 
     private var failedMessage: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: AuraTheme.Spacing.lg) {
             Text("Couldn't fetch routes right now. Check your connection and try again.")
                 .font(.subheadline)
-                .foregroundStyle(AuraTheme.muted)
+                .foregroundStyle(AuraTheme.textSecondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, AuraTheme.Spacing.xxl)
             backButton
         }
         .frame(maxWidth: .infinity)
@@ -205,11 +200,11 @@ struct RoutePreviewView: View {
         } label: {
             Text("Back")
                 .font(.headline)
-                .foregroundStyle(AuraTheme.text)
+                .foregroundStyle(AuraTheme.textPrimary)
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
                 .background(AuraTheme.surface, in: Capsule())
-                .padding(.horizontal, 24)
+                .padding(.horizontal, AuraTheme.Spacing.xxl)
         }
         .buttonStyle(.plain)
     }
@@ -217,22 +212,10 @@ struct RoutePreviewView: View {
     // MARK: Start CTA
 
     private var startButton: some View {
-        Button {
+        Button("Start RIDE") {
             router.screen = .ride(route: selected, destination: destination)
-        } label: {
-            Text("Start RIDE")
-                .font(.headline)
-                .foregroundStyle(Color.black)
-                .frame(maxWidth: .infinity)
-                .frame(height: 56)
-                .background(
-                    selected != nil
-                        ? AnyShapeStyle(AuraTheme.auroraGradient)
-                        : AnyShapeStyle(AuraTheme.auroraGradient.opacity(0.35)),
-                    in: Capsule()
-                )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.ctaPrimary)
         .disabled(selected == nil)
         .animation(.easeOut(duration: 0.18), value: selected?.id)
     }
@@ -316,29 +299,29 @@ private struct RouteOptionRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 14) {
+            HStack(spacing: AuraTheme.Spacing.lg) {
                 Image(systemName: glyph)
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(isSelected ? Color.black : AuraTheme.text)
+                    .foregroundStyle(isSelected ? AuraTheme.onAccent : AuraTheme.textPrimary)
                     .frame(width: 24)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(label)
                         .font(.headline)
-                        .foregroundStyle(isSelected ? Color.black : AuraTheme.text)
+                        .foregroundStyle(isSelected ? AuraTheme.onAccent : AuraTheme.textPrimary)
                     Text(metricText)
                         .font(.subheadline)
-                        .foregroundStyle(isSelected ? Color.black.opacity(0.65) : AuraTheme.muted)
+                        .foregroundStyle(isSelected ? AuraTheme.onAccent.opacity(0.7) : AuraTheme.textSecondary)
                 }
 
-                Spacer(minLength: 8)
+                Spacer(minLength: AuraTheme.Spacing.sm)
 
                 // Elevation profile — lets the rider compare hilliness across options.
                 if route.elevationProfile.count > 1 {
                     ElevationSparkline(
                         elevations: route.elevationProfile,
-                        stroke: isSelected ? Color.black.opacity(0.7) : AuraTheme.cyan,
-                        fill: isSelected ? Color.black.opacity(0.14) : AuraTheme.cyan.opacity(0.16)
+                        stroke: isSelected ? AuraTheme.onAccent.opacity(0.75) : AuraTheme.accent,
+                        fill: isSelected ? AuraTheme.onAccent.opacity(0.16) : AuraTheme.accent.opacity(0.16)
                     )
                     .frame(width: 54, height: 26)
                 }
@@ -346,17 +329,17 @@ private struct RouteOptionRow: View {
                 if isSelected {
                     Image(systemName: "checkmark")
                         .font(.subheadline.weight(.bold))
-                        .foregroundStyle(Color.black)
+                        .foregroundStyle(AuraTheme.onAccent)
                 }
             }
-            .padding(.horizontal, 18)
-            .padding(.vertical, 14)
+            .padding(.horizontal, AuraTheme.Spacing.lg)
+            .padding(.vertical, AuraTheme.Spacing.lg)
             .frame(minHeight: 56)
             .background(
                 isSelected
-                    ? AnyShapeStyle(AuraTheme.route)
+                    ? AnyShapeStyle(AuraTheme.accent)
                     : AnyShapeStyle(AuraTheme.surface),
-                in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                in: RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous)
             )
         }
         .buttonStyle(.plain)
@@ -371,24 +354,24 @@ private struct SkeletonRow: View {
     @State private var pulse: Bool = false
 
     var body: some View {
-        HStack(spacing: 14) {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+        HStack(spacing: AuraTheme.Spacing.lg) {
+            RoundedRectangle(cornerRadius: AuraTheme.Radius.sm, style: .continuous)
                 .fill(AuraTheme.surface)
                 .frame(width: 24, height: 20)
-            VStack(alignment: .leading, spacing: 6) {
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
+            VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
+                RoundedRectangle(cornerRadius: AuraTheme.Radius.xs, style: .continuous)
                     .fill(AuraTheme.surface)
                     .frame(width: 100, height: 14)
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                RoundedRectangle(cornerRadius: AuraTheme.Radius.xs, style: .continuous)
                     .fill(AuraTheme.surface)
                     .frame(width: 140, height: 11)
             }
             Spacer()
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 16)
+        .padding(.horizontal, AuraTheme.Spacing.lg)
+        .padding(.vertical, AuraTheme.Spacing.lg)
         .frame(minHeight: 56)
-        .background(AuraTheme.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(AuraTheme.surface, in: RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous))
         .opacity(reduceMotion ? 1.0 : (pulse ? 0.45 : 0.9))
         .onAppear {
             guard !reduceMotion else { return }

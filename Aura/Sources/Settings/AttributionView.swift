@@ -7,7 +7,7 @@ struct AttributionView: View {
                 Link("© OpenStreetMap contributors",
                      destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                 Text("Map data is available under the Open Database License (ODbL).")
-                    .font(.caption).foregroundStyle(AuraTheme.muted)
+                    .font(.caption).foregroundStyle(AuraTheme.textSecondary)
             }
             Section("Pittsburgh bike data") {
                 Link("BikePGH / WPRDC (CC-BY)",
@@ -16,8 +16,8 @@ struct AttributionView: View {
             Section("Maps & navigation") { Text("© Mapbox") }
         }
         .scrollContentBackground(.hidden)
-        .background(AuraTheme.bg.ignoresSafeArea())
-        .tint(AuraTheme.cyan)
+        .background(AuraTheme.background.ignoresSafeArea())
+        .tint(AuraTheme.accent)
         .navigationTitle("Attribution & data")
     }
 }

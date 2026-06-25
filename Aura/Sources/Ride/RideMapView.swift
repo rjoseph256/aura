@@ -18,7 +18,7 @@ struct RideMapView: View {
                         CLLocationCoordinate2D(latitude: $0.coordinate.latitude,
                                                longitude: $0.coordinate.longitude)
                     })
-                    .lineColor(StyleColor(UIColor(red: 43 / 255, green: 224 / 255, blue: 138 / 255, alpha: 1)))
+                    .lineColor(StyleColor(AuraTheme.routeUIColor))
                     .lineWidth(6)
                 }
             }

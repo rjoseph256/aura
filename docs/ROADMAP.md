@@ -133,16 +133,23 @@ The rest of the audit groups into a few themes.
   everywhere) is the cautionary tale for why a clean build is not enough here.
   Resolved in Wave 1 (2026-06-25): CI now builds and lints the app. It remains untested;
   app-target tests are still later work.
-- **There is no design system, only a color sheet.** `AuraTheme` is eight flat colors and
-  two font helpers. Spacing, radii, elevation, and the type ramp are improvised per view
-  (corner radii alone span seven values). The route green is a hardcoded RGB duplicated
-  across four map files instead of flowing from the token. The taste is good; the system
-  underneath it is missing.
+- **There is no design system, only a color sheet.** `AuraTheme` was eight flat colors and
+  two font helpers. Spacing, radii, elevation, and the type ramp were improvised per view
+  (corner radii alone spanned seven values). The route green was a hardcoded RGB duplicated
+  across four map files instead of flowing from the token. The taste was good; the system
+  underneath it was missing.
+  Resolved in Wave 1 (2026-06-25): see the Design system bullet under Wave 1 — roles, scales,
+  a type ramp, four extracted components, the route bridge, and the mono-lime identity, with
+  every screen migrated and the old symbols removed.
 - **Accessibility is strong on motion, weak in the cockpit.** Reduce Motion is honored
   everywhere and the Dynamic Type pass is real, but the SpeedRail and TurnCard, the two
   most important elements, have no composed VoiceOver labels, and the floating controls
   use thin material with no Reduce Transparency fallback and several borderline contrast
   values.
+  Partly resolved in Wave 1 (2026-06-25): the floating controls now run through
+  `HUDControlButton`, which falls back to a solid surface under Reduce Transparency, and the
+  speed and stat readouts combine value and label into one VoiceOver element. Richer composed
+  labels for SpeedRail/TurnCard and the broad contrast lift are still Wave 2 work.
 
 Full detail, including file and line references and severities, lives in the audit notes
 that produced this section.
@@ -181,10 +188,22 @@ The rebuilds that make every later wave cheap and safe. Do these before feature 
   the `openSettings` helper, the GPS chip, and the screen-awake calls. This is the seam that
   the Live Activity, HealthKit, and haptics all hook into, and it makes ride completion
   testable.
-- **Design system:** promote `AuraTheme` into color roles, a spacing scale, a radius
-  scale, and a type ramp, with a `UIColor`/`StyleColor` bridge so the route polyline stops
-  being a magic number in four files. Extract the repeated components (the aurora CTA, the
-  stat pair, the HUD control button with a Reduce Transparency fallback).
+- **Design system:** SHIPPED (2026-06-25). `AuraTheme` is now semantic color roles
+  (background, surface, text primary/secondary, accent, routeLine, destructive, ink-on-fill,
+  border), a spacing scale, a radius scale, and a type ramp, plus a `UIColor` bridge so the
+  route polyline flows from one token instead of a magic RGB in four files. The four repeated
+  components were extracted: `CTAButtonStyle` (primary/secondary/tertiary/destructive),
+  `HUDControlButton` (with the Reduce Transparency fallback), `SpeedReadout`, and `StatPair`.
+  The work also carried a new identity the user chose along the way: one electric lime accent
+  (#C8FA4B) on near-black, pink (#FF4D9D) reserved for ending a ride, and no gradients (the
+  aurora is retired). The two personalities now read apart by type and density rather than
+  color — the cockpit uses Saira Condensed numerals (bundled, SIL OFL), the chrome uses SF Pro
+  Rounded. Every screen was migrated (Plan, ride summary, History, Settings, Offline,
+  permission, both cockpit HUDs) along with the Live Activity, and the deprecated `AuraTheme`
+  symbols were removed. Two choices are worth a look on a real ring with progress and a saved
+  ride: the WeeklyRing stroke was left at its existing 16pt rather than thinned, and the ride
+  summary's stat grid is now centered. Still deferred: a custom Mapbox Studio map style
+  (fast-follow).
 - **Quality gates:** SHIPPED (2026-06-25). CI now compiles the app target and the
   embedded AuraWidgets extension with xcodebuild, on top of the existing package tests.
   Swift 6 language mode is on across all four compiled targets (AuraCore, AuraKit, the

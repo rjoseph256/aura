@@ -104,6 +104,6 @@ private struct AuraTabView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag(AppRouter.Tab.settings)
         }
-        .tint(AuraTheme.cyan)
+        .tint(AuraTheme.accent)
     }
 }

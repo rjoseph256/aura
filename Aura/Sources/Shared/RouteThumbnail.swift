@@ -9,7 +9,7 @@ import AuraKit
 /// attribution — and the route's *shape* reads clearly even at thumbnail size.
 struct RouteThumbnail: View {
     let coordinates: [Coordinate]
-    var lineColor: Color = AuraTheme.route
+    var lineColor: Color = AuraTheme.routeLine
     var lineWidth: CGFloat = 2
 
     var body: some View {
