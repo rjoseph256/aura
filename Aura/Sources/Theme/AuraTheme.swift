@@ -78,16 +78,4 @@ enum AuraTheme {
             .custom(CockpitFace.bold.postScriptName, size: size, relativeTo: style)
         }
     }
-
-    // MARK: - Deprecated — removed in the final cleanup task once all call sites migrate.
-    static let bg = background
-    static let cyan   = Palette.lime
-    static let violet = Palette.lime
-    static let pink   = destructive
-    static let route  = Palette.lime
-    static let text   = textPrimary
-    static let muted  = textSecondary
-    static let auroraGradient = LinearGradient(colors: [accent, accent], startPoint: .leading, endPoint: .trailing)
-    static func heroNumber(_ size: CGFloat = 52) -> Font { .system(size: size, weight: .heavy, design: .rounded) }
-    static let unitLabel = Typography.unit
 }

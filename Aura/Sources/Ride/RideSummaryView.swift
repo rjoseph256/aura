@@ -84,7 +84,7 @@ struct RideSummaryView: View {
     /// One value+label metric cell. Combined into a single VoiceOver element so it reads
     /// as a unit (e.g. "21.6, km/h top") instead of two separate stops.
     private func stat(_ value: String, _ label: String) -> some View {
-        StatPair(value: value, label: label, context: .brand)
+        StatPair(value: value, label: label, context: .brand, alignment: .center)
             .accessibilityElement(children: .combine)
     }
 
