@@ -82,6 +82,7 @@ public final class RideSessionCoordinator {
             for await point in stream { self?.recorder.record(point) }
         }
         tickerTask = Task { [weak self] in
+            // Terminates when finish()/cancel() cancels this task; the isRecording guard is a secondary exit.
             while !Task.isCancelled {
                 guard let self, self.recorder.isRecording else { return }
                 self.elapsed = Date().timeIntervalSince(self.startedAt ?? Date())
@@ -93,8 +94,8 @@ public final class RideSessionCoordinator {
     }
 
     /// Pushes current stats + maneuver to the Live Activity. Factored out so a test can
-    /// call it directly instead of waiting on the 0.5 s ticker. The activity throttles
-    /// internally.
+    /// call it directly instead of waiting on the 0.5 s ticker. The production activity
+    /// conformer throttles internally; test doubles record every call.
     func pushActivityUpdate() {
         activity.update(stats: recorder.stats, maneuver: maneuver)
     }
