@@ -1,5 +1,9 @@
 name: CI
 
+# Jobs run on macos-15 with latest-stable Xcode so the toolchain matches the dev
+# environment (Swift 6.2 / Xcode 26, with region-based isolation). An older
+# Swift-5-era image would reject the Swift 6 language mode the package and app use.
+
 on:
   push:
     branches: [main]
@@ -10,23 +14,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  auracore-tests:
+  package-tests:
     name: AuraCore tests (swift test)
-    # Use a modern macOS image + latest stable Xcode so the Swift toolchain matches
-    # the dev environment (Swift 6's region-based isolation). The older Swift 5.10 on
-    # macos-14 rejected concurrency captures that newer toolchains accept as warnings.
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-
       - name: Show Swift version
         run: swift --version
-
-      # Pure-logic package: no simulator, no Mapbox token required.
+      # Pure-logic package, now under Swift 6 language mode. No simulator, no Mapbox token.
       - name: Run AuraCore + AuraKit tests
         working-directory: AuraCore
         run: swift test
+
+  app-build:
+    name: App build (xcodebuild)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Write Mapbox credentials
+        env:
+          MAPBOX_DOWNLOADS_TOKEN: ${{ secrets.MAPBOX_DOWNLOADS_TOKEN }}
+          MAPBOX_PUBLIC_TOKEN: ${{ secrets.MAPBOX_PUBLIC_TOKEN }}
+        run: |
+          umask 077
+          printf 'machine api.mapbox.com\n  login mapbox\n  password %s\n' "$MAPBOX_DOWNLOADS_TOKEN" > "$HOME/.netrc"
+          printf '%s' "$MAPBOX_PUBLIC_TOKEN" > Aura/Resources/MapboxAccessToken
+      - name: Generate project
+        working-directory: Aura
+        run: xcodegen generate
+      - name: Build app (also builds the embedded AuraWidgets extension)
+        working-directory: Aura
+        run: |
+          xcodebuild build \
+            -project Aura.xcodeproj \
+            -scheme Aura \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO
+
+  lint:
+    name: SwiftLint (--strict)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned SwiftLint
+        run: |
+          curl -fsSL -o /tmp/swiftlint.zip \
+            https://github.com/realm/SwiftLint/releases/download/0.64.1/portable_swiftlint.zip
+          mkdir -p /tmp/swiftlint && unzip -o /tmp/swiftlint.zip -d /tmp/swiftlint
+          echo "/tmp/swiftlint" >> "$GITHUB_PATH"
+      - name: Lint
+        run: swiftlint lint --strict

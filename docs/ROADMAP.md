@@ -131,6 +131,8 @@ The rest of the audit groups into a few themes.
   a break in a Mapbox provider, a view, or the wiring passes green. There is no SwiftLint
   config and no lint step. The Terrain-RGB elevation bug (compiled fine, returned flat
   everywhere) is the cautionary tale for why a clean build is not enough here.
+  Resolved in Wave 1 (2026-06-25): CI now builds and lints the app. It remains untested;
+  app-target tests are still later work.
 - **There is no design system, only a color sheet.** `AuraTheme` is eight flat colors and
   two font helpers. Spacing, radii, elevation, and the type ramp are improvised per view
   (corner radii alone span seven values). The route green is a hardcoded RGB duplicated
@@ -183,9 +185,11 @@ The rebuilds that make every later wave cheap and safe. Do these before feature 
   scale, and a type ramp, with a `UIColor`/`StyleColor` bridge so the route polyline stops
   being a magic number in four files. Extract the repeated components (the aurora CTA, the
   stat pair, the HUD control button with a Reduce Transparency fallback).
-- **Quality gates:** turn on strict concurrency in dependency order (AuraCore, then
-  AuraKit, then the app), add an `xcodebuild build` job for the app to CI, and add
-  SwiftLint with a committed config and a `--strict` CI step.
+- **Quality gates:** SHIPPED (2026-06-25). CI now compiles the app target and the
+  embedded AuraWidgets extension with xcodebuild, on top of the existing package tests.
+  Swift 6 language mode is on across all four compiled targets (AuraCore, AuraKit, the
+  app, and AuraWidgets). SwiftLint runs `--strict` with a tuned default rule set and a
+  committed config.
 
 ### Wave 2 — The cockpit the spec promised
 
@@ -246,14 +250,16 @@ The `AuraCore` package has 115 XCTest tests covering the pure layer: GPX parsing
 ranking (including that "Most paths" avoids forced-walking routes), unit conversion, the
 turn-card and guidance pipelines (including the reroute transitions), the week-to-date
 aggregation, the plotting math, and the GPS signal classification, fix filter, and
-`LocationService.ingest`. The gap is the app target: every SwiftUI view, every Mapbox-backed
-provider, and the live CoreLocation stream are untested and not even compiled in CI. Wave 0's
-free-ride record-to-summary flow was checked with a one-off simulator smoke test, not an
-automated one; the app-target CI build and SwiftLint are still Wave 1 work.
+`LocationService.ingest`. CI runs three jobs: the package tests under Swift 6 language mode,
+an xcodebuild build of the app (which also builds AuraWidgets), and SwiftLint `--strict`. The
+package test count is unchanged at 115; the quality-gates sub-project added no tests. The gap
+is the app target: every SwiftUI view, every Mapbox-backed provider, and the live CoreLocation
+stream are built in CI now but still untested. Wave 0's free-ride record-to-summary flow was
+checked with a one-off simulator smoke test, not an automated one.
 
-Near-term testing work, sequenced with the waves above: build the app target in CI and add
-SwiftLint (Wave 1), add the schema migration test alongside the persistence rebuild
-(Wave 1), and adopt Swift Testing for new tests. UI work is still verified by running the
+Near-term testing work, sequenced with the waves above: the app-target CI build and SwiftLint
+landed in Wave 1; still to come are the schema migration test alongside the persistence
+rebuild (Wave 1) and adopting Swift Testing for new tests. UI work is still verified by running the
 app on the simulator and checking the actual screens, since a clean build is not enough to
 catch a feature that silently does nothing (the Terrain-RGB elevation switch is the
 cautionary tale: the first implementation compiled fine and returned a flat value
