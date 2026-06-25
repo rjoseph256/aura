@@ -48,6 +48,9 @@
 | numeric `cornerRadius`/literal | nearest `AuraTheme.Radius.*` | 6→sm(8), 11→md(12), 14→lg(16)or md, 18→xl(20)or lg |
 | numeric `.padding`/`spacing:` | nearest `AuraTheme.Spacing.*` | snap to nearest 4-pt step |
 | `.font(...)` literal | nearest `AuraTheme.Typography` role | |
+| `Color.white.opacity(0.08)`-style separators/tracks | `AuraTheme.border` (added in Task 3) | hairline rows, ring track, control outlines |
+
+**Color-collapse note (from the Task 1 code review).** Because `cyan`, `violet`, and `route` all map to lime now, any site that used *color* to encode meaning loses that cue. Known sites: `HistoryView.swift` and `LastRideCard.swift` (navigate vs free-ride was cyan vs green) and `WeeklyRing.swift` (a cyan→violet gradient ring). When migrating those, keep the distinction **non-chromatically** — the SF Symbol already differs (`bicycle` vs `location.north.line.fill`); add weight or density if it needs reinforcing — and make the ring a solid lime arc. "Still compiles and looks lime" is NOT migrated; consciously re-express or intentionally drop each former color distinction.
 
 ---
 
@@ -209,7 +212,12 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 Consult @all-ios-skills:swiftui-patterns (ButtonStyle) and @all-ios-skills:ios-accessibility (Reduce Transparency).
 
-**Files:** Create `Aura/Sources/Theme/CTAButtonStyle.swift`, `Aura/Sources/Theme/HUDControlButton.swift`.
+**Files:** Create `Aura/Sources/Theme/CTAButtonStyle.swift`, `Aura/Sources/Theme/HUDControlButton.swift`; Modify `Aura/Sources/Theme/AuraTheme.swift` (add the `border` role).
+
+- [ ] **Step 0: Add a neutral hairline role** to `AuraTheme` (color roles section), so separators, hairline instrument rows, control outlines, and the ring track stop being ad-hoc opacity literals:
+```swift
+    static let border = Color.white.opacity(0.08)
+```
 
 - [ ] **Step 1: `CTAButtonStyle`** with the refined hierarchy (radius lg, weight 600/`.semibold`, ~50pt primary, reduce-motion-aware press):
 ```swift
