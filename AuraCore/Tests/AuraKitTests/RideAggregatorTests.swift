@@ -35,7 +35,7 @@ final class RideAggregatorTests: XCTestCase {
             ride(day: 22, distance: 1000),  // Mon — in week
             ride(day: 24, distance: 2000),  // Wed (today) — in week
             ride(day: 21, distance: 5000),  // Sun — previous week
-            ride(day: 29, distance: 9000),  // next Mon — next week
+            ride(day: 29, distance: 9000)  // next Mon — next week
         ]
         let w = RideAggregator.weekToDate(rides, now: now, calendar: cal)
         XCTAssertEqual(w.distanceMeters, 3000, accuracy: 0.001)

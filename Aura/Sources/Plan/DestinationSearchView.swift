@@ -15,8 +15,8 @@ struct DestinationSearchView: View {
 
     @State private var suggestions: [PlaceAutocomplete.Suggestion] = []
     @State private var isLoading: Bool = false
-    @State private var errorMessage: String? = nil
-    @State private var debounceTask: Task<Void, Never>? = nil
+    @State private var errorMessage: String?
+    @State private var debounceTask: Task<Void, Never>?
 
     // The Search SDK does NOT read MapboxOptions.accessToken; it requires an explicit
     // token (or Info.plist MBXAccessToken). We pass the token configured at launch.

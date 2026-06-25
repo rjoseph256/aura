@@ -107,4 +107,3 @@ private struct AuraTabView: View {
         .tint(AuraTheme.cyan)
     }
 }
-

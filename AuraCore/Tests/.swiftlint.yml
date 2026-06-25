@@ -1,0 +1,6 @@
+# Test-code tolerances. Inherits the root config; relaxes rules that are
+# acceptable in tests, where force-unwrapping a known-good fixture is clearer
+# than defensive optionality.
+disabled_rules:
+  - force_try
+  - force_cast

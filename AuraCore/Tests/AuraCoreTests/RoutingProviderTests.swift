@@ -18,7 +18,6 @@ final class RoutingProviderTests: XCTestCase {
         let provider: RoutingProvider = MockRoutingProvider(error: Boom())
         let request = RouteRequest(origin: .init(latitude: 0, longitude: 0),
                                    destination: .init(latitude: 1, longitude: 1), waypoints: [])
-        do { _ = try await provider.routes(for: request); XCTFail("should throw") }
-        catch { /* expected */ }
+        do { _ = try await provider.routes(for: request); XCTFail("should throw") } catch { /* expected */ }
     }
 }

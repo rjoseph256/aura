@@ -22,7 +22,7 @@ final class RideStatsCalculatorEdgeTests: XCTestCase {
         // and no contribution to moving time.
         let track = [
             pt(40.4400, -80.0000, ele: 250, t: 100),
-            pt(40.4410, -80.0000, ele: 250, t: 100), // dt == 0
+            pt(40.4410, -80.0000, ele: 250, t: 100) // dt == 0
         ]
         let s = RideStatsCalculator.stats(from: track)
 
@@ -45,7 +45,7 @@ final class RideStatsCalculatorEdgeTests: XCTestCase {
         // the segment entirely: no negative/inflated speed, no negative moving time.
         let track = [
             pt(40.4400, -80.0000, ele: 250, t: 200),
-            pt(40.4410, -80.0000, ele: 250, t: 100), // dt == -100
+            pt(40.4410, -80.0000, ele: 250, t: 100) // dt == -100
         ]
         let s = RideStatsCalculator.stats(from: track)
 
@@ -68,7 +68,7 @@ final class RideStatsCalculatorEdgeTests: XCTestCase {
         let track = [
             pt(40.4400, -80.0000, ele: 250, t: 0),
             pt(40.4400, -80.0000, ele: 250, t: 30),
-            pt(40.4400, -80.0000, ele: 250, t: 60),
+            pt(40.4400, -80.0000, ele: 250, t: 60)
         ]
         let s = RideStatsCalculator.stats(from: track)
 
@@ -90,7 +90,7 @@ final class RideStatsCalculatorEdgeTests: XCTestCase {
             pt(40.4400, -80.0000, ele: 100, t: 0),
             pt(40.4410, -80.0000, ele: nil, t: 20),   // nil → carried over, last known stays 100
             pt(40.4420, -80.0000, ele: 200, t: 40),   // +100 vs last known (100) → counted
-            pt(40.4430, -80.0000, ele: 210, t: 60),   // +10 vs previous (200) → counted
+            pt(40.4430, -80.0000, ele: 210, t: 60)   // +10 vs previous (200) → counted
         ]
         let s = RideStatsCalculator.stats(from: track)
 
@@ -105,7 +105,7 @@ final class RideStatsCalculatorEdgeTests: XCTestCase {
         let track = [
             pt(40.4400, -80.0000, ele: nil, t: 0),
             pt(40.4410, -80.0000, ele: 100, t: 20),   // first known → baseline, no gain
-            pt(40.4420, -80.0000, ele: 105, t: 40),   // +5 vs baseline → counted
+            pt(40.4420, -80.0000, ele: 105, t: 40)   // +5 vs baseline → counted
         ]
         let s = RideStatsCalculator.stats(from: track)
         XCTAssertEqual(s.elevationGainMeters, 5, accuracy: 1e-6)
@@ -114,7 +114,7 @@ final class RideStatsCalculatorEdgeTests: XCTestCase {
     func test_allNilElevation_zeroGainNoCrash() {
         let track = [
             pt(40.4400, -80.0000, ele: nil, t: 0),
-            pt(40.4410, -80.0000, ele: nil, t: 20),
+            pt(40.4410, -80.0000, ele: nil, t: 20)
         ]
         let s = RideStatsCalculator.stats(from: track)
         XCTAssertEqual(s.elevationGainMeters, 0)
@@ -138,7 +138,7 @@ final class RideStatsCalculatorEdgeTests: XCTestCase {
         let end = Coordinate(latitude: 0, longitude: 5.01 / 111_320.0)
         let track = [
             TrackPoint(coordinate: start, elevation: nil, timestamp: Date(timeIntervalSince1970: 0)),
-            TrackPoint(coordinate: end, elevation: nil, timestamp: Date(timeIntervalSince1970: 10)),
+            TrackPoint(coordinate: end, elevation: nil, timestamp: Date(timeIntervalSince1970: 10))
         ]
         let s = RideStatsCalculator.stats(from: track)
 
@@ -154,7 +154,7 @@ final class RideStatsCalculatorEdgeTests: XCTestCase {
         let end = Coordinate(latitude: 0, longitude: 5.0 / 111_320.0)
         let track = [
             TrackPoint(coordinate: start, elevation: nil, timestamp: Date(timeIntervalSince1970: 0)),
-            TrackPoint(coordinate: end, elevation: nil, timestamp: Date(timeIntervalSince1970: 10)),
+            TrackPoint(coordinate: end, elevation: nil, timestamp: Date(timeIntervalSince1970: 10))
         ]
         let s = RideStatsCalculator.stats(from: track)
 
@@ -169,7 +169,7 @@ final class RideStatsCalculatorEdgeTests: XCTestCase {
         // delta == 1.0 m, guard is `delta >= elevationNoiseThreshold` → counted.
         let track = [
             pt(40.4400, -80.0000, ele: 100.0, t: 0),
-            pt(40.4410, -80.0000, ele: 101.0, t: 20), // +1.0 exactly
+            pt(40.4410, -80.0000, ele: 101.0, t: 20) // +1.0 exactly
         ]
         let s = RideStatsCalculator.stats(from: track)
         XCTAssertEqual(s.elevationGainMeters, 1.0, accuracy: 1e-9)
@@ -179,7 +179,7 @@ final class RideStatsCalculatorEdgeTests: XCTestCase {
         // +0.9 m < 1.0 threshold → treated as GPS noise, not counted.
         let track = [
             pt(40.4400, -80.0000, ele: 100.0, t: 0),
-            pt(40.4410, -80.0000, ele: 100.9, t: 20),
+            pt(40.4410, -80.0000, ele: 100.9, t: 20)
         ]
         let s = RideStatsCalculator.stats(from: track)
         XCTAssertEqual(s.elevationGainMeters, 0, accuracy: 1e-9)

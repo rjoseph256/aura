@@ -6,7 +6,7 @@ final class RouteMetricsTests: XCTestCase {
         let segments: [(distanceMeters: Double, isWalking: Bool)] = [
             (300, true),   // pushing the bike
             (100, false),  // riding
-            (100, true),   // pushing the bike
+            (100, true)   // pushing the bike
         ]
         // 400 walked of 500 total = 0.8
         XCTAssertEqual(RouteMetrics.walkFraction(segments: segments), 0.8, accuracy: 0.0001)

@@ -81,7 +81,7 @@ struct RideTimerStatCell: View {
 /// turn is imminent).
 struct AuroraGlyph: View {
     let systemName: String
-    var solid: Color? = nil
+    var solid: Color?
     var size: CGFloat = 34
 
     private var foreground: AnyShapeStyle {

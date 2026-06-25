@@ -46,7 +46,7 @@ final class PlottingTests: XCTestCase {
             Coordinate(latitude: 0.0, longitude: 0.0),
             Coordinate(latitude: 0.0, longitude: 2.0),
             Coordinate(latitude: 1.0, longitude: 2.0),
-            Coordinate(latitude: 1.0, longitude: 0.0),
+            Coordinate(latitude: 1.0, longitude: 0.0)
         ]
         let size = CGSize(width: 100, height: 100)
         let pts = PolylineNormalizer.points(coords, in: size, inset: 0)
@@ -69,7 +69,7 @@ final class PlottingTests: XCTestCase {
         // Higher latitude must map to a smaller y (top of the view).
         let coords = [
             Coordinate(latitude: 0.0, longitude: 0.0),  // south
-            Coordinate(latitude: 1.0, longitude: 0.0),  // north
+            Coordinate(latitude: 1.0, longitude: 0.0)  // north
         ]
         let pts = PolylineNormalizer.points(coords, in: CGSize(width: 50, height: 50), inset: 0)
         XCTAssertGreaterThan(pts[0].y, pts[1].y) // south below north

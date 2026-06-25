@@ -17,10 +17,10 @@ struct TurnCardView: View {
     // MARK: Layout constants
 
     @ScaledMetric(relativeTo: .title2)     private var arrowCollapsed: CGFloat = 24
-    @ScaledMetric(relativeTo: .largeTitle) private var arrowExpanded:  CGFloat = 34
+    @ScaledMetric(relativeTo: .largeTitle) private var arrowExpanded: CGFloat = 34
 
-    @ScaledMetric(relativeTo: .title2)     private var distCollapsed:  CGFloat = 22
-    @ScaledMetric(relativeTo: .largeTitle) private var distExpanded:   CGFloat = 36
+    @ScaledMetric(relativeTo: .title2)     private var distCollapsed: CGFloat = 22
+    @ScaledMetric(relativeTo: .largeTitle) private var distExpanded: CGFloat = 36
 
     // MARK: Body
 
@@ -72,7 +72,7 @@ struct TurnCardView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, state.isExpanded ? 20 : 14)
-        .padding(.vertical,   state.isExpanded ? 18 : 12)
+        .padding(.vertical, state.isExpanded ? 18 : 12)
         // Background shifts from near-opaque dark → brand green.
         .background(
             state.isExpanded ? AuraTheme.route : AuraTheme.surface.opacity(0.92),
