@@ -7,13 +7,13 @@ import SwiftUI
 
 /// Navigate-mode HUD with real turn-by-turn guidance.
 ///
-/// - Full-bleed dark Mapbox map with `followPuck` viewport and a static green
+/// - Full-bleed dark Mapbox map with `followPuck` viewport and a static lime
 ///   polyline drawn from `route.geometry`.
 /// - Turn card driven by a `GuidanceViewModel`, which consumes guidance events from a
 ///   `GuidanceSession` (Mapbox-backed in the app, scripted in tests). The HUD itself
 ///   imports no guidance SDK — only the map renderer.
 /// - SpeedRail bottom-trailing with live speed and elapsed time.
-/// - Pink "End ride" capsule → RideSummaryView sheet → returns to .plan.
+/// - Destructive "End ride" button → RideSummaryView sheet → returns to .plan.
 /// - Mute toggle (top-trailing) for spoken instructions via AVSpeechSynthesizer.
 struct NavigateHUDView: View {
     let route: AuraCore.Route
@@ -69,7 +69,7 @@ struct NavigateHUDView: View {
 
             // Speed stats — bottom-trailing mirror of RideHUDView
             SpeedRail(stats: recorder.stats, elapsed: elapsed, units: settings.units)
-                .padding(.trailing, 14)
+                .padding(.trailing, AuraTheme.Spacing.lg)
                 .padding(.bottom, 90)
                 .frame(maxWidth: .infinity, maxHeight: .infinity,
                        alignment: .bottomTrailing)
@@ -101,18 +101,18 @@ struct NavigateHUDView: View {
             if guidance.isRerouting {
                 Label("Rerouting…", systemImage: "arrow.triangle.2.circlepath")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.6), in: Capsule())
-                    .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
+                    .foregroundStyle(AuraTheme.textPrimary)
+                    .padding(.horizontal, AuraTheme.Spacing.md)
+                    .padding(.vertical, AuraTheme.Spacing.sm)
+                    .background(AuraTheme.surface.opacity(0.6), in: Capsule())
+                    .overlay(Capsule().strokeBorder(AuraTheme.border))
                     .padding(.top, 96)
                     .transition(.opacity)
                     .accessibilityLabel("Rerouting")
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: guidance.isRerouting)
-        .background(AuraTheme.bg)
+        .background(AuraTheme.background)
         // Summary sheet: when dismissed, return to plan screen.
         .sheet(item: $finishedRide, onDismiss: {
             router.screen = .plan
@@ -194,18 +194,11 @@ struct NavigateHUDView: View {
     // MARK: End-ride button
 
     private var endRideButton: some View {
-        Button {
+        Button("End ride") {
             endRide()
-        } label: {
-            Text("End ride")
-                .font(.headline)
-                .foregroundStyle(.black)
-                .padding(.vertical, 14)
-                .frame(maxWidth: .infinity)
-                .background(AuraTheme.pink, in: Capsule())
-                .frame(minHeight: 56)
         }
-        .padding(.horizontal, 24)
+        .buttonStyle(.ctaDestructive)
+        .padding(.horizontal, AuraTheme.Spacing.xxl)
         .padding(.bottom, 28)
         .frame(maxWidth: .infinity, alignment: .center)
     }
@@ -220,12 +213,13 @@ struct NavigateHUDView: View {
             }
         } label: {
             Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
         }
-        .accessibilityLabel(isMuted ? "Unmute voice guidance" : "Mute voice guidance")
+        // Active (muted) state shows lime; toggle trait + value convey state non-visually
+        // since HUDControlButton signals "active" by color alone.
+        .buttonStyle(.hudControl(active: isMuted))
+        .accessibilityLabel("Mute voice guidance")
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityValue(isMuted ? "On" : "Off")
     }
 
     // MARK: Recording lifecycle

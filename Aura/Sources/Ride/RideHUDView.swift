@@ -25,7 +25,7 @@ struct RideHUDView: View {
         ZStack(alignment: .bottomTrailing) {
             RideMapView(track: recorder.track)
             SpeedRail(stats: recorder.stats, elapsed: elapsed, units: settings.units)
-                .padding(.trailing, 14).padding(.bottom, 90)
+                .padding(.trailing, AuraTheme.Spacing.lg).padding(.bottom, 90)
             controls
         }
         // Back-to-home affordance, shown before a ride starts so the screen can be
@@ -42,7 +42,7 @@ struct RideHUDView: View {
             GPSSignalChip(signal: location.signal)
                 .padding(.top, 8).padding(.trailing, 16)
         }
-        .background(AuraTheme.bg)
+        .background(AuraTheme.background)
         // Returning from the summary (or backing out) drops to the plan/tab shell,
         // mirroring NavigateHUDView.
         .sheet(item: $finishedRide, onDismiss: { router.screen = .plan }, content: {
@@ -73,12 +73,10 @@ struct RideHUDView: View {
             recorder.isRecording ? endRide() : startRide()
         } label: {
             Text(recorder.isRecording ? "End ride" : "Start free ride")
-                .font(.headline).foregroundStyle(.black)
-                .padding(.vertical, 14).frame(maxWidth: .infinity)
-                .background(recorder.isRecording ? AnyShapeStyle(AuraTheme.pink) : AnyShapeStyle(AuraTheme.auroraGradient),
-                            in: Capsule())
         }
-        .padding(.horizontal, 24).padding(.bottom, 28)
+        // Primary lime when starting; destructive pink only for end-ride.
+        .buttonStyle(recorder.isRecording ? .ctaDestructive : .ctaPrimary)
+        .padding(.horizontal, AuraTheme.Spacing.xxl).padding(.bottom, 28)
         .frame(maxWidth: .infinity, alignment: .center)
     }
 
@@ -87,11 +85,8 @@ struct RideHUDView: View {
             router.screen = .plan
         } label: {
             Image(systemName: "chevron.left")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
         }
+        .buttonStyle(.hudControl)
         .accessibilityLabel("Back to home")
     }
 
