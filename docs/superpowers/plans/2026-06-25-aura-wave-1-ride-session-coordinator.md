@@ -264,6 +264,8 @@ public final class RideSessionCoordinator {
     public var track: [TrackPoint] { recorder.track }
     public var isRecording: Bool { recorder.isRecording }
     public private(set) var elapsed: TimeInterval = 0
+    /// Set by `finish()`, bound by the HUD's summary `.sheet(item:)`. Not reset here:
+    /// the HUD is torn down on return to `.plan`, so the coordinator goes with it.
     public var finishedRide: Ride?
     public private(set) var saveFailed = false
 
