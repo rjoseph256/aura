@@ -19,7 +19,7 @@ final class RideStatsCalculatorTests: XCTestCase {
             pt(40.4400, -80.0000, ele: 250, t: 0),
             pt(40.4410, -80.0000, ele: 255, t: 20),   // climb +5
             pt(40.4420, -80.0000, ele: 252, t: 40),   // descent (ignored for gain)
-            pt(40.4430, -80.0000, ele: 258, t: 60),   // climb +6
+            pt(40.4430, -80.0000, ele: 258, t: 60)   // climb +6
         ]
         let s = RideStatsCalculator.stats(from: track)
         // Each 0.001° latitude ≈ 111 m → ~333 m total
@@ -32,7 +32,7 @@ final class RideStatsCalculatorTests: XCTestCase {
             pt(40.4400, -80.0000, ele: 250, t: 0),
             pt(40.4410, -80.0000, ele: 250, t: 20),   // ~111 m in 20 s → ~5.5 m/s (moving)
             pt(40.4410, -80.0000, ele: 250, t: 320),  // 0 m in 300 s → stopped (excluded)
-            pt(40.4420, -80.0000, ele: 250, t: 340),  // ~111 m in 20 s → moving
+            pt(40.4420, -80.0000, ele: 250, t: 340)  // ~111 m in 20 s → moving
         ]
         let s = RideStatsCalculator.stats(from: track)
         XCTAssertEqual(s.movingTimeSeconds, 40, accuracy: 0.001)        // 20 + 20, stop excluded

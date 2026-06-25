@@ -12,7 +12,7 @@ final class RouteRankerTests: XCTestCase {
 
     func test_labelsThreeDistinctWinners() {
         let fast = candidate(dur: 200, ele: 80, walk: 0.5)   // fastest (lowest dur)
-        let flat = candidate(dur: 400, ele: 5,  walk: 0.4)   // flattest (lowest ele)
+        let flat = candidate(dur: 400, ele: 5, walk: 0.4)   // flattest (lowest ele)
         let paths = candidate(dur: 350, ele: 60, walk: 0.1)  // most paths (least walking)
         let result = RouteRanker.label(origin: origin, destination: dest,
                                        candidates: [fast, flat, paths])

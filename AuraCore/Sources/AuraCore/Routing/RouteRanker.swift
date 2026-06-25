@@ -31,7 +31,7 @@ public enum RouteRanker {
         let winners: [(Route.Profile, Int)] = [
             (.mostPaths, indexOfMin(candidates) { $0.walkFraction }),
             (.flattest, indexOfMin(candidates) { $0.elevationGainMeters }),
-            (.fastest, indexOfMin(candidates) { $0.estimatedDurationSeconds }),
+            (.fastest, indexOfMin(candidates) { $0.estimatedDurationSeconds })
         ]
 
         var usedIndices = Set<Int>()

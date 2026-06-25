@@ -14,7 +14,7 @@ final class RideRecorderTests: XCTestCase {
             pt(40.4400, ele: 250, t: 0),
             pt(40.4410, ele: 255, t: 20),
             pt(40.4420, ele: 252, t: 40),
-            pt(40.4430, ele: 258, t: 60),
+            pt(40.4430, ele: 258, t: 60)
         ]
         let recorder = RideRecorder(kind: .freeRide)
         recorder.start(at: Date(timeIntervalSince1970: 0))

@@ -31,6 +31,8 @@ public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
 
     // MARK: - AuraCore.RoutingProvider
 
+    // Mapbox v3 setup is one linear configuration block; splitting hides the sequence.
+    // swiftlint:disable:next function_body_length
     public func routes(for request: AuraCore.RouteRequest) async throws -> [AuraCore.Route] {
 
         // 1. Build Mapbox Waypoints (origin → intermediate → destination).

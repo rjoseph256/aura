@@ -45,9 +45,9 @@ struct RideHUDView: View {
         .background(AuraTheme.bg)
         // Returning from the summary (or backing out) drops to the plan/tab shell,
         // mirroring NavigateHUDView.
-        .sheet(item: $finishedRide, onDismiss: { router.screen = .plan }) {
+        .sheet(item: $finishedRide, onDismiss: { router.screen = .plan }, content: {
             RideSummaryView(ride: $0, saveFailed: saveFailed)
-        }
+        })
         .sheet(isPresented: $showPermission) {
             LocationPermissionView(onOpenSettings: openSettings)
         }

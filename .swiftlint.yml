@@ -1,0 +1,41 @@
+# SwiftLint configuration for Aura. CI runs `swiftlint --strict`; any violation,
+# warning or error, fails the build. The team decision is to keep SwiftLint's
+# default rule set and tune only the rules that clash with established
+# conventions in this codebase. Each tuning is documented inline.
+
+included:
+  - AuraCore/Sources
+  - AuraCore/Tests
+  - Aura/Sources
+  - Aura/Widgets
+
+excluded:
+  - .build
+  - DerivedData
+  - docs
+
+disabled_rules:
+  # The codebase uses `TODO(Wave N)` markers intentionally to track deferred
+  # roadmap work. Flagging them would fight that convention.
+  - todo
+
+identifier_name:
+  # The geo/stats/SwiftUI code uses idiomatic single- and two-letter names for
+  # loop indices, math and vector variables (dx, dt, px), and closure
+  # parameters (s, p, f). They read clearly in context; renaming them would
+  # reduce clarity. The rest of identifier_name (casing, max length) stays on.
+  min_length:
+    warning: 1
+    error: 0
+
+line_length:
+  # 120 is tight for SwiftUI modifier chains and Mapbox option builders. 140 is
+  # common practice; anything past 140 is still wrapped by hand.
+  warning: 140
+  error: 200
+
+file_length:
+  # A couple of view files run ~400-450 lines today. 500 is a reasonable
+  # ceiling; splitting large views is deferred to the design-system sub-project.
+  warning: 500
+  error: 1200

@@ -75,18 +75,29 @@ public struct MapboxTerrainRGBElevationProvider: AuraCore.ElevationProvider {
     }
 }
 
-struct TileKey: Hashable, Sendable { let z: Int; let x: Int; let y: Int }
+// `nonisolated` so its (inferred) Hashable conformance is usable from the actor's
+// own isolation domain, not only MainActor. It's an immutable Sendable value type,
+// so opting out of default MainActor isolation is safe.
+nonisolated struct TileKey: Hashable, Sendable { let z: Int; let x: Int; let y: Int }
 
 /// Caches decoded Terrain-RGB tiles (256×256 RGBA byte buffers) so the sampled
 /// points of a route — and repeat searches — reuse one fetch+decode per tile.
 public actor TerrainTileCache {
     public static let shared = TerrainTileCache()
-    public init() {}
 
     /// Decoded RGBA8 pixels (row-major, 4 bytes/px) plus side length, or nil if the
     /// tile failed to load (cached as a negative result to avoid re-fetching).
-    private var tiles: [TileKey: [UInt8]?] = [:]
+    ///
+    /// Initialized in `init()` rather than via a default literal: under default
+    /// MainActor isolation a stored-property default expression is MainActor-isolated,
+    /// which can't initialize this actor-isolated storage. Assigning in the actor's
+    /// init keeps the initialization inside the actor's isolation domain.
+    private var tiles: [TileKey: [UInt8]?]
     private let side = 256
+
+    public init() {
+        self.tiles = [:]
+    }
 
     /// Fetches + decodes the tile into the cache if not already present.
     func warm(_ key: TileKey, token: String) async {
@@ -104,6 +115,9 @@ public actor TerrainTileCache {
     }
 
     /// Downloads a terrain-rgb tile and decodes it into a deterministic RGBA8 buffer.
+    /// Keep this a `nonisolated static func` (it must stay off the main actor): the
+    /// CGImage decode is CPU-bound, and under default MainActor isolation an instance
+    /// method here would hop onto the main actor and could jank map rendering.
     private static func fetchDecoded(_ key: TileKey, token: String, side: Int) async -> [UInt8]? {
         let urlStr = "https://api.mapbox.com/v4/mapbox.terrain-rgb/\(key.z)/\(key.x)/\(key.y).pngraw?access_token=\(token)"
         guard let url = URL(string: urlStr) else { return nil }

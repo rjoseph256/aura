@@ -116,9 +116,9 @@ struct NavigateHUDView: View {
         // Summary sheet: when dismissed, return to plan screen.
         .sheet(item: $finishedRide, onDismiss: {
             router.screen = .plan
-        }) { ride in
+        }, content: { ride in
             RideSummaryView(ride: ride, saveFailed: saveFailed)
-        }
+        })
         .sheet(isPresented: $showPermission) {
             LocationPermissionView(onOpenSettings: openSettings)
         }

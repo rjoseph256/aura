@@ -25,7 +25,7 @@ final class RideStatsSnapshotTests: XCTestCase {
             pt(40.4400, -80.0000, ele: 250, t: 0),
             pt(40.4410, -80.0000, ele: 255, t: 20),   // climb +5
             pt(40.4420, -80.0000, ele: 252, t: 40),   // descent, ignored for gain
-            pt(40.4430, -80.0000, ele: 258, t: 60),   // climb +6
+            pt(40.4430, -80.0000, ele: 258, t: 60)   // climb +6
         ]
     }
 

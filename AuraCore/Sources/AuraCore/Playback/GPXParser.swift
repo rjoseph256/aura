@@ -19,7 +19,11 @@ public enum GPXParser {
         private var ele: Double?
         private var time: Date?
         private var buffer = ""
-        private static let iso: ISO8601DateFormatter = {
+        // Instance-level (one per parse) rather than a shared static: a shared
+        // static ISO8601DateFormatter is a non-Sendable global that Swift 6
+        // strict concurrency rejects. The Delegate is created fresh per parse,
+        // so this is functionally identical.
+        private let iso: ISO8601DateFormatter = {
             let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f
         }()
 
@@ -38,7 +42,7 @@ public enum GPXParser {
         func parser(_ p: XMLParser, didEndElement el: String, namespaceURI: String?, qualifiedName: String?) {
             switch el {
             case "ele": ele = Double(buffer.trimmingCharacters(in: .whitespacesAndNewlines))
-            case "time": time = Self.iso.date(from: buffer.trimmingCharacters(in: .whitespacesAndNewlines))
+            case "time": time = iso.date(from: buffer.trimmingCharacters(in: .whitespacesAndNewlines))
             case "trkpt":
                 // Skip incomplete trackpoints instead of fabricating data. A missing
                 // lat/lon would otherwise become (0,0) ("null island"), injecting a
