@@ -6,7 +6,7 @@
 
 **Architecture:** Additive then migratory. First add the new token API and components alongside the old symbols so the app keeps compiling, then migrate screens file-group by file-group (each change set builds and lints green), then delete the deprecated symbols last. The new identity is one accent (lime) on near-black, pink reserved for end-ride, no gradients; cockpit vs chrome differ by type and density, not color.
 
-**Tech stack:** SwiftUI (iOS 26 / Swift 6), XcodeGen + xcodebuild, SwiftLint, Saira Condensed (SIL OFL, bundled), SF Pro Rounded + SF Symbols (system), Mapbox.
+**Tech stack:** SwiftUI (iOS 17 deployment target; Swift 6 / Xcode 26 toolchain), XcodeGen + xcodebuild, SwiftLint, Saira Condensed (SIL OFL, bundled), SF Pro Rounded + SF Symbols (system), Mapbox. Do not reach for iOS-version APIs above the 17 target.
 
 **Relevant skills:** @impeccable (design quality / audit / polish), @all-ios-skills:swiftui-patterns (ButtonStyle, ViewModifier, view composition), @all-ios-skills:ios-accessibility (Reduce Transparency, Dynamic Type), @all-ios-skills:swiftui-layout-components, @apple-platform-build-tools:builder (delegate the app build/verify).
 
@@ -156,11 +156,11 @@ curl -fsSL "$base/OFL.txt" -o Aura/Resources/Fonts/SairaCondensed-OFL.txt
 ls -la Aura/Resources/Fonts
 ```
 
-- [ ] **Step 2: Verify the PostScript names** (needed for `Font.custom`):
+- [ ] **Step 2: Confirm the family name** (the type roles use the FAMILY name, not a PostScript name). The cockpit roles call `Font.custom("Saira Condensed", …)` plus `.weight()` to select the face. Do NOT substitute a PostScript name like `SairaCondensed-Bold` into `.custom(_:)` — that pins one face and makes `.weight()` a no-op. Verify the family before bundling:
 ```bash
-for f in Aura/Resources/Fonts/SairaCondensed-*.ttf; do echo "$f:"; mdls -name com_apple_ats_name_postscript "$f" 2>/dev/null || true; done
+for f in Aura/Resources/Fonts/SairaCondensed-*.ttf; do echo "$f:"; mdls -name com_apple_ats_name_fullname "$f" 2>/dev/null || true; done
 ```
-Expected names like `SairaCondensed-SemiBold`. If they differ, use the reported names in Step 5.
+Expect the family "Saira Condensed". After bundling (Step 6), a one-off `print(UIFont.fontNames(forFamilyName: "Saira Condensed"))` should list the three faces.
 
 - [ ] **Step 3: Register `UIAppFonts` in both Info.plists.** Add to `Aura/Resources/Info.plist` and `Aura/Widgets/Info.plist` (inside the top-level `<dict>`):
 ```xml
@@ -177,7 +177,7 @@ Expected names like `SairaCondensed-SemiBold`. If they differ, use the reported 
   - Under the `AuraWidgets` target `sources:`, add `- path: Resources/Fonts`.
   Then `cd Aura && xcodegen generate`.
 
-- [ ] **Step 5: Add cockpit type roles** to `AuraTheme.Typography` (use the verified PostScript family). Saira Condensed is registered by family name "Saira Condensed":
+- [ ] **Step 5: Add cockpit type roles** to `AuraTheme.Typography` (using the family name verified in Step 2). Saira Condensed is registered by family name "Saira Condensed":
 ```swift
         /// Cockpit numerals (Saira Condensed). Pass a @ScaledMetric size for Dynamic Type.
         static func metricCockpit(_ size: CGFloat, relativeTo style: Font.TextStyle = .body) -> Font {
