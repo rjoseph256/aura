@@ -1,22 +1,59 @@
 import SwiftUI
 
 enum AuraTheme {
-    // Aura brand — aurora on near-black
-    static let bg      = Color(red: 0.031, green: 0.035, blue: 0.059) // #08090F
-    static let surface = Color(red: 0.055, green: 0.067, blue: 0.086) // panels
-    static let cyan    = Color(red: 0.212, green: 0.886, blue: 1.0)   // #36E2FF
-    static let violet  = Color(red: 0.482, green: 0.357, blue: 1.0)   // #7B5BFF
-    static let pink    = Color(red: 1.0, green: 0.302, blue: 0.616) // #FF4D9D
-    static let route   = Color(red: 0.169, green: 0.878, blue: 0.541) // #2BE08A
-    static let text    = Color(white: 0.92)
-    static let muted   = Color(white: 0.55)
+    // MARK: - Private palette (raw values — views use the roles below, never these)
+    private enum Palette {
+        static let nearBlack = Color(red: 0.027, green: 0.031, blue: 0.047) // #07080C
+        static let panel     = Color(red: 0.055, green: 0.063, blue: 0.078) // #0E1014
+        static let lime      = Color(red: 0.784, green: 0.980, blue: 0.294) // #C8FA4B
+        static let pink      = Color(red: 1.0, green: 0.302, blue: 0.616) // #FF4D9D
+        static let inkOnLime = Color(red: 0.086, green: 0.129, blue: 0.039) // #16210A
+        static let inkOnPink = Color(red: 0.165, green: 0.012, blue: 0.078) // #2A0314
+    }
 
-    static let auroraGradient = LinearGradient(
-        colors: [cyan, violet, pink], startPoint: .leading, endPoint: .trailing)
+    // MARK: - Color roles
+    static let background    = Palette.nearBlack
+    static let surface       = Palette.panel
+    static let textPrimary   = Color(white: 0.92)
+    static let textSecondary = Color(white: 0.55)
+    static let accent        = Palette.lime
+    static let routeLine     = Palette.lime
+    static let destructive   = Palette.pink
+    static let onAccent      = Palette.inkOnLime
+    static let onDestructive = Palette.inkOnPink
 
-    // Glanceable numerics — large, rounded, high-contrast for sunlight.
-    // `size` is expected to come from a caller's @ScaledMetric so the hero number
-    // still tracks Dynamic Type; the unit label rides the caption2 metric directly.
+    // MARK: - Spacing scale (pt)
+    enum Spacing {
+        static let xs: CGFloat = 4, sm: CGFloat = 8, md: CGFloat = 12, lg: CGFloat = 16
+        static let xl: CGFloat = 20, xxl: CGFloat = 24, xxxl: CGFloat = 32
+    }
+
+    // MARK: - Radius scale (pt)
+    enum Radius {
+        static let xs: CGFloat = 4, sm: CGFloat = 8, md: CGFloat = 12, lg: CGFloat = 16, xl: CGFloat = 20
+    }
+
+    // MARK: - Typography roles (cockpit Saira variants added in the next task)
+    enum Typography {
+        /// Brand numerals (chrome): SF Pro Rounded. Pass a @ScaledMetric size for Dynamic Type.
+        static func metricBrand(_ size: CGFloat, weight: Font.Weight = .bold) -> Font {
+            .system(size: size, weight: weight, design: .rounded)
+        }
+        static let unit = Font.system(.caption2, design: .rounded).weight(.bold)
+        static func title(_ style: Font.TextStyle = .title2) -> Font {
+            .system(style, design: .rounded).weight(.semibold)
+        }
+    }
+
+    // MARK: - Deprecated — removed in the final cleanup task once all call sites migrate.
+    static let bg = background
+    static let cyan   = Palette.lime
+    static let violet = Palette.lime
+    static let pink   = destructive
+    static let route  = Palette.lime
+    static let text   = textPrimary
+    static let muted  = textSecondary
+    static let auroraGradient = LinearGradient(colors: [accent, accent], startPoint: .leading, endPoint: .trailing)
     static func heroNumber(_ size: CGFloat = 52) -> Font { .system(size: size, weight: .heavy, design: .rounded) }
-    static let unitLabel = Font.system(.caption2, design: .rounded).weight(.bold)
+    static let unitLabel = Typography.unit
 }
