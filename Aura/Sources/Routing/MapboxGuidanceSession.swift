@@ -57,12 +57,37 @@ public final class MapboxGuidanceSession: GuidanceSession {
             Task { @MainActor in self?.teardown(generation: generation) }
         }
 
-        // Route progress → turn-card updates.
+        // Tracks the active route id so we can detect a reroute swap in routeProgress.
+        // Declared as a local var here so it resets to nil every time start() is called.
+        var lastRouteId: RouteId?
+
+        // Route progress → turn-card updates + rerouted geometry swap.
         nav.navigation().routeProgress
             .receive(on: DispatchQueue.main)
             .sink { state in
                 guard let progress = state?.routeProgress else { return }
                 continuation.yield(.progress(Self.guidanceUpdate(from: progress)))
+                // Emit the new polyline shape when the active route changes (post-reroute).
+                // Skip the very first routeId assignment (that's the initial route, not a swap).
+                if lastRouteId != progress.routeId {
+                    let isFirst = (lastRouteId == nil)
+                    lastRouteId = progress.routeId
+                    if !isFirst, let coords = progress.route.shape?.coordinates {
+                        continuation.yield(.rerouted(coords.map {
+                            Coordinate(latitude: $0.latitude, longitude: $0.longitude)
+                        }))
+                    }
+                }
+            }
+            .store(in: &cancellables)
+
+        // Rerouting started → show the recalculating cue in the HUD.
+        nav.navigation().rerouting
+            .receive(on: DispatchQueue.main)
+            .sink { status in
+                if status.event is ReroutingStatus.Events.FetchingRoute {
+                    continuation.yield(.rerouting)
+                }
             }
             .store(in: &cancellables)
 

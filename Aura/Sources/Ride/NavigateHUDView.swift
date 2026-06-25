@@ -23,15 +23,16 @@ struct NavigateHUDView: View {
     @Environment(AppRouter.self) private var router
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
+    @Environment(LocationService.self) private var location
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // MARK: Recording
 
     @State private var recorder = RideRecorder(kind: .navigate)
-    @State private var provider: (any LocationStreaming)?
     @State private var streamTask: Task<Void, Never>?
     @State private var finishedRide: Ride?
     @State private var saveFailed = false
+    @State private var showPermission = false
 
     // MARK: Guidance
 
@@ -89,12 +90,37 @@ struct NavigateHUDView: View {
                 .padding(.top, 8)
                 .padding(.trailing, 16)
         }
+        // GPS signal chip — top leading, clear of the turn card (top-center) and mute button (top-trailing)
+        .overlay(alignment: .topLeading) {
+            GPSSignalChip(signal: location.signal)
+                .padding(.top, 8).padding(.leading, 16)
+        }
+        // Rerouting cue — centered below the turn card (top 8 pt + ~80 pt card ≈ 88 pt;
+        // 96 pt padding gives a comfortable gap). Shown only while guidance is rerouting.
+        .overlay(alignment: .top) {
+            if guidance.isRerouting {
+                Label("Rerouting…", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.black.opacity(0.6), in: Capsule())
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.15)))
+                    .padding(.top, 96)
+                    .transition(.opacity)
+                    .accessibilityLabel("Rerouting")
+            }
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: guidance.isRerouting)
         .background(AuraTheme.bg)
         // Summary sheet: when dismissed, return to plan screen.
         .sheet(item: $finishedRide, onDismiss: {
             router.screen = .plan
         }) { ride in
             RideSummaryView(ride: ride, saveFailed: saveFailed)
+        }
+        .sheet(isPresented: $showPermission) {
+            LocationPermissionView(onOpenSettings: openSettings)
         }
         // Elapsed-time ticker (mirrors RideHUDView pattern)
         .task(id: recorder.isRecording) {
@@ -115,6 +141,16 @@ struct NavigateHUDView: View {
             configureAudioSession()
             guidance.onSpeak = { speakInstruction($0) }
             guidance.onArrive = { endRide() }
+
+            // Gate: do not start recording or guidance when permission is denied.
+            switch location.authorization {
+            case .denied, .restricted:
+                showPermission = true
+                return
+            default:
+                break
+            }
+
             startRide()
             if let startDate {
                 RideLiveActivityController.shared.start(
@@ -125,25 +161,29 @@ struct NavigateHUDView: View {
         }
         .onDisappear {
             teardownGuidance()
+            location.stop()
+            RideScreen.keepAwake(false)
         }
     }
 
-    // MARK: Map view (puck follow + static route polyline)
+    // MARK: Map view (puck follow + live route polyline)
 
     private var navigateMapView: some View {
         Map(viewport: $viewport) {
             // Rider puck follows heading
             Puck2D(bearing: .heading)
 
-            // Static green route polyline drawn from geometry
-            if route.geometry.count > 1 {
+            // Live route polyline: switches to the post-reroute geometry when available.
+            // guidance.routeGeometry is updated by GuidanceViewModel on each reroute event.
+            if (guidance.routeGeometry ?? route.geometry).count > 1 {
                 PolylineAnnotationGroup {
                     PolylineAnnotation(
-                        lineCoordinates: route.geometry.map {
+                        lineCoordinates: (guidance.routeGeometry ?? route.geometry).map {
                             CLLocationCoordinate2D(latitude: $0.latitude,
                                                    longitude: $0.longitude)
                         }
                     )
+                    // TODO(Wave 2): replace hardcoded route color with an AuraTheme StyleColor bridge
                     .lineColor(StyleColor(UIColor(red: 43 / 255,
                                                   green: 224 / 255,
                                                   blue: 138 / 255,
@@ -195,13 +235,12 @@ struct NavigateHUDView: View {
     // MARK: Recording lifecycle
 
     private func startRide() {
-        let p = LiveLocationProvider()
-        provider = p
         startDate = Date()
         recorder.start(at: startDate!)
+        RideScreen.keepAwake(true)
 
         streamTask = Task { @MainActor in
-            for await point in p.points() {
+            for await point in location.points() {
                 recorder.record(point)
                 // Turn state is driven by the GuidanceViewModel; recording only here.
             }
@@ -213,7 +252,8 @@ struct NavigateHUDView: View {
         // recording has stopped there's nothing more to do.
         guard recorder.isRecording else { return }
         streamTask?.cancel()
-        provider?.stop()
+        location.stop()
+        RideScreen.keepAwake(false)
         teardownGuidance()
         RideLiveActivityController.shared.end()
         let ride = recorder.end(at: Date(), destinationName: destination?.name)
@@ -249,5 +289,11 @@ struct NavigateHUDView: View {
             ?? AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         speechSynthesizer.speak(utterance)
+    }
+
+    // MARK: Settings deep-link
+
+    private func openSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
     }
 }

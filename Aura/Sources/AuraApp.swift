@@ -9,6 +9,7 @@ struct AuraApp: App {
     @State private var router = AppRouter()
     @State private var rideStore = AuraApp.makeRideStore()
     @State private var settings = SettingsStore()
+    @State private var location = LocationService()
 
     init() { AuraApp.configureMapbox() }
 
@@ -18,6 +19,7 @@ struct AuraApp: App {
                 .environment(router)
                 .environment(rideStore)
                 .environment(settings)
+                .environment(location)
                 .preferredColorScheme(.dark)
         }
     }
@@ -48,16 +50,6 @@ struct AuraApp: App {
         MapboxOptions.accessToken = token
     }
 
-    /// Loads the bundled GPX and replays it at 10× for a quick desk demo.
-    @MainActor
-    static func simulatedProvider() -> LocationStreaming {
-        guard let url = Bundle.main.url(forResource: "sample-ride-pittsburgh", withExtension: "gpx"),
-              let xml = try? String(contentsOf: url, encoding: .utf8),
-              let track = try? GPXParser.parse(xml) else {
-            return SimulatedLocationProvider(track: GPXTrack(points: []))
-        }
-        return SimulatedLocationProvider(track: track, speedMultiplier: 10)
-    }
 }
 
 // MARK: - RootView
@@ -80,7 +72,7 @@ private struct RootView: View {
                     NavigateHUDView(route: route, destination: destination)
                 } else {
                     // Free ride — unchanged path
-                    RideHUDView(makeProvider: { LiveLocationProvider() })
+                    RideHUDView()
                 }
             }
         }
