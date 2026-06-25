@@ -50,6 +50,8 @@
 | `.font(...)` literal | nearest `AuraTheme.Typography` role | |
 | `Color.white.opacity(0.08)`-style separators/tracks | `AuraTheme.border` (added in Task 3) | hairline rows, ring track, control outlines |
 
+**Metric a11y note (from the Task 4 code review).** `StatPair` and `SpeedReadout` are presentational — they render value + label as two separate `Text`s. When wiring them into a screen, combine each readout into one accessibility element (`.accessibilityElement(children: .combine)`, or a composed `.accessibilityLabel` like "Speed, 24 miles per hour") so VoiceOver reads it as a unit and Switch Control gets one scan stop, not two. The caller owns this — apply it at each migration site.
+
 **Color-collapse note (from the Task 1 code review).** Because `cyan`, `violet`, and `route` all map to lime now, any site that used *color* to encode meaning loses that cue. Known sites: `HistoryView.swift` and `LastRideCard.swift` (navigate vs free-ride was cyan vs green) and `WeeklyRing.swift` (a cyan→violet gradient ring). When migrating those, keep the distinction **non-chromatically** — the SF Symbol already differs (`bicycle` vs `location.north.line.fill`); add weight or density if it needs reinforcing — and make the ring a solid lime arc. "Still compiles and looks lime" is NOT migrated; consciously re-express or intentionally drop each former color distinction.
 
 ---
