@@ -22,8 +22,7 @@ struct StaticRouteMap: View {
             if clCoords.count > 1 {
                 PolylineAnnotationGroup {
                     PolylineAnnotation(lineCoordinates: clCoords)
-                        .lineColor(StyleColor(UIColor(red: 43 / 255, green: 224 / 255,
-                                                      blue: 138 / 255, alpha: 1)))
+                        .lineColor(StyleColor(AuraTheme.routeUIColor))
                         .lineWidth(5)
                 }
             }

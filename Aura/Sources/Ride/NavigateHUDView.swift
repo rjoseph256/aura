@@ -183,11 +183,7 @@ struct NavigateHUDView: View {
                                                    longitude: $0.longitude)
                         }
                     )
-                    // TODO(Wave 2): replace hardcoded route color with an AuraTheme StyleColor bridge
-                    .lineColor(StyleColor(UIColor(red: 43 / 255,
-                                                  green: 224 / 255,
-                                                  blue: 138 / 255,
-                                                  alpha: 1)))
+                    .lineColor(StyleColor(AuraTheme.routeUIColor))
                     .lineWidth(6)
                 }
             }

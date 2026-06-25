@@ -23,6 +23,10 @@ enum AuraTheme {
     static let onDestructive = Palette.inkOnPink
     static let border = Color.white.opacity(0.08)
 
+    // MARK: - Mapbox bridge
+    /// `routeLine` as a UIColor so Mapbox `StyleColor(_:)` accepts it. lime #C8FA4B = RGB 200/250/75.
+    static let routeUIColor = UIColor(red: 200 / 255, green: 250 / 255, blue: 75 / 255, alpha: 1)
+
     // MARK: - Spacing scale (pt)
     enum Spacing {
         static let xs: CGFloat = 4, sm: CGFloat = 8, md: CGFloat = 12, lg: CGFloat = 16
