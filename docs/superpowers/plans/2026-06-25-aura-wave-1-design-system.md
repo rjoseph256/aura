@@ -180,14 +180,35 @@ Expect the family "Saira Condensed". After bundling (Step 6), a one-off `print(U
   - Under the `AuraWidgets` target `sources:`, add `- path: Resources/Fonts`.
   Then `cd Aura && xcodegen generate`.
 
-- [ ] **Step 5: Add cockpit type roles** to `AuraTheme.Typography` (using the family name verified in Step 2). Saira Condensed is registered by family name "Saira Condensed":
+- [ ] **Step 5: Add cockpit type roles** to `AuraTheme.Typography`. **Address faces by PostScript name, not family + `.weight()`** (decided in the Task 2 review): the three static files are verified to share CoreText family "Saira Condensed" but their legacy name-table entries are inconsistent across faces, so `.custom(family).weight(.bold)` resolves the default face ambiguously and can faux-bold instead of selecting the real Bold file. A `CockpitFace` enum maps each weight to its exact PostScript name (`SairaCondensed-Medium/SemiBold/Bold`, verified via CoreText), which keeps all three bundled faces reachable. `relativeTo:` still provides Dynamic Type scaling — so callers pass a plain base point size (a `@ScaledMetric` value would scale twice). Place `CockpitFace` as a direct member of `AuraTheme` (sibling of `Typography`, not nested inside it) — SwiftLint's `nesting` rule caps type nesting at 1 level, and it still resolves unqualified from inside `Typography`:
 ```swift
-        /// Cockpit numerals (Saira Condensed). Pass a @ScaledMetric size for Dynamic Type.
-        static func metricCockpit(_ size: CGFloat, relativeTo style: Font.TextStyle = .body) -> Font {
-            .custom("Saira Condensed", size: size, relativeTo: style).weight(.bold)
+        /// The bundled Saira Condensed faces, addressed by exact PostScript name.
+        /// These are three separate static files; their legacy name-table entries are
+        /// inconsistent across faces, so `.custom(family).weight()` can't reliably
+        /// select one. Naming the PostScript face directly is deterministic.
+        enum CockpitFace {
+            case medium, semibold, bold
+            var postScriptName: String {
+                switch self {
+                case .medium: "SairaCondensed-Medium"
+                case .semibold: "SairaCondensed-SemiBold"
+                case .bold: "SairaCondensed-Bold"
+                }
+            }
         }
+
+        /// Cockpit numerals (Saira Condensed). Scales with Dynamic Type via `relativeTo:`,
+        /// so pass a plain base point size — NOT a `@ScaledMetric` value (that scales twice).
+        static func metricCockpit(_ size: CGFloat,
+                                  face: CockpitFace = .bold,
+                                  relativeTo style: Font.TextStyle = .body) -> Font {
+            .custom(face.postScriptName, size: size, relativeTo: style)
+        }
+
+        /// The large cockpit speed readout (Saira Condensed Bold). Scales with Dynamic
+        /// Type via `relativeTo:`; pass a plain base point size, not a `@ScaledMetric` value.
         static func speedHero(_ size: CGFloat, relativeTo style: Font.TextStyle = .largeTitle) -> Font {
-            .custom("Saira Condensed", size: size, relativeTo: style).weight(.bold)
+            .custom(CockpitFace.bold.postScriptName, size: size, relativeTo: style)
         }
 ```
 
@@ -321,7 +342,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 **Files:** Create `Aura/Sources/Theme/SpeedReadout.swift`, `Aura/Sources/Theme/StatPair.swift` (add both to `AuraWidgets` membership in project.yml — the Live Activity uses them in Task 9).
 
-- [ ] **Step 1: `StatPair`** (value over label, context-aware):
+- [ ] **Step 1: `StatPair`** (value over label, context-aware). Dynamic Type note (from the Task 2 review): the cockpit font self-scales via `relativeTo:`, so its size must be a **plain constant** — wrapping it in `@ScaledMetric` would scale twice. The brand font is a system font with a fixed `size:`, so it *does* need `@ScaledMetric`. Hence two separate size sources:
 ```swift
 import SwiftUI
 
@@ -330,13 +351,17 @@ struct StatPair: View {
     let value: String
     let label: String
     var context: Context = .brand
-    @ScaledMetric(relativeTo: .title2) private var valueSize: CGFloat = 21
+    // Brand (system) font has a fixed size → @ScaledMetric drives Dynamic Type.
+    @ScaledMetric(relativeTo: .title2) private var brandValueSize: CGFloat = 21
+    // Cockpit (Saira) font self-scales via relativeTo: → plain base size (no @ScaledMetric).
+    private let cockpitValueSize: CGFloat = 22
 
     var body: some View {
         VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
             Text(value)
-                .font(context == .cockpit ? AuraTheme.Typography.metricCockpit(valueSize, relativeTo: .title2)
-                                          : AuraTheme.Typography.metricBrand(valueSize))
+                .font(context == .cockpit
+                      ? AuraTheme.Typography.metricCockpit(cockpitValueSize, relativeTo: .title2)
+                      : AuraTheme.Typography.metricBrand(brandValueSize))
                 .foregroundStyle(AuraTheme.textPrimary)
             Text(label)
                 .font(.caption2)
@@ -346,14 +371,14 @@ struct StatPair: View {
 }
 ```
 
-- [ ] **Step 2: `SpeedReadout`** (the big cockpit speed + lime unit):
+- [ ] **Step 2: `SpeedReadout`** (the big cockpit speed + lime unit). `speedHero` self-scales via `relativeTo:`, so `size` is a plain constant base size (no `@ScaledMetric` — that would double-scale, per the Task 2 review):
 ```swift
 import SwiftUI
 
 struct SpeedReadout: View {
     let value: String
     let unit: String
-    @ScaledMetric(relativeTo: .largeTitle) private var size: CGFloat = 62
+    private let size: CGFloat = 62
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.sm) {
