@@ -64,7 +64,10 @@ struct WeeklyRing: View {
         .onChange(of: fraction) { _, new in animate(to: new) }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Distance this week")
-        .accessibilityValue("\(fmt.distanceValue(stats.distanceMeters)) \(fmt.distanceUnit), \(stats.goalPercent(goalMeters: goalMeters)) percent of weekly goal")
+        .accessibilityValue(
+            "\(fmt.distanceValue(stats.distanceMeters)) \(fmt.distanceUnit), "
+                + "\(stats.goalPercent(goalMeters: goalMeters)) percent of weekly goal"
+        )
     }
 
     private func animate(to target: Double) {

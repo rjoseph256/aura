@@ -106,7 +106,7 @@ struct RideLiveActivity: Widget {
 
     @ViewBuilder
     private func expandedBottom(_ context: ActivityViewContext<RideActivityAttributes>,
-                               nav: Bool) -> some View {
+                                nav: Bool) -> some View {
         let fmt = RideStatsFormatter(units: context.attributes.units)
         let state = context.state
         let statOpacity = context.isStale ? 0.4 : 1

@@ -26,6 +26,8 @@ public final class MapboxGuidanceSession: GuidanceSession {
 
     public init() {}
 
+    // Mapbox v3 setup is one linear configuration block; splitting hides the sequence.
+    // swiftlint:disable:next function_body_length
     public func start(route: AuraCore.Route) async -> AsyncStream<GuidanceEvent> {
         // Defensive: end any prior stream (so a stale consumer can't hang) and drop
         // its subscriptions before standing up a new session.
