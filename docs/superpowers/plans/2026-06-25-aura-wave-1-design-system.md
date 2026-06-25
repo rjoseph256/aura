@@ -434,6 +434,7 @@ Apply the migration map to the planning surfaces. Behavior unchanged; colors→r
 **Files:** `Aura/Sources/Ride/RideSummaryView.swift`, `Aura/Sources/History/HistoryView.swift`, `Aura/Sources/Settings/SettingsView.swift`, `AttributionView.swift`, `Aura/Sources/Offline/OfflineMapsView.swift`, `Aura/Sources/Location/LocationPermissionView.swift`.
 
 - [ ] **Step 1:** Migrate per the map. RideSummaryView: replace the inline `stat()` helper with `StatPair(context: .brand)`, "Done" → `.ctaPrimary`, route map already bridged; the finish marker stays `AuraTheme.destructive` (pink). HistoryView numerals → `metricBrand`; LocationPermissionView CTA → `.ctaPrimary`, "Not now" → `.ctaTertiary`.
+  - **A11y note (from the DS-T3 review):** `.ctaTertiary` is only 40pt tall, under the 44pt minimum tap target. Wherever it's used (e.g. "Not now"), ensure the hit area reaches 44pt — add vertical padding and/or `.contentShape(Rectangle())` at the call site if it ends up tight.
 - [ ] **Step 2-4:** Build, lint, sim spot-check (Summary stat grid, History list, Settings), commit.
 
 ---
@@ -445,6 +446,7 @@ The instrument personality: Saira Condensed via `SpeedReadout`/`StatPair(context
 **Files:** `Aura/Sources/Ride/RideHUDView.swift`, `NavigateHUDView.swift`, `SpeedRail.swift`, `TurnCardView.swift`, `RideMapView.swift` (route bridged in Task 5; confirm), `GPSSignalChip.swift`.
 
 - [ ] **Step 1:** SpeedRail → use `SpeedReadout` (replaces `AuraTheme.heroNumber`/`unitLabel`); HUD stat row → `StatPair(context: .cockpit)`; the floating back/mute/info buttons → `.buttonStyle(HUDControlButton())` (active state lime); end-ride button → `.ctaDestructive`; turn-card maneuver distance → `metricCockpit` in lime; snap spacing/radii. Confirm the Reduce Transparency fallback path compiles and renders (toggle the setting in the sim).
+  - **A11y note (from the DS-T3 review):** `HUDControlButton(active:)` signals its active state **only** via color (lime vs. textPrimary). For any control that toggles (e.g. mute), add `.accessibilityAddTraits(.isToggle)` and an accessibility value at the call site so the state is conveyed non-visually — color alone fails the "no info by color alone" rule.
 - [ ] **Step 2-4:** Build, lint, sim spot-check both a free ride and a navigate session (confirm Saira numerals, lime, RT fallback when enabled), commit.
 
 ---
