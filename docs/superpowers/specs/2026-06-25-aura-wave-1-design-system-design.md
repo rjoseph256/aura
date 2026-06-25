@@ -92,7 +92,7 @@ Weight ramp rule (from the critique): the heaviest weight is reserved for `speed
 
 ## Assets
 
-- **Saira Condensed** bundled: font file(s) under `Aura/Resources/Fonts/`, registered in `UIAppFonts` in `Aura/project.yml` for both the app and the `AuraWidgets` extension, the OFL license committed, Dynamic Type via `@ScaledMetric`.
+- **Saira Condensed** bundled: font file(s) under `Aura/Resources/Fonts/`, added to the resource copy phase of both the app and the `AuraWidgets` extension. Because both targets set `GENERATE_INFOPLIST_FILE: NO` and use explicit Info.plist files, the `UIAppFonts` key goes in each target's plist (`Resources/Info.plist` and `Widgets/Info.plist`), not an auto-generated one. Commit the OFL license file. Dynamic Type via `@ScaledMetric`.
 - **SF Symbols** stays the icon base. No icon bundle.
 - **Custom Mapbox Studio map style** is deferred to a fast-follow (it is a Studio asset and style URL, not code tokens), so this sub-project stays shippable. For now the route recolors to lime on the existing dark Mapbox style.
 
