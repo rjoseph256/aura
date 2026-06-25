@@ -82,6 +82,8 @@ targets:
       # Shared with the app so both sides compile the same Live Activity contract / theme.
       - path: Sources/LiveActivity/RideActivityAttributes.swift
       - path: Sources/Theme/AuraTheme.swift
+      - path: Sources/Theme/StatPair.swift
+      - path: Sources/Theme/SpeedReadout.swift
       # Bundled Saira Condensed faces (OFL), registered via Widgets/Info.plist
       # UIAppFonts so the Live Activity can render cockpit numerals.
       - path: Resources/Fonts
