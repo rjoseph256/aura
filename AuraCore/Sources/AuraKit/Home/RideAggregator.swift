@@ -59,4 +59,16 @@ public enum RideAggregator {
     public static func mostRecent(_ rides: [RideSummary]) -> RideSummary? {
         rides.max { $0.startedAt < $1.startedAt }
     }
+
+    /// Whether the ride identified by `rideID` ties or beats every other ride in
+    /// `rides` by distance — the "Longest ride yet" badge rule. `rides` is the full
+    /// saved set (the just-finished ride included), and `distance` is that ride's own
+    /// distance. Returns `false` unless the distance is positive and there's more than
+    /// one ride, so a lone first ride doesn't trumpet a record. Reads only the cheap
+    /// `distanceMeters` column, so callers never have to fault a GPS track.
+    public static func isLongest(rideID: UUID, distanceMeters distance: Double,
+                                 among rides: [RideSummary]) -> Bool {
+        guard distance > 0, rides.count > 1 else { return false }
+        return rides.allSatisfy { $0.id == rideID || $0.distanceMeters <= distance }
+    }
 }
