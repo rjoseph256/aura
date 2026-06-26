@@ -171,8 +171,10 @@ public final class MapboxGuidanceSession: GuidanceSession {
 
     // MARK: - Progress decoding
 
-    /// Extracts the upcoming maneuver's remaining distance and instruction text from
-    /// Mapbox `RouteProgress`, preferring the upcoming step (what you're approaching).
+    /// Decodes a `GuidanceUpdate` from Mapbox `RouteProgress`. The maneuver distance and
+    /// instruction come from the current/upcoming step (what you're approaching); the
+    /// three cruising fields (distance-remaining, duration-remaining, current street) come
+    /// from whole-route progress.
     private static func guidanceUpdate(from progress: RouteProgress) -> GuidanceUpdate {
         let distanceToManeuver = progress.currentLegProgress.currentStepProgress.distanceRemaining
         let instruction: String
