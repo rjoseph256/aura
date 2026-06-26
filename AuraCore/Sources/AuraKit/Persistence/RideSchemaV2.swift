@@ -21,7 +21,7 @@ public enum RideSchemaV2: VersionedSchema {
         public var distanceMeters: Double = 0
         public var movingTimeSeconds: Double = 0
         public var elevationGainMeters: Double = 0
-        public var thumbnailData: Data? = nil                      // JSON-encoded [Coordinate]; nil when < 2 points
+        public var thumbnailData: Data?                            // JSON-encoded [Coordinate]; nil when < 2 points
         public var destinationName: String?
         public var routeId: UUID?
         public var destinationPlaceId: UUID?
