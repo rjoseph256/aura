@@ -9,13 +9,13 @@ struct PlanView: View {
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
     @State private var query: String = ""
-    @State private var rides: [Ride] = []
+    @State private var summaries: [RideSummary] = []
     @ScaledMetric(relativeTo: .title) private var brandSize: CGFloat = 24
 
     private var weekStats: WeeklyRideStats {
-        RideAggregator.weekToDate(rides, now: Date())
+        RideAggregator.weekToDate(summaries, now: Date())
     }
-    private var lastRide: Ride? { RideAggregator.mostRecent(rides) }
+    private var lastRide: RideSummary? { RideAggregator.mostRecent(summaries) }
 
     var body: some View {
         ZStack {
@@ -47,7 +47,7 @@ struct PlanView: View {
     // MARK: Data
 
     private func loadRides() async {
-        rides = (try? rideStore.allRides()) ?? []
+        summaries = (try? rideStore.summaries()) ?? []
     }
 
     // MARK: Header
@@ -128,10 +128,10 @@ struct PlanView: View {
 
     // MARK: Last-ride section
 
-    private func lastRideSection(_ ride: Ride) -> some View {
+    private func lastRideSection(_ ride: RideSummary) -> some View {
         VStack(alignment: .leading, spacing: AuraTheme.Spacing.sm) {
             sectionHeader("Last ride")
-            LastRideCard(ride: ride, units: settings.units) {
+            LastRideCard(summary: ride, units: settings.units) {
                 router.selectedTab = .history
             }
         }

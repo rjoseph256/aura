@@ -9,7 +9,7 @@ struct HistoryView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var rides: [Ride] = []
+    @State private var summaries: [RideSummary] = []
     @State private var selected: Ride?
     @State private var appeared = false
     @ScaledMetric(relativeTo: .largeTitle) private var emptyGlyph: CGFloat = 56
@@ -23,7 +23,7 @@ struct HistoryView: View {
                     ephemeralBanner
                 }
                 Group {
-                    if rides.isEmpty {
+                    if summaries.isEmpty {
                         emptyState
                     } else {
                         rideList
@@ -37,7 +37,7 @@ struct HistoryView: View {
             // Reload on every appearance (e.g. returning from a finished ride).
             // onAppear runs synchronously and isn't cancellable like .task, so rows
             // are never left gated invisible behind an interrupted entrance flag.
-            rides = (try? store.allRides()) ?? []
+            summaries = (try? store.summaries()) ?? []
             if !appeared {
                 withAnimation(.easeOut(duration: 0.45)) { appeared = true }
             }
@@ -51,16 +51,16 @@ struct HistoryView: View {
 
     private var rideList: some View {
         List {
-            ForEach(Array(rides.enumerated()), id: \.element.id) { index, ride in
-                RideRow(ride: ride, units: settings.units)
+            ForEach(Array(summaries.enumerated()), id: \.element.id) { index, summary in
+                RideRow(summary: summary, units: settings.units)
                     .contentShape(Rectangle())
-                    .onTapGesture { selected = ride }
+                    .onTapGesture { selected = try? store.ride(id: summary.id) }
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                     .modifier(EntranceModifier(index: index, appeared: appeared, reduceMotion: reduceMotion))
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) { delete(ride) } label: {
+                        Button(role: .destructive) { delete(summary) } label: {
                             Label("Delete", systemImage: "trash")
                         }
                     }
@@ -71,9 +71,9 @@ struct HistoryView: View {
         .background(Color.clear)
     }
 
-    private func delete(_ ride: Ride) {
-        try? store.delete(id: ride.id)
-        rides.removeAll { $0.id == ride.id }
+    private func delete(_ summary: RideSummary) {
+        try? store.delete(id: summary.id)
+        summaries.removeAll { $0.id == summary.id }
     }
 
     // MARK: - Empty state
@@ -128,11 +128,10 @@ struct HistoryView: View {
 // MARK: - Row
 
 private struct RideRow: View {
-    let ride: Ride
+    let summary: RideSummary
     let units: DistanceUnits
 
-    private var stats: RideStats { ride.stats ?? .zero }
-    private var isNavigate: Bool { ride.kind == .navigate }
+    private var isNavigate: Bool { summary.kind == .navigate }
     private var symbol: String { isNavigate ? "location.north.line.fill" : "bicycle" }
     // Mono-lime: both ride kinds share the accent. The free/navigate distinction is
     // carried non-chromatically — by the differing SF Symbol and its weight, not hue.
@@ -141,22 +140,22 @@ private struct RideRow: View {
 
     private var caption: String {
         let lead: String
-        if let name = ride.destinationName, !name.isEmpty {
+        if let name = summary.destinationName, !name.isEmpty {
             lead = name
         } else {
             lead = isNavigate ? "Navigated" : "Free ride"
         }
-        let climb = "\(fmt.elevationValue(stats.elevationGainMeters)) \(fmt.elevationUnit)"
-        return "\(lead) · \(fmt.minutes(stats.movingTimeSeconds)) · ↑ \(climb)"
+        let climb = "\(fmt.elevationValue(summary.elevationGainMeters)) \(fmt.elevationUnit)"
+        return "\(lead) · \(fmt.minutes(summary.movingTimeSeconds)) · ↑ \(climb)"
     }
 
-    private var distance: String { fmt.distanceValue(stats.distanceMeters) }
+    private var distance: String { fmt.distanceValue(summary.distanceMeters) }
 
     private var distanceUnit: String { fmt.distanceUnit.uppercased() }
 
     @ViewBuilder
     private var leadingThumbnail: some View {
-        let coords = ride.track.map(\.coordinate)
+        let coords = summary.thumbnailCoordinates
         if coords.count > 1 {
             RouteThumbnail(coordinates: coords, lineColor: AuraTheme.accent, lineWidth: 2)
         } else {
@@ -177,7 +176,7 @@ private struct RideRow: View {
 
             // Middle — date + summary caption.
             VStack(alignment: .leading, spacing: 3) {
-                Text(ride.startedAt.formatted(date: .abbreviated, time: .shortened))
+                Text(summary.startedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(AuraTheme.textPrimary)
                     .lineLimit(1)
