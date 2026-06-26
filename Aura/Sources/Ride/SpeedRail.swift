@@ -3,9 +3,13 @@ import AuraCore
 import AuraKit
 
 struct SpeedRail: View {
+    enum Layout { case full, speedOnly }
+
     let stats: RideStats
     let elapsed: TimeInterval
     let units: DistanceUnits
+    /// Navigate mode passes `.speedOnly`; free ride keeps the default `.full`.
+    var layout: Layout = .full
 
     private var fmt: RideStatsFormatter { RideStatsFormatter(units: units) }
 
@@ -16,11 +20,13 @@ struct SpeedRail: View {
             SpeedReadout(value: fmt.speedValue(stats.averageSpeedMetersPerSecond),
                          unit: fmt.speedUnit.uppercased())
                 .accessibilityElement(children: .combine)
-            HStack(spacing: AuraTheme.Spacing.md) {
-                metric(fmt.distanceValue(stats.distanceMeters), fmt.distanceUnit.uppercased())
-                metric(RideStatsFormatter.clock(elapsed), "TIME")
-                metric(fmt.elevationValue(stats.elevationGainMeters), "\(fmt.elevationUnit.uppercased()) ↑")
-            }.padding(.top, AuraTheme.Spacing.xs)
+            if layout == .full {
+                HStack(spacing: AuraTheme.Spacing.md) {
+                    metric(fmt.distanceValue(stats.distanceMeters), fmt.distanceUnit.uppercased())
+                    metric(RideStatsFormatter.clock(elapsed), "TIME")
+                    metric(fmt.elevationValue(stats.elevationGainMeters), "\(fmt.elevationUnit.uppercased()) ↑")
+                }.padding(.top, AuraTheme.Spacing.xs)
+            }
         }
         .padding(AuraTheme.Spacing.lg)
         .background(AuraTheme.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: AuraTheme.Radius.lg))
