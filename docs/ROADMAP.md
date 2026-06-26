@@ -115,6 +115,10 @@ The rest of the audit groups into a few themes.
   with no `@Attribute(.externalStorage)`, so the History list decodes roughly a megabyte
   per multi-hour ride just to show a date and a distance. There is no `VersionedSchema`
   or migration plan, so the first non-additive change risks losing recorded rides.
+  Resolved in Wave 1 (2026-06-26): see the Persistence bullet under Wave 1. The model is
+  versioned behind a migration plan, the track moved to external storage with denormalized
+  summary columns so the list never decodes a track, the `.unique` drop unblocks CloudKit,
+  and a round-trip migration test guards against losing rides.
 - **The cockpit does not yet match the HUD spec.** Section 5 of the design spec calls for
   a cruising state with speed plus distance-remaining plus ETA plus the current street
   name, a persistent recenter control, and the safety states (GPS-weak, off-route,
@@ -177,11 +181,22 @@ The rebuilds that make every later wave cheap and safe. Do these before feature 
   over a typed `Route` enum and one `.navigationDestination`. Keep `AppRouter` as the
   `@MainActor @Observable` owner of the path and add a `handle(url:)` entry point for deep
   links. This also removes the per-transition Mapbox teardown.
-- **Persistence:** drop `@Attribute(.unique)`, move `trackData` to
-  `@Attribute(.externalStorage)`, denormalize the summary fields (distance, duration,
-  elevation, name) into stored columns so the History list never decodes a track, and wrap
-  the current model as `SchemaV1` with a `SchemaMigrationPlan` and a round-trip migration
-  test.
+- **Persistence:** SHIPPED (2026-06-26). The SwiftData store is now versioned and the
+  History list no longer decodes a track to draw a row. `RideRecord` split into a frozen
+  `RideSchemaV1` and a `RideSchemaV2` that drops `@Attribute(.unique)` on `id` (the CloudKit
+  blocker), moves `trackData` to `@Attribute(.externalStorage)` so it faults lazily, and adds
+  denormalized `distanceMeters`/`movingTimeSeconds`/`elevationGainMeters` columns plus a
+  compact `thumbnailData` polyline. A custom `RideMigrationPlan` (V1 to V2) backfills those
+  columns and the thumbnail from existing rows, and `RideStore.persistent()` wires it into the
+  on-disk container. A new `RideSummary` value type with `RideStore.summaries()` (and
+  `ride(id:)` for the detail sheet) gives the list and dashboard a read path that never touches
+  the track blob; `RideAggregator`, History, the dashboard ring, and the last-ride card all
+  moved onto it with their behavior unchanged. Thumbnails now draw from a stored simplified
+  polyline (`TrackSimplifier`) rather than the full track. The headline is a round-trip
+  migration test that writes V1-shaped rows, reopens through the plan, and proves the row
+  count, track bytes, backfilled columns, and thumbnails all survive; a fresh-install test
+  covers the empty-store path. CloudKit sync is now unblocked but intentionally not wired (a
+  later wave).
 - **Ride-session coordinator:** SHIPPED (2026-06-25). Ride start and finish now route through
   one `RideSessionCoordinator` in `AuraKit`, ending the duplicated start/end lifecycle, the
   permission gate, the screen-awake calls, the Live Activity loop, and the `openSettings` helper
@@ -194,8 +209,8 @@ The rebuilds that make every later wave cheap and safe. Do these before feature 
   maneuver push. Both HUDs collapsed onto the coordinator and call only `start`/`finish`/`cancel`
   (plus the navigate maneuver sync); `RideScreen` was removed and `openSettings` is one shared
   helper. Both ride flows were verified on the simulator. This is the seam the Live Activity,
-  HealthKit, and haptics hook into. The remaining Wave 1 sub-projects are persistence and
-  navigation.
+  HealthKit, and haptics hook into. With persistence now shipped, the remaining Wave 1
+  sub-project is navigation.
 - **Design system:** SHIPPED (2026-06-25). `AuraTheme` is now semantic color roles
   (background, surface, text primary/secondary, accent, routeLine, destructive, ink-on-fill,
   border), a spacing scale, a radius scale, and a type ramp, plus a `UIColor` bridge so the
@@ -279,16 +294,17 @@ turn-card and guidance pipelines (including the reroute transitions), the week-t
 aggregation, the plotting math, the GPS signal classification, fix filter, and
 `LocationService.ingest`, and the ride-session coordinator lifecycle. CI runs three jobs: the
 package tests under Swift 6 language mode, an xcodebuild build of the app (which also builds
-AuraWidgets), and SwiftLint `--strict`. The package test count rose from 115 to 124: the
-ride-session coordinator added a 9-case suite, the first use of Swift Testing in the package
-(the prior 115 are XCTest). The gap is the app target: every SwiftUI view, every Mapbox-backed
+AuraWidgets), and SwiftLint `--strict`. The package test count is now 136, up from the
+original 115 XCTest cases: Wave 1 added Swift Testing suites for the ride-session coordinator
+lifecycle, the track simplifier, the schema migration (round-trip plus fresh-install), and the
+summary read path. The gap is the app target: every SwiftUI view, every Mapbox-backed
 provider, and the live CoreLocation stream are built in CI now but still untested. Wave 0's free-ride record-to-summary flow was
 checked with a one-off simulator smoke test, not an automated one.
 
 Near-term testing work, sequenced with the waves above: the app-target CI build and SwiftLint
-landed in Wave 1; still to come is the schema migration test alongside the persistence
-rebuild (Wave 1). The ride-session coordinator already adopted Swift Testing for its suite,
-the pattern new tests follow from here. UI work is still verified by running the
+landed in Wave 1, and the schema migration test landed with the persistence rebuild (Wave 1).
+The ride-session coordinator and persistence work adopted Swift Testing for their suites, the
+pattern new tests follow from here. UI work is still verified by running the
 app on the simulator and checking the actual screens, since a clean build is not enough to
 catch a feature that silently does nothing (the Terrain-RGB elevation switch is the
 cautionary tale: the first implementation compiled fine and returned a flat value
