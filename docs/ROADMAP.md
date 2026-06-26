@@ -182,12 +182,20 @@ The rebuilds that make every later wave cheap and safe. Do these before feature 
   elevation, name) into stored columns so the History list never decodes a track, and wrap
   the current model as `SchemaV1` with a `SchemaMigrationPlan` and a round-trip migration
   test.
-- **Ride-session coordinator:** route ride start and finish through one `AuraKit`
-  coordinator instead of duplicating the logic in both HUDs. The duplication is now real and
-  worth removing: after Wave 0 both HUDs repeat the start/end lifecycle, the permission gate,
-  the `openSettings` helper, the GPS chip, and the screen-awake calls. This is the seam that
-  the Live Activity, HealthKit, and haptics all hook into, and it makes ride completion
-  testable.
+- **Ride-session coordinator:** SHIPPED (2026-06-25). Ride start and finish now route through
+  one `RideSessionCoordinator` in `AuraKit`, ending the duplicated start/end lifecycle, the
+  permission gate, the screen-awake calls, the Live Activity loop, and the `openSettings` helper
+  that both HUDs carried after Wave 0. The coordinator drives its two app-target side effects
+  (screen-wake, the Live Activity) and the store through three injected `@MainActor` seams
+  (`ScreenWakeControlling`, `RideActivityControlling`, `RideSaving`), so `AuraKit` stays free of
+  UIKit and ActivityKit and still builds on the macOS CI host. Ride completion is now
+  unit-tested: a Swift Testing suite covers the permission gate, the start wiring, point
+  streaming, finish and save, finish idempotency, the save-failure branch, cancel, and the
+  maneuver push. Both HUDs collapsed onto the coordinator and call only `start`/`finish`/`cancel`
+  (plus the navigate maneuver sync); `RideScreen` was removed and `openSettings` is one shared
+  helper. Both ride flows were verified on the simulator. This is the seam the Live Activity,
+  HealthKit, and haptics hook into. The remaining Wave 1 sub-projects are persistence and
+  navigation.
 - **Design system:** SHIPPED (2026-06-25). `AuraTheme` is now semantic color roles
   (background, surface, text primary/secondary, accent, routeLine, destructive, ink-on-fill,
   border), a spacing scale, a radius scale, and a type ramp, plus a `UIColor` bridge so the
@@ -265,20 +273,22 @@ rest become mostly additive once Wave 1 lands.
 
 ## Testing
 
-The `AuraCore` package has 115 XCTest tests covering the pure layer: GPX parsing, stats and
+The `AuraCore` package has 124 tests covering the pure layer: GPX parsing, stats and
 ranking (including that "Most paths" avoids forced-walking routes), unit conversion, the
 turn-card and guidance pipelines (including the reroute transitions), the week-to-date
-aggregation, the plotting math, and the GPS signal classification, fix filter, and
-`LocationService.ingest`. CI runs three jobs: the package tests under Swift 6 language mode,
-an xcodebuild build of the app (which also builds AuraWidgets), and SwiftLint `--strict`. The
-package test count is unchanged at 115; the quality-gates sub-project added no tests. The gap
-is the app target: every SwiftUI view, every Mapbox-backed provider, and the live CoreLocation
-stream are built in CI now but still untested. Wave 0's free-ride record-to-summary flow was
+aggregation, the plotting math, the GPS signal classification, fix filter, and
+`LocationService.ingest`, and the ride-session coordinator lifecycle. CI runs three jobs: the
+package tests under Swift 6 language mode, an xcodebuild build of the app (which also builds
+AuraWidgets), and SwiftLint `--strict`. The package test count rose from 115 to 124: the
+ride-session coordinator added a 9-case suite, the first use of Swift Testing in the package
+(the prior 115 are XCTest). The gap is the app target: every SwiftUI view, every Mapbox-backed
+provider, and the live CoreLocation stream are built in CI now but still untested. Wave 0's free-ride record-to-summary flow was
 checked with a one-off simulator smoke test, not an automated one.
 
 Near-term testing work, sequenced with the waves above: the app-target CI build and SwiftLint
-landed in Wave 1; still to come are the schema migration test alongside the persistence
-rebuild (Wave 1) and adopting Swift Testing for new tests. UI work is still verified by running the
+landed in Wave 1; still to come is the schema migration test alongside the persistence
+rebuild (Wave 1). The ride-session coordinator already adopted Swift Testing for its suite,
+the pattern new tests follow from here. UI work is still verified by running the
 app on the simulator and checking the actual screens, since a clean build is not enough to
 catch a feature that silently does nothing (the Terrain-RGB elevation switch is the
 cautionary tale: the first implementation compiled fine and returned a flat value

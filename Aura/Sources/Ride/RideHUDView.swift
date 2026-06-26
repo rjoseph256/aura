@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 import AuraCore
 import AuraKit
 
@@ -8,30 +7,24 @@ struct RideHUDView: View {
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
     @Environment(LocationService.self) private var location
-    @State private var recorder = RideRecorder(kind: .freeRide)
-    @State private var streamTask: Task<Void, Never>?
-    @State private var finishedRide: Ride?
-    @State private var saveFailed = false
-    @State private var startDate: Date?
-    @State private var now = Date()
+
+    @State private var coordinator = RideSessionCoordinator(
+        kind: .freeRide, destinationName: nil,
+        screen: ScreenWakeController(), activity: RideLiveActivityController.shared)
     @State private var showPermission = false
 
-    private var elapsed: TimeInterval {
-        guard let startDate else { return 0 }
-        return now.timeIntervalSince(startDate)
-    }
-
     var body: some View {
+        @Bindable var coordinator = coordinator
         ZStack(alignment: .bottomTrailing) {
-            RideMapView(track: recorder.track)
-            SpeedRail(stats: recorder.stats, elapsed: elapsed, units: settings.units)
+            RideMapView(track: coordinator.track)
+            SpeedRail(stats: coordinator.stats, elapsed: coordinator.elapsed, units: settings.units)
                 .padding(.trailing, AuraTheme.Spacing.lg).padding(.bottom, 90)
             controls
         }
         // Back-to-home affordance, shown before a ride starts so the screen can be
         // abandoned without having to start and then end a ride.
         .overlay(alignment: .topLeading) {
-            if !recorder.isRecording {
+            if !coordinator.isRecording {
                 backButton
                     .padding(.top, 8)   // sits in the safe area; no hardcoded status-bar inset
                     .padding(.leading, 16)
@@ -45,37 +38,23 @@ struct RideHUDView: View {
         .background(AuraTheme.background)
         // Returning from the summary (or backing out) drops to the plan/tab shell,
         // mirroring NavigateHUDView.
-        .sheet(item: $finishedRide, onDismiss: { router.screen = .plan }, content: {
-            RideSummaryView(ride: $0, saveFailed: saveFailed)
+        .sheet(item: $coordinator.finishedRide, onDismiss: { router.screen = .plan }, content: { ride in
+            RideSummaryView(ride: ride, saveFailed: coordinator.saveFailed)
         })
         .sheet(isPresented: $showPermission) {
-            LocationPermissionView(onOpenSettings: openSettings)
+            LocationPermissionView(onOpenSettings: RideSettingsLink.open)
         }
-        .task(id: recorder.isRecording) {
-            guard recorder.isRecording else { return }
-            while !Task.isCancelled {
-                now = Date()
-                // The controller throttles internally — ticking it here keeps the Live
-                // Activity fresh without an extra timer.
-                RideLiveActivityController.shared.update(stats: recorder.stats, maneuver: nil)
-                try? await Task.sleep(nanoseconds: 500_000_000)
-            }
-        }
-        .onDisappear {
-            streamTask?.cancel()
-            location.stop()
-            RideScreen.keepAwake(false)
-        }
+        .onDisappear { coordinator.cancel() }
     }
 
     private var controls: some View {
         Button {
-            recorder.isRecording ? endRide() : startRide()
+            coordinator.isRecording ? coordinator.finish() : startRide()
         } label: {
-            Text(recorder.isRecording ? "End ride" : "Start free ride")
+            Text(coordinator.isRecording ? "End ride" : "Start free ride")
         }
         // Primary lime when starting; destructive pink only for end-ride.
-        .buttonStyle(recorder.isRecording ? .ctaDestructive : .ctaPrimary)
+        .buttonStyle(coordinator.isRecording ? .ctaDestructive : .ctaPrimary)
         .padding(.horizontal, AuraTheme.Spacing.xxl).padding(.bottom, 28)
         .frame(maxWidth: .infinity, alignment: .center)
     }
@@ -91,38 +70,9 @@ struct RideHUDView: View {
     }
 
     private func startRide() {
-        switch location.authorization {
-        case .denied, .restricted:
-            showPermission = true
-            return
-        default:
-            break
-        }
-        startDate = Date()
-        recorder.start(at: startDate!)
-        RideScreen.keepAwake(true)
-        RideLiveActivityController.shared.start(
-            mode: .freeRide, startedAt: startDate!, units: settings.units, destinationName: nil)
-        streamTask = Task { @MainActor in
-            for await point in location.points() { recorder.record(point) }
-        }
-    }
-
-    private func endRide() {
-        // Idempotent: only end+save once even if invoked again.
-        guard recorder.isRecording else { return }
-        streamTask?.cancel()
-        location.stop()
-        RideScreen.keepAwake(false)
-        RideLiveActivityController.shared.end()
-        let ride = recorder.end(at: Date())
-        do { try rideStore.save(ride) } catch { saveFailed = true }
-        finishedRide = ride
-    }
-
-    private func openSettings() {
-        if let url = URL(string: UIApplication.openSettingsURLString) {
-            UIApplication.shared.open(url)
-        }
+        let outcome = coordinator.start(
+            location: location, saving: rideStore, units: settings.units,
+            authorization: location.authorization)
+        if outcome == .permissionDenied { showPermission = true }
     }
 }

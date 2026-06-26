@@ -13,8 +13,8 @@ import SwiftUI
 ///   `GuidanceSession` (Mapbox-backed in the app, scripted in tests). The HUD itself
 ///   imports no guidance SDK — only the map renderer.
 /// - SpeedRail bottom-trailing with live speed and elapsed time.
-/// - Destructive "End ride" button → RideSummaryView sheet → returns to .plan.
-/// - Mute toggle (top-trailing) for spoken instructions via AVSpeechSynthesizer.
+/// - The ride lifecycle (record, screen-wake, Live Activity, save) is owned by
+///   `RideSessionCoordinator`; this view keeps guidance, voice, and the map.
 struct NavigateHUDView: View {
     let route: AuraCore.Route
     /// The place the rider chose in search, denormalized onto the saved ride for History.
@@ -26,12 +26,9 @@ struct NavigateHUDView: View {
     @Environment(LocationService.self) private var location
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    // MARK: Recording
+    // MARK: Ride lifecycle
 
-    @State private var recorder = RideRecorder(kind: .navigate)
-    @State private var streamTask: Task<Void, Never>?
-    @State private var finishedRide: Ride?
-    @State private var saveFailed = false
+    @State private var coordinator: RideSessionCoordinator
     @State private var showPermission = false
 
     // MARK: Guidance
@@ -39,16 +36,6 @@ struct NavigateHUDView: View {
     /// Owns the guidance event stream and the turn-card state. Backed by Mapbox here;
     /// a `ScriptedGuidanceSession` drives the same model in tests.
     @State private var guidance = GuidanceViewModel(session: MapboxGuidanceSession())
-
-    // MARK: Elapsed-time ticker
-
-    @State private var startDate: Date?
-    @State private var now = Date()
-
-    private var elapsed: TimeInterval {
-        guard let startDate else { return 0 }
-        return now.timeIntervalSince(startDate)
-    }
 
     // MARK: Voice
 
@@ -59,16 +46,25 @@ struct NavigateHUDView: View {
 
     @State private var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
 
+    init(route: AuraCore.Route, destination: Place? = nil) {
+        self.route = route
+        self.destination = destination
+        _coordinator = State(initialValue: RideSessionCoordinator(
+            kind: .navigate, destinationName: destination?.name,
+            screen: ScreenWakeController(), activity: RideLiveActivityController.shared))
+    }
+
     // MARK: Body
 
     var body: some View {
+        @Bindable var coordinator = coordinator
         ZStack(alignment: .bottom) {
             // Full-bleed map
             navigateMapView
                 .ignoresSafeArea()
 
             // Speed stats — bottom-trailing mirror of RideHUDView
-            SpeedRail(stats: recorder.stats, elapsed: elapsed, units: settings.units)
+            SpeedRail(stats: coordinator.stats, elapsed: coordinator.elapsed, units: settings.units)
                 .padding(.trailing, AuraTheme.Spacing.lg)
                 .padding(.bottom, 90)
                 .frame(maxWidth: .infinity, maxHeight: .infinity,
@@ -114,55 +110,38 @@ struct NavigateHUDView: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: guidance.isRerouting)
         .background(AuraTheme.background)
         // Summary sheet: when dismissed, return to plan screen.
-        .sheet(item: $finishedRide, onDismiss: {
+        .sheet(item: $coordinator.finishedRide, onDismiss: {
             router.screen = .plan
         }, content: { ride in
-            RideSummaryView(ride: ride, saveFailed: saveFailed)
+            RideSummaryView(ride: ride, saveFailed: coordinator.saveFailed)
         })
         .sheet(isPresented: $showPermission) {
-            LocationPermissionView(onOpenSettings: openSettings)
+            LocationPermissionView(onOpenSettings: RideSettingsLink.open)
         }
-        // Elapsed-time ticker (mirrors RideHUDView pattern)
-        .task(id: recorder.isRecording) {
-            guard recorder.isRecording else { return }
-            while !Task.isCancelled {
-                now = Date()
-                // The controller throttles internally and pushes immediately on a new
-                // maneuver, so ticking it here keeps the next turn current on the
-                // Lock Screen / Dynamic Island without a separate timer.
-                RideLiveActivityController.shared.update(
-                    stats: recorder.stats, maneuver: guidance.lastUpdate)
-                try? await Task.sleep(nanoseconds: 500_000_000)
-            }
+        // Keep the coordinator's Live Activity turn current as guidance progresses.
+        .onChange(of: guidance.lastUpdate) { _, update in
+            coordinator.maneuver = update
         }
-        // Start recording + guidance immediately on appear
+        // Start recording + guidance on appear. The voice/audio front matter stays ahead
+        // of coordinator.start so its ordering is unchanged.
         .task {
             isMuted = !settings.voiceEnabled
             configureAudioSession()
             guidance.onSpeak = { speakInstruction($0) }
             guidance.onArrive = { endRide() }
 
-            // Gate: do not start recording or guidance when permission is denied.
-            switch location.authorization {
-            case .denied, .restricted:
+            let outcome = coordinator.start(
+                location: location, saving: rideStore, units: settings.units,
+                authorization: location.authorization)
+            guard outcome == .started else {
                 showPermission = true
                 return
-            default:
-                break
-            }
-
-            startRide()
-            if let startDate {
-                RideLiveActivityController.shared.start(
-                    mode: .navigate, startedAt: startDate, units: settings.units,
-                    destinationName: destination?.name)
             }
             guidance.start(route: route)
         }
         .onDisappear {
             teardownGuidance()
-            location.stop()
-            RideScreen.keepAwake(false)
+            coordinator.cancel()
         }
     }
 
@@ -222,33 +201,13 @@ struct NavigateHUDView: View {
         .accessibilityValue(isMuted ? "On" : "Off")
     }
 
-    // MARK: Recording lifecycle
+    // MARK: Ride end (guidance teardown then coordinator finish)
 
-    private func startRide() {
-        startDate = Date()
-        recorder.start(at: startDate!)
-        RideScreen.keepAwake(true)
-
-        streamTask = Task { @MainActor in
-            for await point in location.points() {
-                recorder.record(point)
-                // Turn state is driven by the GuidanceViewModel; recording only here.
-            }
-        }
-    }
-
+    /// Idempotent through the coordinator: arrival and the End-ride button can both call
+    /// this. Tears down guidance (view-owned) first, then finishes the ride.
     private func endRide() {
-        // Idempotent: arrival and the End-ride button can both call this; once
-        // recording has stopped there's nothing more to do.
-        guard recorder.isRecording else { return }
-        streamTask?.cancel()
-        location.stop()
-        RideScreen.keepAwake(false)
         teardownGuidance()
-        RideLiveActivityController.shared.end()
-        let ride = recorder.end(at: Date(), destinationName: destination?.name)
-        do { try rideStore.save(ride) } catch { saveFailed = true }
-        finishedRide = ride
+        coordinator.finish()
     }
 
     // MARK: Guidance teardown
@@ -279,11 +238,5 @@ struct NavigateHUDView: View {
             ?? AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         speechSynthesizer.speak(utterance)
-    }
-
-    // MARK: Settings deep-link
-
-    private func openSettings() {
-        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
     }
 }
