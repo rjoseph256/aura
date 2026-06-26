@@ -5,14 +5,7 @@ import AuraCore
 @Observable
 @MainActor
 final class AppRouter {
-    enum Screen: Equatable {
-        case plan
-        case preview(destination: Place)
-        case ride(route: Route?, destination: Place?)   // nil route => free ride
-    }
-    var screen: Screen = .plan
-
-    /// Selected tab on the plan screen (bound by `AuraTabView`). Lets the home
+    /// Selected tab on the plan screen (bound by the Ride tab's NavigationStack). Lets the home
     /// dashboard switch to History when the rider taps their last ride.
     enum Tab: Hashable { case ride, history, settings }
     var selectedTab: Tab = .ride

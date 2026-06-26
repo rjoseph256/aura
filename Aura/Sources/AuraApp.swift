@@ -20,6 +20,7 @@ struct AuraApp: App {
                 .environment(settings)
                 .environment(location)
                 .preferredColorScheme(.dark)
+                .onOpenURL { router.handle(url: $0) }
         }
     }
 
@@ -52,47 +53,30 @@ struct AuraApp: App {
 
 // MARK: - RootView
 
-/// Routes the window to the correct screen based on AppRouter.screen.
+/// The app's tab shell. The Ride tab is a NavigationStack whose path the AppRouter owns;
+/// History and Settings keep their own stacks. Pushing preview or a ride HUD retains the
+/// screen beneath it, so transitions no longer tear down and rebuild the Mapbox map.
 private struct RootView: View {
-    @Environment(AppRouter.self) private var router
-
-    var body: some View {
-        Group {
-            switch router.screen {
-            case .plan:
-                AuraTabView()
-
-            case .preview(let destination):
-                RoutePreviewView(destination: destination)
-
-            case .ride(let route, let destination):
-                if let route {
-                    NavigateHUDView(route: route, destination: destination)
-                } else {
-                    // Free ride — unchanged path
-                    RideHUDView()
-                }
-            }
-        }
-        .animation(.easeInOut(duration: 0.25), value: router.screen)
-    }
-}
-
-// MARK: - AuraTabView
-
-/// Three-tab shell shown on the plan screen. History & Settings get their own
-/// NavigationStacks (sheets / NavigationLinks need them); the Ride tab hosts the
-/// router-driven plan→preview→ride flow's entry point (PlanView), which manages
-/// its own layout and needs no nav bar.
-private struct AuraTabView: View {
     @Environment(AppRouter.self) private var router
 
     var body: some View {
         @Bindable var router = router
         TabView(selection: $router.selectedTab) {
-            PlanView()
-                .tabItem { Label("Ride", systemImage: "bicycle") }
-                .tag(AppRouter.Tab.ride)
+            NavigationStack(path: $router.path) {
+                PlanView()
+                    .navigationDestination(for: AppRoute.self) { route in
+                        switch route {
+                        case .freeRide:
+                            RideHUDView()
+                        case let .preview(place):
+                            RoutePreviewView(destination: place)
+                        case let .navigate(route, destination):
+                            NavigateHUDView(route: route, destination: destination)
+                        }
+                    }
+            }
+            .tabItem { Label("Ride", systemImage: "bicycle") }
+            .tag(AppRouter.Tab.ride)
 
             NavigationStack { HistoryView() }
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }

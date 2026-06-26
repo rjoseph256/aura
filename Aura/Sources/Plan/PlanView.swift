@@ -28,7 +28,7 @@ struct PlanView: View {
 
                 DestinationSearchView(query: $query) { place in
                     router.remember(place)
-                    router.screen = .preview(destination: place)
+                    router.push(.preview(place))
                 }
 
                 // Dashboard is hidden while actively searching (results take over).
@@ -146,7 +146,7 @@ struct PlanView: View {
             VStack(spacing: 0) {
                 ForEach(router.recents) { place in
                     RecentRow(place: place) {
-                        router.screen = .preview(destination: place)
+                        router.push(.preview(place))
                     }
                     if place.id != router.recents.last?.id {
                         Divider()
@@ -173,7 +173,7 @@ struct PlanView: View {
 
     private var freeRideButton: some View {
         Button("Free ride") {
-            router.screen = .ride(route: nil, destination: nil)
+            router.push(.freeRide)
         }
         .buttonStyle(.ctaPrimary)
         .padding(.horizontal, AuraTheme.Spacing.xxl)

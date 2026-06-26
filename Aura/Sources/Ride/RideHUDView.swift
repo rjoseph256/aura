@@ -38,13 +38,19 @@ struct RideHUDView: View {
         .background(AuraTheme.background)
         // Returning from the summary (or backing out) drops to the plan/tab shell,
         // mirroring NavigateHUDView.
-        .sheet(item: $coordinator.finishedRide, onDismiss: { router.screen = .plan }, content: { ride in
+        .sheet(item: $coordinator.finishedRide, onDismiss: { router.popToRoot() }, content: { ride in
             RideSummaryView(ride: ride, saveFailed: coordinator.saveFailed)
         })
         .sheet(isPresented: $showPermission) {
             LocationPermissionView(onOpenSettings: RideSettingsLink.open)
         }
-        .onDisappear { coordinator.cancel() }
+        .onChange(of: coordinator.isRecording) { _, recording in
+            router.isRideActive = recording
+        }
+        .onDisappear {
+            router.isRideActive = false
+            coordinator.cancel()
+        }
     }
 
     private var controls: some View {
@@ -61,7 +67,7 @@ struct RideHUDView: View {
 
     private var backButton: some View {
         Button {
-            router.screen = .plan
+            router.popToRoot()
         } label: {
             Image(systemName: "chevron.left")
         }
