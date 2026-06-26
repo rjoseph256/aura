@@ -40,6 +40,7 @@ struct NavigateHUDView: View {
     // MARK: Voice
 
     @State private var isMuted = false
+    @State private var showEndConfirm = false
     private let speechSynthesizer = AVSpeechSynthesizer()
 
     // MARK: Map
@@ -63,15 +64,24 @@ struct NavigateHUDView: View {
             navigateMapView
                 .ignoresSafeArea()
 
-            // Speed stats — bottom-trailing mirror of RideHUDView
-            SpeedRail(stats: coordinator.stats, elapsed: coordinator.elapsed, units: settings.units)
-                .padding(.trailing, AuraTheme.Spacing.lg)
-                .padding(.bottom, 90)
-                .frame(maxWidth: .infinity, maxHeight: .infinity,
-                       alignment: .bottomTrailing)
+            // Bottom cockpit: controls + speed on one row, trip strip beneath them.
+            VStack(spacing: AuraTheme.Spacing.sm) {
+                HStack(alignment: .bottom) {
+                    ControlCluster(
+                        isFollowing: viewport.followPuck != nil,
+                        isMuted: isMuted,
+                        onRecenter: { recenter() },
+                        onToggleMute: { toggleMute() },
+                        onEndRide: { showEndConfirm = true })
+                    Spacer()
+                    SpeedRail(stats: coordinator.stats, elapsed: coordinator.elapsed,
+                             units: settings.units, layout: .speedOnly)
+                }
+                .padding(.horizontal, AuraTheme.Spacing.lg)
 
-            // End-ride button
-            endRideButton
+                TripStripView(state: cruisingState)
+            }
+            .padding(.bottom, AuraTheme.Spacing.sm)
         }
         // Turn card pinned below the status bar
         .overlay(alignment: .top) {
@@ -80,19 +90,12 @@ struct NavigateHUDView: View {
                 .animation(reduceMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.38),
                            value: guidance.turn)
         }
-        // Mute toggle — top trailing, clear of notch
-        .overlay(alignment: .topTrailing) {
-            muteButton
-                .padding(.top, 8)
-                .padding(.trailing, 16)
-        }
-        // GPS signal chip — top leading, clear of the turn card (top-center) and mute button (top-trailing)
+        // GPS signal chip — top leading
         .overlay(alignment: .topLeading) {
             GPSSignalChip(signal: location.signal)
                 .padding(.top, 8).padding(.leading, 16)
         }
-        // Rerouting cue — centered below the turn card (top 8 pt + ~80 pt card ≈ 88 pt;
-        // 96 pt padding gives a comfortable gap). Shown only while guidance is rerouting.
+        // Rerouting cue — centered below the turn card
         .overlay(alignment: .top) {
             if guidance.isRerouting {
                 Label("Rerouting…", systemImage: "arrow.triangle.2.circlepath")
@@ -109,7 +112,12 @@ struct NavigateHUDView: View {
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: guidance.isRerouting)
         .background(AuraTheme.background)
-        // Summary sheet: when dismissed, return to plan screen.
+        // End-ride confirmation: the cluster's End button opens this.
+        .confirmationDialog("End ride?", isPresented: $showEndConfirm, titleVisibility: .visible) {
+            Button("End ride", role: .destructive) { endRide() }
+            Button("Keep riding", role: .cancel) { }
+        }
+        // Summary sheet: when dismissed, return to the home dashboard.
         .sheet(item: $coordinator.finishedRide, onDismiss: {
             router.popToRoot()
         }, content: { ride in
@@ -153,6 +161,13 @@ struct NavigateHUDView: View {
         .swipeBackEnabled(false)
     }
 
+    /// The formatted trip strip line, recomputed each render from the latest guidance
+    /// update and the current time. nil update (pre-guidance) reads as `.starting`.
+    private var cruisingState: CruisingState {
+        guard let update = guidance.lastUpdate else { return .starting }
+        return CruisingPresenter.state(for: update, units: settings.units, now: Date())
+    }
+
     // MARK: Map view (puck follow + live route polyline)
 
     private var navigateMapView: some View {
@@ -178,35 +193,26 @@ struct NavigateHUDView: View {
         .mapStyle(settings.mapStyle.mapboxStyle)
     }
 
-    // MARK: End-ride button
+    // MARK: Cluster actions
 
-    private var endRideButton: some View {
-        Button("End ride") {
-            endRide()
+    /// Re-engages puck-following after the rider has panned the map. Snaps under Reduce
+    /// Motion, flies otherwise.
+    private func recenter() {
+        if reduceMotion {
+            viewport = .followPuck(zoom: 16, bearing: .heading)
+        } else {
+            withViewportAnimation(.easeOut(duration: 0.4)) {
+                viewport = .followPuck(zoom: 16, bearing: .heading)
+            }
         }
-        .buttonStyle(.ctaDestructive)
-        .padding(.horizontal, AuraTheme.Spacing.xxl)
-        .padding(.bottom, 28)
-        .frame(maxWidth: .infinity, alignment: .center)
     }
 
-    // MARK: Mute button
-
-    private var muteButton: some View {
-        Button {
-            isMuted.toggle()
-            if isMuted {
-                speechSynthesizer.stopSpeaking(at: .immediate)
-            }
-        } label: {
-            Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+    /// Toggles voice mute; muting also cuts off any in-flight prompt.
+    private func toggleMute() {
+        isMuted.toggle()
+        if isMuted {
+            speechSynthesizer.stopSpeaking(at: .immediate)
         }
-        // Active (muted) state shows lime; toggle trait + value convey state non-visually
-        // since HUDControlButton signals "active" by color alone.
-        .buttonStyle(.hudControl(active: isMuted))
-        .accessibilityLabel("Mute voice guidance")
-        .accessibilityAddTraits(.isToggle)
-        .accessibilityValue(isMuted ? "On" : "Off")
     }
 
     // MARK: Ride end (guidance teardown then coordinator finish)
