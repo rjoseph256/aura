@@ -174,13 +174,19 @@ public final class MapboxGuidanceSession: GuidanceSession {
     /// Extracts the upcoming maneuver's remaining distance and instruction text from
     /// Mapbox `RouteProgress`, preferring the upcoming step (what you're approaching).
     private static func guidanceUpdate(from progress: RouteProgress) -> GuidanceUpdate {
-        let distanceRemaining = progress.currentLegProgress.currentStepProgress.distanceRemaining
+        let distanceToManeuver = progress.currentLegProgress.currentStepProgress.distanceRemaining
         let instruction: String
         if let upcoming = progress.currentLegProgress.upcomingStep {
             instruction = upcoming.instructions
         } else {
             instruction = progress.currentLegProgress.currentStep.instructions
         }
-        return GuidanceUpdate(distanceToManeuverMeters: distanceRemaining, instruction: instruction)
+        return GuidanceUpdate(
+            distanceToManeuverMeters: distanceToManeuver,
+            instruction: instruction,
+            distanceRemainingMeters: progress.distanceRemaining,
+            durationRemainingSeconds: progress.durationRemaining,
+            currentStreetName: progress.currentLegProgress.currentStep.names?.first
+        )
     }
 }
