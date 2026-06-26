@@ -53,6 +53,9 @@ public enum CruisingPresenter {
     /// Arrival = now + remaining, formatted to a locale-aware short time so a 12-hour
     /// locale gets "4:38 PM" and a 24-hour locale gets "16:38".
     private static func eta(_ seconds: Double?, now: Date, calendar: Calendar) -> String? {
+        // Accepts `>= 0` (unlike the distance guard's `> 0`): zero seconds means "arriving
+        // now", which is a valid ETA, whereas zero meters remaining is indistinguishable
+        // from "not yet known" and so reads as a placeholder.
         guard let seconds, seconds >= 0 else { return nil }
         let arrival = now.addingTimeInterval(seconds)
         let formatter = DateFormatter()
