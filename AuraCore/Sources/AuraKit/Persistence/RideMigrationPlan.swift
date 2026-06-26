@@ -21,11 +21,16 @@ public enum RideMigrationPlan: SchemaMigrationPlan {
             let encoder = JSONEncoder()
             let records = try context.fetch(FetchDescriptor<RideSchemaV2.RideRecord>())
             for record in records {
-                if let statsData = record.statsData,
-                   let stats = try? decoder.decode(RideStats.self, from: statsData) {
-                    record.distanceMeters = stats.distanceMeters
-                    record.movingTimeSeconds = stats.movingTimeSeconds
-                    record.elevationGainMeters = stats.elevationGainMeters
+                if let statsData = record.statsData {
+                    if let stats = try? decoder.decode(RideStats.self, from: statsData) {
+                        record.distanceMeters = stats.distanceMeters
+                        record.movingTimeSeconds = stats.movingTimeSeconds
+                        record.elevationGainMeters = stats.elevationGainMeters
+                    } else {
+                        // Loud in DEBUG/CI, non-fatal in release: a non-nil blob that fails to
+                        // decode leaves the columns at 0, indistinguishable from a statless ride.
+                        assertionFailure("Migration: failed to decode statsData for ride \(record.id); columns stay 0")
+                    }
                 }
                 if let track = try? decoder.decode([TrackPoint].self, from: record.trackData) {
                     let thumb = TrackSimplifier.thumbnail(from: track.map(\.coordinate))

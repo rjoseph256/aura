@@ -75,4 +75,19 @@ struct RideMigrationTests {
         #expect(nav.thumbnailData != nil)
         #expect(free.thumbnailData == nil)
     }
+
+    /// The path every new user hits: a brand-new store opened through the migration
+    /// plan should start cleanly on V2 and round-trip a saved ride.
+    @Test func freshStoreThroughMigrationPlanWorks() throws {
+        let container = try ModelContainer(
+            for: RideRecord.self,
+            migrationPlan: RideMigrationPlan.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true))
+        let store = RideStore(container: container)
+        let ride = Ride(kind: .freeRide, startedAt: Date(timeIntervalSince1970: 0),
+                        endedAt: Date(timeIntervalSince1970: 60), track: [], stats: nil,
+                        routeId: nil, destinationPlaceId: nil)
+        try store.save(ride)
+        #expect(try store.allRides().count == 1)
+    }
 }
