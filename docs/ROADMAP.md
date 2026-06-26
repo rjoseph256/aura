@@ -109,6 +109,11 @@ The rest of the audit groups into a few themes.
   and it cannot represent a deep link into a ride. The planned group-ride and deep-link
   futures both need the appendable path this design does not have. This is the largest
   rebuild item and it unblocks several others.
+  Resolved in Wave 1 (2026-06-26): see the Navigation bullet under Wave 1. The switch is now a
+  `NavigationStack` over a typed `AppRoute` path with one `.navigationDestination`, `AppRouter`
+  owns the path and a `handle(url:)` deep-link seam over the `aura://` scheme, pushing retains the
+  Mapbox map instead of tearing it down per transition, and back-swipe plus a URL-addressable ride
+  now exist.
 - **The SwiftData schema will fight the first feature that touches it.** `RideRecord`
   carries `@Attribute(.unique)` on `id`, which is a hard incompatibility with the iCloud
   sync the spec wants. The full GPS track is a JSON `Data` blob stored inline in the row
@@ -173,14 +178,31 @@ in `docs/superpowers/`. One item remains open and is intentionally not claimed: 
 ride to confirm the screen can lock mid-ride and keep recording (the simulator cannot prove
 this). Everything else was verified by the package tests and a simulator smoke test.
 
-### Wave 1 — Structural foundations
+### Wave 1 — Structural foundations — COMPLETE (2026-06-26)
 
-The rebuilds that make every later wave cheap and safe. Do these before feature work.
+The rebuilds that make every later wave cheap and safe. Do these before feature work. All
+five sub-projects shipped: quality gates, design system, ride-session coordinator,
+persistence, and navigation.
 
-- **Navigation:** replace the `AppRouter.screen` switch with a `NavigationStack(path:)`
-  over a typed `Route` enum and one `.navigationDestination`. Keep `AppRouter` as the
-  `@MainActor @Observable` owner of the path and add a `handle(url:)` entry point for deep
-  links. This also removes the per-transition Mapbox teardown.
+- **Navigation:** SHIPPED (2026-06-26). The `AppRouter.screen` switch is replaced by a
+  `NavigationStack(path:)` over a typed `AppRoute` enum and one `.navigationDestination`.
+  `AppRoute` lives in `AuraCore` and carries the full `Route` for the navigate case, with a
+  manual id-keyed `Hashable` so the path never hashes a route's geometry and `Place`/`Route`/
+  `Coordinate` gain no conformance. `AppRouter` stays the `@MainActor @Observable` owner of the
+  path (`push`/`pop`/`popToRoot`) and gains a `handle(url:)` that a pure, CI-tested `DeepLink`
+  parser feeds over an `aura://` scheme. The addressable set is the home dashboard, the History
+  and Settings tabs, a pre-start free ride, and a route preview to a destination given by
+  coordinate and name; navigating a specific computed route is intentionally not URL-addressable,
+  because a URL cannot carry a geometry. A deep link arriving mid-ride is ignored, guarded on an
+  `isRideActive` flag the HUDs drive from `coordinator.isRecording`, so a link can never abandon a
+  recording ride. `RootView` is now the tab shell: the Ride tab holds the stack while History and
+  Settings keep their own. Pushing a destination retains the Mapbox map beneath it instead of
+  rebuilding it on every transition, which was the second goal of this item. Pushed screens are
+  full-bleed (the navigation bar and tab bar hide), and a small `UINavigationController`-backed
+  modifier keeps the back-swipe alive for preview under the hidden bar while suppressing it on an
+  actively recording ride so a stray edge swipe cannot drop the ride. New AuraCore suites cover
+  `AppRoute` identity and the `DeepLink` parser. A single Mapbox map hoisted across the whole flow
+  is a documented fast-follow. This was the last Wave 1 sub-project.
 - **Persistence:** SHIPPED (2026-06-26). The SwiftData store is now versioned and the
   History list no longer decodes a track to draw a row. `RideRecord` split into a frozen
   `RideSchemaV1` and a `RideSchemaV2` that drops `@Attribute(.unique)` on `id` (the CloudKit
@@ -209,8 +231,8 @@ The rebuilds that make every later wave cheap and safe. Do these before feature 
   maneuver push. Both HUDs collapsed onto the coordinator and call only `start`/`finish`/`cancel`
   (plus the navigate maneuver sync); `RideScreen` was removed and `openSettings` is one shared
   helper. Both ride flows were verified on the simulator. This is the seam the Live Activity,
-  HealthKit, and haptics hook into. With persistence now shipped, the remaining Wave 1
-  sub-project is navigation.
+  HealthKit, and haptics hook into. With persistence and navigation now shipped as well, Wave 1
+  is complete.
 - **Design system:** SHIPPED (2026-06-25). `AuraTheme` is now semantic color roles
   (background, surface, text primary/secondary, accent, routeLine, destructive, ink-on-fill,
   border), a spacing scale, a radius scale, and a type ramp, plus a `UIColor` bridge so the

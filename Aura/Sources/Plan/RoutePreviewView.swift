@@ -50,6 +50,10 @@ struct RoutePreviewView: View {
                 fitCamera(to: route, animate: !reduceMotion)
             }
         }
+        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
+        .navigationBarBackButtonHidden(true)
+        .swipeBackEnabled(true)
     }
 
     // MARK: Map pane
@@ -76,7 +80,7 @@ struct RoutePreviewView: View {
             // Back chevron — HUDControlButton carries the 44pt hit area and the
             // Reduce Transparency fallback.
             Button {
-                router.screen = .plan
+                router.pop()
             } label: {
                 Image(systemName: "chevron.left")
             }
@@ -196,7 +200,7 @@ struct RoutePreviewView: View {
 
     private var backButton: some View {
         Button {
-            router.screen = .plan
+            router.pop()
         } label: {
             Text("Back")
                 .font(.headline)
@@ -213,7 +217,9 @@ struct RoutePreviewView: View {
 
     private var startButton: some View {
         Button("Start RIDE") {
-            router.screen = .ride(route: selected, destination: destination)
+            if let selected {
+                router.push(.navigate(route: selected, destination: destination))
+            }
         }
         .buttonStyle(.ctaPrimary)
         .disabled(selected == nil)

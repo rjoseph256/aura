@@ -111,7 +111,7 @@ struct NavigateHUDView: View {
         .background(AuraTheme.background)
         // Summary sheet: when dismissed, return to plan screen.
         .sheet(item: $coordinator.finishedRide, onDismiss: {
-            router.screen = .plan
+            router.popToRoot()
         }, content: { ride in
             RideSummaryView(ride: ride, saveFailed: coordinator.saveFailed)
         })
@@ -139,10 +139,18 @@ struct NavigateHUDView: View {
             }
             guidance.start(route: route)
         }
+        .onChange(of: coordinator.isRecording) { _, recording in
+            router.isRideActive = recording
+        }
         .onDisappear {
+            router.isRideActive = false
             teardownGuidance()
             coordinator.cancel()
         }
+        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
+        .navigationBarBackButtonHidden(true)
+        .swipeBackEnabled(false)
     }
 
     // MARK: Map view (puck follow + live route polyline)
