@@ -22,6 +22,14 @@ public final class RideStore {
                          isEphemeral: true)
     }
 
+    /// The app's on-disk store, with the migration plan wired in. This is the only
+    /// container that migrates; `inMemory()` always starts fresh on the current schema.
+    public static func persistent() throws -> RideStore {
+        let container = try ModelContainer(for: RideRecord.self,
+                                           migrationPlan: RideMigrationPlan.self)
+        return RideStore(container: container)
+    }
+
     public func save(_ ride: Ride) throws {
         let context = container.mainContext
         context.insert(try RideMapper.record(from: ride))
