@@ -35,6 +35,11 @@ private struct SwipeBackGestureToggle: UIViewControllerRepresentable {
             applyToNavigationController()
         }
 
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            applyToNavigationController()
+        }
+
         func applyToNavigationController() {
             navigationController?.interactivePopGestureRecognizer?.isEnabled = desiredEnabled
         }
