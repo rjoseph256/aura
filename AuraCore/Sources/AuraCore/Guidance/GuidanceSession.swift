@@ -8,10 +8,24 @@ public struct GuidanceUpdate: Equatable, Sendable {
     public var distanceToManeuverMeters: Double
     /// Human-readable instruction for the upcoming maneuver, e.g. "Right onto Penn Ave".
     public var instruction: String
+    /// Whole-route distance remaining to the destination, in meters. nil until known.
+    public var distanceRemainingMeters: Double?
+    /// Whole-route time remaining to the destination, in seconds. ETA = now + this.
+    public var durationRemainingSeconds: Double?
+    /// The road the rider is currently on, e.g. "Penn Ave". nil when the engine has no
+    /// name for the current step.
+    public var currentStreetName: String?
 
-    public init(distanceToManeuverMeters: Double, instruction: String) {
+    public init(distanceToManeuverMeters: Double,
+                instruction: String,
+                distanceRemainingMeters: Double? = nil,
+                durationRemainingSeconds: Double? = nil,
+                currentStreetName: String? = nil) {
         self.distanceToManeuverMeters = distanceToManeuverMeters
         self.instruction = instruction
+        self.distanceRemainingMeters = distanceRemainingMeters
+        self.durationRemainingSeconds = durationRemainingSeconds
+        self.currentStreetName = currentStreetName
     }
 }
 
