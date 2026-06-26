@@ -131,6 +131,13 @@ The rest of the audit groups into a few themes.
   elevation, no ETA, no street name, no recenter, and none of the edge states. Off-route
   reroute is not observed at all, so after a reroute the rider would see the old line while
   being guided down a new one.
+  Resolved in Wave 2 (2026-06-26): see the Navigate-HUD cockpit bullet under Wave 2. A
+  bottom trip strip now shows distance-remaining, an arrival ETA, and the current street
+  name; a persistent recenter control plus the unified mute and end-ride controls landed
+  as one cluster; and the GPS-weak, off-route, and permission-denied states (added in
+  Wave 0) are kept and re-fitted to the new layout. The remaining cockpit-adjacent work,
+  the composed VoiceOver labels and the contrast lift, are the next two Wave 2
+  sub-projects.
 - **Strict concurrency is off.** Both modules build in Swift 5 language mode with no
   strict-concurrency flags, and CI leans on a newer toolchain downgrading data-race
   violations to warnings. The code is written to a high Swift 6 standard already, so the
@@ -257,13 +264,31 @@ persistence, and navigation.
 
 ### Wave 2 — The cockpit the spec promised
 
-With the foundations in place, build the HUD the design spec describes.
+With the foundations in place, build the HUD the design spec describes. The four items
+split into three separately-shipped sub-projects, in build order: the navigate-HUD
+cockpit (items one and two), the composed VoiceOver labels (item three), and the
+ride-summary redesign with the contrast lift (item four).
 
-- Add distance-remaining, ETA, and the current street name to the navigate HUD (the data
-  already flows through `GuidanceViewModel`).
-- Add a recenter control and unify it with mute and end-ride into one control cluster
-  built on the new HUD control component.
-- Give the SpeedRail and TurnCard composed VoiceOver labels.
+- **Navigate-HUD cockpit:** SHIPPED (2026-06-26). The navigate HUD now shows the cruising
+  data Section 5 asks for and carries one control cluster. Distance-remaining, an arrival
+  ETA, and the current street name ride in a slim trip strip pinned to the bottom safe
+  area, and recenter, mute, and end-ride collapsed into one bottom-leading cluster built
+  on `HUDControlButton` (which gained a pink destructive role), with end-ride behind a
+  "Keep riding" or "End ride" confirmation. The cruising data needed a seam, not just
+  wiring: the audit's note that it "already flows through `GuidanceViewModel`" was not
+  true at the type level. `GuidanceUpdate` gained `distanceRemainingMeters`,
+  `durationRemainingSeconds`, and `currentStreetName`, which `MapboxGuidanceSession` now
+  decodes from `RouteProgress`, and a pure `CruisingPresenter` in AuraKit formats them
+  (distance unit-aware, ETA as an arrival clock from an injected clock) so CI tests the
+  formatting. `SpeedRail` gained a speed-only navigate layout, the recenter button
+  re-engages `followPuck` and lights when the rider pans off the puck, and the new
+  controls carry accessibility labels and values. New AuraKit and AuraCore suites cover
+  the presenter and the seam; the cockpit was verified on the iPhone 17 / iOS 26
+  simulator through the accessibility tree (the trip strip showing a live street,
+  distance, and ETA, the cluster, the recenter toggle, and the end-ride confirmation).
+- Give the SpeedRail and TurnCard composed VoiceOver labels. The cockpit sub-project gave
+  the new controls correct labels and values; this sub-project adds the richer composed
+  reads for the two most important elements.
 - Redesign the ride summary away from the orphaned stat stack into a balanced grid or a
   true hero metric, and lift the borderline contrast values across the app.
 
