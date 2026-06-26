@@ -50,6 +50,10 @@ struct RoutePreviewView: View {
                 fitCamera(to: route, animate: !reduceMotion)
             }
         }
+        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
+        .navigationBarBackButtonHidden(true)
+        .swipeBackEnabled(true)
     }
 
     // MARK: Map pane

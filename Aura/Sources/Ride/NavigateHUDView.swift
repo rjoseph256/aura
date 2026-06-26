@@ -147,6 +147,10 @@ struct NavigateHUDView: View {
             teardownGuidance()
             coordinator.cancel()
         }
+        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
+        .navigationBarBackButtonHidden(true)
+        .swipeBackEnabled(false)
     }
 
     // MARK: Map view (puck follow + live route polyline)

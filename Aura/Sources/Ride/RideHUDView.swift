@@ -51,6 +51,10 @@ struct RideHUDView: View {
             router.isRideActive = false
             coordinator.cancel()
         }
+        .toolbar(.hidden, for: .navigationBar)
+        .toolbar(.hidden, for: .tabBar)
+        .navigationBarBackButtonHidden(true)
+        .swipeBackEnabled(!coordinator.isRecording)
     }
 
     private var controls: some View {
