@@ -37,6 +37,8 @@ struct SpeedRail: View {
         }
         .padding(AuraTheme.Spacing.lg)
         .background(AuraTheme.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: AuraTheme.Radius.lg))
+        // The HUD is a compact glance target; let it enlarge meaningfully but not so
+        // far it swamps the map. Standard sizes scale freely; cap the accessibility tail.
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
