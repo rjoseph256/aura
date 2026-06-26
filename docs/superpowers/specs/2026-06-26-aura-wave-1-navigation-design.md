@@ -4,8 +4,8 @@
 in `RootView` with a `NavigationStack(path:)` over a typed `AppRoute` enum and one
 `.navigationDestination`. `AppRouter` stays the `@MainActor @Observable` owner of the
 path and gains a `handle(url:)` entry point for deep links. The move to a real stack
-also ends the per-transition Mapbox map teardown that the current switch forces on
-every screen change.
+also ends the Mapbox map teardown the current switch forces on forward transitions,
+since a push no longer dismantles the screen beneath it.
 
 **Status:** approved design, ready to plan.
 
@@ -34,10 +34,10 @@ Current state, confirmed in code:
   `selectedTab: Tab`, and a persisted `recents: [Place]` with `remember(_:)`.
 - `RootView` (`Aura/Sources/AuraApp.swift`) renders a `switch router.screen` wrapped
   in `.animation(.easeInOut(duration: 0.25), value: router.screen)`. `.plan` shows
-  `AuraTabView` (a `TabView` over Ride / History / Settings, where History and
-  Settings each already wrap their content in their own `NavigationStack`). `.preview`
+  `AuraTabView` (a `TabView` over Ride / History / Settings, where the tab shell, not
+  the views, wraps History and Settings each in its own `NavigationStack`). `.preview`
   and `.ride` swap the whole window to a full-screen view.
-- Eight call sites drive navigation by assigning `router.screen`: two in `PlanView`
+- Nine call sites drive navigation by assigning `router.screen`: two in `PlanView`
   (search result and recents row, both to `.preview`) plus the free-ride button (to
   `.ride(route: nil, ...)`), three in `RoutePreviewView` (two backs to `.plan`, one
   Start to `.ride`), one in `NavigateHUDView` (summary dismiss to `.plan`), and two in
@@ -88,11 +88,15 @@ geometry.
    Associated Domains entitlement and a hosted apple-app-site-association file that this
    private app does not have.
 
-4. **Lean on stack retention for the map, no shared map.** The end of per-transition
-   teardown comes from the push model itself: pushing a destination does not dismantle
-   the screen beneath it, and popping restores it without a rebuild. No shared-map
-   plumbing is added. Hoisting a single Mapbox map behind the whole flow is recorded as
-   a fast-follow rather than bundled into the last structural item.
+4. **Lean on stack retention for the map, no shared map.** Pushing a destination does
+   not dismantle the screen beneath it, so navigating deeper no longer tears down the
+   prior screen's map, and a back navigation returns to it without a rebuild. A pop
+   releases the map of the screen that is leaving, which is the correct lifecycle rather
+   than wasted work. The retention holds because each screen's `Map` keeps a stable
+   identity in its view tree, so the implementer must not wrap a `Map` in a conditional
+   that would change its identity. No shared-map plumbing is added. Hoisting a single
+   Mapbox map behind the whole flow is recorded as a fast-follow rather than bundled into
+   the last structural item.
 
 5. **Back-swipe is suppressed only while recording.** Before a ride starts, the
    interactive back-swipe and the in-content back button both pop, matching today's
@@ -189,17 +193,23 @@ typed-in destination is modeled elsewhere.
 ## `AppRouter`
 
 `Screen` is removed. `selectedTab`, `recents`, and `remember(_:)` are unchanged. The
-path and its helpers are added:
+path, its helpers, and a recording flag are added:
 
 ```swift
 var path: [AppRoute] = []
+
+/// True while a ride HUD is recording. The HUDs drive it from `coordinator.isRecording`;
+/// `handle(url:)` reads it so a deep link cannot pop an active ride out from under the rider.
+var isRideActive = false
 
 func push(_ route: AppRoute) { path.append(route) }
 func pop() { if !path.isEmpty { path.removeLast() } }
 func popToRoot() { path.removeAll() }
 
 func handle(url: URL) {
-    guard let link = DeepLink.parse(url) else { return }
+    // A recording ride takes precedence: a URL must never abandon it. The rider can act
+    // on the link after the ride ends. Tab-only links are dropped too, for one simple rule.
+    guard !isRideActive, let link = DeepLink.parse(url) else { return }
     switch link {
     case .home:
         selectedTab = .ride
@@ -221,8 +231,22 @@ func handle(url: URL) {
 
 A deep link resets the Ride tab's path to a single element rather than appending, so an
 incoming link lands on a clean stack instead of stacking onto whatever the rider had
-open. `handle(url:)` is thin glue over the tested parser; the string parsing it depends
-on is the part with the bugs, and that part is in AuraCore under test.
+open. Because `freeRide` and `preview` set the path to one element rather than appending,
+the same link twice lands on the same surface rather than stacking, even though each
+parse mints a fresh `Place.id`. `handle(url:)` is thin glue over the tested parser; the
+string parsing it depends on is the part with the bugs, and that part is in AuraCore
+under test.
+
+The `isRideActive` guard is load-bearing, not defensive padding. Without it, a recognized
+link that resets the path while recording would pop the live HUD, fire its
+`onDisappear { coordinator.cancel() }`, and abandon the ride with no save and a leaked
+Live Activity. The Live Activity's own tap-to-open is a concrete trigger for exactly this.
+The flag is the only new coupling between the router and the ride: the HUDs set it from
+`coordinator.isRecording`, and the router never reaches into the coordinator.
+
+Note the host split in the table above: `aura://plan` opens the home dashboard (Ride tab,
+empty path), while `aura://ride` opens a pre-start free ride. They are two surfaces on the
+same tab, named apart on purpose.
 
 ## Composition
 
@@ -290,11 +314,12 @@ bar and the tab bar and keeps its own in-content controls:
 .navigationBarBackButtonHidden(true)
 ```
 
-Hiding the navigation bar this way leaves the interactive back-swipe working in a
-`NavigationStack`, which is what preview wants. The ride HUDs need the swipe gone while
-recording, which the toolbar modifiers do not do on their own. A small reusable modifier
-backed by the hosting `UINavigationController` toggles
-`interactivePopGestureRecognizer.isEnabled`:
+Hiding the navigation bar usually leaves the interactive back-swipe working in a
+`NavigationStack`, but the system can disable the gesture when the bar is hidden, so the
+screens that want the swipe assert it rather than assume it. The ride HUDs separately need
+the swipe gone while recording, which the toolbar modifiers do not do on their own. One
+small reusable modifier backed by the hosting `UINavigationController` does both jobs by
+toggling `interactivePopGestureRecognizer.isEnabled`:
 
 ```swift
 // Aura/Sources/App/SwipeBackGesture.swift
@@ -309,11 +334,23 @@ extension View {
 ```
 
 `SwipeBackGestureToggle` is a `UIViewControllerRepresentable` whose `updateUIViewController`
-walks to `navigationController?.interactivePopGestureRecognizer` and sets `isEnabled`.
-The free-ride HUD applies `.swipeBackEnabled(!coordinator.isRecording)`; the navigate HUD
-applies `.swipeBackEnabled(!coordinator.isRecording)` as well. Because reaching the
-controller is the one piece of UIKit introspection here, the simulator smoke test
-exercises both the recording and pre-start states directly.
+walks to `navigationController?.interactivePopGestureRecognizer` and sets `isEnabled`. It
+re-runs whenever `enabled` changes, so it tracks the recording state. Each pushed screen
+sets it to fit its needs:
+
+- `RoutePreviewView`: `.swipeBackEnabled(true)`, to re-assert the swipe under the hidden
+  bar. The in-content back chevron is the explicit affordance; the swipe is the bonus.
+- `RideHUDView` (free ride): `.swipeBackEnabled(!coordinator.isRecording)`. The swipe and
+  the pre-start back button both work before recording; once recording, the swipe is gone.
+- `NavigateHUDView`: `.swipeBackEnabled(false)` for the whole lifetime. It has no pre-start
+  back state (it starts guidance on appear), the rider exits through End ride or arrival,
+  and a constant `false` closes the brief window between push and `start()` where the
+  gesture would otherwise be live.
+
+If the bridge ever fails to find the controller it leaves the gesture at its default, which
+fails safe toward the system behavior rather than crashing. Because this is the one piece of
+UIKit introspection in the work, the simulator smoke test checks preview's swipe under the
+hidden bar and both HUD states directly.
 
 ## Wiring deltas
 
@@ -332,6 +369,15 @@ preserved at each site.
   The view applies the full-screen chrome and `swipeBackEnabled`.
 - `NavigateHUDView`: the summary `onDismiss` calls `router.popToRoot()`. The view applies
   the full-screen chrome and `swipeBackEnabled`.
+- Both HUDs keep `router.isRideActive` in step with `coordinator.isRecording`
+  (`.onChange(of: coordinator.isRecording) { _, recording in router.isRideActive = recording }`)
+  and reset it to `false` in `onDisappear`, so the deep-link guard always reflects the live
+  ride.
+
+The summary return runs from the sheet's `onDismiss`, which fires after the dismissal
+finishes, so `popToRoot()` pops the HUD only once the sheet is gone. The smoke test runs
+End-ride to summary to home twice and watches for a stuck dim layer; if one appears, the
+pop is deferred one runloop tick.
 
 ## Behavior preservation
 
@@ -345,7 +391,8 @@ preserved at each site.
 | Ride summary dismiss → home | `screen = .plan` | `popToRoot()` |
 | Last-ride card → History | `selectedTab = .history` | unchanged |
 | Transition animation | `.easeInOut` cross-fade of the whole subtree | system push/pop, Reduce-Motion aware |
-| Mapbox map across a transition | dismantled and rebuilt | retained under the push, rebuilt only on pop |
+| Mapbox map across a transition | dismantled and rebuilt every transition | retained across a push; released only when its own screen is popped |
+| Deep link while recording | not applicable (no router) | ignored, so the active ride is never abandoned |
 | Pre-start back-swipe on a HUD | not applicable (no stack) | swipe and in-content back both pop |
 | Back-swipe while recording | not applicable | suppressed; End ride and arrival are the exits |
 
@@ -356,29 +403,36 @@ live in `AuraCore/Tests/AuraCoreTests/`, since `AppRoute` and `DeepLink` are Aur
 types, and they run in the package job on the macOS CI host.
 
 - `AppRoute`: `.freeRide` equals itself; two `preview` values are equal exactly when
-  their place ids match; two `navigate` values are equal exactly when route id and
-  destination id match; different cases are unequal; equal values hash equal. One test
+  their place ids match; two `navigate` values are equal exactly when both route id and
+  destination id match (a differing route id with the same destination is unequal, and the
+  reverse is unequal too); different cases are unequal; equal values hash equal. One test
   builds a `navigate` route with a large geometry and asserts equality is decided by id,
   not contents.
 - `DeepLink.parse`: each recognized URL maps to its intent, including `preview` decoding
-  `lat` / `lng` / `name` into a `Place` with the right coordinate, name, and `.custom`
-  category. Unknown host, wrong scheme, missing or non-numeric `lat` / `lng`, and missing
-  `name` each return nil.
+  `lat` / `lng` / `name` into a `Place` with the right coordinate, name, `.custom`
+  category, and `isSaved == false`. Parsing the same `preview` URL twice yields a fresh
+  `Place.id` each time. Unknown host, wrong scheme, missing or non-numeric `lat` / `lng`,
+  and missing `name` each return nil.
 
-The package count rises from 136 by these cases. Existing suites are unaffected; nothing
-in the package depends on `AppRouter` or the views.
+The package suite stays green and gains these cases; confirm the new total with
+`swift test`. Existing suites are unaffected, since nothing in the package depends on
+`AppRouter` or the views.
 
 The app target has no test target, so the navigation flows are verified on the iPhone 17
 / iOS 26 simulator, through the accessibility tree per the text-before-pixels rule:
 
 - Home to preview and back, watching that the map does not flash or rebuild on the back
-  step.
+  step, and that preview's back-swipe still works with the bar hidden.
 - Preview to navigate, End ride, summary, dismiss, and a return to the home dashboard.
+  Run End-ride to summary to home twice and confirm no stuck dim layer.
 - A free ride start to summary to home.
 - Each deep link with `xcrun simctl openurl booted "aura://…"`: `plan`, `history`,
   `settings`, `ride`, and a `preview` with coordinates, plus a malformed URL that should
   do nothing.
-- The back-swipe: a swipe pops a pre-start HUD, and a swipe during recording does not.
+- A deep link delivered mid-ride: start recording, fire `aura://plan` (and `aura://ride`),
+  and confirm the ride keeps recording rather than being abandoned.
+- The back-swipe: a swipe pops a pre-start free-ride HUD, and a swipe during recording does
+  not.
 
 If a pixel capture is needed and its md5 matches the prior frame, reboot the simulator
 before trusting it, per the known screenshot-freeze gotcha.
@@ -396,9 +450,20 @@ before trusting it, per the known screenshot-freeze gotcha.
 - **The map still rebuilds on a transition.** If view identity is not stable across a
   push, the retention claim does not hold. Mitigation: the smoke test watches a back
   navigation for a rebuild, and each screen's `Map` keeps a stable position in its view.
+- **A deep link abandons an active ride.** A recognized link that resets the path while
+  recording would pop the HUD, fire `coordinator.cancel()`, and lose the ride with no save
+  and a leaked Live Activity; the Live Activity's own tap-to-open is a concrete trigger.
+  Mitigation: `handle(url:)` is guarded on `isRideActive`, which the HUDs drive from
+  `coordinator.isRecording`, so a link is a no-op while recording, and a smoke test fires
+  links mid-ride to confirm the ride survives.
 - **A deep link lands on a wrong or crashing state.** Mitigation: the parser returns nil
   for anything unrecognized, so `handle(url:)` no-ops; the recognized set is small and
   each case is covered by a parse test and a simulator open-url check.
+- **The summary dismiss glitches the pop.** `popToRoot()` runs from the summary sheet's
+  `onDismiss`. On iOS 17, popping a sheet's presenter mid-dismissal can leave a stuck dim
+  layer. Mitigation: `onDismiss` fires after the dismissal completes; the smoke test runs
+  the End-ride-to-home path twice and checks for a residual layer, deferring the pop one
+  runloop tick if one appears.
 
 ## Out of scope
 
@@ -406,8 +471,9 @@ before trusting it, per the known screenshot-freeze gotcha.
 - Universal (https) links, Associated Domains, and an apple-app-site-association file.
 - Group ride, any new screen, and any change to HUD or screen visuals. `AuraTheme` is
   reused as is.
-- State restoration through `NSUserActivity` or scene storage. The `Codable` models make
-  the path restoration-ready, but wiring restoration is later work.
+- State restoration through `NSUserActivity` or scene storage. `Place` and `Route` are
+  `Codable`, so the path's payloads can be encoded, but `AppRoute` would additionally need
+  a `Codable` conformance when restoration is wired. That, and the wiring, are later work.
 - App-target tests. The app target still has no test target; the new tests live in the
   package.
 
@@ -415,13 +481,14 @@ before trusting it, per the known screenshot-freeze gotcha.
 
 1. `AppRoute` and its tests.
 2. `DeepLink` and its parser tests.
-3. `AppRouter`: drop `Screen`, add `path`, the push/pop helpers, and `handle(url:)`.
+3. `AppRouter`: drop `Screen`, add `path`, the push/pop helpers, `isRideActive`, and the
+   guarded `handle(url:)`.
 4. `RootView` rewrite (tab shell, `NavigationStack`, `navigationDestination`), the
    `.onOpenURL` hook, and the `CFBundleURLTypes` entry in Info.plist.
 5. `SwipeBackGesture` modifier, then the full-screen chrome on `RoutePreviewView` and
    both HUDs.
-6. Rewire the eight call sites in `PlanView`, `RoutePreviewView`, `RideHUDView`, and
-   `NavigateHUDView` onto the path helpers.
+6. Rewire the nine call sites in `PlanView`, `RoutePreviewView`, `RideHUDView`, and
+   `NavigateHUDView` onto the path helpers, and bind `isRideActive` in both HUDs.
 7. `docs/ROADMAP.md`: mark navigation shipped and Wave 1 complete.
 
 Commits follow the repo conventions: `feat(core)` / `refactor(core)` for the package,
