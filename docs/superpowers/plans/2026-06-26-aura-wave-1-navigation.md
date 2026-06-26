@@ -70,7 +70,7 @@ import Testing
 import Foundation
 import AuraCore
 
-@Suite struct AppRouteTests {
+struct AppRouteTests {
     private func place(_ id: UUID = UUID(), _ name: String = "Dest") -> Place {
         Place(id: id, name: name, coordinate: Coordinate(latitude: 40.44, longitude: -79.99),
               category: .custom)
@@ -179,12 +179,12 @@ extension AppRoute: Hashable {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Delegate to the builder: `cd AuraCore && swift test --filter AppRouteTests`
-Expected: PASS (6 tests).
+Expected: PASS (5 tests).
 
 - [ ] **Step 5: Full package test run**
 
 Delegate to the builder: `cd AuraCore && swift test`
-Expected: PASS, all existing tests plus the 6 new ones.
+Expected: PASS, all existing tests plus the 5 new ones.
 
 - [ ] **Step 6: Commit**
 
@@ -222,7 +222,7 @@ import Testing
 import Foundation
 import AuraCore
 
-@Suite struct DeepLinkTests {
+struct DeepLinkTests {
     private func parse(_ string: String) -> DeepLink? {
         DeepLink.parse(URL(string: string)!)
     }
@@ -817,11 +817,14 @@ Expected: 0 violations.
 
 - [ ] **Step 8: Simulator smoke (full-screen and swipe)**
 
-Delegate to the builder / ios-simulator tools, on the just-built app:
+Delegate to the builder / ios-simulator tools, on the just-built app. The gesture toggles a
+property of the shared `UINavigationController`, so the smoke test must check the re-enable
+transitions, not just suppression:
 - Preview, free ride, and navigate are full-bleed with no nav bar and no tab bar.
 - Preview: a back-swipe pops to the dashboard (the swipe still works under the hidden bar); the in-content back chevron also works.
-- Free ride: a back-swipe before tapping Start pops to the dashboard; after Start (recording), a back-swipe does NOT pop; End ride, summary, dismiss, land on the dashboard. Run End-ride to dashboard twice and confirm no stuck dim layer.
-- Navigate: a back-swipe does not pop; End ride / arrival returns through the summary.
+- Free ride suppress-then-re-enable: a back-swipe before tapping Start pops to the dashboard; after Start (recording) a back-swipe does NOT pop; End ride, summary, dismiss, land on the dashboard; then push the free-ride HUD again and confirm the pre-start back-swipe works once more (the gesture was re-enabled, not stuck off).
+- Run End-ride to dashboard twice and confirm no stuck dim layer.
+- Navigate suppress-then-restore: from preview (swipe on) push navigate (swipe off, a back-swipe does not pop); End ride / arrival returns through the summary. Separately, push preview, navigate, then pop back to preview and confirm preview's swipe works again (re-enabled after navigate held it off).
 - Re-confirm the mid-ride deep-link guard: while recording, `xcrun simctl openurl booted "aura://ride"` does not abandon the ride.
 - Confirm the map does not flash or rebuild stepping preview to navigate and back.
 
