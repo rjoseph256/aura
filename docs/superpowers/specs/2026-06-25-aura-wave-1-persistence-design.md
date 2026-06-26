@@ -111,6 +111,12 @@ public struct RideSummary: Identifiable, Equatable, Sendable {
 here, and a present column decodes to its points. The views treat an empty array
 as "no thumbnail, show the kind badge."
 
+The type also carries a cheap `hasStats: Bool`, set from `statsData != nil` without
+decoding the blob. The denormalized stat columns are non-optional and default to
+`0`, so a statless ride (a free ride saved without computed stats) is otherwise
+indistinguishable from a real zero. `hasStats` lets the dashboard's last-ride card
+keep showing "—" for a statless ride, preserving today's behavior.
+
 `RideStore` gains two methods and keeps the rest:
 
 - `summaries() throws -> [RideSummary]` fetches records newest-first and maps each
