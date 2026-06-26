@@ -148,10 +148,14 @@ struct NavigateHUDView: View {
                 showPermission = true
                 return
             }
+            guidance.units = settings.units
             guidance.start(route: route)
         }
         .onChange(of: coordinator.isRecording) { _, recording in
             router.isRideActive = recording
+        }
+        .onChange(of: settings.units) { _, newUnits in
+            guidance.units = newUnits
         }
         .onDisappear {
             router.isRideActive = false

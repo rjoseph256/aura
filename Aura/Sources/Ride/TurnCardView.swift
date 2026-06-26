@@ -72,6 +72,8 @@ struct TurnCardView: View {
 
             Spacer(minLength: 0)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(state.accessibilityLabel)
         .padding(.horizontal, state.isExpanded ? AuraTheme.Spacing.xl : AuraTheme.Spacing.lg)
         .padding(.vertical, state.isExpanded ? AuraTheme.Spacing.lg : AuraTheme.Spacing.md)
         // Background shifts from near-opaque dark → lime.
