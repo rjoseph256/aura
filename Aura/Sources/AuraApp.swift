@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 import AuraCore
 import AuraKit
 import MapboxMaps
@@ -28,8 +27,7 @@ struct AuraApp: App {
     /// in-memory store if the on-disk container can't be created, so the app still runs.
     @MainActor static func makeRideStore() -> RideStore {
         do {
-            let container = try ModelContainer(for: RideRecord.self)
-            return RideStore(container: container)
+            return try RideStore.persistent()
         } catch {
             assertionFailure("Failed to build persistent ModelContainer: \(error)")
             return (try? RideStore.inMemory()) ?? {

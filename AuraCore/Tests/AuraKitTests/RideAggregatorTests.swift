@@ -16,15 +16,16 @@ final class RideAggregatorTests: XCTestCase {
         cal.date(from: DateComponents(year: 2026, month: 6, day: day, hour: hour))!
     }
 
-    private func ride(day: Int, distance: Double?, elevation: Double = 30, moving: Double = 600) -> Ride {
+    private func summary(day: Int, distance: Double?, elevation: Double = 30, moving: Double = 600) -> RideSummary {
         let start = date(day)
-        let stats = distance.map {
-            RideStats(distanceMeters: $0, movingTimeSeconds: moving,
-                      averageSpeedMetersPerSecond: 5, maxSpeedMetersPerSecond: 8,
-                      elevationGainMeters: elevation)
-        }
-        return Ride(kind: .navigate, startedAt: start, endedAt: start.addingTimeInterval(moving),
-                    track: [], stats: stats, routeId: nil, destinationPlaceId: nil)
+        return RideSummary(
+            id: UUID(), kind: .navigate, startedAt: start,
+            endedAt: start.addingTimeInterval(moving),
+            hasStats: distance != nil,
+            distanceMeters: distance ?? 0,
+            movingTimeSeconds: distance == nil ? 0 : moving,
+            elevationGainMeters: distance == nil ? 0 : elevation,
+            destinationName: nil, thumbnailCoordinates: [])
     }
 
     // now = Wed Jun 24 2026 → week is Mon Jun 22 … Sun Jun 28.
@@ -32,10 +33,10 @@ final class RideAggregatorTests: XCTestCase {
 
     func test_weekToDate_sumsOnlyInWeekRides() {
         let rides = [
-            ride(day: 22, distance: 1000),  // Mon — in week
-            ride(day: 24, distance: 2000),  // Wed (today) — in week
-            ride(day: 21, distance: 5000),  // Sun — previous week
-            ride(day: 29, distance: 9000)  // next Mon — next week
+            summary(day: 22, distance: 1000),  // Mon — in week
+            summary(day: 24, distance: 2000),  // Wed (today) — in week
+            summary(day: 21, distance: 5000),  // Sun — previous week
+            summary(day: 29, distance: 9000)  // next Mon — next week
         ]
         let w = RideAggregator.weekToDate(rides, now: now, calendar: cal)
         XCTAssertEqual(w.distanceMeters, 3000, accuracy: 0.001)
@@ -45,7 +46,7 @@ final class RideAggregatorTests: XCTestCase {
     }
 
     func test_weekToDate_rideWithoutStats_countsButAddsNoDistance() {
-        let rides = [ride(day: 23, distance: 1500), ride(day: 24, distance: nil)]
+        let rides = [summary(day: 23, distance: 1500), summary(day: 24, distance: nil)]
         let w = RideAggregator.weekToDate(rides, now: now, calendar: cal)
         XCTAssertEqual(w.rideCount, 2)
         XCTAssertEqual(w.distanceMeters, 1500, accuracy: 0.001)
@@ -56,7 +57,7 @@ final class RideAggregatorTests: XCTestCase {
     }
 
     func test_mostRecent_returnsLatestStart() {
-        let rides = [ride(day: 22, distance: 1), ride(day: 28, distance: 1), ride(day: 24, distance: 1)]
+        let rides = [summary(day: 22, distance: 1), summary(day: 28, distance: 1), summary(day: 24, distance: 1)]
         XCTAssertEqual(RideAggregator.mostRecent(rides)?.startedAt, date(28))
     }
 

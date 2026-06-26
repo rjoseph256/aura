@@ -22,6 +22,14 @@ public final class RideStore {
                          isEphemeral: true)
     }
 
+    /// The app's on-disk store, with the migration plan wired in. This is the only
+    /// container that migrates; `inMemory()` always starts fresh on the current schema.
+    public static func persistent() throws -> RideStore {
+        let container = try ModelContainer(for: RideRecord.self,
+                                           migrationPlan: RideMigrationPlan.self)
+        return RideStore(container: container)
+    }
+
     public func save(_ ride: Ride) throws {
         let context = container.mainContext
         context.insert(try RideMapper.record(from: ride))
@@ -31,6 +39,20 @@ public final class RideStore {
     public func allRides() throws -> [Ride] {
         let descriptor = FetchDescriptor<RideRecord>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
         return try container.mainContext.fetch(descriptor).map { try RideMapper.ride(from: $0) }
+    }
+
+    /// Lightweight, newest-first projection for the list and dashboard. Never reads
+    /// `trackData`, so the external blob never faults.
+    public func summaries() throws -> [RideSummary] {
+        let descriptor = FetchDescriptor<RideRecord>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
+        return try container.mainContext.fetch(descriptor).map(RideMapper.summary(from:))
+    }
+
+    /// The full ride (track + stats), for opening one ride into the detail sheet.
+    public func ride(id: UUID) throws -> Ride? {
+        let descriptor = FetchDescriptor<RideRecord>(predicate: #Predicate { $0.id == id })
+        guard let record = try container.mainContext.fetch(descriptor).first else { return nil }
+        return try RideMapper.ride(from: record)
     }
 
     public func delete(id: UUID) throws {

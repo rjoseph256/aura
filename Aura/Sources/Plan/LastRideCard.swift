@@ -6,7 +6,7 @@ import AuraKit
 /// thumbnail (the same `StaticRouteMap` History will reuse), the destination, its
 /// distance + duration, and a relative date. Taps through to the History tab.
 struct LastRideCard: View {
-    let ride: Ride
+    let summary: RideSummary
     let units: DistanceUnits
     let onTap: () -> Void
 
@@ -52,8 +52,8 @@ struct LastRideCard: View {
 
     @ViewBuilder
     private var thumbnail: some View {
-        let coords = ride.track.map(\.coordinate)
-        let isNavigate = ride.kind == .navigate
+        let coords = summary.thumbnailCoordinates
+        let isNavigate = summary.kind == .navigate
         ZStack {
             AuraTheme.background
             if coords.count > 1 {
@@ -77,25 +77,25 @@ struct LastRideCard: View {
     // MARK: Text
 
     private var title: String {
-        if let name = ride.destinationName, !name.isEmpty { return name }
-        return ride.kind == .navigate ? "Ride" : "Free ride"
+        if let name = summary.destinationName, !name.isEmpty { return name }
+        return summary.kind == .navigate ? "Ride" : "Free ride"
     }
 
     private var statsLine: String {
-        guard let s = ride.stats else { return "—" }
-        return "\(fmt.distanceValue(s.distanceMeters)) \(fmt.distanceUnit) · \(fmt.minutes(s.movingTimeSeconds))"
+        guard summary.hasStats else { return "—" }
+        return "\(fmt.distanceValue(summary.distanceMeters)) \(fmt.distanceUnit) · \(fmt.minutes(summary.movingTimeSeconds))"
     }
 
     private var relativeDate: String {
         let cal = Calendar.current
-        if cal.isDateInToday(ride.startedAt) { return "Today" }
-        if cal.isDateInYesterday(ride.startedAt) { return "Yesterday" }
+        if cal.isDateInToday(summary.startedAt) { return "Today" }
+        if cal.isDateInYesterday(summary.startedAt) { return "Yesterday" }
         let days = cal.dateComponents([.day],
-                                      from: cal.startOfDay(for: ride.startedAt),
+                                      from: cal.startOfDay(for: summary.startedAt),
                                       to: cal.startOfDay(for: Date())).day ?? 0
         if days >= 2 && days < 7 { return "\(days) days ago" }
         let f = DateFormatter()
         f.dateFormat = "MMM d"
-        return f.string(from: ride.startedAt)
+        return f.string(from: summary.startedAt)
     }
 }

@@ -33,31 +33,30 @@ public struct WeeklyRideStats: Equatable, Sendable {
     }
 }
 
-/// Rolls a list of persisted rides up into the home dashboard's figures. `now` and
+/// Rolls a list of ride summaries up into the home dashboard's figures. `now` and
 /// `calendar` are injectable so the week boundary (and "this week" membership) are
 /// deterministic in tests rather than tied to the wall clock / device locale.
 public enum RideAggregator {
 
-    /// Sum of every ride that *started* within the calendar week containing `now`.
-    /// Rides without computed `stats` count toward `rideCount` but contribute no
-    /// distance (they can't move the ring), matching what History would display.
-    public static func weekToDate(_ rides: [Ride], now: Date,
+    /// Sum of every summary that *started* within the calendar week containing `now`.
+    /// A statless summary carries `0` for its stat fields, so it counts toward
+    /// `rideCount` but contributes no distance (it can't move the ring), matching
+    /// what History would display.
+    public static func weekToDate(_ rides: [RideSummary], now: Date,
                                   calendar: Calendar = .current) -> WeeklyRideStats {
         guard let week = calendar.dateInterval(of: .weekOfYear, for: now) else { return .zero }
         var out = WeeklyRideStats.zero
         for ride in rides where week.contains(ride.startedAt) {
             out.rideCount += 1
-            if let s = ride.stats {
-                out.distanceMeters += s.distanceMeters
-                out.elevationGainMeters += s.elevationGainMeters
-                out.movingTimeSeconds += s.movingTimeSeconds
-            }
+            out.distanceMeters += ride.distanceMeters
+            out.elevationGainMeters += ride.elevationGainMeters
+            out.movingTimeSeconds += ride.movingTimeSeconds
         }
         return out
     }
 
-    /// The most recently started ride, if any.
-    public static func mostRecent(_ rides: [Ride]) -> Ride? {
+    /// The most recently started summary, if any.
+    public static func mostRecent(_ rides: [RideSummary]) -> RideSummary? {
         rides.max { $0.startedAt < $1.startedAt }
     }
 }

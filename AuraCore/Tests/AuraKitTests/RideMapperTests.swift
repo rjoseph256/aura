@@ -36,4 +36,35 @@ final class RideMapperTests: XCTestCase {
                         track: [], stats: nil, routeId: nil, destinationPlaceId: nil)
         XCTAssertEqual(try RideMapper.ride(from: RideMapper.record(from: ride)), ride)
     }
+
+    func test_record_populatesDenormalizedColumns() throws {
+        let ride = Ride(
+            kind: .navigate, startedAt: Date(timeIntervalSince1970: 0),
+            endedAt: Date(timeIntervalSince1970: 100),
+            track: [TrackPoint(coordinate: .init(latitude: 1, longitude: 1), elevation: nil,
+                               timestamp: Date(timeIntervalSince1970: 0)),
+                    TrackPoint(coordinate: .init(latitude: 2, longitude: 2), elevation: nil,
+                               timestamp: Date(timeIntervalSince1970: 50))],
+            stats: RideStats(distanceMeters: 1234, movingTimeSeconds: 600,
+                             averageSpeedMetersPerSecond: 2, maxSpeedMetersPerSecond: 6,
+                             elevationGainMeters: 42),
+            destinationName: "Frick Park", routeId: nil, destinationPlaceId: nil)
+        let record = try RideMapper.record(from: ride)
+        XCTAssertEqual(record.distanceMeters, 1234, accuracy: 0.001)
+        XCTAssertEqual(record.movingTimeSeconds, 600, accuracy: 0.001)
+        XCTAssertEqual(record.elevationGainMeters, 42, accuracy: 0.001)
+        XCTAssertNotNil(record.thumbnailData)
+    }
+
+    func test_summary_mapsColumnsWithoutTrack() throws {
+        let ride = Ride(
+            kind: .freeRide, startedAt: Date(timeIntervalSince1970: 10), endedAt: nil,
+            track: [], stats: nil, routeId: nil, destinationPlaceId: nil)
+        let summary = RideMapper.summary(from: try RideMapper.record(from: ride))
+        XCTAssertEqual(summary.id, ride.id)
+        XCTAssertEqual(summary.kind, .freeRide)
+        XCTAssertFalse(summary.hasStats)
+        XCTAssertEqual(summary.distanceMeters, 0, accuracy: 0.001)
+        XCTAssertTrue(summary.thumbnailCoordinates.isEmpty)
+    }
 }
