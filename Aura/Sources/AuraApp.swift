@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 import AuraCore
 import AuraKit
 import MapboxMaps
