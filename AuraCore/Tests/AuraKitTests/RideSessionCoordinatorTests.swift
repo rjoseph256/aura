@@ -30,15 +30,29 @@ struct RideSessionCoordinatorTests {
         #expect(try store.allRides().count == 1)
     }
 
-    @Test func deniedAuthorizationGatesStart() throws {
+    @Test(arguments: [LocationAuthorization.denied, .restricted])
+    func blockedAuthorizationGatesStart(_ auth: LocationAuthorization) throws {
         let screen = SpyScreenWake(); let activity = SpyRideActivity()
         let c = makeCoordinator(screen: screen, activity: activity)
         let outcome = c.start(location: ScriptedLocationProvider([]), saving: try RideStore.inMemory(),
-                              units: .metric, authorization: .denied)
+                              units: .metric, authorization: auth)
         #expect(outcome == .permissionDenied)
         #expect(c.isRecording == false)
         #expect(screen.keepAwakeCalls.isEmpty)
         #expect(activity.started == nil)
+    }
+
+    @Test func startWhileRecordingIsNoOp() throws {
+        let screen = SpyScreenWake(); let activity = SpyRideActivity()
+        let c = makeCoordinator(screen: screen, activity: activity)
+        c.start(location: ScriptedLocationProvider([]), saving: try RideStore.inMemory(),
+                units: .metric, authorization: .authorized)
+        let outcome = c.start(location: ScriptedLocationProvider([]), saving: try RideStore.inMemory(),
+                              units: .metric, authorization: .authorized)
+        #expect(outcome == .started)
+        #expect(screen.keepAwakeCalls == [true]) // screen-wake not called a second time
+        #expect(c.isRecording == true)
+        c.cancel()
     }
 
     @Test func authorizedStartWiresSideEffects() throws {

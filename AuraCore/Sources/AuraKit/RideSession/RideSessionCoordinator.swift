@@ -64,6 +64,8 @@ public final class RideSessionCoordinator {
         switch authorization {
         case .denied, .restricted:
             return .permissionDenied
+        // .notDetermined proceeds: the location stream's points() requests When-In-Use,
+        // which surfaces the system prompt on first use.
         case .authorized, .notDetermined:
             break
         }
