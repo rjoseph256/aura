@@ -135,9 +135,9 @@ The rest of the audit groups into a few themes.
   bottom trip strip now shows distance-remaining, an arrival ETA, and the current street
   name; a persistent recenter control plus the unified mute and end-ride controls landed
   as one cluster; and the GPS-weak, off-route, and permission-denied states (added in
-  Wave 0) are kept and re-fitted to the new layout. The remaining cockpit-adjacent work,
-  the composed VoiceOver labels and the contrast lift, are the next two Wave 2
-  sub-projects.
+  Wave 0) are kept and re-fitted to the new layout. The composed VoiceOver labels shipped
+  next (the Wave 2 bullet below has the detail); the ride-summary redesign with the contrast
+  lift is the last Wave 2 sub-project.
 - **Strict concurrency is off.** Both modules build in Swift 5 language mode with no
   strict-concurrency flags, and CI leans on a newer toolchain downgrading data-race
   violations to warnings. The code is written to a high Swift 6 standard already, so the
@@ -164,8 +164,9 @@ The rest of the audit groups into a few themes.
   values.
   Partly resolved in Wave 1 (2026-06-25): the floating controls now run through
   `HUDControlButton`, which falls back to a solid surface under Reduce Transparency, and the
-  speed and stat readouts combine value and label into one VoiceOver element. Richer composed
-  labels for SpeedRail/TurnCard and the broad contrast lift are still Wave 2 work.
+  speed and stat readouts combine value and label into one VoiceOver element. The richer composed
+  labels for SpeedRail and TurnCard shipped in Wave 2 (2026-06-26); the broad contrast lift is
+  the last open piece.
 
 Full detail, including file and line references and severities, lives in the audit notes
 that produced this section.
@@ -286,9 +287,21 @@ ride-summary redesign with the contrast lift (item four).
   the presenter and the seam; the cockpit was verified on the iPhone 17 / iOS 26
   simulator through the accessibility tree (the trip strip showing a live street,
   distance, and ETA, the cluster, the recenter toggle, and the end-ride confirmation).
-- Give the SpeedRail and TurnCard composed VoiceOver labels. The cockpit sub-project gave
-  the new controls correct labels and values; this sub-project adds the richer composed
-  reads for the two most important elements.
+- **Composed VoiceOver labels:** SHIPPED (2026-06-26). The TurnCard and SpeedRail, plus the
+  trip strip taken in scope alongside them, now each read as one composed VoiceOver element
+  rather than several mechanical stops. The turn card reads "In 390 feet, Right onto Penn Ave"
+  as a single label, and it is now unit-aware in both the visible distance and the spoken read
+  (it had formatted feet and miles for everyone, a bug for riders set to metric). The SpeedRail
+  became two elements: a static "Speed" label with the spoken speed as its accessibility value,
+  so a focused rider hears only the changing speed re-announced, and one composed stats line
+  ("Distance 5.0 miles, time 12 minutes 30 seconds, elevation gain 340 feet") in place of the
+  old four reads, one of which spoke the raw "FT ↑" glyph. The trip strip reads "On Penn Ave,
+  2.1 miles to go, arriving 4:38 PM". All the composition is pure and unit-tested in AuraKit
+  (spoken units on `RideStatsFormatter`, the turn-card and cruising presenters, and a new
+  `SpeedRailVoice`); the views apply it with `accessibilityElement(children: .ignore)` so
+  nothing double-exposes. Verified on the iPhone 17 / iOS 26 simulator through the accessibility
+  tree, each element reading as one composed utterance on a live navigated ride. The
+  ride-summary redesign with the app-wide contrast lift is the one remaining Wave 2 sub-project.
 - Redesign the ride summary away from the orphaned stat stack into a balanced grid or a
   true hero metric, and lift the borderline contrast values across the app.
 
