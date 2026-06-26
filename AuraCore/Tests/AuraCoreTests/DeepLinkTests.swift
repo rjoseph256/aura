@@ -41,5 +41,7 @@ struct DeepLinkTests {
         #expect(parse("aura://preview?lat=abc&lng=2&name=A") == nil) // non-numeric lat
         #expect(parse("aura://preview?lat=1&lng=2") == nil)          // missing name
         #expect(parse("aura://preview?lat=1&lng=2&name=") == nil)    // empty name
+        #expect(parse("aura://preview?lat=1&name=A") == nil)         // missing lng
+        #expect(parse("aura://preview?lat=1&lng=xyz&name=A") == nil) // non-numeric lng
     }
 }

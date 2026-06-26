@@ -18,8 +18,10 @@ struct AppRouteTests {
     }
 
     @Test func freeRideEqualsItself() {
-        #expect(AppRoute.freeRide == AppRoute.freeRide)
-        #expect(AppRoute.freeRide.hashValue == AppRoute.freeRide.hashValue)
+        let a = AppRoute.freeRide
+        let b = AppRoute.freeRide
+        #expect(a == b)
+        #expect(a.hashValue == b.hashValue)
     }
 
     @Test func previewEqualByPlaceId() {
