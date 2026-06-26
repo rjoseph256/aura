@@ -124,4 +124,18 @@ final class GuidanceViewModelTests: XCTestCase {
         XCTAssertTrue(vm.isRerouting)
         XCTAssertNil(vm.routeGeometry)
     }
+
+    @MainActor
+    func test_units_propagateToTurnCard() async {
+        let session = ScriptedGuidanceSession(script: [
+            .progress(.init(distanceToManeuverMeters: 120, instruction: "Right onto Penn Ave"))
+        ])
+        let vm = GuidanceViewModel(session: session)
+        vm.units = .metric
+
+        await vm.run(route: makeRoute())
+
+        XCTAssertEqual(vm.turn.distanceText, "120 m")
+        XCTAssertEqual(vm.turn.accessibilityLabel, "In 120 meters, Right onto Penn Ave")
+    }
 }
