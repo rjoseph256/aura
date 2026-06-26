@@ -84,4 +84,50 @@ final class RideAggregatorTests: XCTestCase {
         XCTAssertEqual(w.goalFraction(goalMeters: 0), 0)
         XCTAssertEqual(w.goalPercent(goalMeters: 0), 0)
     }
+
+    // MARK: - isLongest (the "Longest ride yet" badge rule)
+
+    func test_isLongest_trueWhenStrictlyFarthest() {
+        let rides = [summary(day: 22, distance: 1000),
+                     summary(day: 23, distance: 3000),   // subject
+                     summary(day: 24, distance: 2000)]
+        let subject = rides[1]
+        XCTAssertTrue(RideAggregator.isLongest(rideID: subject.id,
+                                               distanceMeters: subject.distanceMeters, among: rides))
+    }
+
+    func test_isLongest_tieCountsAsLongest() {
+        let rides = [summary(day: 22, distance: 3000),   // ties the subject
+                     summary(day: 23, distance: 3000)]   // subject
+        let subject = rides[1]
+        XCTAssertTrue(RideAggregator.isLongest(rideID: subject.id,
+                                               distanceMeters: subject.distanceMeters, among: rides))
+    }
+
+    func test_isLongest_falseWhenAnotherRideIsFarther() {
+        let rides = [summary(day: 22, distance: 5000),   // farther
+                     summary(day: 23, distance: 3000)]   // subject
+        let subject = rides[1]
+        XCTAssertFalse(RideAggregator.isLongest(rideID: subject.id,
+                                                distanceMeters: subject.distanceMeters, among: rides))
+    }
+
+    func test_isLongest_falseForSingleRide() {
+        let rides = [summary(day: 23, distance: 3000)]
+        let subject = rides[0]
+        XCTAssertFalse(RideAggregator.isLongest(rideID: subject.id,
+                                                distanceMeters: subject.distanceMeters, among: rides))
+    }
+
+    func test_isLongest_falseForNonPositiveDistance() {
+        let rides = [summary(day: 22, distance: 1000),
+                     summary(day: 23, distance: 0)]      // subject has no distance
+        let subject = rides[1]
+        XCTAssertFalse(RideAggregator.isLongest(rideID: subject.id,
+                                                distanceMeters: subject.distanceMeters, among: rides))
+    }
+
+    func test_isLongest_falseForEmpty() {
+        XCTAssertFalse(RideAggregator.isLongest(rideID: UUID(), distanceMeters: 1000, among: []))
+    }
 }

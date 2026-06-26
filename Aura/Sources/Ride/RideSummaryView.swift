@@ -90,11 +90,13 @@ struct RideSummaryView: View {
 
     /// "Longest ride yet" when this ride's distance is the max across all saved rides
     /// (and there's more than one). The just-finished ride is already saved by the time
-    /// the summary appears, so it's included in the comparison.
+    /// the summary appears, so it's included in the comparison. Reads the lightweight
+    /// `summaries()` projection rather than `allRides()`, so the comparison never faults
+    /// every ride's externally-stored GPS track.
     private func computeRecord() {
-        let all = (try? store.allRides()) ?? []
-        let distance = stats.distanceMeters
-        guard distance > 0, all.count > 1 else { isLongest = false; return }
-        isLongest = all.allSatisfy { $0.id == ride.id || ($0.stats?.distanceMeters ?? 0) <= distance }
+        let summaries = (try? store.summaries()) ?? []
+        isLongest = RideAggregator.isLongest(rideID: ride.id,
+                                             distanceMeters: stats.distanceMeters,
+                                             among: summaries)
     }
 }
