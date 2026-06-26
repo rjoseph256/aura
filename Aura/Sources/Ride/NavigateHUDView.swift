@@ -112,8 +112,11 @@ struct NavigateHUDView: View {
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: guidance.isRerouting)
         .background(AuraTheme.background)
-        // End-ride confirmation: the cluster's End button opens this.
-        .confirmationDialog("End ride?", isPresented: $showEndConfirm, titleVisibility: .visible) {
+        // End-ride confirmation: the cluster's End button opens this. An alert (not a
+        // confirmationDialog) is used so the "Keep riding" cancel button reliably renders
+        // and stays VoiceOver-reachable in this full-screen HUD; an action sheet's cancel
+        // was being clipped here.
+        .alert("End ride?", isPresented: $showEndConfirm) {
             Button("End ride", role: .destructive) { endRide() }
             Button("Keep riding", role: .cancel) { }
         }
