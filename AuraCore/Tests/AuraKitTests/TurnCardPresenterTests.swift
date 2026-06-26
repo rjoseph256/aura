@@ -13,13 +13,16 @@ final class TurnCardPresenterTests: XCTestCase {
     }
 
     func test_isExpanded_whenWithinThreshold() {
-        XCTAssertTrue(TurnCardPresenter.state(distanceToManeuverMeters: 100, instruction: "x", units: .imperial, expandWithinMeters: 150).isExpanded)
-        XCTAssertFalse(TurnCardPresenter.state(distanceToManeuverMeters: 200, instruction: "x", units: .imperial, expandWithinMeters: 150).isExpanded)
+        XCTAssertTrue(
+            TurnCardPresenter.state(distanceToManeuverMeters: 100, instruction: "x", units: .imperial, expandWithinMeters: 150).isExpanded)
+        XCTAssertFalse(
+            TurnCardPresenter.state(distanceToManeuverMeters: 200, instruction: "x", units: .imperial, expandWithinMeters: 150).isExpanded)
     }
 
     func test_passesInstructionThrough() {
-        XCTAssertEqual(TurnCardPresenter.state(distanceToManeuverMeters: 50, instruction: "Right onto Penn Ave", units: .imperial).primaryText,
-                       "Right onto Penn Ave")
+        XCTAssertEqual(
+            TurnCardPresenter.state(distanceToManeuverMeters: 50, instruction: "Right onto Penn Ave", units: .imperial).primaryText,
+            "Right onto Penn Ave")
     }
 
     func test_accessibilityLabel_composed_imperial() {

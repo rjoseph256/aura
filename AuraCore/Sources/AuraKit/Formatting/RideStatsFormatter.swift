@@ -32,28 +32,30 @@ public struct RideStatsFormatter {
         return String(format: "%.\(decimals)f", v)
     }
     public var speedUnit: String { metric ? "km/h" : "mph" }
-    public var speedUnitSpoken: String     { metric ? "kilometers per hour" : "miles per hour" }
-    public var distanceUnitSpoken: String  { metric ? "kilometers" : "miles" }
+    public var speedUnitSpoken: String { metric ? "kilometers per hour" : "miles per hour" }
+    public var distanceUnitSpoken: String { metric ? "kilometers" : "miles" }
     public var elevationUnitSpoken: String { metric ? "meters" : "feet" }
 
     public func minutes(_ seconds: Double) -> String { "\(Int(seconds / 60)) min" }
 
+    private struct ManeuverParts { let value: String; let short: String; let spoken: String }
+
     /// The maneuver distance split into its formatted value and both unit forms, so the
     /// short glyph string and the spoken string share one rounding path and never drift.
-    private func maneuverParts(_ meters: Double) -> (value: String, short: String, spoken: String) {
+    private func maneuverParts(_ meters: Double) -> ManeuverParts {
         if metric {
             if meters >= 1000 {
-                return (String(format: "%.1f", UnitConverter.km(fromMeters: meters)), "km", "kilometers")
+                return ManeuverParts(value: String(format: "%.1f", UnitConverter.km(fromMeters: meters)), short: "km", spoken: "kilometers")
             }
             let rounded = Int((meters / 10).rounded()) * 10
-            return ("\(rounded)", "m", "meters")
+            return ManeuverParts(value: "\(rounded)", short: "m", spoken: "meters")
         } else {
             let feet = UnitConverter.feet(fromMeters: meters)
             if feet >= 1000 {
-                return (String(format: "%.1f", UnitConverter.miles(fromMeters: meters)), "mi", "miles")
+                return ManeuverParts(value: String(format: "%.1f", UnitConverter.miles(fromMeters: meters)), short: "mi", spoken: "miles")
             }
             let rounded = Int((feet / 10).rounded()) * 10
-            return ("\(rounded)", "ft", "feet")
+            return ManeuverParts(value: "\(rounded)", short: "ft", spoken: "feet")
         }
     }
 
