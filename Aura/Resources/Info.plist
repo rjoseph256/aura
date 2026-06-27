@@ -34,6 +34,8 @@
   <string>Aura keeps tracking your ride when the screen is off so your route and stats stay accurate.</string>
   <key>UIBackgroundModes</key>
   <array><string>location</string></array>
+  <key>NSHealthUpdateUsageDescription</key>
+  <string>Aura saves your finished rides to Health as cycling workouts, including distance and route.</string>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>

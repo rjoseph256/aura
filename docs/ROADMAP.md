@@ -329,9 +329,28 @@ These were the old "Next steps." The Live Activity and Dynamic Island have since
 which left the `AuraWidgets` extension target and `NSSupportsLiveActivities` in place. The
 rest become mostly additive once Wave 1 lands.
 
-- HealthKit: write completed rides as cycling workouts at ride finish via `HKWorkoutBuilder`.
-  Needs the HealthKit capability, the write usage description, and a thin testable
-  `WorkoutWriter` seam. Smallest blast radius of the three.
+- **HealthKit:** SHIPPED (2026-06-27). A finished ride now writes to Apple Health as a
+  cycling workout when the rider opts in. `RideSessionCoordinator.finish()` gained a fourth
+  injected `@MainActor` seam, `WorkoutWriting`, called once after the save and fire-and-forget,
+  so a HealthKit failure can never block or fail the ride save. The decisions that can be tested
+  live in the package: a pure `WorkoutData` mapping and a `RideWorkoutGate` (opt-in on, ride
+  ended, distance over a 10 m floor) in `AuraCore`, and the `TrackPoint`→`CLLocation` route
+  reconstruction in `AuraKit` (positive synthesized accuracy, altitude only when recorded). The
+  HealthKit code stays in the app target behind the seam: `WorkoutWriter` builds an
+  `HKWorkout` of type `.cycling` with `HKWorkoutBuilder` (start/end, a `distanceCycling` sample,
+  the ride id stamped as `HKMetadataKeyExternalUUID`) and attaches the GPS route from the recorded
+  track via `HKWorkoutRouteBuilder`. Authorization is write-only and requested at the moment of
+  intent — flipping the "Save rides to Health" Settings toggle — and a denied or unavailable store
+  reverts the toggle and explains rather than failing silently. The capability lands as a committed
+  `Aura.entitlements` wired through XcodeGen with the write usage string; the entitlement is
+  consumed at sign time, so CI's unsigned app build still compiles. Idempotency comes from the
+  single-shot write at finish; the external UUID is traceability only, not native dedup. Active
+  energy is intentionally deferred (no HR or power sensor to derive it honestly). New AuraCore and
+  AuraKit suites cover the mapping, the gate, the route reconstruction, and the coordinator's gated
+  write; the real result was verified on the iPhone 17 / iOS 26 simulator — the authorization sheet,
+  a written cycling workout with distance and route (read back from `healthd`), the opt-out and
+  ride-save-unaffected paths, and one workout per ride. Next in Wave 3 is haptics on turn approach
+  and arrival.
 - Haptics on turn approach and arrival, edge-triggered in the view model so they fire once
   on the false-to-true transition, gated by a settings toggle.
 - A home and lock-screen widget for the last ride and weekly goal, reusing the
@@ -374,7 +393,9 @@ package tests under Swift 6 language mode, an xcodebuild build of the app (which
 AuraWidgets), and SwiftLint `--strict`. The package test count is now 136, up from the
 original 115 XCTest cases: Wave 1 added Swift Testing suites for the ride-session coordinator
 lifecycle, the track simplifier, the schema migration (round-trip plus fresh-install), and the
-summary read path. The gap is the app target: every SwiftUI view, every Mapbox-backed
+summary read path. Wave 3 added more for HealthKit: the `WorkoutData` mapping and `RideWorkoutGate`,
+the `TrackPoint`→`CLLocation` route reconstruction, and the coordinator's gated workout write. The
+gap is the app target: every SwiftUI view, every Mapbox-backed
 provider, and the live CoreLocation stream are built in CI now but still untested. Wave 0's free-ride record-to-summary flow was
 checked with a one-off simulator smoke test, not an automated one.
 

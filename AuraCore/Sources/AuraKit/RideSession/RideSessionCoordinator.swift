@@ -31,11 +31,13 @@ public final class RideSessionCoordinator {
     private let destinationName: String?
     private let screen: any ScreenWakeControlling
     private let activity: any RideActivityControlling
+    private let workout: (any WorkoutWriting)?
 
     // Stashed at start() for the rest of the ride.
     private var location: (any LocationStreaming)?
     private var saving: (any RideSaving)?
     private var startedAt: Date?
+    private var saveToHealth = false
     // Internal so a test can await the stream draining; not part of the public surface.
     var streamTask: Task<Void, Never>?
     private var tickerTask: Task<Void, Never>?
@@ -43,12 +45,14 @@ public final class RideSessionCoordinator {
     public init(kind: Ride.Kind,
                 destinationName: String?,
                 screen: any ScreenWakeControlling,
-                activity: any RideActivityControlling) {
+                activity: any RideActivityControlling,
+                workout: (any WorkoutWriting)? = nil) {
         self.kind = kind
         self.recorder = RideRecorder(kind: kind)
         self.destinationName = destinationName
         self.screen = screen
         self.activity = activity
+        self.workout = workout
     }
 
     public enum StartOutcome: Sendable { case started, permissionDenied }
@@ -59,7 +63,8 @@ public final class RideSessionCoordinator {
     public func start(location: any LocationStreaming,
                       saving: any RideSaving,
                       units: DistanceUnits,
-                      authorization: LocationAuthorization) -> StartOutcome {
+                      authorization: LocationAuthorization,
+                      saveToHealth: Bool = false) -> StartOutcome {
         guard !recorder.isRecording else { return .started }
         switch authorization {
         case .denied, .restricted:
@@ -72,6 +77,7 @@ public final class RideSessionCoordinator {
 
         self.location = location
         self.saving = saving
+        self.saveToHealth = saveToHealth
         let now = Date()
         startedAt = now
         elapsed = 0
@@ -118,6 +124,9 @@ public final class RideSessionCoordinator {
             saveFailed = true
         }
         finishedRide = ride
+        if RideWorkoutGate.shouldWrite(ride: ride, saveToHealthEnabled: saveToHealth) {
+            workout?.writeWorkout(WorkoutData(from: ride))
+        }
     }
 
     /// Teardown for an abandoned (not finished) ride, called from `onDisappear`. Stops

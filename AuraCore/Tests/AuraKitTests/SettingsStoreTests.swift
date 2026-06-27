@@ -28,6 +28,13 @@ final class SettingsStoreTests: XCTestCase {
     /// Guards the @Observable contract: mutating a setting must fire an observation
     /// change so SwiftUI views reading it re-render. (A computed-property store would
     /// silently fail this.)
+    func test_saveToHealth_defaultsOffAndPersists() {
+        let s = freshStore()
+        XCTAssertFalse(s.saveToHealth)
+        s.saveToHealth = true
+        XCTAssertTrue(s.saveToHealth)
+    }
+
     func test_unitsChange_firesObservation() {
         let s = freshStore()
         // Swift 6: the onChange closure is @Sendable, so a captured local `var`
