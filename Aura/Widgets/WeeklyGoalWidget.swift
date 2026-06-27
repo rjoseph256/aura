@@ -76,6 +76,7 @@ private struct WeeklyGoalView: View {
         .gaugeStyle(.accessoryCircular)
         .widgetAccentable()
         .containerBackground(.clear, for: .widget)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("Distance this week")
         .accessibilityValue(accessibilityValue(week))
     }
@@ -83,13 +84,13 @@ private struct WeeklyGoalView: View {
     private var rectangular: some View {
         let week = self.week
         return VStack(alignment: .leading, spacing: 2) {
-            Text("This week").font(.headline)
+            Text("This week").font(.headline).lineLimit(1)
             Text("\(fmt.distanceValue(week?.distanceMeters ?? 0)) / "
                  + "\(fmt.distanceValue(week?.goalMeters ?? 0)) \(fmt.distanceUnit)")
-                .font(.body)
+                .font(.body).lineLimit(1)
             Gauge(value: week?.fraction ?? 0, in: 0...1) { EmptyView() }
                 .gaugeStyle(.accessoryLinearCapacity)
-            Text("\(week?.percent ?? 0)% · \(week?.rideCount ?? 0) rides").font(.caption)
+            Text("\(week?.percent ?? 0)% · \(week?.rideCount ?? 0) rides").font(.caption).lineLimit(1)
         }
         .widgetAccentable()
         .containerBackground(.clear, for: .widget)
