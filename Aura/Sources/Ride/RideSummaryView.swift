@@ -82,7 +82,7 @@ struct RideSummaryView: View {
                 if let name = ride.destinationName, !name.isEmpty {
                     Text("to \(name)")
                         .font(.subheadline)
-                        .foregroundStyle(AuraTheme.textSecondary)
+                        .foregroundStyle(AuraTheme.secondaryText(contrast))
                         .lineLimit(2)
                 }
             }
@@ -121,11 +121,11 @@ struct RideSummaryView: View {
 
                 Text(fmt.distanceUnit)
                     .font(.title3.weight(.semibold))
-                    .foregroundStyle(AuraTheme.textSecondary)
+                    .foregroundStyle(AuraTheme.secondaryText(contrast))
             }
             Text("distance")
                 .font(.caption)
-                .foregroundStyle(AuraTheme.textSecondary)
+                .foregroundStyle(AuraTheme.secondaryText(contrast))
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Distance, \(fmt.distanceValue(stats.distanceMeters)) \(fmt.distanceUnitSpoken)")
