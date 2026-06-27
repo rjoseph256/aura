@@ -27,6 +27,7 @@ targets:
           - MapboxAccessToken
           - sample-ride-pittsburgh.gpx
           - Fonts
+          - Aura.entitlements
       # Bundled Saira Condensed faces (OFL) — classified as resources and
       # registered via UIAppFonts in Resources/Info.plist.
       - path: Resources/Fonts
@@ -61,6 +62,7 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Resources/Aura.entitlements
         PRODUCT_BUNDLE_IDENTIFIER: app.aura.ios
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
