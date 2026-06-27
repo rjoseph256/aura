@@ -95,7 +95,7 @@ private struct LastRideView: View {
                         .frame(width: 34, height: 34)
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Last ride · \(ride.startedAt.widgetWeekday)").font(.caption)
-                        Text("\(ride.hasStats ? fmt.distanceValue(ride.distanceMeters) : "—") \(fmt.distanceUnit)")
+                        Text(ride.hasStats ? "\(fmt.distanceValue(ride.distanceMeters)) \(fmt.distanceUnit)" : "—")
                             .font(.headline)
                         if ride.hasStats {
                             let elev = "\(fmt.elevationValue(ride.elevationGainMeters)) \(fmt.elevationUnit)"
@@ -142,6 +142,7 @@ private struct LastRideView: View {
         guard ride.hasStats else { return "Last ride, \(ride.startedAt.widgetWeekday)" }
         return "Last ride, \(ride.startedAt.widgetWeekday), "
             + "\(fmt.distanceValue(ride.distanceMeters)) \(fmt.distanceUnit), "
-            + "moving time \(ride.movingTimeText)"
+            + "moving time \(ride.movingTimeText), "
+            + "\(fmt.elevationValue(ride.elevationGainMeters)) \(fmt.elevationUnit) climb"
     }
 }
