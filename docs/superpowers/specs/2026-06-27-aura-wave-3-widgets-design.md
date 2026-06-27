@@ -113,13 +113,20 @@ The forks were settled toward the ambitious, low-risk choice, grounded in the
    read-projection of persisted state, so the app rebuilds and rewrites it when
    that state changes, the WidgetKit-idiomatic pattern. A thin app-target shim
    reads `RideStore.summaries()` + the relevant settings, writes the snapshot, and
-   calls `WidgetCenter.shared.reloadAllTimelines()` at four points: a ride finish
+   calls `WidgetCenter.shared.reloadAllTimelines()` at five points: a ride finish
    (via `.onChange(of: coordinator.finishedRide)` in both HUDs, which fires on
-   every finish path including navigate arrival), a weekly-goal change, a units
-   change, and app launch + foreground (`scenePhase == .active`, which also catches
-   a week rollover that happened while backgrounded). `RideSessionCoordinator` is
-   untouched — threading a fifth seam through the ride lifecycle for a projection
-   concern would be heavier than the app refreshing when its own data changes.
+   every finish path including navigate arrival), a ride deletion in History, a
+   weekly-goal change, a units change, and app launch + foreground
+   (`scenePhase == .active`, which also catches a week rollover that happened while
+   backgrounded). `RideSessionCoordinator` is untouched — threading a sixth seam
+   through the ride lifecycle for a projection concern would be heavier than the
+   app refreshing when its own data changes. The finish trigger is sound because
+   `coordinator.finish()` saves synchronously (`try saving?.save(ride)`, a
+   synchronous `throws`) *before* it sets `finishedRide = ride`, so by the time the
+   `.onChange` fires, `summaries()` already includes the just-finished ride. The
+   `.onChange` coexists with the existing `.sheet(item: $coordinator.finishedRide)`
+   binding (the refresh is guarded on the new value being non-nil, so a sheet
+   dismissal back to nil does not refresh).
 4. **Two timeline entries with a week-boundary reset.** The provider reads the
    snapshot and never fetches. It emits an entry for *now* (the stored weekly
    figures) and a second entry dated at the snapshot's `week.end` that renders the
@@ -215,6 +222,9 @@ an AuraCore-to-AuraKit dependency inversion.
     `DateInterval` from `calendar.dateInterval(of: .weekOfYear, for: now)` (falling
     back to `now...now` if the calendar returns nil, so the type stays total);
   - `lastRide` mapped from `RideAggregator.mostRecent(summaries)` (nil when empty);
+    its `thumbnailCoordinates` come straight from `RideSummary`, already capped at
+    ≤ 60 points by `TrackSimplifier.thumbnail(maxPoints: 60)` at persistence time,
+    so the snapshot JSON stays small and the extension decodes a bounded array;
   - `units` and `generatedAt: now` passed through (`now`, not `Date()`, so the
     factory is deterministic and testable).
 - **`WidgetSnapshot.weekReset()`** — returns a copy with `week.distanceMeters = 0`
@@ -300,6 +310,10 @@ an AuraCore-to-AuraKit dependency inversion.
     `.onChange(of: scenePhase)` that reloads on `.active`.
   - `RideHUDView` and `NavigateHUDView`:
     `.onChange(of: coordinator.finishedRide) { _, ride in if ride != nil { WidgetRefresh.reload(...) } }`.
+  - `HistoryView`: after a successful delete (`rideStore.delete(id:)` in the
+    existing swipe/delete action), call `WidgetRefresh.reload(...)` so removing the
+    most recent ride (or any ride this week) updates both widgets without waiting
+    for the next foreground.
   - `SettingsView`: `.onChange(of: settings.weeklyGoalMeters)` and
     `.onChange(of: settings.units)` both reload.
 
@@ -309,7 +323,7 @@ an AuraCore-to-AuraKit dependency inversion.
   `let date: Date; let snapshot: WidgetSnapshot?`. Shared by both widgets.
 - **`SnapshotProvider: TimelineProvider`** — one provider type, two instances:
   - `placeholder(in:)` → `SnapshotEntry(date: .now, snapshot: .sample)` (synchronous).
-  - `getSnapshot(in:)` → in preview, the sample; otherwise the stored snapshot.
+  - `getSnapshot(in:)` → `context.isPreview ? .sample : (store.read() ?? .sample)`.
   - `getTimeline(in:)` → reads `WidgetSnapshotStore.appGroup().read()`. With a
     snapshot: two entries — `(now, snapshot)` and `(snapshot.week.end,
     snapshot.weekReset())` — policy `.after(snapshot.week.end)`. With nil: a single
@@ -338,12 +352,14 @@ labels.
   label, and a lime "<percent>% of <goal> <unit>" plus the ride count beneath.
   `.containerBackground(AuraTheme.background, for: .widget)`. Deep links to
   `aura://plan`.
-- **`accessoryCircular`** — `Gauge(value: snapshot.week.fraction)` with
+- **`accessoryCircular`** — `Gauge(value: snapshot.week.fraction, in: 0...1)` with
   `.gaugeStyle(.accessoryCircular)`, the distance as the `currentValueLabel`,
-  `.widgetAccentable()`. The system handles the vibrant ring.
+  `.widgetAccentable()`. The system handles the vibrant ring. `fraction` is clamped
+  to 1.0, so an over-goal week shows a full ring while the value label still reads
+  the actual distance (intended).
 - **`accessoryRectangular`** — a "This week" line, the value "<dist> / <goal> <unit>",
-  a `Gauge(...).gaugeStyle(.accessoryLinearCapacity)` bar, and a "<percent>% ·
-  <n> rides" line. `.widgetAccentable()`.
+  a `Gauge(value: fraction, in: 0...1).gaugeStyle(.accessoryLinearCapacity)` bar,
+  and a "<percent>% · <n> rides" line. `.widgetAccentable()`.
 - **`accessoryInline`** — `Label("<dist> of <goal> <unit> this week", systemImage:
   "bicycle")` (inline supports one image + text, shown beside the clock).
 
@@ -374,7 +390,12 @@ labels.
 ## TimelineProvider model
 
 - Entries: `[(now, snapshot)]` plus `[(week.end, weekReset)]` when a snapshot
-  exists, else `[(now, nil)]`.
+  exists, else `[(now, nil)]`. `week.end` is the half-open `DateInterval.end` from
+  `Calendar.dateInterval(of: .weekOfYear)`, i.e. the first instant of the next week,
+  so the second entry renders at the moment the week turns over. `weekReset()`
+  zeroes the figures but keeps the *old* interval; the app's next reload (or the
+  policy below) rewrites the snapshot with the new week's interval, so the stale
+  boundary is corrected promptly.
 - Policy: `.after(week.end)` with a snapshot (so the boundary entry is followed by
   a refresh that recomputes "this week" even with the app unopened); `.atEnd`
   without one.
@@ -406,11 +427,22 @@ labels.
     inside the already-referenced file).
 - **CI tolerance.** App Groups are applied at code-sign time, which the app build
   skips (`CODE_SIGNING_ALLOWED=NO`). `import WidgetKit` compiles against the SDK on
-  the CI host, so the build (which also builds `AuraWidgets`) stays green. The
-  app-target and extension file adds (`AuraWidgets.entitlements`, the two widget
-  files, `WidgetTimeline.swift`, `WidgetRefresh.swift`, and the shared
-  `RouteThumbnail` membership) require `xcodegen generate`; the package files under
-  `AuraCore/Sources/**` are auto-globbed.
+  the CI host, so the build (which also builds `AuraWidgets`) stays green.
+- **What needs a `project.yml` change vs. what is auto-globbed.** XcodeGen expands
+  globs at generation time, so `xcodegen generate` is required after *any* file
+  add, but most new files need no `project.yml` edit: new widget files under
+  `Aura/Widgets/**` (`WidgetTimeline.swift`, the two widget files) are already
+  covered by the existing `- path: Widgets` source glob, and `WidgetRefresh.swift`
+  under `Aura/Sources/**` is covered by the app target's `- Sources` glob. Only
+  three things touch `project.yml`: the `RouteThumbnail.swift` path entry under
+  `AuraWidgets` `sources` (it lives in `Sources/Shared/`, outside `Widgets/`), the
+  `AuraWidgets.entitlements` exclude + `CODE_SIGN_ENTITLEMENTS`, and the app's
+  `Aura.entitlements` is edited in place (no `project.yml` change, since
+  `CODE_SIGN_ENTITLEMENTS` already points at it). The package files under
+  `AuraCore/Sources/**` are auto-globbed by SwiftPM and never touch `project.yml`.
+  The `@main` `WidgetBundle` stays the only `@main` in the extension —
+  `RouteThumbnail` and the widget files are plain types, so there is no
+  duplicate-entry-point risk.
 
 ## Accessibility and design
 
@@ -497,6 +529,18 @@ The pure layer carries the unit tests; the widgets are verified on the simulator
   returns nil unsigned or unentitled, so `write`/`read` no-op rather than crash; CI
   never resolves it, and simulator verification builds signed. Both paths are
   named, not assumed.
+- **Transient read during an atomic write.** `.atomic` writes rename a temp file
+  into place, so a concurrent reader sees the old or the new file whole, never a
+  torn one. The one residual case is a `Data(contentsOf:)` that opens during the
+  rename and throws, which `read()` folds to nil and the widget would render as the
+  empty state for a single timeline build. This is rare and self-heals on the next
+  reload; it is accepted rather than guarded with a last-known-good cache, to keep
+  the store a plain value type.
+- **The empty-state deep link is a no-op mid-ride.** The Last ride widget's
+  "Start a ride" links to `aura://ride`, which `router.handle(url:)` ignores while a
+  ride is recording (the `isRideActive` guard). This only matters during a rider's
+  very first ride (the empty state shows only before any ride is saved), so the
+  degradation is acceptable and the link is intentionally left as is.
 - **Refresh budget.** All freshness is app-driven plus one week-boundary entry, so
   the widget never approaches WidgetKit's 40–70/day reload budget; `reloadAllTimelines`
   is called only on genuine data changes.
@@ -527,8 +571,8 @@ The pure layer carries the unit tests; the widgets are verified on the simulator
    `make(...)`, `weekReset()`, `sample`, TDD.
 2. `AuraKit`: `AppGroup.identifier` + `WidgetSnapshotStore` (directory-injected),
    TDD with a temp directory.
-3. App target: `WidgetRefresh` and its four trigger sites (app launch/foreground,
-   both HUDs' `finishedRide`, Settings goal + units).
+3. App target: `WidgetRefresh` and its five trigger sites (app launch/foreground,
+   both HUDs' `finishedRide`, History delete, Settings goal + units).
 4. `AuraWidgets`: `SnapshotEntry` + `SnapshotProvider` + `WidgetTimeline.swift`;
    share `RouteThumbnail` into the target.
 5. `AuraWidgets`: `WeeklyGoalWidget` (4 families) + `LastRideWidget` (3 families) +
