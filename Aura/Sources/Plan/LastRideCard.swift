@@ -29,7 +29,7 @@ struct LastRideCard: View {
                         .foregroundStyle(AuraTheme.textSecondary)
                     Text(relativeDate)
                         .font(.caption)
-                        .foregroundStyle(AuraTheme.textSecondary.opacity(0.85))
+                        .foregroundStyle(AuraTheme.textSecondary)
                 }
 
                 Spacer(minLength: AuraTheme.Spacing.xs)

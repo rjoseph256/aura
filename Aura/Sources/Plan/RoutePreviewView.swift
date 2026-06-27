@@ -317,7 +317,7 @@ private struct RouteOptionRow: View {
                         .foregroundStyle(isSelected ? AuraTheme.onAccent : AuraTheme.textPrimary)
                     Text(metricText)
                         .font(.subheadline)
-                        .foregroundStyle(isSelected ? AuraTheme.onAccent.opacity(0.7) : AuraTheme.textSecondary)
+                        .foregroundStyle(isSelected ? AuraTheme.onAccent : AuraTheme.textSecondary)
                 }
 
                 Spacer(minLength: AuraTheme.Spacing.sm)
@@ -326,7 +326,7 @@ private struct RouteOptionRow: View {
                 if route.elevationProfile.count > 1 {
                     ElevationSparkline(
                         elevations: route.elevationProfile,
-                        stroke: isSelected ? AuraTheme.onAccent.opacity(0.75) : AuraTheme.accent,
+                        stroke: isSelected ? AuraTheme.onAccent : AuraTheme.accent,
                         fill: isSelected ? AuraTheme.onAccent.opacity(0.16) : AuraTheme.accent.opacity(0.16)
                     )
                     .frame(width: 54, height: 26)
