@@ -7,6 +7,7 @@ struct HUDControlButton: ButtonStyle {
     var size: CGFloat = 44
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -28,7 +29,7 @@ struct HUDControlButton: ButtonStyle {
     }
 
     @ViewBuilder private var backgroundView: some View {
-        if reduceTransparency {
+        if AuraTheme.prefersOpaqueSurface(reduceTransparency: reduceTransparency, contrast) {
             AuraTheme.surface
         } else {
             Color.clear.background(.ultraThinMaterial)

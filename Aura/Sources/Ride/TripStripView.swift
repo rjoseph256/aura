@@ -8,6 +8,7 @@ struct TripStripView: View {
     let state: CruisingState
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private var isStarting: Bool { state == .starting }
 
@@ -55,7 +56,7 @@ struct TripStripView: View {
     }
 
     @ViewBuilder private var background: some View {
-        if reduceTransparency {
+        if AuraTheme.prefersOpaqueSurface(reduceTransparency: reduceTransparency, contrast) {
             AuraTheme.surface
         } else {
             AuraTheme.surface.opacity(0.55).background(.ultraThinMaterial)

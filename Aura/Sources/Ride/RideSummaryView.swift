@@ -11,8 +11,16 @@ struct RideSummaryView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(SettingsStore.self) private var settings
     @Environment(RideStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
 
     @State private var isLongest = false
+    @State private var animatedMeters: Double = 0
+    @State private var revealed = false
+
+    // Brand (SF Pro Rounded) is fixed-size, so @ScaledMetric drives Dynamic Type for the
+    // hero. (Cockpit Saira self-scales via relativeTo: — not used here.)
+    @ScaledMetric(relativeTo: .largeTitle) private var heroSize: CGFloat = 44
 
     private var stats: RideStats { ride.stats ?? .zero }
     private var fmt: RideStatsFormatter { RideStatsFormatter(units: settings.units) }
@@ -21,82 +29,170 @@ struct RideSummaryView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: AuraTheme.Spacing.xl) {
+            VStack(alignment: .leading, spacing: AuraTheme.Spacing.xl) {
                 if hasRoute {
                     StaticRouteMap(coordinates: ride.track.map(\.coordinate))
                         .frame(height: 240)
                         .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous))
                         .overlay(
                             RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous)
-                                .strokeBorder(AuraTheme.border, lineWidth: 1)
+                                .strokeBorder(AuraTheme.hairline(contrast), lineWidth: 1)
                         )
-                        .padding(.horizontal, AuraTheme.Spacing.xl)
                         .padding(.top, AuraTheme.Spacing.lg)
+                        .opacity(revealed ? 1 : 0)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.45), value: revealed)
                 }
 
-                VStack(spacing: AuraTheme.Spacing.xs) {
-                    Text("Nice ride").font(.largeTitle.bold()).foregroundStyle(AuraTheme.textPrimary)
-                    if let name = ride.destinationName, !name.isEmpty {
-                        Text("to \(name)")
-                            .font(.subheadline)
-                            .foregroundStyle(AuraTheme.textSecondary)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                    }
-                }
+                titleBlock
+                    .opacity(revealed ? 1 : 0)
+                    .offset(y: revealed ? 0 : 8)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.45).delay(0.05), value: revealed)
 
-                if isLongest {
-                    Label("Longest ride yet", systemImage: "trophy.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(AuraTheme.accent)
-                        .padding(.horizontal, AuraTheme.Spacing.lg).padding(.vertical, AuraTheme.Spacing.sm)
-                        .background(AuraTheme.accent.opacity(0.14), in: Capsule())
-                }
+                heroDistance
+                    .opacity(revealed ? 1 : 0)
+                    .offset(y: revealed ? 0 : 8)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.45).delay(0.10), value: revealed)
 
-                if saveFailed {
-                    Label("Couldn't save this ride — it won't appear in History.",
-                          systemImage: "exclamationmark.triangle.fill")
-                        .font(.footnote)
-                        .foregroundStyle(AuraTheme.destructive)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, AuraTheme.Spacing.sm)
-                }
-
-                HStack(spacing: AuraTheme.Spacing.xxl) {
-                    stat(fmt.distanceValue(stats.distanceMeters), metric ? "km" : "miles")
-                    stat(fmt.minutes(stats.movingTimeSeconds), "moving")
-                    stat(fmt.elevationValue(stats.elevationGainMeters), metric ? "m climbed" : "ft climbed")
-                }
-                stat(fmt.speedValue(stats.maxSpeedMetersPerSecond, decimals: 1), metric ? "km/h top" : "mph top")
+                supportingStats
+                    .opacity(revealed ? 1 : 0)
+                    .offset(y: revealed ? 0 : 8)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.45).delay(0.15), value: revealed)
 
                 Button("Done") { dismiss() }
                     .buttonStyle(.ctaPrimary)
-                    .padding(.horizontal, AuraTheme.Spacing.xl)
                     .padding(.top, AuraTheme.Spacing.xs)
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, AuraTheme.Spacing.xl)
             .padding(.bottom, AuraTheme.Spacing.xxxl)
         }
         .background(AuraTheme.background.ignoresSafeArea())
-        .onAppear(perform: computeRecord)
+        .onAppear {
+            computeRecord()
+            startAppearance()
+        }
     }
 
-    /// One value+label metric cell. Combined into a single VoiceOver element so it reads
-    /// as a unit (e.g. "21.6, km/h top") instead of two separate stops.
+    // MARK: Sections
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: AuraTheme.Spacing.sm) {
+            VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
+                Text("Nice ride").font(.largeTitle.bold()).foregroundStyle(AuraTheme.textPrimary)
+                if let name = ride.destinationName, !name.isEmpty {
+                    Text("to \(name)")
+                        .font(.subheadline)
+                        .foregroundStyle(AuraTheme.secondaryText(contrast))
+                        .lineLimit(2)
+                }
+            }
+            if isLongest {
+                Label("Longest ride yet", systemImage: "trophy.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AuraTheme.accent)
+                    .padding(.horizontal, AuraTheme.Spacing.lg).padding(.vertical, AuraTheme.Spacing.sm)
+                    .background(AuraTheme.accent.opacity(0.14), in: Capsule())
+            }
+            if saveFailed {
+                Label("Couldn't save this ride — it won't appear in History.",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(AuraTheme.destructive)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// The hero metric: distance, leading the recap. Counts up to the formatted value, with
+    /// the unit and a "distance" label. Reads as one VoiceOver element using the final value.
+    private var heroDistance: some View {
+        VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.xs) {
+                Group {
+                    if reduceMotion {
+                        Text(fmt.distanceValue(stats.distanceMeters))
+                    } else {
+                        CountUpText(meters: animatedMeters, format: fmt.distanceValue)
+                    }
+                }
+                .font(AuraTheme.Typography.metricBrand(heroSize))
+                .monospacedDigit()
+                .foregroundStyle(AuraTheme.textPrimary)
+
+                Text(fmt.distanceUnit)
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(AuraTheme.secondaryText(contrast))
+            }
+            Text("distance")
+                .font(.caption)
+                .foregroundStyle(AuraTheme.secondaryText(contrast))
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Distance, \(fmt.distanceValue(stats.distanceMeters)) \(fmt.distanceUnitSpoken)")
+    }
+
+    /// The three supporting stats in an even row that reflows to a vertical stack at
+    /// accessibility text sizes so nothing clips.
+    private var supportingStats: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.xxl) {
+                supportingCells
+            }
+            VStack(alignment: .leading, spacing: AuraTheme.Spacing.md) {
+                supportingCells
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var supportingCells: some View {
+        stat(fmt.minutes(stats.movingTimeSeconds), "moving")
+        stat(fmt.elevationValue(stats.elevationGainMeters), metric ? "m climbed" : "ft climbed")
+        stat(fmt.speedValue(stats.maxSpeedMetersPerSecond, decimals: 1), metric ? "km/h top" : "mph top")
+    }
+
+    /// One value+label metric, left-aligned, combined into a single VoiceOver element.
     private func stat(_ value: String, _ label: String) -> some View {
-        StatPair(value: value, label: label, context: .brand, alignment: .center)
+        StatPair(value: value, label: label, context: .brand, alignment: .leading)
             .accessibilityElement(children: .combine)
     }
 
-    /// "Longest ride yet" when this ride's distance is the max across all saved rides
-    /// (and there's more than one). The just-finished ride is already saved by the time
-    /// the summary appears, so it's included in the comparison. Reads the lightweight
-    /// `summaries()` projection rather than `allRides()`, so the comparison never faults
-    /// every ride's externally-stored GPS track.
+    // MARK: Behavior
+
+    private func startAppearance() {
+        if reduceMotion {
+            revealed = true
+            animatedMeters = stats.distanceMeters
+        } else {
+            // `revealed` drives the per-section staggered reveal via their .animation(value:)
+            // modifiers; the count-up animates the Animatable CountUpText separately.
+            revealed = true
+            withAnimation(.easeOut(duration: 0.7)) { animatedMeters = stats.distanceMeters }
+        }
+    }
+
+    /// "Longest ride yet" when this ride's distance is the max across all saved rides (and
+    /// there's more than one). Reads the lightweight `summaries()` projection rather than
+    /// faulting every ride's externally-stored track.
     private func computeRecord() {
         let summaries = (try? store.summaries()) ?? []
         isLongest = RideAggregator.isLongest(rideID: ride.id,
                                              distanceMeters: stats.distanceMeters,
                                              among: summaries)
     }
+}
+
+/// A number that ticks up to its target: SwiftUI interpolates `meters` (its `animatableData`)
+/// each frame and the body re-formats with the screen's own formatter, so the final frame is
+/// byte-identical to the static value (no visible snap). Reduce Motion uses a plain Text instead.
+private struct CountUpText: View, Animatable {
+    var meters: Double
+    var format: (Double) -> String
+
+    var animatableData: Double {
+        get { meters }
+        set { meters = newValue }
+    }
+
+    var body: some View { Text(format(meters)) }
 }
