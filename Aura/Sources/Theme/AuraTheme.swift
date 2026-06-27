@@ -1,31 +1,60 @@
 import SwiftUI
+import AuraCore
 
 enum AuraTheme {
-    // MARK: - Private palette (raw values — views use the roles below, never these)
-    private enum Palette {
-        static let nearBlack = Color(red: 0.027, green: 0.031, blue: 0.047) // #07080C
-        static let panel     = Color(red: 0.055, green: 0.063, blue: 0.078) // #0E1014
-        static let lime      = Color(red: 0.784, green: 0.980, blue: 0.294) // #C8FA4B
-        static let pink      = Color(red: 1.0, green: 0.302, blue: 0.616) // #FF4D9D
-        static let inkOnLime = Color(red: 0.086, green: 0.129, blue: 0.039) // #16210A
-        static let inkOnPink = Color(red: 0.165, green: 0.012, blue: 0.078) // #2A0314
+    // MARK: - Color roles
+    // Built from the pure `AuraPalette` so the `WCAGContrast` tests in AuraCore guard the
+    // exact values the app ships. Views use these roles, never raw colors.
+    private static func rgb(_ c: RGBColor) -> Color {
+        Color(red: c.red, green: c.green, blue: c.blue)
     }
 
-    // MARK: - Color roles
-    static let background    = Palette.nearBlack
-    static let surface       = Palette.panel
-    static let textPrimary   = Color(white: 0.92)
-    static let textSecondary = Color(white: 0.55)
-    static let accent        = Palette.lime
-    static let routeLine     = Palette.lime
-    static let destructive   = Palette.pink
-    static let onAccent      = Palette.inkOnLime
-    static let onDestructive = Palette.inkOnPink
-    static let border = Color.white.opacity(0.08)
+    static let background    = rgb(AuraPalette.nearBlack)
+    static let surface       = rgb(AuraPalette.panel)
+    static let textPrimary   = Color(white: AuraPalette.textPrimaryWhite)
+    static let textSecondary = Color(white: AuraPalette.textSecondaryWhite)
+    static let accent        = rgb(AuraPalette.lime)
+    static let routeLine     = rgb(AuraPalette.lime)
+    static let destructive   = rgb(AuraPalette.pink)
+    static let onAccent      = rgb(AuraPalette.inkOnLime)
+    static let onDestructive = rgb(AuraPalette.inkOnPink)
+    static let border        = Color.white.opacity(AuraPalette.borderWhite)
+
+    // MARK: - Contrast-aware resolvers
+    // Scoped to high-value over-map / sunlight spots. Named apart from the constants above
+    // so a call site can't silently fall back to the standard value by omitting the argument.
+    static func secondaryText(_ contrast: ColorSchemeContrast) -> Color {
+        Color(white: contrast == .increased
+              ? AuraPalette.textSecondaryWhiteHighContrast
+              : AuraPalette.textSecondaryWhite)
+    }
+
+    static func hairline(_ contrast: ColorSchemeContrast) -> Color {
+        Color.white.opacity(contrast == .increased
+                            ? AuraPalette.borderWhiteHighContrast
+                            : AuraPalette.borderWhite)
+    }
+
+    /// Whether a floating cockpit surface should drop transparency and render solid.
+    static func prefersOpaqueSurface(reduceTransparency: Bool, _ contrast: ColorSchemeContrast) -> Bool {
+        reduceTransparency || contrast == .increased
+    }
+
+    /// The scrim fill for a non-material cockpit surface over the map: solid when transparency
+    /// is reduced or contrast increased, otherwise a high-opacity surface that holds secondary
+    /// text even over a bright sunlit map.
+    static func mapScrim(reduceTransparency: Bool, _ contrast: ColorSchemeContrast) -> Color {
+        prefersOpaqueSurface(reduceTransparency: reduceTransparency, contrast)
+        ? surface
+        : surface.opacity(AuraPalette.mapScrimOpacity)
+    }
 
     // MARK: - Mapbox bridge
-    /// `routeLine` as a UIColor so Mapbox `StyleColor(_:)` accepts it. lime #C8FA4B = RGB 200/250/75.
-    static let routeUIColor = UIColor(red: 200 / 255, green: 250 / 255, blue: 75 / 255, alpha: 1)
+    /// `routeLine` as a UIColor so Mapbox `StyleColor(_:)` accepts it; built from the same
+    /// lime token as `accent` (was a separate 200/250/75 literal; now consistent).
+    static let routeUIColor = UIColor(red: AuraPalette.lime.red,
+                                      green: AuraPalette.lime.green,
+                                      blue: AuraPalette.lime.blue, alpha: 1)
 
     // MARK: - Spacing scale (pt)
     enum Spacing {
