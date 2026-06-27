@@ -142,6 +142,62 @@ struct RideSessionCoordinatorTests {
         #expect(activity.updates.last?.maneuver == update)
         c.cancel()
     }
+
+    @Test func finishWritesWorkoutWhenEnabledAndQualifies() async throws {
+        let spy = SpyWorkoutWriter()
+        let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
+                                       screen: SpyScreenWake(), activity: SpyRideActivity(),
+                                       workout: spy)
+        c.start(location: ScriptedLocationProvider([point(40.40, 0), point(40.41, 10)]),
+                saving: try RideStore.inMemory(), units: .metric,
+                authorization: .authorized, saveToHealth: true)
+        await c.streamTask?.value
+        c.finish()
+        #expect(spy.written.count == 1)
+        #expect(spy.written.first?.externalID == c.finishedRide?.id)
+    }
+
+    @Test func finishDoesNotWriteWhenDisabled() async throws {
+        let spy = SpyWorkoutWriter()
+        let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
+                                       screen: SpyScreenWake(), activity: SpyRideActivity(),
+                                       workout: spy)
+        c.start(location: ScriptedLocationProvider([point(40.40, 0), point(40.41, 10)]),
+                saving: try RideStore.inMemory(), units: .metric,
+                authorization: .authorized, saveToHealth: false)
+        await c.streamTask?.value
+        c.finish()
+        #expect(spy.written.isEmpty)
+    }
+
+    @Test func finishDoesNotWriteBelowDistanceFloor() async throws {
+        let spy = SpyWorkoutWriter()
+        let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
+                                       screen: SpyScreenWake(), activity: SpyRideActivity(),
+                                       workout: spy)
+        c.start(location: ScriptedLocationProvider([point(40.40, 0)]),
+                saving: try RideStore.inMemory(), units: .metric,
+                authorization: .authorized, saveToHealth: true)
+        await c.streamTask?.value
+        #expect(c.stats.distanceMeters < 10)  // guard the premise: one fix => under the floor
+        c.finish()
+        #expect(spy.written.isEmpty)
+    }
+
+    @Test func workoutWriteStillHappensWhenSaveFails() async throws {
+        let spy = SpyWorkoutWriter()
+        let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
+                                       screen: SpyScreenWake(), activity: SpyRideActivity(),
+                                       workout: spy)
+        c.start(location: ScriptedLocationProvider([point(40.40, 0), point(40.41, 10)]),
+                saving: ThrowingRideSaving(), units: .metric,
+                authorization: .authorized, saveToHealth: true)
+        await c.streamTask?.value
+        c.finish()
+        #expect(c.saveFailed == true)        // save threw
+        #expect(c.finishedRide != nil)       // ride still published
+        #expect(spy.written.count == 1)      // write runs after the save, unaffected
+    }
 }
 
 // MARK: - Doubles
@@ -191,4 +247,10 @@ final class ThrowingRideSaving: RideSaving {
     struct SaveError: Error {}
     private(set) var saveCount = 0
     func save(_ ride: Ride) throws { saveCount += 1; throw SaveError() }
+}
+
+@MainActor
+final class SpyWorkoutWriter: WorkoutWriting {
+    private(set) var written: [WorkoutData] = []
+    func writeWorkout(_ data: WorkoutData) { written.append(data) }
 }
