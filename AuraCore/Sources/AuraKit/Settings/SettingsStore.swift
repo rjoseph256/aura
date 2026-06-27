@@ -19,6 +19,8 @@ public final class SettingsStore {
     public var weeklyGoalMeters: Double { didSet { defaults.set(weeklyGoalMeters, forKey: Key.weeklyGoal) } }
     /// Opt-in: write finished rides to Apple Health as cycling workouts.
     public var saveToHealth: Bool { didSet { defaults.set(saveToHealth, forKey: Key.saveToHealth) } }
+    /// Opt-in: play a haptic on turn approach and arrival during a navigated ride.
+    public var turnHaptics: Bool { didSet { defaults.set(turnHaptics, forKey: Key.turnHaptics) } }
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -29,11 +31,13 @@ public final class SettingsStore {
         let storedGoal = defaults.object(forKey: Key.weeklyGoal) as? Double
         weeklyGoalMeters = (storedGoal.map { $0 > 0 ? $0 : nil } ?? nil) ?? 40_000
         saveToHealth = defaults.object(forKey: Key.saveToHealth) as? Bool ?? false
+        turnHaptics = defaults.object(forKey: Key.turnHaptics) as? Bool ?? true
     }
 
     private enum Key {
         static let units = "units"; static let voice = "voiceEnabled"; static let mapStyle = "mapStyle"
         static let weeklyGoal = "weeklyGoalMeters"
         static let saveToHealth = "saveToHealth"
+        static let turnHaptics = "turnHaptics"
     }
 }
