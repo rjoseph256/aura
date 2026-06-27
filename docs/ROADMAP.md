@@ -156,7 +156,9 @@ The rest of the audit groups into a few themes.
   underneath it was missing.
   Resolved in Wave 1 (2026-06-25): see the Design system bullet under Wave 1 — roles, scales,
   a type ramp, four extracted components, the route bridge, and the mono-lime identity, with
-  every screen migrated and the old symbols removed.
+  every screen migrated and the old symbols removed. The one loose end it left, the centered
+  ride-summary stat grid, was redesigned into a map-led layout in Wave 2 (2026-06-26), which
+  fully closes this finding.
 - **Accessibility is strong on motion, weak in the cockpit.** Reduce Motion is honored
   everywhere and the Dynamic Type pass is real, but the SpeedRail and TurnCard, the two
   most important elements, have no composed VoiceOver labels, and the floating controls
@@ -165,8 +167,10 @@ The rest of the audit groups into a few themes.
   Partly resolved in Wave 1 (2026-06-25): the floating controls now run through
   `HUDControlButton`, which falls back to a solid surface under Reduce Transparency, and the
   speed and stat readouts combine value and label into one VoiceOver element. The richer composed
-  labels for SpeedRail and TurnCard shipped in Wave 2 (2026-06-26); the broad contrast lift is
-  the last open piece.
+  labels for SpeedRail and TurnCard shipped in Wave 2 (2026-06-26), and the broad contrast lift
+  shipped as the final Wave 2 sub-project (2026-06-26): the borderline values were measured and
+  lifted through token bumps, per-view fixes, and a scoped Increase-Contrast path, closing this
+  finding.
 
 Full detail, including file and line references and severities, lives in the audit notes
 that produced this section.
@@ -253,22 +257,22 @@ persistence, and navigation.
   color — the cockpit uses Saira Condensed numerals (bundled, SIL OFL), the chrome uses SF Pro
   Rounded. Every screen was migrated (Plan, ride summary, History, Settings, Offline,
   permission, both cockpit HUDs) along with the Live Activity, and the deprecated `AuraTheme`
-  symbols were removed. Two choices are worth a look on a real ring with progress and a saved
-  ride: the WeeklyRing stroke was left at its existing 16pt rather than thinned, and the ride
-  summary's stat grid is now centered. Still deferred: a custom Mapbox Studio map style
-  (fast-follow).
+  symbols were removed. One choice is worth a look on a real ring with progress: the WeeklyRing
+  stroke was left at its existing 16pt rather than thinned. (The centered ride-summary stat grid
+  this bullet flagged was redesigned into the map-led layout in Wave 2's final sub-project.)
+  Still deferred: a custom Mapbox Studio map style (fast-follow).
 - **Quality gates:** SHIPPED (2026-06-25). CI now compiles the app target and the
   embedded AuraWidgets extension with xcodebuild, on top of the existing package tests.
   Swift 6 language mode is on across all four compiled targets (AuraCore, AuraKit, the
   app, and AuraWidgets). SwiftLint runs `--strict` with a tuned default rule set and a
   committed config.
 
-### Wave 2 — The cockpit the spec promised
+### Wave 2 — The cockpit the spec promised — COMPLETE (2026-06-26)
 
-With the foundations in place, build the HUD the design spec describes. The four items
-split into three separately-shipped sub-projects, in build order: the navigate-HUD
-cockpit (items one and two), the composed VoiceOver labels (item three), and the
-ride-summary redesign with the contrast lift (item four).
+With the foundations in place, this wave built the HUD the design spec describes. The
+four items shipped as three sub-projects, in build order: the navigate-HUD cockpit
+(items one and two), the composed VoiceOver labels (item three), and the ride-summary
+redesign with the contrast lift (item four). All three have shipped, completing Wave 2.
 
 - **Navigate-HUD cockpit:** SHIPPED (2026-06-26). The navigate HUD now shows the cruising
   data Section 5 asks for and carries one control cluster. Distance-remaining, an arrival
@@ -301,9 +305,22 @@ ride-summary redesign with the contrast lift (item four).
   `SpeedRailVoice`); the views apply it with `accessibilityElement(children: .ignore)` so
   nothing double-exposes. Verified on the iPhone 17 / iOS 26 simulator through the accessibility
   tree, each element reading as one composed utterance on a live navigated ride. The
-  ride-summary redesign with the app-wide contrast lift is the one remaining Wave 2 sub-project.
-- Redesign the ride summary away from the orphaned stat stack into a balanced grid or a
-  true hero metric, and lift the borderline contrast values across the app.
+  ride-summary redesign with the app-wide contrast lift shipped next, completing the wave.
+- **Ride-summary redesign + contrast lift:** SHIPPED (2026-06-26). The ride summary is now
+  map-led: the route map leads, the distance is a hero that counts up, and moving time,
+  climbed, and top speed sit in one left-aligned row that reflows to a vertical stack at
+  accessibility text sizes. The old centered three-up with a stranded fourth stat is gone.
+  The contrast work is a hybrid. The raw palette moved into a pure `AuraPalette` in AuraCore
+  with a `WCAGContrast` helper, so a unit-test suite asserts the token pairs clear their WCAG
+  targets and a regression fails CI. `textSecondary` rose from 0.55 to 0.62 white (7.5:1 on
+  the background) and the hairline border firmed, both at the token level. The cockpit
+  surfaces that float over the map (the free-ride `SpeedRail`, the GPS chip, the rerouting
+  cue) moved onto one scrim helper that stays solid enough to hold secondary text over a
+  bright sunlit map, and a scoped Increase-Contrast path strengthens those foregrounds when
+  the rider turns on Increase Contrast. `AuraTheme` now builds its colors from `AuraPalette`,
+  so the route line and every role flow from one source. Verified on the iPhone 17 / iOS 26
+  simulator: the redesigned summary, the reflow at accessibility sizes, Reduce Motion,
+  Increase Contrast, and measured contrast ratios. This was the last Wave 2 sub-project.
 
 ### Wave 3 — Near-term features
 
