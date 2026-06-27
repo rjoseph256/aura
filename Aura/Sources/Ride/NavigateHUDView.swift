@@ -25,6 +25,8 @@ struct NavigateHUDView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(LocationService.self) private var location
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
 
     // MARK: Ride lifecycle
 
@@ -103,8 +105,8 @@ struct NavigateHUDView: View {
                     .foregroundStyle(AuraTheme.textPrimary)
                     .padding(.horizontal, AuraTheme.Spacing.md)
                     .padding(.vertical, AuraTheme.Spacing.sm)
-                    .background(AuraTheme.surface.opacity(0.6), in: Capsule())
-                    .overlay(Capsule().strokeBorder(AuraTheme.border))
+                    .background(AuraTheme.mapScrim(reduceTransparency: reduceTransparency, contrast), in: Capsule())
+                    .overlay(Capsule().strokeBorder(AuraTheme.hairline(contrast)))
                     .padding(.top, 96)
                     .transition(.opacity)
                     .accessibilityLabel("Rerouting")

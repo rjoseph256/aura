@@ -11,6 +11,9 @@ struct SpeedRail: View {
     /// Navigate mode passes `.speedOnly`; free ride keeps the default `.full`.
     var layout: Layout = .full
 
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+
     private var fmt: RideStatsFormatter { RideStatsFormatter(units: units) }
 
     var body: some View {
@@ -36,7 +39,8 @@ struct SpeedRail: View {
             }
         }
         .padding(AuraTheme.Spacing.lg)
-        .background(AuraTheme.surface.opacity(0.55), in: RoundedRectangle(cornerRadius: AuraTheme.Radius.lg))
+        .background(AuraTheme.mapScrim(reduceTransparency: reduceTransparency, contrast),
+                    in: RoundedRectangle(cornerRadius: AuraTheme.Radius.lg))
         // The HUD is a compact glance target; let it enlarge meaningfully but not so
         // far it swamps the map. Standard sizes scale freely; cap the accessibility tail.
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
