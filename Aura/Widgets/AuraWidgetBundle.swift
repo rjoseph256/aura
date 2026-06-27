@@ -8,5 +8,6 @@ struct AuraWidgetBundle: WidgetBundle {
     var body: some Widget {
         RideLiveActivity()
         WeeklyGoalWidget()
+        LastRideWidget()
     }
 }
