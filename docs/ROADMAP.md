@@ -351,8 +351,32 @@ rest become mostly additive once Wave 1 lands.
   a written cycling workout with distance and route (read back from `healthd`), the opt-out and
   ride-save-unaffected paths, and one workout per ride. Next in Wave 3 is haptics on turn approach
   and arrival.
-- Haptics on turn approach and arrival, edge-triggered in the view model so they fire once
-  on the false-to-true transition, gated by a settings toggle.
+- **Haptics:** SHIPPED (2026-06-27). A navigated ride now plays a haptic as each turn nears
+  and one at the destination, gated by a "Turn haptics" Settings toggle (default on). The
+  decision of when to fire is a pure `TurnHapticEngine` in `AuraCore`: it keys the current
+  maneuver on the guidance instruction string and fires an approach once per maneuver when the
+  distance to the turn first reaches 150 m (the threshold at which the turn card already expands
+  to lime), and an arrival once on the final `arrivedAtDestination`. Keying the once-only guard
+  to the maneuver means a turn that has already buzzed never buzzes again, so a stop or a GPS
+  re-snap that pushes the maneuver distance back up cannot double-fire it, and no hysteresis band
+  is needed. `GuidanceViewModel` owns the engine and feeds it every guidance event, calling a new
+  `@MainActor HapticPlaying` seam only when haptics are enabled; the setting is read live, so a
+  mid-ride toggle takes effect. The play itself lives in the app target behind that seam:
+  `HapticPlayer` uses UIKit feedback generators (a `.rigid` impact for the approach, a `.success`
+  notification for arrival) rather than Core Haptics, since two simple cues need no engine
+  lifecycle and the generators honor the system Haptics setting and no-op without a Taptic Engine.
+  Haptics are navigate-only (a free ride has no turns) and independent of voice and the mute
+  button, so they stay useful as the silent channel when a rider rides to music. The package stays
+  UIKit-free, so CI's macOS build is unaffected. New AuraCore and AuraKit suites cover the engine
+  (once per maneuver, re-arm on a new maneuver, no re-fire on a receding distance, arrival once)
+  and the view-model wiring (fires when enabled, silent when off, no double-fire) through a
+  `HapticPlaying` spy. Verified on the iPhone 17 / iOS 26 simulator by driving a real navigate
+  ride with simulated movement and reading the haptic log: the approach fires once as a turn nears
+  and is suppressed when the toggle is off, with the ride still recording. The arrival's
+  end-to-end emission could not be triggered from the simulator's teleporting GPS (Mapbox's
+  arrival detector needs a track that follows the route), so it rests on the unit tests and a
+  device confirmation; the haptic feel itself is a device-only boundary the simulator cannot
+  reproduce. Next in Wave 3 is the home and lock-screen widgets.
 - A home and lock-screen widget for the last ride and weekly goal, reusing the
   `AuraWidgets` extension the Live Activity introduced. Timeline widgets that read saved
   rides will need an App Group (the Live Activity itself did not).
@@ -390,12 +414,13 @@ turn-card and guidance pipelines (including the reroute transitions), the week-t
 aggregation, the plotting math, the GPS signal classification, fix filter, and
 `LocationService.ingest`, and the ride-session coordinator lifecycle. CI runs three jobs: the
 package tests under Swift 6 language mode, an xcodebuild build of the app (which also builds
-AuraWidgets), and SwiftLint `--strict`. The package test count is now 136, up from the
-original 115 XCTest cases: Wave 1 added Swift Testing suites for the ride-session coordinator
-lifecycle, the track simplifier, the schema migration (round-trip plus fresh-install), and the
-summary read path. Wave 3 added more for HealthKit: the `WorkoutData` mapping and `RideWorkoutGate`,
-the `TrackPoint`→`CLLocation` route reconstruction, and the coordinator's gated workout write. The
-gap is the app target: every SwiftUI view, every Mapbox-backed
+AuraWidgets), and SwiftLint `--strict`. The package now runs 226 tests (133 XCTest plus 93
+Swift Testing): Wave 1 added Swift Testing suites for the ride-session coordinator lifecycle, the
+track simplifier, the schema migration (round-trip plus fresh-install), and the summary read path.
+Wave 3 added more for HealthKit (the `WorkoutData` mapping and `RideWorkoutGate`, the
+`TrackPoint`→`CLLocation` route reconstruction, and the coordinator's gated workout write) and for
+turn haptics (the `TurnHapticEngine` edge-trigger and the `GuidanceViewModel` haptic wiring through
+a `HapticPlaying` spy). The gap is the app target: every SwiftUI view, every Mapbox-backed
 provider, and the live CoreLocation stream are built in CI now but still untested. Wave 0's free-ride record-to-summary flow was
 checked with a one-off simulator smoke test, not an automated one.
 
