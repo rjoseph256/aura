@@ -322,12 +322,13 @@ redesign with the contrast lift (item four). All three have shipped, completing 
   simulator: the redesigned summary, the reflow at accessibility sizes, Reduce Motion,
   Increase Contrast, and measured contrast ratios. This was the last Wave 2 sub-project.
 
-### Wave 3 — Near-term features
+### Wave 3 — Near-term features — COMPLETE (2026-06-27)
 
 These were the old "Next steps." The Live Activity and Dynamic Island have since shipped
 (see Shipped, above) — built straight from the ride HUDs ahead of the Wave 1 coordinator,
 which left the `AuraWidgets` extension target and `NSSupportsLiveActivities` in place. The
-rest become mostly additive once Wave 1 lands.
+rest became mostly additive once Wave 1 landed. All three sub-projects shipped in build
+order: HealthKit, turn haptics, and the home and lock-screen widgets.
 
 - **HealthKit:** SHIPPED (2026-06-27). A finished ride now writes to Apple Health as a
   cycling workout when the rider opts in. `RideSessionCoordinator.finish()` gained a fourth
@@ -377,9 +378,31 @@ rest become mostly additive once Wave 1 lands.
   arrival detector needs a track that follows the route), so it rests on the unit tests and a
   device confirmation; the haptic feel itself is a device-only boundary the simulator cannot
   reproduce. Next in Wave 3 is the home and lock-screen widgets.
-- A home and lock-screen widget for the last ride and weekly goal, reusing the
-  `AuraWidgets` extension the Live Activity introduced. Timeline widgets that read saved
-  rides will need an App Group (the Live Activity itself did not).
+- **Widgets:** SHIPPED (2026-06-27). Home Screen and Lock Screen widgets for the last ride
+  and the weekly distance goal now ship in the `AuraWidgets` extension beside the Live
+  Activity. The widget reads a small denormalized `WidgetSnapshot` — a pure `Codable` value
+  in AuraKit — that the app writes into a shared App Group container (`group.app.aura.ios`),
+  so the extension never opens SwiftData, the migration plan, or Mapbox. The app rewrites the
+  snapshot and calls `WidgetCenter.reloadAllTimelines()` whenever its data changes (a ride
+  finishes, a ride is deleted, the weekly goal or units change, or the app foregrounds)
+  through a thin `WidgetRefresh` shim, leaving `RideSessionCoordinator` untouched — the
+  snapshot is a read-projection of persisted state, not a ride-lifecycle concern. A
+  `WidgetBundle` exposes two static widgets. Weekly goal (systemSmall plus accessory
+  circular, rectangular, and inline) mirrors the home `WeeklyRing` and uses a system `Gauge`
+  on the Lock Screen; Last ride (systemSmall, systemMedium, and accessory rectangular) draws
+  the stored thumbnail polyline through the shared `RouteThumbnail` and leads with the hero
+  distance. One `TimelineProvider` reads the snapshot and emits a now entry plus a
+  week-boundary reset entry, so the weekly total self-corrects across the week turnover even
+  with the app closed. The App Group capability extends the committed HealthKit entitlement
+  to both the app and the extension through XcodeGen and is consumed at sign time, so CI's
+  unsigned build stays green. The pure snapshot factory and the App Group store carry the
+  unit tests (over-goal percent, the week rollover, version gating, the Codable round-trip).
+  Verified on the iPhone 17 / iOS 26 simulator: both widgets, added from the gallery, render
+  live App Group data on the Home Screen — the over-goal ring clamps full while the percent
+  stays uncapped, and the Last ride thumbnail draws the real route. The Lock Screen accessory
+  placement rests on the same proven provider and the build, since the simulator's
+  lock-screen editor and StandBy are device-only surfaces. This was the last Wave 3
+  sub-project, completing the wave.
 
 ### Wave 4 and beyond — Platform and the group-ride future
 
