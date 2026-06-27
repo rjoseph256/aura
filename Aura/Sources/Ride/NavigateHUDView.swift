@@ -151,6 +151,8 @@ struct NavigateHUDView: View {
                 showPermission = true
                 return
             }
+            guidance.haptics = HapticPlayer.shared
+            guidance.hapticsEnabled = settings.turnHaptics
             guidance.units = settings.units
             guidance.start(route: route)
         }
@@ -159,6 +161,9 @@ struct NavigateHUDView: View {
         }
         .onChange(of: settings.units) { _, newUnits in
             guidance.units = newUnits
+        }
+        .onChange(of: settings.turnHaptics) { _, on in
+            guidance.hapticsEnabled = on
         }
         .onDisappear {
             router.isRideActive = false
