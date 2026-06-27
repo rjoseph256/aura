@@ -17,6 +17,8 @@ public final class SettingsStore {
     public var mapStyle: MapStyle { didSet { defaults.set(mapStyle.rawValue, forKey: Key.mapStyle) } }
     /// Weekly distance target the home ring fills toward, stored in meters (unit-agnostic).
     public var weeklyGoalMeters: Double { didSet { defaults.set(weeklyGoalMeters, forKey: Key.weeklyGoal) } }
+    /// Opt-in: write finished rides to Apple Health as cycling workouts.
+    public var saveToHealth: Bool { didSet { defaults.set(saveToHealth, forKey: Key.saveToHealth) } }
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -26,10 +28,12 @@ public final class SettingsStore {
         // Default ≈ 40 km / 25 mi. Guard against a corrupt/zero stored value.
         let storedGoal = defaults.object(forKey: Key.weeklyGoal) as? Double
         weeklyGoalMeters = (storedGoal.map { $0 > 0 ? $0 : nil } ?? nil) ?? 40_000
+        saveToHealth = defaults.object(forKey: Key.saveToHealth) as? Bool ?? false
     }
 
     private enum Key {
         static let units = "units"; static let voice = "voiceEnabled"; static let mapStyle = "mapStyle"
         static let weeklyGoal = "weeklyGoalMeters"
+        static let saveToHealth = "saveToHealth"
     }
 }
