@@ -34,6 +34,17 @@ public final class GuidanceViewModel {
     /// card. Not observed (only read inside `run`), so `@ObservationIgnored`.
     @ObservationIgnored public var units: DistanceUnits = .imperial
 
+    /// The app-target haptic player. `nil` in tests and on free ride; the navigate
+    /// HUD sets it. Not observed — only read inside `start`/`run`.
+    @ObservationIgnored public var haptics: (any HapticPlaying)?
+
+    /// Whether turn haptics are enabled (the rider's setting). Live, like `units`:
+    /// the navigate HUD updates it on change, so a mid-ride toggle takes effect.
+    @ObservationIgnored public var hapticsEnabled: Bool = false
+
+    /// Pure once-per-maneuver edge-trigger for the approach + arrival cues.
+    @ObservationIgnored private var hapticEngine = TurnHapticEngine()
+
     /// Invoked for each spoken prompt; the view decides whether to actually speak
     /// (honoring the mute toggle and the voice setting).
     @ObservationIgnored public var onSpeak: (String) -> Void = { _ in }
@@ -52,6 +63,7 @@ public final class GuidanceViewModel {
     /// (or `stop()` is called).
     public func start(route: Route) {
         task?.cancel()
+        haptics?.prepare()
         task = Task { @MainActor in
             await self.run(route: route)
         }
@@ -77,6 +89,10 @@ public final class GuidanceViewModel {
                 sawProgress = true
                 lastUpdate = update
                 turn = TurnCardPresenter.state(for: update, units: units)
+                let cue = hapticEngine.onProgress(
+                    distanceToManeuverMeters: update.distanceToManeuverMeters,
+                    maneuverKey: update.instruction)
+                if hapticsEnabled, let cue { haptics?.play(cue) }
             case .spokenInstruction(let text):
                 onSpeak(text)
             case .rerouting:
@@ -85,6 +101,8 @@ public final class GuidanceViewModel {
                 routeGeometry = geometry
                 isRerouting = false
             case .arrivedAtDestination:
+                let cue = hapticEngine.onArrival()
+                if hapticsEnabled, let cue { haptics?.play(cue) }
                 // `onArrive` ends the ride, which tears down this very session. Stop
                 // consuming by returning rather than letting teardown cancel the task
                 // from inside its own loop.

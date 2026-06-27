@@ -22,6 +22,10 @@ struct SettingsView: View {
                     Toggle("", isOn: $settings.voiceEnabled)
                         .labelsHidden().tint(AuraTheme.accent)
                 }
+                row(icon: "hand.tap.fill", tint: AuraTheme.accent, title: "Turn haptics") {
+                    Toggle("", isOn: $settings.turnHaptics)
+                        .labelsHidden().tint(AuraTheme.accent)
+                }
                 HealthAccessRow()
                 row(icon: "target", tint: AuraTheme.accent, title: "Weekly goal") {
                     Stepper(value: goalBinding(settings), in: 5...200, step: 5) {
