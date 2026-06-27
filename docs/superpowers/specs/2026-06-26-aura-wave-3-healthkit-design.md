@@ -111,10 +111,10 @@ choice where the risk stayed contained.
    coordinator writes only at `finish()`, which runs once per ride, and there is no
    retry or backfill, a ride cannot be written twice in the normal flow. The ride's
    `id` is stamped into the workout's `HKMetadataKeyExternalUUID` (a `String`-valued
-   key HealthKit also treats as a sync identifier), so the record is traceable, a
-   future dedup or Strava-style export has a stable key, and the store gets a measure
-   of native dedup for free — re-saving the same external UUID is treated as the same
-   logical record rather than a second workout.
+   key), so the record is traceable and a future dedup or Strava-style export has a
+   stable key. (This key is for traceability, not native dedup — HealthKit only
+   dedupes on `HKMetadataKeySyncIdentifier` + `HKMetadataKeySyncVersion`, which this
+   feature does not set; idempotency here comes solely from the single-shot write.)
 6. **A committed entitlements file wired through XcodeGen.** Unlike Wave 0, which
    needed no entitlements file, HealthKit requires `com.apple.developer.healthkit`.
    It lands as `Aura/Resources/Aura.entitlements`, generated and referenced by
@@ -372,8 +372,7 @@ the simulator.
   `finishWorkout()` and `finishRoute`, Health keeps a valid `.cycling` workout with
   distance and duration but no route. This is acceptable (not a duplicate, not a
   crash, not a corrupt record); it is named here rather than implying the write is
-  atomic. The external-UUID dedup means a hypothetical future retry would not create
-  a second workout.
+  atomic. The current flow never retries, so this cannot accumulate.
 - **The entitlement could break the unsigned CI build.** It is applied at sign time,
   not compile time; the app-build gate confirms green before merge, and the design
   does not assume it.
