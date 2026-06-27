@@ -77,6 +77,8 @@ import AuraCore
         #expect(reset.week.start == snap.week.start)
         #expect(reset.week.end == snap.week.end)
         #expect(reset.lastRide == snap.lastRide)
+        #expect(reset.generatedAt == snap.generatedAt)
+        #expect(reset.units == snap.units)
     }
 
     @Test func codable_roundTrips() throws {

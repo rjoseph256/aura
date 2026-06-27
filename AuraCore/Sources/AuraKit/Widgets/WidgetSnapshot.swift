@@ -8,7 +8,7 @@ import AuraCore
 /// `DistanceUnits`, `WeeklyRideStats`, and `RideAggregator`) but imports no
 /// SwiftUI/UIKit/WidgetKit, so it builds and tests on the macOS CI host.
 public struct WidgetSnapshot: Codable, Equatable, Sendable {
-    /// Bumped if the stored shape changes; a reader rejects an unknown version, so a new
+    /// Bumped if the stored shape changes; the snapshot store's reader (`WidgetSnapshotStore.read()`) rejects an unknown version, so a new
     /// widget binary ignores a snapshot an old app wrote (and vice versa) until the app
     /// rewrites it.
     public static let currentVersion = 1
@@ -59,6 +59,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             self.goalMeters = goalMeters; self.start = start; self.end = end
         }
 
+        // Elevation and moving time are passed as 0; widgets only use distance/count for goal math.
         private var stats: WeeklyRideStats {
             WeeklyRideStats(distanceMeters: distanceMeters, rideCount: rideCount,
                             elevationGainMeters: 0, movingTimeSeconds: 0)
@@ -110,7 +111,7 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
     public static let sample = WidgetSnapshot(
         generatedAt: Date(timeIntervalSince1970: 1_750_000_000),
         units: .imperial,
-        lastRide: LastRide(id: UUID(), kind: .freeRide,
+        lastRide: LastRide(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!, kind: .freeRide,
                            startedAt: Date(timeIntervalSince1970: 1_749_900_000),
                            hasStats: true, distanceMeters: 20_000, movingTimeSeconds: 3_720,
                            elevationGainMeters: 104, destinationName: nil,
