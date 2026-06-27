@@ -48,6 +48,9 @@ struct RideHUDView: View {
         .onChange(of: coordinator.isRecording) { _, recording in
             router.isRideActive = recording
         }
+        .onChange(of: coordinator.finishedRide) { _, ride in
+            if ride != nil { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+        }
         .onDisappear {
             router.isRideActive = false
             coordinator.cancel()

@@ -2,6 +2,7 @@ import SwiftUI
 import AuraKit
 
 struct SettingsView: View {
+    @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
 
     var body: some View {
@@ -66,6 +67,12 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(AuraTheme.background.ignoresSafeArea())
         .navigationTitle("Settings")
+        .onChange(of: settings.weeklyGoalMeters) { _, _ in
+            WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+        }
+        .onChange(of: settings.units) { _, _ in
+            WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+        }
     }
 
     // A settings row: colored icon badge + title + trailing control.

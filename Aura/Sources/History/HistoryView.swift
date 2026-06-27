@@ -74,6 +74,7 @@ struct HistoryView: View {
     private func delete(_ summary: RideSummary) {
         try? store.delete(id: summary.id)
         summaries.removeAll { $0.id == summary.id }
+        WidgetRefresh.reload(rideStore: store, settings: settings)
     }
 
     // MARK: - Empty state
