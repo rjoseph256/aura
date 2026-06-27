@@ -54,7 +54,8 @@ struct NavigateHUDView: View {
         self.destination = destination
         _coordinator = State(initialValue: RideSessionCoordinator(
             kind: .navigate, destinationName: destination?.name,
-            screen: ScreenWakeController(), activity: RideLiveActivityController.shared))
+            screen: ScreenWakeController(), activity: RideLiveActivityController.shared,
+            workout: WorkoutWriter.shared))
     }
 
     // MARK: Body
@@ -145,7 +146,7 @@ struct NavigateHUDView: View {
 
             let outcome = coordinator.start(
                 location: location, saving: rideStore, units: settings.units,
-                authorization: location.authorization)
+                authorization: location.authorization, saveToHealth: settings.saveToHealth)
             guard outcome == .started else {
                 showPermission = true
                 return

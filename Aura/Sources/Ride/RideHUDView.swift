@@ -10,7 +10,8 @@ struct RideHUDView: View {
 
     @State private var coordinator = RideSessionCoordinator(
         kind: .freeRide, destinationName: nil,
-        screen: ScreenWakeController(), activity: RideLiveActivityController.shared)
+        screen: ScreenWakeController(), activity: RideLiveActivityController.shared,
+        workout: WorkoutWriter.shared)
     @State private var showPermission = false
 
     var body: some View {
@@ -82,7 +83,7 @@ struct RideHUDView: View {
     private func startRide() {
         let outcome = coordinator.start(
             location: location, saving: rideStore, units: settings.units,
-            authorization: location.authorization)
+            authorization: location.authorization, saveToHealth: settings.saveToHealth)
         if outcome == .permissionDenied { showPermission = true }
     }
 }
