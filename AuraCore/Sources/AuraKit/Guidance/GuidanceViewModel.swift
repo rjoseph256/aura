@@ -30,6 +30,10 @@ public final class GuidanceViewModel {
     /// original `route.geometry`. `nil` until the first reroute.
     public private(set) var routeGeometry: [Coordinate]?
 
+    /// The rider's distance-units setting, set by the view. Drives the unit-aware turn
+    /// card. Not observed (only read inside `run`), so `@ObservationIgnored`.
+    @ObservationIgnored public var units: DistanceUnits = .imperial
+
     /// Invoked for each spoken prompt; the view decides whether to actually speak
     /// (honoring the mute toggle and the voice setting).
     @ObservationIgnored public var onSpeak: (String) -> Void = { _ in }
@@ -72,7 +76,7 @@ public final class GuidanceViewModel {
                 isRerouting = false
                 sawProgress = true
                 lastUpdate = update
-                turn = TurnCardPresenter.state(for: update)
+                turn = TurnCardPresenter.state(for: update, units: units)
             case .spokenInstruction(let text):
                 onSpeak(text)
             case .rerouting:

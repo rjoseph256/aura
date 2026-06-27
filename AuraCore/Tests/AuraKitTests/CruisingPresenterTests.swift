@@ -79,4 +79,45 @@ import AuraCore
                                         now: now(cal), calendar: cal)
         #expect(s.streetName == "Penn Ave")
     }
+
+    @Test func accessibilityLabel_full() {
+        let cal = calendar("en_US")
+        let s = CruisingPresenter.state(for: update(distance: 3380, duration: 1080, street: "Penn Ave"),
+                                        units: .imperial, now: now(cal), calendar: cal)
+        // 3380 m -> "2.1 miles"; 16:20 + 18 min -> "4:38 PM" (assert the stable parts).
+        #expect(s.accessibilityLabel.hasPrefix("On Penn Ave, 2.1 miles to go, arriving "))
+        #expect(s.accessibilityLabel.contains("4:38"))
+    }
+
+    @Test func accessibilityLabel_noStreet() {
+        let cal = calendar("en_US")
+        let s = CruisingPresenter.state(for: update(distance: 3380, duration: 1080),
+                                        units: .imperial, now: now(cal), calendar: cal)
+        #expect(s.accessibilityLabel.hasPrefix("2.1 miles to go, arriving "))
+    }
+
+    @Test func accessibilityLabel_missingDistance() {
+        let cal = calendar("en_US")
+        let s = CruisingPresenter.state(for: update(duration: 1080, street: "Penn Ave"),
+                                        units: .imperial, now: now(cal), calendar: cal)
+        #expect(s.accessibilityLabel.hasPrefix("On Penn Ave, arriving "))
+    }
+
+    @Test func accessibilityLabel_missingEta() {
+        let cal = calendar("en_US")
+        let s = CruisingPresenter.state(for: update(distance: 3380, street: "Penn Ave"),
+                                        units: .imperial, now: now(cal), calendar: cal)
+        #expect(s.accessibilityLabel == "On Penn Ave, 2.1 miles to go")
+    }
+
+    @Test func accessibilityLabel_metricDistance() {
+        let cal = calendar("en_US")
+        let s = CruisingPresenter.state(for: update(distance: 3380, street: "Penn Ave"),
+                                        units: .metric, now: now(cal), calendar: cal)
+        #expect(s.accessibilityLabel == "On Penn Ave, 3.4 kilometers to go")
+    }
+
+    @Test func accessibilityLabel_startingState() {
+        #expect(CruisingState.starting.accessibilityLabel == "Starting navigation.")
+    }
 }

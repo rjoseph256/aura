@@ -15,17 +15,24 @@ struct SpeedRail: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: AuraTheme.Spacing.xs) {
-            // Hero speed + lime unit — Saira Condensed via SpeedReadout. Grouped so it
-            // reads as one VoiceOver element ("24, km/h") instead of two stops.
+            // Hero speed: one element, static "Speed" label + spoken value, so the live
+            // (slow-moving average) value re-announces alone, never the whole rail.
             SpeedReadout(value: fmt.speedValue(stats.averageSpeedMetersPerSecond),
                          unit: fmt.speedUnit.uppercased())
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Speed")
+                .accessibilityValue(SpeedRailVoice.speedValue(stats, units: units))
             if layout == .full {
                 HStack(spacing: AuraTheme.Spacing.md) {
                     metric(fmt.distanceValue(stats.distanceMeters), fmt.distanceUnit.uppercased())
                     metric(RideStatsFormatter.clock(elapsed), "TIME")
                     metric(fmt.elevationValue(stats.elevationGainMeters), "\(fmt.elevationUnit.uppercased()) ↑")
-                }.padding(.top, AuraTheme.Spacing.xs)
+                }
+                .padding(.top, AuraTheme.Spacing.xs)
+                // The trio composes into one element so VoiceOver reads "Distance ...,
+                // time ..., elevation gain ..." instead of four mechanical stops.
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(SpeedRailVoice.statsLabel(stats, elapsed: elapsed, units: units))
             }
         }
         .padding(AuraTheme.Spacing.lg)
@@ -37,6 +44,5 @@ struct SpeedRail: View {
 
     private func metric(_ value: String, _ label: String) -> some View {
         StatPair(value: value, label: label, context: .cockpit)
-            .accessibilityElement(children: .combine)
     }
 }

@@ -13,6 +13,8 @@ struct TripStripView: View {
 
     var body: some View {
         content
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(state.accessibilityLabel)
             .padding(.horizontal, AuraTheme.Spacing.lg)
             .padding(.vertical, AuraTheme.Spacing.md)
             .frame(maxWidth: .infinity)
@@ -63,10 +65,13 @@ struct TripStripView: View {
 
 #Preview {
     VStack(spacing: 12) {
-        TripStripView(state: .init(streetName: "Penn Ave", distanceRemaining: "2.1 mi", eta: "4:38 PM"))
+        TripStripView(state: .init(streetName: "Penn Ave", distanceRemaining: "2.1 mi", eta: "4:38 PM",
+                                   accessibilityLabel: "On Penn Ave, 2.1 miles to go, arriving 4:38 PM"))
         TripStripView(state: .init(streetName: "Boulevard of the Allies and then some more",
-                                   distanceRemaining: "12.4 mi", eta: "5:02 PM"))
-        TripStripView(state: .init(streetName: nil, distanceRemaining: "0.3 mi", eta: "4:51 PM"))
+                                   distanceRemaining: "12.4 mi", eta: "5:02 PM",
+                                   accessibilityLabel: "On Boulevard of the Allies and then some more, 12.4 miles to go, arriving 5:02 PM"))
+        TripStripView(state: .init(streetName: nil, distanceRemaining: "0.3 mi", eta: "4:51 PM",
+                                   accessibilityLabel: "0.3 miles to go, arriving 4:51 PM"))
         TripStripView(state: .starting)
     }
     .padding()

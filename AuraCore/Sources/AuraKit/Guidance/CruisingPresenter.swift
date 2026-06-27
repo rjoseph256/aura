@@ -12,15 +12,20 @@ public struct CruisingState: Equatable, Sendable {
     public var distanceRemaining: String?
     /// Arrival clock, e.g. "4:38 PM". nil shows a placeholder.
     public var eta: String?
+    /// One composed VoiceOver read for the whole strip, e.g.
+    /// "On Penn Ave, 2.1 miles to go, arriving 4:38 PM".
+    public var accessibilityLabel: String
 
-    public init(streetName: String?, distanceRemaining: String?, eta: String?) {
+    public init(streetName: String?, distanceRemaining: String?, eta: String?, accessibilityLabel: String) {
         self.streetName = streetName
         self.distanceRemaining = distanceRemaining
         self.eta = eta
+        self.accessibilityLabel = accessibilityLabel
     }
 
     /// Before the first usable progress update; the strip reads a calm "Starting…".
-    public static let starting = CruisingState(streetName: nil, distanceRemaining: nil, eta: nil)
+    public static let starting = CruisingState(streetName: nil, distanceRemaining: nil, eta: nil,
+                                               accessibilityLabel: "Starting navigation.")
 }
 
 /// Turns a `GuidanceUpdate` into a `CruisingState`. Pure: the caller passes `now` and a
@@ -30,9 +35,16 @@ public enum CruisingPresenter {
                              units: DistanceUnits,
                              now: Date,
                              calendar: Calendar = .current) -> CruisingState {
-        CruisingState(streetName: street(update.currentStreetName),
-                      distanceRemaining: distance(update.distanceRemainingMeters, units: units),
-                      eta: eta(update.durationRemainingSeconds, now: now, calendar: calendar))
+        let streetName = street(update.currentStreetName)
+        let distanceRemaining = distance(update.distanceRemainingMeters, units: units)
+        let eta = eta(update.durationRemainingSeconds, now: now, calendar: calendar)
+        return CruisingState(
+            streetName: streetName,
+            distanceRemaining: distanceRemaining,
+            eta: eta,
+            accessibilityLabel: label(streetName: streetName,
+                                      meters: update.distanceRemainingMeters,
+                                      eta: eta, units: units))
     }
 
     /// Empty or whitespace-only names (unnamed trails) become nil so the strip omits them.
@@ -64,5 +76,19 @@ public enum CruisingPresenter {
         formatter.timeZone = calendar.timeZone
         formatter.setLocalizedDateFormatFromTemplate("jmm")
         return formatter.string(from: arrival)
+    }
+
+    /// Composes the spoken strip read from the resolved parts, omitting whichever clause
+    /// has no value. Distance is spelled from the raw meters (so "2.1 miles", not "2.1 mi").
+    private static func label(streetName: String?, meters: Double?, eta: String?,
+                              units: DistanceUnits) -> String {
+        var clauses: [String] = []
+        if let streetName { clauses.append("On \(streetName)") }
+        if let meters, meters > 0 {
+            let formatter = RideStatsFormatter(units: units)
+            clauses.append("\(formatter.distanceValue(meters)) \(formatter.distanceUnitSpoken) to go")
+        }
+        if let eta { clauses.append("arriving \(eta)") }
+        return clauses.isEmpty ? "Starting navigation." : clauses.joined(separator: ", ")
     }
 }

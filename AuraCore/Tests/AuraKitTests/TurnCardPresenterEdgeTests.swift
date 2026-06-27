@@ -2,7 +2,7 @@ import XCTest
 @testable import AuraKit
 import AuraCore
 
-/// Boundary tests for `TurnCardPresenter.state`.
+/// Boundary tests for `TurnCardPresenter.state` (imperial distance rounding).
 ///
 /// The feet→miles switch is `feet >= 1000`, where feet = meters * 3.280839895…
 /// So 1000 ft corresponds to 1000 / 3.280839895… ≈ 304.8 m. Below that, the card
@@ -16,7 +16,7 @@ final class TurnCardPresenterEdgeTests: XCTestCase {
     private let metersAtNominal1000ft = 1000.0 / 3.280839895013123 // ≈ 304.8 m
 
     func test_zeroMeters_showsZeroFeet() {
-        let state = TurnCardPresenter.state(distanceToManeuverMeters: 0, instruction: "x")
+        let state = TurnCardPresenter.state(distanceToManeuverMeters: 0, instruction: "x", units: .imperial)
         XCTAssertEqual(state.distanceText, "0 ft")
         // 0 m is within the default 150 m expand window.
         XCTAssertTrue(state.isExpanded)
@@ -24,14 +24,14 @@ final class TurnCardPresenterEdgeTests: XCTestCase {
 
     func test_justBelowSwitch_showsFeet() {
         // 300 m ≈ 984.25 ft → nearest 10 = 980 ft (clearly in feet territory).
-        let state = TurnCardPresenter.state(distanceToManeuverMeters: 300, instruction: "x")
+        let state = TurnCardPresenter.state(distanceToManeuverMeters: 300, instruction: "x", units: .imperial)
         XCTAssertEqual(state.distanceText, "980 ft")
     }
 
     func test_atOrAboveSwitch_showsMiles() {
         // 305 m ≈ 1000.66 ft → unambiguously >= 1000 → miles.
         // 305 m ≈ 0.1895 mi → "%.1f mi" = "0.2 mi".
-        let state = TurnCardPresenter.state(distanceToManeuverMeters: 305, instruction: "x")
+        let state = TurnCardPresenter.state(distanceToManeuverMeters: 305, instruction: "x", units: .imperial)
         XCTAssertEqual(state.distanceText, "0.2 mi")
     }
 
@@ -41,26 +41,23 @@ final class TurnCardPresenterEdgeTests: XCTestCase {
         // rounds to nearest 10 = 1000 → it DISPLAYS "1000 ft" rather than switching
         // to miles. So "1000 ft" is a string the card can actually show, despite
         // 1000 ft nominally being the switch point. Pins the float edge, not endorses it.
-        let state = TurnCardPresenter.state(distanceToManeuverMeters: metersAtNominal1000ft, instruction: "x")
+        let state = TurnCardPresenter.state(distanceToManeuverMeters: metersAtNominal1000ft, instruction: "x", units: .imperial)
         XCTAssertEqual(state.distanceText, "1000 ft")
     }
 
     func test_justAboveSwitch_showsMiles() {
         // A hair above the nominal boundary clears 1000 ft and switches to miles.
-        let state = TurnCardPresenter.state(distanceToManeuverMeters: metersAtNominal1000ft + 1, instruction: "x")
+        let state = TurnCardPresenter.state(distanceToManeuverMeters: metersAtNominal1000ft + 1, instruction: "x", units: .imperial)
         XCTAssertTrue(state.distanceText.hasSuffix(" mi"),
                       "expected miles formatting just above the switch, got \(state.distanceText)")
     }
 
     func test_roundsFeetToNearest10() {
         // 30 m ≈ 98.4 ft → nearest 10 = 100 ft.
-        XCTAssertEqual(TurnCardPresenter.state(distanceToManeuverMeters: 30, instruction: "x").distanceText,
-                       "100 ft")
+        XCTAssertEqual(TurnCardPresenter.state(distanceToManeuverMeters: 30, instruction: "x", units: .imperial).distanceText, "100 ft")
         // 8 m ≈ 26.2 ft → nearest 10 = 30 ft.
-        XCTAssertEqual(TurnCardPresenter.state(distanceToManeuverMeters: 8, instruction: "x").distanceText,
-                       "30 ft")
+        XCTAssertEqual(TurnCardPresenter.state(distanceToManeuverMeters: 8, instruction: "x", units: .imperial).distanceText, "30 ft")
         // 1 m ≈ 3.28 ft → nearest 10 = 0 ft.
-        XCTAssertEqual(TurnCardPresenter.state(distanceToManeuverMeters: 1, instruction: "x").distanceText,
-                       "0 ft")
+        XCTAssertEqual(TurnCardPresenter.state(distanceToManeuverMeters: 1, instruction: "x", units: .imperial).distanceText, "0 ft")
     }
 }

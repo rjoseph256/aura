@@ -32,29 +32,46 @@ public struct RideStatsFormatter {
         return String(format: "%.\(decimals)f", v)
     }
     public var speedUnit: String { metric ? "km/h" : "mph" }
+    public var speedUnitSpoken: String { metric ? "kilometers per hour" : "miles per hour" }
+    public var distanceUnitSpoken: String { metric ? "kilometers" : "miles" }
+    public var elevationUnitSpoken: String { metric ? "meters" : "feet" }
 
     public func minutes(_ seconds: Double) -> String { "\(Int(seconds / 60)) min" }
 
-    /// Short distance-to-maneuver string for the next turn, e.g. "390 ft" / "0.2 mi"
-    /// (imperial) or "120 m" / "0.3 km" (metric). Near distances round to the nearest
-    /// 10 of the short unit; once past ~1000 short units it rolls up to the long unit
-    /// with one decimal. Mirrors the turn card's rounding, but unit-aware so the Live
-    /// Activity honors the rider's distance-units setting.
-    public func maneuverDistance(_ meters: Double) -> String {
+    private struct ManeuverParts { let value: String; let short: String; let spoken: String }
+
+    /// The maneuver distance split into its formatted value and both unit forms, so the
+    /// short glyph string and the spoken string share one rounding path and never drift.
+    private func maneuverParts(_ meters: Double) -> ManeuverParts {
         if metric {
             if meters >= 1000 {
-                return String(format: "%.1f km", UnitConverter.km(fromMeters: meters))
+                return ManeuverParts(value: String(format: "%.1f", UnitConverter.km(fromMeters: meters)), short: "km", spoken: "kilometers")
             }
             let rounded = Int((meters / 10).rounded()) * 10
-            return "\(rounded) m"
+            return ManeuverParts(value: "\(rounded)", short: "m", spoken: "meters")
         } else {
             let feet = UnitConverter.feet(fromMeters: meters)
             if feet >= 1000 {
-                return String(format: "%.1f mi", UnitConverter.miles(fromMeters: meters))
+                return ManeuverParts(value: String(format: "%.1f", UnitConverter.miles(fromMeters: meters)), short: "mi", spoken: "miles")
             }
             let rounded = Int((feet / 10).rounded()) * 10
-            return "\(rounded) ft"
+            return ManeuverParts(value: "\(rounded)", short: "ft", spoken: "feet")
         }
+    }
+
+    /// Short distance-to-maneuver string, e.g. "390 ft" / "0.2 mi" / "120 m" / "0.3 km".
+    /// Output is unchanged from the previous implementation (the Live Activity and Lock
+    /// Screen widgets depend on it).
+    public func maneuverDistance(_ meters: Double) -> String {
+        let p = maneuverParts(meters)
+        return "\(p.value) \(p.short)"
+    }
+
+    /// Spoken distance-to-maneuver, e.g. "390 feet" / "0.2 miles" / "120 meters" /
+    /// "0.3 kilometers". Same value and rounding as `maneuverDistance`, spelled units.
+    public func maneuverDistanceSpoken(_ meters: Double) -> String {
+        let p = maneuverParts(meters)
+        return "\(p.value) \(p.spoken)"
     }
 
     /// "m:ss" elapsed clock, e.g. 125 -> "2:05".

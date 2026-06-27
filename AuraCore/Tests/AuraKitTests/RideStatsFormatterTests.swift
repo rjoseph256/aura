@@ -47,4 +47,28 @@ final class RideStatsFormatterTests: XCTestCase {
         XCTAssertEqual(f.maneuverDistance(8), "10 m")        // rounds to nearest 10 m
         XCTAssertEqual(f.maneuverDistance(2500), "2.5 km")   // ≥1000 m rolls up to km
     }
+
+    func test_maneuverDistanceSpoken_imperial() {
+        let f = RideStatsFormatter(units: .imperial)
+        XCTAssertEqual(f.maneuverDistanceSpoken(120), "390 feet")
+        XCTAssertEqual(f.maneuverDistanceSpoken(8), "30 feet")
+        XCTAssertEqual(f.maneuverDistanceSpoken(1609.344), "1.0 miles")
+    }
+
+    func test_maneuverDistanceSpoken_metric() {
+        let f = RideStatsFormatter(units: .metric)
+        XCTAssertEqual(f.maneuverDistanceSpoken(120), "120 meters")
+        XCTAssertEqual(f.maneuverDistanceSpoken(2500), "2.5 kilometers")
+    }
+
+    func test_spokenUnitWords() {
+        let imperial = RideStatsFormatter(units: .imperial)
+        let metric = RideStatsFormatter(units: .metric)
+        XCTAssertEqual(imperial.speedUnitSpoken, "miles per hour")
+        XCTAssertEqual(metric.speedUnitSpoken, "kilometers per hour")
+        XCTAssertEqual(imperial.distanceUnitSpoken, "miles")
+        XCTAssertEqual(metric.distanceUnitSpoken, "kilometers")
+        XCTAssertEqual(imperial.elevationUnitSpoken, "feet")
+        XCTAssertEqual(metric.elevationUnitSpoken, "meters")
+    }
 }
