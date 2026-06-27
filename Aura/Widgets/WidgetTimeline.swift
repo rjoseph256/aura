@@ -43,6 +43,9 @@ nonisolated struct SnapshotProvider: TimelineProvider {
         if snapshot.week.end > now {
             entries.append(SnapshotEntry(date: snapshot.week.end, snapshot: snapshot.weekReset()))
         }
-        completion(Timeline(entries: entries, policy: .after(snapshot.week.end)))
+        // Refresh at the week boundary when it's still ahead; otherwise re-check in an
+        // hour (the app normally rewrites the snapshot on foreground/finish well before).
+        let refreshDate = snapshot.week.end > now ? snapshot.week.end : now.addingTimeInterval(3600)
+        completion(Timeline(entries: entries, policy: .after(refreshDate)))
     }
 }
