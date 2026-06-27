@@ -455,7 +455,7 @@ Replace the contents of `Aura/Resources/Aura.entitlements` with:
 
 - [ ] **Step 3: Wire the extension in `project.yml`**
 
-In `Aura/project.yml`, under the `AuraWidgets` target: (a) add `AuraWidgets.entitlements` to the `Widgets` source `excludes`; (b) add the `RouteThumbnail.swift` path; (c) add `CODE_SIGN_ENTITLEMENTS`. The `AuraWidgets` `sources` and `settings.base` become:
+In `Aura/project.yml`, under the `AuraWidgets` target, make three surgical edits (diff-merge — keep any existing inline comments and the `Resources/Fonts` entry; do not wholesale-replace the target): (a) add `AuraWidgets.entitlements` to the `Widgets` source `excludes`; (b) add the `RouteThumbnail.swift` path under `sources`; (c) add `CODE_SIGN_ENTITLEMENTS` under `settings.base`. The result (`SWIFT_APPROACHABLE_CONCURRENCY`/`SWIFT_DEFAULT_ACTOR_ISOLATION` are already present — leave them):
 
 ```yaml
     sources:
@@ -625,7 +625,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 **Interfaces:**
 - Consumes: `WidgetSnapshot`, `WidgetSnapshotStore` (Tasks 1–2); `AuraTheme`, `RideStatsFormatter`.
-- Produces: `SnapshotEntry`, `SnapshotProvider`; `Date.widgetWeekday`, `WidgetSnapshot.LastRide.kindCaption`/`movingTimeText()`, `WidgetStat`.
+- Produces: `SnapshotEntry`, `SnapshotProvider`; `Date.widgetWeekday`, `WidgetSnapshot.LastRide.kindCaption`/`movingTimeText` (a computed property, not a method), `WidgetStat`.
 
 - [ ] **Step 1: Create the timeline provider**
 
@@ -635,7 +635,9 @@ import WidgetKit
 import AuraKit
 
 /// One timeline entry: the decoded snapshot (nil → empty state). Shared by both widgets.
-struct SnapshotEntry: TimelineEntry {
+/// Explicitly `Sendable` so it crosses into WidgetKit's nonisolated completion handlers
+/// cleanly under the target's default-MainActor isolation.
+struct SnapshotEntry: TimelineEntry, Sendable {
     let date: Date
     let snapshot: WidgetSnapshot?
 }
@@ -643,18 +645,24 @@ struct SnapshotEntry: TimelineEntry {
 /// Reads the App-Group snapshot the app writes; never fetches. Emits an entry for now plus a
 /// week-boundary reset entry so the weekly total self-corrects across the week turnover even
 /// if the app stays closed. One instance per widget.
+///
+/// The three `TimelineProvider` methods are `nonisolated`: this app-extension target sets
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor`, which would otherwise infer them onto the
+/// MainActor and clash with WidgetKit's nonisolated protocol requirements. They touch only
+/// nonisolated, `Sendable` package types (`WidgetSnapshotStore`, `WidgetSnapshot`), so
+/// `nonisolated` is safe.
 struct SnapshotProvider: TimelineProvider {
-    func placeholder(in context: Context) -> SnapshotEntry {
+    nonisolated func placeholder(in context: Context) -> SnapshotEntry {
         SnapshotEntry(date: Date(), snapshot: .sample)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (SnapshotEntry) -> Void) {
+    nonisolated func getSnapshot(in context: Context, completion: @escaping (SnapshotEntry) -> Void) {
         let snapshot: WidgetSnapshot? = context.isPreview
             ? .sample : WidgetSnapshotStore.appGroup().read()
         completion(SnapshotEntry(date: Date(), snapshot: snapshot))
     }
 
-    func getTimeline(in context: Context, completion: @escaping (Timeline<SnapshotEntry>) -> Void) {
+    nonisolated func getTimeline(in context: Context, completion: @escaping (Timeline<SnapshotEntry>) -> Void) {
         let now = Date()
         guard let snapshot = WidgetSnapshotStore.appGroup().read() else {
             completion(Timeline(entries: [SnapshotEntry(date: now, snapshot: nil)], policy: .atEnd))
@@ -668,6 +676,11 @@ struct SnapshotProvider: TimelineProvider {
     }
 }
 ```
+
+> **Swift 6 concurrency note for the executor:** if the build still reports an
+> isolation mismatch on the `TimelineProvider` conformance, the fallback is to mark
+> the whole `struct SnapshotProvider: TimelineProvider` `nonisolated`. Do not make the
+> methods `async` or add `@MainActor` — that breaks the conformance.
 
 - [ ] **Step 2: Create the shared widget helpers**
 
@@ -1076,9 +1089,9 @@ struct AuraWidgetBundle: WidgetBundle {
 }
 ```
 
-- [ ] **Step 3: Regenerate and build**
+- [ ] **Step 3: Regenerate, build, lint (expect line wraps)**
 
-Delegate to the builder: in `Aura/`, `xcodegen generate`, then build the app unsigned for the iOS Simulator. Expected: BUILD SUCCEEDED. Run `scripts/lint.sh`. Expected: pass.
+Delegate to the builder: in `Aura/`, `xcodegen generate`, then build the app unsigned for the iOS Simulator. Expected: BUILD SUCCEEDED. Run `scripts/lint.sh`. A couple of the longer interpolated `Text(...)` lines in `LastRideWidget.swift` (the `rectangular` climb line and the `medium` `WidgetStat` climb ternary) sit near the 140-column limit — if `--strict` flags `line_length`, wrap them (break the string interpolation across lines or hoist the value into a `let`) and re-run. Expected: pass after wrapping.
 
 - [ ] **Step 4: Commit**
 
