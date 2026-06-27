@@ -26,3 +26,11 @@ public protocol RideSaving: AnyObject {
 }
 
 extension RideStore: RideSaving {}
+
+/// Writes a finished ride to Apple Health as a cycling workout. The app conforms a
+/// HealthKit-backed type; the package never imports HealthKit. Fire-and-forget: the
+/// coordinator calls this and moves on, so a HealthKit failure cannot affect the save.
+@MainActor
+public protocol WorkoutWriting: AnyObject {
+    func writeWorkout(_ data: WorkoutData)
+}
