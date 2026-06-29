@@ -1,6 +1,6 @@
 name: Aura
 options:
-  bundleIdPrefix: app.aura
+  bundleIdPrefix: com.rohunjoseph
   deploymentTarget:
     iOS: "17.0"
 packages:
@@ -70,7 +70,7 @@ targets:
       base:
         INFOPLIST_FILE: Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: Resources/Aura.entitlements
-        PRODUCT_BUNDLE_IDENTIFIER: app.aura.ios
+        PRODUCT_BUNDLE_IDENTIFIER: com.rohunjoseph.aura
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "6.0"
@@ -106,7 +106,7 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: Widgets/Info.plist
-        PRODUCT_BUNDLE_IDENTIFIER: app.aura.ios.AuraWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.rohunjoseph.aura.AuraWidgets
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
