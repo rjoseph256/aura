@@ -1,0 +1,3 @@
+-- Intentionally empty. The local stack (and CI `supabase test db`) needs this file
+-- to exist because config.toml's [db.seed] sql_paths points at it. Group-ride tests
+-- seed their own fixtures inside each pgTAP transaction, so no global seed data.
