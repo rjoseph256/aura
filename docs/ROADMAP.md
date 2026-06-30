@@ -425,15 +425,35 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
 - CarPlay, using the Mapbox v3 CarPlay templates and the existing `GuidanceSession`
   abstraction. Needs the CarPlay entitlement (Apple approval) and a scene delegate.
 - Apple Watch companion.
-- **Group Rides SP1 — SHIPPED.** Supabase backend + identity: `create_ride`, `join_ride`,
-  `record_track_points`, `end_ride`, `leave_ride` RPCs; RLS; `SupabaseGroupRideBackend`;
-  Apple Sign-In; pgTAP db-tests CI job. Project `aura` (wyofhmufnttiqyjkrbxi), migrations
-  0001–0009.
-- **Group Rides SP2 — IN PROGRESS.** Live transport layer: `RideSessionTransport` seam,
-  `PointOutbox`, `LivePresenceState`, `RideSession` coordinator, lifecycle (`LiveShareCadence`,
-  `GroupLocationSink`), and `SupabaseRideSessionTransport` (this task). Migrations 0010–0015
-  add the `ride_live_snapshot` RPC, per-ride private Realtime channels, and the broadcast
-  trigger on `record_track_points`. UI wiring and device-verify are the remaining steps.
+- Group rides — led small-crew (2-8) ride: host shares a join code, everyone navigates one
+  route and sees each other live. Decomposed into three sub-projects on Supabase
+  (Auth + Postgres/RLS + Realtime).
+  - **SP1 backend + identity — SHIPPED (PR #17, 2026-06-30).** Supabase project `aura`:
+    schema + RLS + `SECURITY DEFINER` write-API (`is_ride_member`, `create_ride`,
+    `join_ride` with rate limit + 8-cap + generic-failure oracle closure,
+    `record_track_points`, `end_ride`/`leave_ride` with host transfer, `delete_account` +
+    auth edge function, signup trigger, shared-ride profile read), `pg_cron` auto-expiry,
+    and a `db-tests` pgTAP CI job. Swift: AuraCore models, an AuraKit `GroupRideBackend`
+    seam + fake, an app-target `AuraSync` live conformer, and Sign in with Apple. No UI.
+    `supabase-swift` is quarantined to the app target so the package CI stays hermetic.
+    *Tier-3 device verification (real Apple sign-in, end-to-end) still pending: enable the
+    Sign-in-with-Apple capability for the app id and deploy the delete-account edge fn.*
+  - **SP2 live presence transport — IN PR #18, 2026-06-30.** The `RideSession` layer:
+    positions fan out via `realtime.send` from inside `record_track_points`
+    (Broadcast-from-Database, so a backgrounded rider stays visible), seeded/re-seeded by a
+    new `ride_live_snapshot` RPC (the correctness anchor; deltas are best-effort).
+    **No Presence and no raw speed on the wire** — peer status (riding/stopped/dropped) is
+    derived from the position stream, and only a sender-computed `moving`/`stopped` bit is
+    broadcast. Pure AuraCore (`MotionClassifier`, `PeerStatusReducer`, `LivePresenceState`,
+    `LiveShareCadence`, `PointOutbox`), an AuraKit `RideSessionTransport` seam +
+    push-driven `RideSession` + `GroupLocationSink` handoff, and an app-target
+    `SupabaseRideSessionTransport`. Migrations 0010–0015 add the topic parser, the
+    members-only `realtime.messages` RLS gate, the broadcast in `record_track_points`,
+    `ride_live_snapshot`, the `join_ride` advisory-lock cap fix, and `member_left` on
+    leave/end. Remaining: device-verify the reconnect path, two Realtime dashboard settings
+    (deployment checklist below), and SP3 UI.
+  - **SP3 group-ride UI**: create/join-by-code flow, the live map with named dots + roster
+    (progress, stopped/dropped), wired onto the route and `GuidanceSession`.
 - Push-to-talk voice within a session (Phase 3), Strava export, and HR/power sensors.
 
 ### Group Rides SP2 — deployment checklist (Supabase `aura`)
