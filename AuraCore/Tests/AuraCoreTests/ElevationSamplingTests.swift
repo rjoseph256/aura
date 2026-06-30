@@ -40,4 +40,39 @@ final class ElevationSamplingTests: XCTestCase {
             XCTAssertLessThan(idx, total)
         }
     }
+
+    // MARK: - proportionalCount (distance-proportional sampling)
+
+    /// A 2-point line along the equator of `degrees` longitude, for a known great-circle length.
+    private func equatorLine(degrees: Double) -> [Coordinate] {
+        [Coordinate(latitude: 0, longitude: 0), Coordinate(latitude: 0, longitude: degrees)]
+    }
+
+    func test_proportionalCount_degenerateReturnsMinCount() {
+        XCTAssertEqual(ElevationSampling.proportionalCount(coordinates: []), 16)
+        XCTAssertEqual(ElevationSampling.proportionalCount(coordinates: [Coordinate(latitude: 0, longitude: 0)]), 16)
+    }
+
+    func test_proportionalCount_shortRouteClampsToMin() {
+        // ~1.1 km → raw ≈ 8, clamps up to the 16 floor (short routes keep prior detail).
+        XCTAssertEqual(ElevationSampling.proportionalCount(coordinates: equatorLine(degrees: 0.01)), 16)
+    }
+
+    func test_proportionalCount_midRouteScalesWithDistance() {
+        // ~5.56 km at 150 m spacing → round(37.06)+1 = 38, between the clamps.
+        XCTAssertEqual(ElevationSampling.proportionalCount(coordinates: equatorLine(degrees: 0.05)), 38)
+    }
+
+    func test_proportionalCount_longRouteClampsToMax() {
+        // ~33 km → raw ≈ 223, clamps down to the 96 ceiling.
+        XCTAssertEqual(ElevationSampling.proportionalCount(coordinates: equatorLine(degrees: 0.3)), 96)
+    }
+
+    func test_proportionalCount_isMonotonicInDistance() {
+        let shortC = ElevationSampling.proportionalCount(coordinates: equatorLine(degrees: 0.02))
+        let midC = ElevationSampling.proportionalCount(coordinates: equatorLine(degrees: 0.06))
+        let longC = ElevationSampling.proportionalCount(coordinates: equatorLine(degrees: 0.2))
+        XCTAssertLessThanOrEqual(shortC, midC)
+        XCTAssertLessThanOrEqual(midC, longC)
+    }
 }

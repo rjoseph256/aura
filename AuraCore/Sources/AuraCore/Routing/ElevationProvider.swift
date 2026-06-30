@@ -44,4 +44,19 @@ public enum ElevationSampling {
         }
         return unique
     }
+
+    /// A distance-proportional sample count: roughly one sample per `spacingMeters` of
+    /// polyline length, clamped to `[minCount, maxCount]`. Sampling a fixed count
+    /// undersamples climb on long routes; `minCount` keeps short routes at least as
+    /// detailed as before, and `maxCount` caps the work on very long routes.
+    public static func proportionalCount(coordinates: [Coordinate], spacingMeters: Double = 150,
+                                         minCount: Int = 16, maxCount: Int = 96) -> Int {
+        guard coordinates.count > 1, spacingMeters > 0 else { return minCount }
+        var distance = 0.0
+        for i in 1..<coordinates.count {
+            distance += Geo.distance(coordinates[i - 1], coordinates[i])
+        }
+        let raw = Int((distance / spacingMeters).rounded()) + 1
+        return min(max(raw, minCount), maxCount)
+    }
 }

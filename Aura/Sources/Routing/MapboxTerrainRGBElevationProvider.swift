@@ -7,21 +7,28 @@ import MapboxMaps
 /// `AuraCore.ElevationProvider` backed by Mapbox **Terrain-RGB** raster tiles —
 /// true per-point elevation (decoded from the RGB-encoded DEM), unlike the contour
 /// Tilequery which only returns nearby contour lines. For a route's geometry it
-/// samples ~16 evenly-spaced points, decodes each point's elevation from the
-/// terrain-rgb tile, and returns them in order so `RouteMetrics.elevationGain` can
-/// separate the "Flattest" route.
+/// samples evenly-spaced points — count proportional to route length (~one per
+/// `spacingMeters`, clamped) so long routes don't undersample climb — decodes each
+/// point's elevation from the terrain-rgb tile, and returns them in order so
+/// `RouteMetrics.elevationGain` can separate the "Flattest" route. Extra samples are
+/// cheap: a route touches the same handful of tiles regardless of sample count.
 ///
 /// BEST-EFFORT: any network/decode/missing-token failure drops the affected sample
 /// (or returns []); it never throws. Only a route's relative *deltas* feed elevation
 /// gain, so a small absolute offset is harmless.
 public struct MapboxTerrainRGBElevationProvider: AuraCore.ElevationProvider {
 
-    private let sampleCount: Int
+    private let spacingMeters: Double
+    private let minSamples: Int
+    private let maxSamples: Int
     private let zoom: Int
     private let tileCache: TerrainTileCache
 
-    public init(sampleCount: Int = 16, zoom: Int = 14, tileCache: TerrainTileCache = .shared) {
-        self.sampleCount = sampleCount
+    public init(spacingMeters: Double = 150, minSamples: Int = 16, maxSamples: Int = 96,
+                zoom: Int = 14, tileCache: TerrainTileCache = .shared) {
+        self.spacingMeters = spacingMeters
+        self.minSamples = minSamples
+        self.maxSamples = maxSamples
         self.zoom = zoom
         self.tileCache = tileCache
     }
@@ -30,7 +37,9 @@ public struct MapboxTerrainRGBElevationProvider: AuraCore.ElevationProvider {
         let token = MapboxMaps.MapboxOptions.accessToken
         guard !token.isEmpty else { return [] }
 
-        let indices = ElevationSampling.sampleIndices(total: coordinates.count, count: sampleCount)
+        let count = ElevationSampling.proportionalCount(coordinates: coordinates, spacingMeters: spacingMeters,
+                                                        minCount: minSamples, maxCount: maxSamples)
+        let indices = ElevationSampling.sampleIndices(total: coordinates.count, count: count)
         guard !indices.isEmpty else { return [] }
         let sampled = indices.map { coordinates[$0] }
 
