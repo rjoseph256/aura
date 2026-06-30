@@ -16,6 +16,8 @@ public final class RideSessionCoordinator {
     // Read by the HUDs.
     public var stats: RideStats { recorder.stats }
     public var track: [TrackPoint] { recorder.track }
+    /// Smoothed live speed for the HUD dial (current speed, not the ride average).
+    public var currentSpeedMetersPerSecond: Double { recorder.currentSpeedMetersPerSecond }
     public var isRecording: Bool { recorder.isRecording }
     public private(set) var elapsed: TimeInterval = 0
     /// Set by `finish()`, bound by the HUD's summary `.sheet(item:)`. Not reset here:
@@ -105,7 +107,9 @@ public final class RideSessionCoordinator {
     /// call it directly instead of waiting on the 0.5 s ticker. The production activity
     /// conformer throttles internally; test doubles record every call.
     func pushActivityUpdate() {
-        activity.update(stats: recorder.stats, maneuver: maneuver)
+        activity.update(stats: recorder.stats,
+                        currentSpeedMetersPerSecond: recorder.currentSpeedMetersPerSecond,
+                        maneuver: maneuver)
     }
 
     /// Idempotent on `isRecording`: the End-ride button and a navigate arrival can both

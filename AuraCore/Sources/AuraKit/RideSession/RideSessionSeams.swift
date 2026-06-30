@@ -14,7 +14,7 @@ public protocol ScreenWakeControlling: AnyObject {
 @MainActor
 public protocol RideActivityControlling: AnyObject {
     func start(kind: Ride.Kind, startedAt: Date, units: DistanceUnits, destinationName: String?)
-    func update(stats: RideStats, maneuver: GuidanceUpdate?)
+    func update(stats: RideStats, currentSpeedMetersPerSecond: Double, maneuver: GuidanceUpdate?)
     func end()
 }
 

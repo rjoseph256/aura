@@ -61,7 +61,7 @@ final class RideLiveActivityController {
     /// instruction changes — so the activity reflects a new maneuver right away while
     /// distance/speed churn stays coalesced. Safe to call every tick; a no-op when no
     /// activity is running.
-    func update(stats: RideStats, maneuver: GuidanceUpdate?) {
+    func update(stats: RideStats, currentSpeedMetersPerSecond: Double, maneuver: GuidanceUpdate?) {
         guard let activity else { return }
 
         let instruction = maneuver?.instruction
@@ -75,7 +75,7 @@ final class RideLiveActivityController {
 
         let state = RideActivityAttributes.ContentState(
             distanceMeters: stats.distanceMeters,
-            speedMetersPerSecond: stats.averageSpeedMetersPerSecond,
+            speedMetersPerSecond: currentSpeedMetersPerSecond,
             elevationGainMeters: stats.elevationGainMeters,
             turnInstruction: instruction,
             turnDistanceMeters: maneuver?.distanceToManeuverMeters)

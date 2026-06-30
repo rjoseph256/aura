@@ -7,6 +7,8 @@ struct SpeedRail: View {
 
     let stats: RideStats
     let elapsed: TimeInterval
+    /// Smoothed live current speed (m/s) — the hero reads this, not the ride average.
+    let currentSpeedMetersPerSecond: Double
     let units: DistanceUnits
     /// Navigate mode passes `.speedOnly`; free ride keeps the default `.full`.
     var layout: Layout = .full
@@ -19,12 +21,12 @@ struct SpeedRail: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: AuraTheme.Spacing.xs) {
             // Hero speed: one element, static "Speed" label + spoken value, so the live
-            // (slow-moving average) value re-announces alone, never the whole rail.
-            SpeedReadout(value: fmt.speedValue(stats.averageSpeedMetersPerSecond),
+            // current speed re-announces alone, never the whole rail.
+            SpeedReadout(value: fmt.speedValue(currentSpeedMetersPerSecond),
                          unit: fmt.speedUnit.uppercased())
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Speed")
-                .accessibilityValue(SpeedRailVoice.speedValue(stats, units: units))
+                .accessibilityValue(SpeedRailVoice.speedValue(currentSpeedMetersPerSecond, units: units))
             if layout == .full {
                 HStack(spacing: AuraTheme.Spacing.md) {
                     metric(fmt.distanceValue(stats.distanceMeters), fmt.distanceUnit.uppercased())
