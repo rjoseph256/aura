@@ -36,14 +36,16 @@ public enum PolylineNormalizer {
 /// Normalizes a 1-D value series (e.g. an elevation profile) into sparkline points.
 /// Pure + testable.
 public enum Sparkline {
-    /// X is evenly spaced across the width; Y maps `[min, max] → [bottom, top]` within
-    /// `inset`, so higher values sit higher. A flat series renders along the vertical
-    /// center. Returns `[]` for fewer than 2 values or empty size.
-    public static func points(values: [Double], in size: CGSize, inset: CGFloat) -> [CGPoint] {
+    /// X is evenly spaced across the width; Y maps `range → [bottom, top]` within `inset`,
+    /// so higher values sit higher. Passing an explicit `range` lets several sparklines
+    /// share ONE vertical scale, so a flat series and a hilly one compare honestly. A
+    /// zero/inverted span renders flat at center. Returns `[]` for < 2 values or empty size.
+    public static func points(values: [Double], in size: CGSize, inset: CGFloat,
+                              range: ClosedRange<Double>) -> [CGPoint] {
         guard values.count > 1, size.width > 0, size.height > 0 else { return [] }
 
-        let minV = values.min()!, maxV = values.max()!
-        let span = maxV - minV
+        let minV = range.lowerBound
+        let span = range.upperBound - range.lowerBound
         let availW = max(size.width - inset * 2, 1)
         let availH = max(size.height - inset * 2, 1)
         let last = CGFloat(values.count - 1)
@@ -54,5 +56,12 @@ public enum Sparkline {
             let y = inset + availH * (1 - t)                                    // higher value → higher
             return CGPoint(x: x, y: y)
         }
+    }
+
+    /// Self-scaling variant: maps each series against its OWN min...max. Unchanged
+    /// behavior for callers that don't share a scale.
+    public static func points(values: [Double], in size: CGSize, inset: CGFloat) -> [CGPoint] {
+        guard let lo = values.min(), let hi = values.max() else { return [] }
+        return points(values: values, in: size, inset: inset, range: lo...hi)
     }
 }

@@ -38,6 +38,37 @@ final class PlottingTests: XCTestCase {
         XCTAssertTrue(Sparkline.points(values: [], in: CGSize(width: 10, height: 10), inset: 0).isEmpty)
     }
 
+    // MARK: Sparkline — shared vertical scale (range overload)
+
+    func test_sparkline_sharedRange_lowSeriesSitsLowNotCentered() {
+        // A flat-ish low series under a wide shared range must sit LOW, not self-center.
+        let pts = Sparkline.points(values: [2, 2], in: CGSize(width: 100, height: 50),
+                                   inset: 0, range: 0...10)
+        for p in pts { XCTAssertEqual(p.y, 40, accuracy: 0.001) } // t=0.2 → near bottom, not 25
+    }
+
+    func test_sparkline_sharedRange_twoSeriesShareOneScale() {
+        let size = CGSize(width: 100, height: 50)
+        let low = Sparkline.points(values: [0, 2], in: size, inset: 0, range: 0...10)
+        let high = Sparkline.points(values: [8, 10], in: size, inset: 0, range: 0...10)
+        // Under one scale the whole low series sits below the whole high series:
+        // lowest point of `low` (largest y) is still below highest point of `high`.
+        XCTAssertGreaterThan(low.map(\.y).min()!, high.map(\.y).max()!)
+    }
+
+    func test_sparkline_zeroSpanRange_centers() {
+        let pts = Sparkline.points(values: [3, 7], in: CGSize(width: 60, height: 40),
+                                   inset: 0, range: 5...5)
+        for p in pts { XCTAssertEqual(p.y, 20, accuracy: 0.001) } // span 0 → center
+    }
+
+    func test_sparkline_selfScalingOverload_delegatesToOwnRange() {
+        let size = CGSize(width: 100, height: 50)
+        let vals = [0.0, 10.0]
+        XCTAssertEqual(Sparkline.points(values: vals, in: size, inset: 0),
+                       Sparkline.points(values: vals, in: size, inset: 0, range: 0...10))
+    }
+
     // MARK: PolylineNormalizer
 
     func test_polyline_fitsWithinBounds_andPreservesAspect() {
