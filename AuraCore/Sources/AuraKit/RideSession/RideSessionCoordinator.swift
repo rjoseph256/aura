@@ -40,6 +40,7 @@ public final class RideSessionCoordinator {
     private var saving: (any RideSaving)?
     private var startedAt: Date?
     private var saveToHealth = false
+    private var groupSink: (any GroupLocationSink)?
     // Internal so a test can await the stream draining; not part of the public surface.
     var streamTask: Task<Void, Never>?
     private var tickerTask: Task<Void, Never>?
@@ -66,7 +67,8 @@ public final class RideSessionCoordinator {
                       saving: any RideSaving,
                       units: DistanceUnits,
                       authorization: LocationAuthorization,
-                      saveToHealth: Bool = false) -> StartOutcome {
+                      saveToHealth: Bool = false,
+                      groupSink: (any GroupLocationSink)? = nil) -> StartOutcome {
         guard !recorder.isRecording else { return .started }
         switch authorization {
         case .denied, .restricted:
@@ -80,6 +82,7 @@ public final class RideSessionCoordinator {
         self.location = location
         self.saving = saving
         self.saveToHealth = saveToHealth
+        self.groupSink = groupSink
         let now = Date()
         startedAt = now
         elapsed = 0
@@ -89,7 +92,15 @@ public final class RideSessionCoordinator {
 
         streamTask = Task { [weak self] in
             guard let stream = self?.location?.points() else { return }
-            for await point in stream { self?.recorder.record(point) }
+            for await point in stream {
+                guard let self else { return }
+                self.recorder.record(point)
+                self.groupSink?.locationDidUpdate(
+                    coordinate: point.coordinate,
+                    progressMeters: self.recorder.stats.distanceMeters,
+                    speed: point.speedMetersPerSecond ?? self.recorder.currentSpeedMetersPerSecond,
+                    at: point.timestamp)
+            }
         }
         tickerTask = Task { [weak self] in
             // Terminates when finish()/cancel() cancels this task; the isRecording guard is a secondary exit.
@@ -145,5 +156,6 @@ public final class RideSessionCoordinator {
         streamTask?.cancel(); streamTask = nil
         tickerTask?.cancel(); tickerTask = nil
         location?.stop()
+        groupSink = nil
     }
 }
