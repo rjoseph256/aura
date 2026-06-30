@@ -98,6 +98,8 @@ public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
             }
         }
 
+        // Built in mbRoutes order, so candidates[i] ↔ mbRoutes[i] — the invariant that
+        // RouteRanker's sourceIndex relies on in step 8.
         let candidates: [AuraCore.CandidateRoute] = mbRoutes.enumerated().map { (i, mbRoute) in
             candidateRoute(from: mbRoute, geometry: geometries[i], elevations: elevationsByIndex[i])
         }
@@ -106,27 +108,21 @@ public struct MapboxRoutingProvider: AuraCore.RoutingProvider {
             throw RoutingError.noRoutes
         }
 
-        // 7. Rank and label candidates → up to 3 distinct AuraCore.Route values.
-        let labeled = AuraCore.RouteRanker.label(
+        // 7. Rank and label candidates → up to 3 distinct labeled routes, each carrying
+        //    the index of the `candidates` entry it came from (== its mbRoutes index).
+        let labeledRoutes = AuraCore.RouteRanker.labeled(
             origin: request.origin,
             destination: request.destination,
             candidates: candidates
         )
 
-        // 8. Correlate each labeled AuraCore.Route back to its mbRoutes index
-        //    (0 = main, k = alternativeRoutes[k-1]) by matching distance AND the
-        //    first geometry coordinate (to break ties), then record the mapping so
-        //    the ride can navigate THAT exact Mapbox route instead of re-fetching.
+        // 8. Record each labeled route's mbRoutes index directly from its sourceIndex
+        //    (0 = main, k = alternativeRoutes[k-1]) so the ride can navigate THAT exact
+        //    Mapbox route instead of re-fetching. No value matching, so two
+        //    equal-distance alternatives can no longer collide.
         var indexByRouteId: [UUID: Int] = [:]
-        for route in labeled {
-            if let i = mbRoutes.firstIndex(where: { mb in
-                mb.distance == route.distanceMeters &&
-                mb.shape?.coordinates.first.map { abs($0.latitude - (route.geometry.first?.latitude ?? .nan)) < 1e-9
-                                               && abs($0.longitude - (route.geometry.first?.longitude ?? .nan)) < 1e-9 } ?? false
-            }) {
-                indexByRouteId[route.id] = i
-            }
-        }
+        for lr in labeledRoutes { indexByRouteId[lr.route.id] = lr.sourceIndex }
+        let labeled = labeledRoutes.map(\.route)
         let routesToRecord = navigationRoutes
         let indexByRouteIdToRecord = indexByRouteId
         await MainActor.run {

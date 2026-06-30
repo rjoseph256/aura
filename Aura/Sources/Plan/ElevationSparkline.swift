@@ -9,10 +9,13 @@ struct ElevationSparkline: View {
     var stroke: Color
     var fill: Color
     var lineWidth: CGFloat = 1.5
+    /// Shared vertical scale across the visible route options; nil → self-scale.
+    var range: ClosedRange<Double>?
 
     var body: some View {
         Canvas { context, size in
-            let pts = Sparkline.points(values: elevations, in: size, inset: lineWidth)
+            let pts = range.map { Sparkline.points(values: elevations, in: size, inset: lineWidth, range: $0) }
+                ?? Sparkline.points(values: elevations, in: size, inset: lineWidth)
             guard pts.count > 1 else { return }
 
             var line = Path()

@@ -135,6 +135,14 @@ struct RoutePreviewView: View {
 
     // MARK: Route rows
 
+    /// One vertical scale shared across every option's elevation sparkline, so a flat
+    /// route and a hilly one compare honestly at a glance. nil when no option has a profile.
+    private var sharedElevationRange: ClosedRange<Double>? {
+        let all = routes.flatMap(\.elevationProfile)
+        guard let lo = all.min(), let hi = all.max() else { return nil }
+        return lo...hi
+    }
+
     private var routeRows: some View {
         VStack(spacing: AuraTheme.Spacing.sm) {
             ForEach(routes) { route in
@@ -142,7 +150,8 @@ struct RoutePreviewView: View {
                     route: route,
                     units: settings.units,
                     isSelected: selected?.id == route.id,
-                    reduceMotion: reduceMotion
+                    reduceMotion: reduceMotion,
+                    elevationRange: sharedElevationRange
                 ) {
                     selected = route
                 }
@@ -275,6 +284,8 @@ private struct RouteOptionRow: View {
     let units: DistanceUnits
     let isSelected: Bool
     let reduceMotion: Bool
+    /// Shared elevation scale across all options (nil → self-scale).
+    var elevationRange: ClosedRange<Double>?
     let onTap: () -> Void
 
     private var fmt: RideStatsFormatter { RideStatsFormatter(units: units) }
@@ -327,7 +338,8 @@ private struct RouteOptionRow: View {
                     ElevationSparkline(
                         elevations: route.elevationProfile,
                         stroke: isSelected ? AuraTheme.onAccent : AuraTheme.accent,
-                        fill: isSelected ? AuraTheme.onAccent.opacity(0.16) : AuraTheme.accent.opacity(0.16)
+                        fill: isSelected ? AuraTheme.onAccent.opacity(0.16) : AuraTheme.accent.opacity(0.16),
+                        range: elevationRange
                     )
                     .frame(width: 54, height: 26)
                 }

@@ -18,11 +18,25 @@ public struct CandidateRoute: Equatable, Sendable {
     }
 }
 
+/// A labeled `Route` paired with the index of the `candidates` entry it was chosen from.
+/// Lets a caller (e.g. the Mapbox provider) map a labeled route back to its source route
+/// by identity instead of by fragile value matching on distance/coordinates.
+public struct LabeledRoute: Equatable, Sendable {
+    public let route: Route
+    public let sourceIndex: Int
+
+    public init(route: Route, sourceIndex: Int) {
+        self.route = route
+        self.sourceIndex = sourceIndex
+    }
+}
+
 public enum RouteRanker {
-    /// Picks the best candidate for each profile and returns up to 3 distinct labeled Routes.
+    /// Picks the best candidate for each profile and returns up to 3 distinct labeled
+    /// routes, each carrying the index of the `candidates` entry it came from.
     /// Label priority when one candidate wins multiple criteria: mostPaths > flattest > fastest.
-    public static func label(origin: Coordinate, destination: Coordinate,
-                             candidates: [CandidateRoute]) -> [Route] {
+    public static func labeled(origin: Coordinate, destination: Coordinate,
+                               candidates: [CandidateRoute]) -> [LabeledRoute] {
         guard !candidates.isEmpty else { return [] }
 
         // (profile, winning index) in priority order. "Most paths" goes to the most
@@ -35,18 +49,26 @@ public enum RouteRanker {
         ]
 
         var usedIndices = Set<Int>()
-        var routes: [Route] = []
+        var result: [LabeledRoute] = []
         for (profile, idx) in winners where !usedIndices.contains(idx) {
             usedIndices.insert(idx)
             let c = candidates[idx]
-            routes.append(Route(origin: origin, destination: destination, waypoints: [],
-                                geometry: c.geometry, profile: profile,
-                                distanceMeters: c.distanceMeters,
-                                estimatedDurationSeconds: c.estimatedDurationSeconds,
-                                elevationGainMeters: c.elevationGainMeters,
-                                elevationProfile: c.elevationProfile))
+            let route = Route(origin: origin, destination: destination, waypoints: [],
+                              geometry: c.geometry, profile: profile,
+                              distanceMeters: c.distanceMeters,
+                              estimatedDurationSeconds: c.estimatedDurationSeconds,
+                              elevationGainMeters: c.elevationGainMeters,
+                              elevationProfile: c.elevationProfile)
+            result.append(LabeledRoute(route: route, sourceIndex: idx))
         }
-        return routes
+        return result
+    }
+
+    /// Picks the best candidate for each profile and returns up to 3 distinct labeled Routes.
+    /// Label priority when one candidate wins multiple criteria: mostPaths > flattest > fastest.
+    public static func label(origin: Coordinate, destination: Coordinate,
+                             candidates: [CandidateRoute]) -> [Route] {
+        labeled(origin: origin, destination: destination, candidates: candidates).map(\.route)
     }
 
     private static func indexOfMin(_ items: [CandidateRoute], _ key: (CandidateRoute) -> Double) -> Int {
