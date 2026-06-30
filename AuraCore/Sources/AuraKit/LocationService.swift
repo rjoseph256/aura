@@ -32,7 +32,10 @@ public final class LocationService: NSObject, LocationStreaming {
             coordinate: Coordinate(latitude: location.coordinate.latitude,
                                    longitude: location.coordinate.longitude),
             elevation: location.altitude,
-            timestamp: location.timestamp)
+            timestamp: location.timestamp,
+            // CLLocation.speed is -1 when the platform can't compute it; keep only
+            // valid readings (0 is a legitimate stopped reading and must be kept).
+            speedMetersPerSecond: location.speed >= 0 ? location.speed : nil)
     }
 
     /// Map the desired-accuracy tier onto CoreLocation. Coarse when idle (battery),

@@ -143,6 +143,19 @@ struct RideSessionCoordinatorTests {
         c.cancel()
     }
 
+    @Test func currentSpeedFlowsToActivityUpdate() async throws {
+        let activity = SpyRideActivity()
+        let c = makeCoordinator(screen: SpyScreenWake(), activity: activity)
+        c.start(location: ScriptedLocationProvider([point(40.40, 0), point(40.41, 10)]),
+                saving: try RideStore.inMemory(), units: .imperial, authorization: .authorized)
+        await c.streamTask?.value
+        c.pushActivityUpdate()
+        // The Live Activity receives the live current speed, not the ride average.
+        #expect(c.currentSpeedMetersPerSecond > 0)
+        #expect(activity.updates.last?.currentSpeedMetersPerSecond == c.currentSpeedMetersPerSecond)
+        c.cancel()
+    }
+
     @Test func finishWritesWorkoutWhenEnabledAndQualifies() async throws {
         let spy = SpyWorkoutWriter()
         let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
@@ -215,13 +228,22 @@ final class SpyRideActivity: RideActivityControlling {
         let units: DistanceUnits
         let destinationName: String?
     }
+    struct UpdateCall {
+        let stats: RideStats
+        let currentSpeedMetersPerSecond: Double
+        let maneuver: GuidanceUpdate?
+    }
     private(set) var started: StartCall?
-    private(set) var updates: [(stats: RideStats, maneuver: GuidanceUpdate?)] = []
+    private(set) var updates: [UpdateCall] = []
     private(set) var ended = false
     func start(kind: Ride.Kind, startedAt: Date, units: DistanceUnits, destinationName: String?) {
         started = StartCall(kind: kind, units: units, destinationName: destinationName)
     }
-    func update(stats: RideStats, maneuver: GuidanceUpdate?) { updates.append((stats, maneuver)) }
+    func update(stats: RideStats, currentSpeedMetersPerSecond: Double, maneuver: GuidanceUpdate?) {
+        updates.append(UpdateCall(stats: stats,
+                                  currentSpeedMetersPerSecond: currentSpeedMetersPerSecond,
+                                  maneuver: maneuver))
+    }
     func end() { ended = true }
 }
 

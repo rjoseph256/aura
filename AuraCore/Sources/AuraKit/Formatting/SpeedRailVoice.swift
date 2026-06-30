@@ -6,11 +6,11 @@ import AuraCore
 /// the composition is unit-tested in CI rather than buried in the SwiftUI view.
 public enum SpeedRailVoice {
     /// The speed element's spoken value, e.g. "24 miles per hour". Used as the
-    /// `accessibilityValue` so it re-announces alone as the (slow-moving average) speed
-    /// changes, while the static "Speed" label does not.
-    public static func speedValue(_ stats: RideStats, units: DistanceUnits) -> String {
+    /// `accessibilityValue` so it re-announces alone as the live current speed changes,
+    /// while the static "Speed" label does not.
+    public static func speedValue(_ metersPerSecond: Double, units: DistanceUnits) -> String {
         let formatter = RideStatsFormatter(units: units)
-        return "\(formatter.speedValue(stats.averageSpeedMetersPerSecond)) \(formatter.speedUnitSpoken)"
+        return "\(formatter.speedValue(metersPerSecond)) \(formatter.speedUnitSpoken)"
     }
 
     /// The free-ride stats element, e.g.

@@ -13,14 +13,17 @@ import AuraCore
 
     @Test func speedValue_imperial() {
         // 10.728 m/s ≈ 24 mph
-        let s = SpeedRailVoice.speedValue(stats(speed: 10.728, distance: 0, elevation: 0), units: .imperial)
-        #expect(s == "24 miles per hour")
+        #expect(SpeedRailVoice.speedValue(10.728, units: .imperial) == "24 miles per hour")
     }
 
     @Test func speedValue_metric() {
         // 6.6667 m/s = 24 km/h
-        let s = SpeedRailVoice.speedValue(stats(speed: 6.6667, distance: 0, elevation: 0), units: .metric)
-        #expect(s == "24 kilometers per hour")
+        #expect(SpeedRailVoice.speedValue(6.6667, units: .metric) == "24 kilometers per hour")
+    }
+
+    @Test func speedValue_roundsLikeTheDial() {
+        // 8.94 m/s ≈ 20.0 mph — the live current-speed value the HUD now speaks.
+        #expect(SpeedRailVoice.speedValue(8.94, units: .imperial) == "20 miles per hour")
     }
 
     @Test func statsLabel_imperial() {

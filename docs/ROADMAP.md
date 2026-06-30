@@ -404,6 +404,19 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
   lock-screen editor and StandBy are device-only surfaces. This was the last Wave 3
   sub-project, completing the wave.
 
+- **Live speedometer:** SHIPPED (2026-06-29). The first real on-device ride exposed a
+  long-standing bug: the HUD speed dial showed the ride *average* (`distance / movingTime`),
+  which converges after a few minutes and barely reacts to surges, so a rider doing 20 mph saw
+  ~15. Worse, CoreLocation's instantaneous Doppler speed was discarded at capture. The dial
+  (and the Live Activity speed) now read a lightly-smoothed *current* speed. `TrackPoint` gains
+  an optional `speedMetersPerSecond` filled from `CLLocation.speed` (Codable-safe, no schema
+  migration — the track is a JSON blob and old rows decode the missing key as nil); a pure
+  `SpeedSmoother` (time-aware EMA, ~2.5 s) and `InstantaneousSpeed` (Doppler when present, else
+  a position-delta so GPX/sim rides still animate) live in AuraCore; `RideRecorder` publishes
+  `currentSpeedMetersPerSecond`, which the coordinator forwards to `SpeedRail` and the Live
+  Activity seam. Average and max stay on the summary. Twenty unit tests cover the smoother, the
+  fallback selection, the legacy-blob decode, and the ingest/recorder/forwarding paths.
+
 ### Wave 4 and beyond — Platform and the group-ride future
 
 - iCloud sync with CloudKit, now unblocked by the Wave 1 schema changes. Needs the iCloud

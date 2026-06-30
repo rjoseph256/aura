@@ -78,6 +78,7 @@ struct NavigateHUDView: View {
                         onEndRide: { showEndConfirm = true })
                     Spacer()
                     SpeedRail(stats: coordinator.stats, elapsed: coordinator.elapsed,
+                             currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
                              units: settings.units, layout: .speedOnly)
                 }
                 .padding(.horizontal, AuraTheme.Spacing.lg)

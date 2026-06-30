@@ -18,7 +18,9 @@ struct RideHUDView: View {
         @Bindable var coordinator = coordinator
         ZStack(alignment: .bottomTrailing) {
             RideMapView(track: coordinator.track)
-            SpeedRail(stats: coordinator.stats, elapsed: coordinator.elapsed, units: settings.units)
+            SpeedRail(stats: coordinator.stats, elapsed: coordinator.elapsed,
+                      currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
+                      units: settings.units)
                 .padding(.trailing, AuraTheme.Spacing.lg).padding(.bottom, 90)
             controls
         }
