@@ -425,9 +425,24 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
 - CarPlay, using the Mapbox v3 CarPlay templates and the existing `GuidanceSession`
   abstraction. Needs the CarPlay entitlement (Apple approval) and a scene delegate.
 - Apple Watch companion.
-- Group rides (Phase 2): a `RideSession` wrapping the existing `Ride`, with Supabase for
-  auth, Postgres, and realtime live location. Re-research the realtime stack before design.
+- **Group Rides SP1 — SHIPPED.** Supabase backend + identity: `create_ride`, `join_ride`,
+  `record_track_points`, `end_ride`, `leave_ride` RPCs; RLS; `SupabaseGroupRideBackend`;
+  Apple Sign-In; pgTAP db-tests CI job. Project `aura` (wyofhmufnttiqyjkrbxi), migrations
+  0001–0009.
+- **Group Rides SP2 — IN PROGRESS.** Live transport layer: `RideSessionTransport` seam,
+  `PointOutbox`, `LivePresenceState`, `RideSession` coordinator, lifecycle (`LiveShareCadence`,
+  `GroupLocationSink`), and `SupabaseRideSessionTransport` (this task). Migrations 0010–0015
+  add the `ride_live_snapshot` RPC, per-ride private Realtime channels, and the broadcast
+  trigger on `record_track_points`. UI wiring and device-verify are the remaining steps.
 - Push-to-talk voice within a session (Phase 3), Strava export, and HR/power sensors.
+
+### Group Rides SP2 — deployment checklist (Supabase `aura`)
+- [ ] Migrations 0010–0015 applied (`list_migrations` shows them).
+- [ ] Realtime → Settings → "Allow public access" is OFF (private channels enforced).
+- [ ] Realtime → message retention set to ≤ 48h (keeps broadcast coordinate copies
+      inside the SP1 ride-track retention promise; `realtime.messages` is not reaped
+      by the SP1 cron).
+- [ ] Manual gate check: subscribe to `ride:<id>` as a non-member → denied.
 
 ### Smaller fixes
 
