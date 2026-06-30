@@ -302,7 +302,8 @@ is **`Sendable`** (§7.1/§7.2 mark them).
 ### 7.2 AuraKit (the seam, beside SP1's `GroupRideBackend`)
 
 - `TransportEvent: Sendable` — enum `.position(LivePositionPayload)`,
-  `.memberLeft(UUID)`, `.connected`, `.disconnected(Error?)`. The event arm is what
+  `.memberLeft(UUID)`, `.connected`, `.disconnected((any Error & Sendable)?)` (bare
+  `Error` is not `Sendable`, and the enum crosses the actor boundary). The event arm is what
   lets the session tell "peer quiet" (a `tick`/staleness condition) from "my socket
   dropped" (handled inside the transport).
 - `RideLiveSubscription` — **one owned object per ride** (reference type, mirrors the

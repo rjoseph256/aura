@@ -207,21 +207,33 @@ git commit -m "feat(db): members-only RLS on realtime.messages for ride channels
 -- non-member is rejected. The daily realtime.messages partition is created in setup,
 -- since realtime.send drops (warns) rather than errors when no partition exists.
 begin;
-select plan(2);
+select plan(4);
 
--- Ensure today's realtime.messages partition exists.
+-- Ensure today's realtime.messages partition exists. In a pure pgTAP run no WebSocket
+-- client ever connects, so Realtime never creates the daily partition; without it
+-- realtime.send silently warns and drops the row (the test would then see 0 with no
+-- diagnostic). Bounds use ::timestamp because realtime.messages partitions by
+-- inserted_at (timestamp without time zone). Guard + assert so a partition problem
+-- fails loudly here, not as a phantom 0 at the broadcast assertion.
 do $$
 begin
   execute format(
     'create table if not exists realtime.messages_%s partition of realtime.messages for values from (%L) to (%L)',
-    to_char(current_date, 'YYYY_MM_DD'), current_date::text, (current_date + 1)::text);
+    to_char(current_date, 'YYYY_MM_DD'), current_date::timestamp, (current_date + 1)::timestamp);
+exception when others then
+  raise notice 'partition setup failed: %', sqlerrm;
 end $$;
+select ok(
+  exists(select 1 from pg_catalog.pg_inherits i
+         join pg_catalog.pg_class c on c.oid = i.inhrelid
+         where c.relname = 'messages_'||to_char(current_date, 'YYYY_MM_DD')),
+  'today''s realtime.messages partition exists');
 
 insert into auth.users (instance_id, id, aud, role, email) values
   ('00000000-0000-0000-0000-000000000000','aaaaaaaa-0000-0000-0000-000000000001','authenticated','authenticated','u1@test.dev'),
   ('00000000-0000-0000-0000-000000000000','bbbbbbbb-0000-0000-0000-000000000002','authenticated','authenticated','u2@test.dev');
 
-create function pg_temp.broadcast_flow(out position_rows int, out nonmember_rejected boolean)
+create function pg_temp.broadcast_flow(out position_rows int, out newest_motion text, out nonmember_rejected boolean)
 language plpgsql security definer set search_path = '' as $$
 declare rid uuid;
 begin
@@ -232,6 +244,10 @@ begin
                        'progress_meters', 10.0, 'motion_state', 'moving')));
   select count(*)::int into position_rows from realtime.messages
     where topic = 'ride:'||rid::text and event = 'position';
+  -- prove the payload shape, not just that some row landed
+  select payload->>'motionState' into newest_motion from realtime.messages
+    where topic = 'ride:'||rid::text and event = 'position'
+    order by inserted_at desc limit 1;
   -- user 2 is not a member -> rejected
   perform set_config('request.jwt.claims','{"sub":"bbbbbbbb-0000-0000-0000-000000000002"}', true);
   begin
@@ -243,6 +259,7 @@ end; $$;
 
 create temp table bf as select * from pg_temp.broadcast_flow();
 select cmp_ok((select position_rows from bf), '>=', 1, 'member record broadcasts a position');
+select is((select newest_motion from bf), 'moving', 'broadcast payload carries motionState');
 select is((select nonmember_rejected from bf), true, 'non-member record is rejected');
 select * from finish();
 rollback;
@@ -314,7 +331,7 @@ grant execute on function public.record_track_points(uuid, jsonb) to authenticat
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `supabase test db` — Expected: `0012_record_broadcast_test.sql .. ok`, 2 pass. (All prior tests still pass.)
+Run: `supabase test db` — Expected: `0012_record_broadcast_test.sql .. ok`, 4 pass. (All prior tests still pass.)
 
 - [ ] **Step 5: Commit**
 ```bash
@@ -464,9 +481,17 @@ begin
   begin perform public.join_ride(code); ninth_rejected := false;
   exception when others then ninth_rejected := true; end;
   select count(*)::int into final_members from public.ride_members where ride_id = rid;
-  -- the per-ride advisory lock taken inside join_ride is xact-scoped, so it is still
-  -- held in this (uncommitted) test transaction.
-  select exists(select 1 from pg_locks where locktype = 'advisory') into advisory_held;
+  -- The per-ride advisory lock taken inside join_ride is xact-scoped (a SECURITY DEFINER
+  -- call is not a transaction boundary), so it is still held in this uncommitted test
+  -- transaction. Pin to THIS backend AND the exact key so the assertion proves the
+  -- per-ride lock, not just "some advisory lock somewhere is held".
+  select exists(
+    select 1 from pg_locks
+    where locktype = 'advisory'
+      and pid = pg_backend_pid()
+      and ((classid::bigint << 32) | (objid::bigint & 4294967295))
+          = hashtextextended(rid::text, 0)
+  ) into advisory_held;
 end; $$;
 
 create temp table cf as select * from pg_temp.cap_flow();
@@ -558,18 +583,29 @@ git commit -m "fix(db): close join_ride cap TOCTOU with per-ride advisory lock"
 `supabase/tests/0015_member_left_test.sql`:
 ```sql
 begin;
-select plan(1);
+select plan(3);
+-- Partition guard + assertion (see Task 3 test for the rationale: realtime.send drops
+-- silently when today's partition is absent, which a pure pgTAP run never creates).
 do $$
 begin
   execute format(
     'create table if not exists realtime.messages_%s partition of realtime.messages for values from (%L) to (%L)',
-    to_char(current_date, 'YYYY_MM_DD'), current_date::text, (current_date + 1)::text);
+    to_char(current_date, 'YYYY_MM_DD'), current_date::timestamp, (current_date + 1)::timestamp);
+exception when others then
+  raise notice 'partition setup failed: %', sqlerrm;
 end $$;
+select ok(
+  exists(select 1 from pg_catalog.pg_inherits i
+         join pg_catalog.pg_class c on c.oid = i.inhrelid
+         where c.relname = 'messages_'||to_char(current_date, 'YYYY_MM_DD')),
+  'today''s realtime.messages partition exists');
 insert into auth.users (instance_id, id, aud, role, email) values
   ('00000000-0000-0000-0000-000000000000','aaaaaaaa-0000-0000-0000-000000000001','authenticated','authenticated','u1@test.dev'),
   ('00000000-0000-0000-0000-000000000000','bbbbbbbb-0000-0000-0000-000000000002','authenticated','authenticated','u2@test.dev');
 
-create function pg_temp.leave_flow(out left_rows int)
+-- Drives both broadcast paths: a non-host member leaves (leave_ride), and the host
+-- ends the ride (end_ride). Each must emit a member_left row for the acting user.
+create function pg_temp.leave_flow(out leave_rows int, out end_rows int)
 language plpgsql security definer set search_path = '' as $$
 declare rid uuid; code text;
 begin
@@ -578,19 +614,27 @@ begin
   perform set_config('request.jwt.claims','{"sub":"bbbbbbbb-0000-0000-0000-000000000002"}', true);
   perform public.join_ride(code);
   perform public.leave_ride(rid);
-  select count(*)::int into left_rows from realtime.messages
-    where topic = 'ride:'||rid::text and event = 'member_left';
+  select count(*)::int into leave_rows from realtime.messages
+    where topic = 'ride:'||rid::text and event = 'member_left'
+      and payload->>'userID' = 'bbbbbbbb-0000-0000-0000-000000000002';
+  -- host (user 1, still the only remaining member) ends the ride
+  perform set_config('request.jwt.claims','{"sub":"aaaaaaaa-0000-0000-0000-000000000001"}', true);
+  perform public.end_ride(rid);
+  select count(*)::int into end_rows from realtime.messages
+    where topic = 'ride:'||rid::text and event = 'member_left'
+      and payload->>'userID' = 'aaaaaaaa-0000-0000-0000-000000000001';
 end; $$;
 
 create temp table mlf as select * from pg_temp.leave_flow();
-select cmp_ok((select left_rows from mlf), '>=', 1, 'leave_ride broadcasts member_left');
+select cmp_ok((select leave_rows from mlf), '>=', 1, 'leave_ride broadcasts member_left for the leaver');
+select cmp_ok((select end_rows from mlf), '>=', 1, 'end_ride broadcasts member_left for the host');
 select * from finish();
 rollback;
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `supabase test db` — Expected: FAIL (`left_rows` = 0).
+Run: `supabase test db` — Expected: FAIL (`leave_rows` = 0; current `leave_ride` does not broadcast).
 
 - [ ] **Step 3: Write the migration**
 
@@ -670,7 +714,7 @@ grant execute on function public.end_ride(uuid) to authenticated;
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `supabase test db` — Expected: `0015_member_left_test.sql .. ok`. (SP1's `0005_lifecycle_test` still passes — host transfer unchanged.)
+Run: `supabase test db` — Expected: `0015_member_left_test.sql .. ok`, 3 pass. (SP1's `0005_lifecycle_test` still passes — host transfer unchanged.)
 
 - [ ] **Step 5: Commit**
 ```bash
@@ -992,7 +1036,10 @@ struct LiveShareCadenceTests {
     }
     @Test func defaultsHonorTheDroppedTimeoutInvariant() {
         // droppedTimeout must be comfortably above the background cadence (>= ~4x).
-        let bgSeconds = Double(cadence.backgroundInterval.components.seconds)
+        // Convert Duration -> seconds WITHOUT truncating (.components.seconds is whole
+        // seconds only; sub-second cadences would otherwise read as 0).
+        let c = cadence.backgroundInterval.components
+        let bgSeconds = Double(c.seconds) + Double(c.attoseconds) / 1e18
         #expect(cadence.droppedTimeout >= 4 * bgSeconds)
     }
 }
@@ -1298,7 +1345,7 @@ git commit -m "feat(core): PointOutbox bounded buffer for offline backfill"
 **Interfaces:**
 - Consumes: `LivePositionPayload` (AuraCore).
 - Produces:
-  - `TransportEvent` enum: `.position(LivePositionPayload)`, `.memberLeft(UUID)`, `.connected`, `.disconnected(Error?)` (`Sendable`).
+  - `TransportEvent` enum: `.position(LivePositionPayload)`, `.memberLeft(UUID)`, `.connected`, `.disconnected((any Error & Sendable)?)` (`Sendable`).
   - `@MainActor protocol RideLiveSubscription: AnyObject { var events: AsyncStream<TransportEvent> { get }; func cancel() }`.
   - `protocol RideSessionTransport: Sendable { @MainActor func liveSubscription(rideID: UUID) -> any RideLiveSubscription; func snapshot(rideID: UUID) async throws -> [LivePositionPayload]; func publish(rideID: UUID, points: [LivePositionPayload]) async throws }`.
   - `@MainActor final class InMemoryRideSessionTransport: RideSessionTransport` — test double exposing `emit(_:)`, settable `snapshotResult`, recorded `publishedBatches`.
@@ -1360,7 +1407,11 @@ public enum TransportEvent: Sendable {
     case position(LivePositionPayload)
     case memberLeft(UUID)
     case connected
-    case disconnected(Error?)
+    // `any Error & Sendable` (not bare `Error?`): a non-Sendable associated value would
+    // block the synthesized `Sendable` conformance, and this enum crosses the
+    // nonisolated -> @MainActor boundary. The conformer maps caught errors to a Sendable
+    // error type (see Task 16's LiveTransportError).
+    case disconnected((any Error & Sendable)?)
 }
 
 /// One owned subscription to a ride's live channel. Owning the channel in a single
@@ -1390,6 +1441,7 @@ public final class InMemoryRideSessionTransport: RideSessionTransport {
     public var snapshotResult: [LivePositionPayload] = []
     public private(set) var publishedBatches: [[LivePositionPayload]] = []
 
+    @MainActor
     private final class Subscription: RideLiveSubscription {
         let events: AsyncStream<TransportEvent>
         let continuation: AsyncStream<TransportEvent>.Continuation
@@ -1446,9 +1498,10 @@ git commit -m "feat(kit): RideSessionTransport seam + in-memory fake"
 - Consumes: `RideSessionTransport`, `TransportEvent`, `RideLiveSubscription`, `LivePresenceState`, `LiveShareCadence`, `MotionClassifier`, `PointOutbox`, `RidePeer`, `LivePositionPayload`, `SpeedSample`, `MotionState`, `RideLifecycle`.
 - Produces: `GroupLocationSink` protocol (`@MainActor func locationDidUpdate(coordinate:progressMeters:speed:at:)`); `@MainActor final class RideSession: GroupLocationSink` with:
   - `init(rideID: UUID, selfUserID: UUID, transport: any RideSessionTransport, cadence: LiveShareCadence = .init())`
-  - `func start(roster: [RidePeer]) async` — seed presence, open subscription, consume events; on `.connected` re-seed via `snapshot`, on `.position` apply, on `.memberLeft` remove.
+  - `func start(roster: [RidePeer]) async` — seed presence, open the subscription, spawn the event task (which loops `for await e in sub.events { await ingest(e) }`).
+  - `func ingest(_ event: TransportEvent) async` — **the deterministic event seam**: on `.position` apply, on `.memberLeft` remove, on `.connected` re-seed via `snapshot`, on `.disconnected` mark `isLive=false`. The production event task and tests both call this; tests call it directly (no `Task.sleep`), keeping event-handling deterministic.
   - `locationDidUpdate(...)` — classify own motion, enqueue own `LivePositionPayload` to the outbox.
-  - `func publishIfDue(now: Date, lifecycle: RideLifecycle) async` — if `now - lastPublish >= cadence.interval(for: ownMotion, lifecycle:)` and the outbox is non-empty, drain and `publish`.
+  - `func publishIfDue(now: Date, lifecycle: RideLifecycle) async` — if `now - lastPublish >= cadence.interval(for: ownMotion, lifecycle:)` (converted to seconds **without truncation**) and the outbox is non-empty, drain and `publish`.
   - `func stalenessTick(now: Date)` — `presence.tick(now:)`.
   - `var peers: [RidePeer]` — read-through to presence.
   - `func stop()` — cancel subscription + event task.
@@ -1473,38 +1526,35 @@ struct RideSessionTests {
                     cadence: LiveShareCadence(foregroundInterval: .seconds(2), droppedTimeout: 40))
     }
 
-    @Test func startSeedsRosterAndAppliesPositionDeltas() async {
-        let transport = InMemoryRideSessionTransport()
-        let session = makeSession(transport)
+    // Event handling is tested by calling `ingest(_:)` directly — deterministic, no
+    // Task.sleep wait on the stream pump. The stream-to-ingest wiring itself is covered
+    // by Task 13's InMemoryRideSessionTransport test.
+    @Test func ingestPositionAppliesDelta() async {
+        let session = makeSession(InMemoryRideSessionTransport())
         await session.start(roster: [RidePeer(userID: alex, displayName: "Alex")])
-        transport.emit(.position(LivePositionPayload(userID: alex,
+        await session.ingest(.position(LivePositionPayload(userID: alex,
             coordinate: Coordinate(latitude: 1, longitude: 2),
             progressMeters: 100, recordedAt: t0, motionState: .moving)))
-        // allow the event task to process
-        try? await Task.sleep(nanoseconds: 50_000_000)
         #expect(session.peers.first { $0.userID == alex }?.progressMeters == 100)
         session.stop()
     }
 
-    @Test func memberLeftPrunesThePeer() async {
-        let transport = InMemoryRideSessionTransport()
-        let session = makeSession(transport)
+    @Test func ingestMemberLeftPrunesThePeer() async {
+        let session = makeSession(InMemoryRideSessionTransport())
         await session.start(roster: [RidePeer(userID: alex, displayName: "Alex")])
-        transport.emit(.memberLeft(alex))
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await session.ingest(.memberLeft(alex))
         #expect(session.peers.contains { $0.userID == alex } == false)
         session.stop()
     }
 
-    @Test func connectedReSeedsFromSnapshot() async {
+    @Test func ingestConnectedReSeedsFromSnapshot() async {
         let transport = InMemoryRideSessionTransport()
         transport.snapshotResult = [LivePositionPayload(userID: alex,
             coordinate: Coordinate(latitude: 9, longitude: 9),
             progressMeters: 500, recordedAt: t0, motionState: .moving)]
         let session = makeSession(transport)
         await session.start(roster: [RidePeer(userID: alex, displayName: "Alex")])
-        transport.emit(.connected)
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await session.ingest(.connected)
         #expect(session.peers.first { $0.userID == alex }?.progressMeters == 500)
         session.stop()
     }
@@ -1532,13 +1582,11 @@ struct RideSessionTests {
     }
 
     @Test func stalenessTickFlipsSilentPeerToDroppedWithNoPayloads() async {
-        let transport = InMemoryRideSessionTransport()
-        let session = makeSession(transport)
+        let session = makeSession(InMemoryRideSessionTransport())
         await session.start(roster: [RidePeer(userID: alex, displayName: "Alex")])
-        transport.emit(.position(LivePositionPayload(userID: alex,
+        await session.ingest(.position(LivePositionPayload(userID: alex,
             coordinate: Coordinate(latitude: 1, longitude: 2),
             progressMeters: 100, recordedAt: t0, motionState: .moving)))
-        try? await Task.sleep(nanoseconds: 50_000_000)
         session.stalenessTick(now: t0.addingTimeInterval(120))   // advance time only
         #expect(session.peers.first { $0.userID == alex }?.status == .dropped)
         session.stop()
@@ -1609,12 +1657,14 @@ public final class RideSession: GroupLocationSink {
         subscription = sub
         eventTask = Task { [weak self] in
             for await event in sub.events {
-                await self?.handle(event)
+                await self?.ingest(event)
             }
         }
     }
 
-    private func handle(_ event: TransportEvent) async {
+    /// The deterministic event seam. The production event task and the tests both call
+    /// this; tests call it directly so event handling needs no `Task.sleep` to settle.
+    public func ingest(_ event: TransportEvent) async {
         switch event {
         case .position(let payload):
             presence.apply(payload, now: payload.recordedAt)
@@ -1650,8 +1700,11 @@ public final class RideSession: GroupLocationSink {
     /// interval (for the current motion + lifecycle) has elapsed.
     public func publishIfDue(now: Date, lifecycle: RideLifecycle) async {
         guard !outbox.isEmpty else { return }
-        let interval = TimeInterval(cadence.interval(for: ownMotion, lifecycle: lifecycle)
-            .components.seconds)
+        // Duration -> seconds WITHOUT truncation. `.components.seconds` is whole seconds
+        // only, so a sub-second foregroundInterval (the spec's "lowerable to ~1s") would
+        // otherwise collapse to 0 and defeat the throttle.
+        let c = cadence.interval(for: ownMotion, lifecycle: lifecycle).components
+        let interval = Double(c.seconds) + Double(c.attoseconds) / 1e18
         guard now.timeIntervalSince(lastPublish) >= interval else { return }
         let batch = outbox.drain()
         lastPublish = now
@@ -1722,13 +1775,14 @@ struct CoordinatorGroupSinkTests {
     @Test func coordinatorForwardsRecordedPointsToTheGroupSink() async throws {
         let sink = SpyGroupSink()
         let coordinator = RideSessionCoordinator(
-            kind: .free, destinationName: nil,
-            screen: NoopScreenWake(), activity: NoopRideActivity())
-        let location = ScriptedLocationProvider(points: [
+            kind: .freeRide, destinationName: nil,
+            screen: SpyScreenWake(), activity: SpyRideActivity())
+        let location = ScriptedLocationProvider([
             TrackPoint(coordinate: Coordinate(latitude: 1, longitude: 2),
-                       timestamp: Date(timeIntervalSince1970: 1), speedMetersPerSecond: 5)
+                       elevation: nil, timestamp: Date(timeIntervalSince1970: 1),
+                       speedMetersPerSecond: 5)
         ])
-        coordinator.start(location: location, saving: NoopRideSaving(), units: .metric,
+        coordinator.start(location: location, saving: try RideStore.inMemory(), units: .metric,
                           authorization: .authorized, groupSink: sink)
         await coordinator.streamTask?.value
         #expect(sink.updates.count == 1)
@@ -1737,7 +1791,7 @@ struct CoordinatorGroupSinkTests {
 }
 ```
 
-*(Reuse the existing coordinator test doubles — `NoopScreenWake`, `NoopRideActivity`, `NoopRideSaving`, `ScriptedLocationProvider` — from `RideSessionCoordinatorTests.swift`. If a needed double is `private` to that file, lift it into a shared `GroupRideTestDoubles.swift` test helper as part of this task.)*
+*(The doubles `SpyScreenWake`, `SpyRideActivity`, and `ScriptedLocationProvider(_ samples:)` are declared `final class` at file scope in `RideSessionCoordinatorTests.swift` — non-`private`, so a new test file in the same `AuraKitTests` module uses them directly; `RideStore.inMemory()` is the saving double the existing tests use. `Ride.Kind` is `.freeRide`; `TrackPoint` requires `elevation:`; `DistanceUnits` is `.metric`/`.imperial`.)*
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -1922,13 +1976,23 @@ private final class SupabaseRideLiveSubscription: RideLiveSubscription {
     }
     deinit { pump?.cancel(); continuation.finish() }
 
+    // The realtime broadcast envelope nests the app data under a "payload" key (the body
+    // we passed to realtime.send is the message's "payload", with "event"/"type" siblings).
+    // Read fields from that nested object, not from the envelope's top level — a flat read
+    // compiles but silently yields nothing at runtime. Confirm the exact envelope shape
+    // against the pinned SDK (some versions hand broadcastStream the payload already
+    // unwrapped); if it is already unwrapped, drop the `body(of:)` indirection.
+    private static func body(of message: [String: AnyJSON]) -> [String: AnyJSON] {
+        message["payload"]?.objectValue ?? message
+    }
     private static func payload(from message: [String: AnyJSON]) -> LivePositionPayload? {
-        guard let userID = message["userID"]?.stringValue.flatMap(UUID.init),
-              let lat = message["lat"]?.doubleValue,
-              let lon = message["lon"]?.doubleValue,
-              let progress = message["progressMeters"]?.doubleValue,
-              let recordedAt = message["recordedAt"]?.stringValue.flatMap(ISO8601DateFormatter().date(from:)),
-              let motionRaw = message["motionState"]?.stringValue,
+        let m = body(of: message)
+        guard let userID = m["userID"]?.stringValue.flatMap(UUID.init),
+              let lat = m["lat"]?.doubleValue,
+              let lon = m["lon"]?.doubleValue,
+              let progress = m["progressMeters"]?.doubleValue,
+              let recordedAt = m["recordedAt"]?.stringValue.flatMap(ISO8601DateFormatter().date(from:)),
+              let motionRaw = m["motionState"]?.stringValue,
               let motion = MotionState(rawValue: motionRaw)
         else { return nil }
         return LivePositionPayload(userID: userID,
@@ -1936,16 +2000,25 @@ private final class SupabaseRideLiveSubscription: RideLiveSubscription {
                                    progressMeters: progress, recordedAt: recordedAt, motionState: motion)
     }
     private static func userID(from message: [String: AnyJSON]) -> UUID? {
-        message["userID"]?.stringValue.flatMap(UUID.init)
+        body(of: message)["userID"]?.stringValue.flatMap(UUID.init)
     }
+}
+
+/// Sendable error for `.disconnected` (bare `Error` is not Sendable, and TransportEvent
+/// crosses the actor boundary). The reconnect loop wraps caught errors in this.
+public struct LiveTransportError: Error, Sendable {
+    public let message: String
+    public init(_ message: String) { self.message = message }
 }
 ```
 
-*(The supabase-swift Realtime v2 API surface — `realtimeV2.channel(_:options:)`, `broadcastStream(event:)`, `subscribe()`, the `AnyJSON` accessors `stringValue`/`doubleValue`, and how broadcast message bodies are keyed — must be confirmed against the version pinned in `Aura/project.yml`. Adjust the bridging calls to match the pinned API while preserving the behavior: private channel, two event streams mapped to `TransportEvent`, `.connected` on subscribe, teardown on cancel. The reconnect/backoff loop wraps the subscribe in a bounded retry that re-emits `.disconnected(error)` then `.connected` on recovery; implement it against the confirmed reconnect signal of the pinned SDK.)*
+*(The supabase-swift Realtime v2 API surface — `realtimeV2.channel(_:options:)`, `broadcastStream(event:)`, `subscribe()`, the `AnyJSON` accessors `stringValue`/`doubleValue`/`objectValue`, and the broadcast envelope shape (nested `payload` vs already-unwrapped) — must be confirmed against the version pinned in `Aura/project.yml`. Adjust the bridging calls to match the pinned API while preserving the behavior: private channel, two event streams mapped to `TransportEvent`, `.connected` on subscribe, teardown on cancel. The reconnect/backoff loop wraps the subscribe in a bounded retry that re-emits `.disconnected(LiveTransportError(...))` then `.connected` on recovery; implement it against the confirmed reconnect signal of the pinned SDK. This module is verified by the `app-build` CI compile and by the Tier-3 device sign-in test — the nested-envelope decode in particular cannot be caught by a compile alone, so flag it for device-verify.)*
 
 - [ ] **Step 2: Apply migrations to the live project**
 
 Apply migrations `0010`–`0015` to the `aura` project via the Supabase MCP `apply_migration` (one per file, in order), then confirm with `list_migrations`. Run the deployment-checklist settings (next step) before relying on live channels.
+
+**Watch `0011` specifically:** `CREATE POLICY ON realtime.messages` requires owner privilege on that table. It applies cleanly under the local superuser in `db-tests`, but on the live project the `apply_migration` role may not own `realtime.messages` (owned by `supabase_realtime_admin`) — if it returns `must be owner of table messages`, the policy must be created with the platform-blessed path (run as `postgres`, or via the dashboard's Realtime authorization policy editor). The local pgTAP green proves the policy shape, **not** that it applied live — verify it exists on the live project after apply, and confirm the manual non-member gate check in the deployment checklist.
 
 - [ ] **Step 3: Update ROADMAP + deployment checklist**
 
