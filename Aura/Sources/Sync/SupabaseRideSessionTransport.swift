@@ -88,72 +88,96 @@ private final class SupabaseRideLiveSubscription: RideLiveSubscription {
         continuation = cont
         let cont2 = continuation
         pump = Task { [cont2] in
-            let topic = "ride:\(rideID.uuidString)"
-            var delay: UInt64 = 1_000_000_000 // 1 s
-            let maxDelay: UInt64 = 30_000_000_000 // 30 s
-            let maxAttempts = 8
-            var attempt = 0
+            await SupabaseRideLiveSubscription.runPump(
+                client: client, rideID: rideID, continuation: cont2)
+        }
+    }
 
-            while attempt <= maxAttempts, !Task.isCancelled {
-                if attempt > 0 {
-                    // Yield disconnected before each retry so the session can surface
-                    // "live sharing unavailable" to the UI without waiting for reconnect.
-                    cont2?.yield(.disconnected(nil))
-                    try? await Task.sleep(nanoseconds: delay)
-                    delay = min(delay * 2, maxDelay)
-                    if Task.isCancelled { break }
-                }
+    private static func runPump(
+        client: SupabaseClient,
+        rideID: UUID,
+        continuation cont2: AsyncStream<TransportEvent>.Continuation?
+    ) async {
+        let topic = "ride:\(rideID.uuidString)"
+        var delay: UInt64 = 1_000_000_000 // 1 s
+        let maxDelay: UInt64 = 30_000_000_000 // 30 s
+        let maxAttempts = 8
+        var attempt = 0
 
-                // UNVERIFIED: channel options closure shape and isPrivate property name.
-                let channel = client.realtimeV2.channel(topic) { opts in
-                    opts.isPrivate = true
-                }
-
-                // UNVERIFIED: broadcastStream(event:) return element type ([String: AnyJSON]).
-                let positions = channel.broadcastStream(event: "position")
-                let lefts = channel.broadcastStream(event: "member_left")
-
-                let positionTask = Task {
-                    for await message in positions {
-                        guard !Task.isCancelled else { break }
-                        if let payload = Self.livePosition(from: message) {
-                            cont2?.yield(.position(payload))
-                        }
-                    }
-                }
-                let leftTask = Task {
-                    for await message in lefts {
-                        guard !Task.isCancelled else { break }
-                        if let id = Self.memberLeftUserID(from: message) {
-                            cont2?.yield(.memberLeft(id))
-                        }
-                    }
-                }
-
-                // UNVERIFIED: subscribe() name and whether it throws.
-                await channel.subscribe()
-                cont2?.yield(.connected)
-                delay = 1_000_000_000 // reset backoff after a successful connect
-
-                // Wait until both broadcast streams drain (channel closed/cancelled).
-                await withTaskGroup(of: Void.self) { group in
-                    group.addTask { await positionTask.value }
-                    group.addTask { await leftTask.value }
-                }
-
+        while attempt <= maxAttempts, !Task.isCancelled {
+            if attempt > 0 {
+                // Yield disconnected before each retry so the session can surface
+                // "live sharing unavailable" to the UI without waiting for reconnect.
+                cont2?.yield(.disconnected(nil))
+                delay = await backoffDelay(current: delay, max: maxDelay)
                 if Task.isCancelled { break }
-
-                // Both streams returned normally — channel closed. Retry.
-                cont2?.yield(.disconnected(
-                    LiveTransportError("channel closed; reconnecting (attempt \(attempt + 1))")))
-                attempt += 1
             }
 
-            // Exhausted retries or cancelled — emit a terminal disconnected and finish.
-            if !Task.isCancelled {
-                cont2?.yield(.disconnected(LiveTransportError("reconnect limit reached")))
+            await runChannelAttempt(client: client, topic: topic, continuation: cont2)
+
+            if Task.isCancelled { break }
+
+            // Channel streams drained normally — channel closed. Retry.
+            cont2?.yield(.disconnected(
+                LiveTransportError("channel closed; reconnecting (attempt \(attempt + 1))")))
+            attempt += 1
+            delay = 1_000_000_000 // reset backoff after a successful connect
+        }
+
+        // Exhausted retries or cancelled — emit a terminal disconnected and finish.
+        if !Task.isCancelled {
+            cont2?.yield(.disconnected(LiveTransportError("reconnect limit reached")))
+        }
+        cont2?.finish()
+    }
+
+    /// Sleeps for `current` nanoseconds then returns the next (doubled, capped) delay value.
+    private static func backoffDelay(current: UInt64, max maxDelay: UInt64) async -> UInt64 {
+        try? await Task.sleep(nanoseconds: current)
+        return min(current * 2, maxDelay)
+    }
+
+    /// Builds the private Realtime channel, subscribes, drains broadcast streams,
+    /// and returns when the channel closes or the Task is cancelled.
+    private static func runChannelAttempt(
+        client: SupabaseClient,
+        topic: String,
+        continuation cont2: AsyncStream<TransportEvent>.Continuation?
+    ) async {
+        // UNVERIFIED: channel options closure shape and isPrivate property name.
+        let channel = client.realtimeV2.channel(topic) { opts in
+            opts.isPrivate = true
+        }
+
+        // UNVERIFIED: broadcastStream(event:) return element type ([String: AnyJSON]).
+        let positions = channel.broadcastStream(event: "position")
+        let lefts = channel.broadcastStream(event: "member_left")
+
+        let positionTask = Task {
+            for await message in positions {
+                guard !Task.isCancelled else { break }
+                if let payload = livePosition(from: message) {
+                    cont2?.yield(.position(payload))
+                }
             }
-            cont2?.finish()
+        }
+        let leftTask = Task {
+            for await message in lefts {
+                guard !Task.isCancelled else { break }
+                if let id = memberLeftUserID(from: message) {
+                    cont2?.yield(.memberLeft(id))
+                }
+            }
+        }
+
+        // UNVERIFIED: subscribe() name and whether it throws.
+        await channel.subscribe()
+        cont2?.yield(.connected)
+
+        // Wait until both broadcast streams drain (channel closed/cancelled).
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await positionTask.value }
+            group.addTask { await leftTask.value }
         }
     }
 
