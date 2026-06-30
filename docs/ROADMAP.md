@@ -425,8 +425,25 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
 - CarPlay, using the Mapbox v3 CarPlay templates and the existing `GuidanceSession`
   abstraction. Needs the CarPlay entitlement (Apple approval) and a scene delegate.
 - Apple Watch companion.
-- Group rides (Phase 2): a `RideSession` wrapping the existing `Ride`, with Supabase for
-  auth, Postgres, and realtime live location. Re-research the realtime stack before design.
+- Group rides — led small-crew (2-8) ride: host shares a join code, everyone navigates one
+  route and sees each other live. Decomposed into three sub-projects on Supabase
+  (Auth + Postgres/RLS + Realtime).
+  - **SP1 backend + identity — SHIPPED (PR #17, 2026-06-30).** Supabase project `aura`:
+    schema + RLS + `SECURITY DEFINER` write-API (`is_ride_member`, `create_ride`,
+    `join_ride` with rate limit + 8-cap + generic-failure oracle closure,
+    `record_track_points`, `end_ride`/`leave_ride` with host transfer, `delete_account` +
+    auth edge function, signup trigger, shared-ride profile read), `pg_cron` auto-expiry,
+    and a `db-tests` pgTAP CI job. Swift: AuraCore models, an AuraKit `GroupRideBackend`
+    seam + fake, an app-target `AuraSync` live conformer, and Sign in with Apple. No UI.
+    `supabase-swift` is quarantined to the app target so the package CI stays hermetic.
+    *Tier-3 device verification (real Apple sign-in, end-to-end) still pending: enable the
+    Sign-in-with-Apple capability for the app id and deploy the delete-account edge fn.*
+  - **SP2 live presence transport** (next): the `RideSession` layer — publish position/
+    progress via Realtime Broadcast, subscribe via Presence, background + reconnect +
+    backfill. Reuses `is_ride_member` as the Realtime authz primitive. (Also harden the
+    `join_ride` cap against its TOCTOU race here.)
+  - **SP3 group-ride UI**: create/join-by-code flow, the live map with named dots + roster
+    (progress, stopped/dropped), wired onto the route and `GuidanceSession`.
 - Push-to-talk voice within a session (Phase 3), Strava export, and HR/power sensors.
 
 ### Smaller fixes
