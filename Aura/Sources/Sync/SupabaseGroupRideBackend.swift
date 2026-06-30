@@ -17,8 +17,11 @@ public struct SupabaseGroupRideBackend: GroupRideBackend {
         }
     }
     public nonisolated func createRide(route: Data) async throws -> GroupRide {
+        // Decode the route bytes into a JSON value so p_route arrives as real jsonb
+        // (an object), not a quoted JSON string.
+        let routeJSON = try JSONDecoder().decode(AnyJSON.self, from: route)
         let row: GroupRideRow = try await client
-            .rpc("create_ride", params: ["p_route": AnyJSON.string(String(decoding: route, as: UTF8.self))])
+            .rpc("create_ride", params: ["p_route": routeJSON])
             .single().execute().value
         return try row.toDomain()
     }
@@ -37,7 +40,7 @@ public struct SupabaseGroupRideBackend: GroupRideBackend {
                 "recorded_at": .string(ISO8601DateFormatter().string(from: p.recordedAt)),
                 "lat": .double(p.coordinate.latitude),
                 "lon": .double(p.coordinate.longitude),
-                "progress_meters": .double(p.progressMeters),
+                "progress_meters": .double(p.progressMeters)
             ])
         }
         _ = try await client.rpc("record_track_points",
