@@ -15,6 +15,9 @@ packages:
   MapboxSearch:
     url: https://github.com/mapbox/search-ios.git
     majorVersion: 2.0.0
+  Supabase:
+    url: https://github.com/supabase/supabase-swift.git
+    majorVersion: 2.0.0
 # Project-level signing so both the app and the AuraWidgets extension share one
 # team. Committed here (not just set in Xcode) so it survives `xcodegen generate`,
 # which would otherwise wipe a team set through the Xcode UI on every regen.
@@ -66,6 +69,8 @@ targets:
         product: MapboxSearch
       - package: MapboxSearch
         product: MapboxSearchUI
+      - package: Supabase
+        product: Supabase
     settings:
       base:
         INFOPLIST_FILE: Resources/Info.plist
