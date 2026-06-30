@@ -1,19 +1,11 @@
 import Foundation
 import Supabase
 
-/// Single shared Supabase client for the app. URL + anon key are injected at
-/// build time (placeholder constants until Task 2 provisions the project).
+/// Single shared Supabase client for the app. RLS-gated; the anon key is
+/// public-safe by design.
 enum SupabaseClientProvider {
     static let shared = SupabaseClient(
-        supabaseURL: URL(string: "https://placeholder.supabase.co")!,
-        supabaseKey: "placeholder-anon-key"
+        supabaseURL: URL(string: "https://wyofhmufnttiqyjkrbxi.supabase.co")!,
+        supabaseKey: "sb_publishable_JszmSwhSo_MEC8yue7Z76A_QYwVo84h"
     )
-}
-
-/// Compile-only proof that a nonisolated async backend method bridges supabase-swift
-/// under SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor. Removed/replaced in Task 11.
-enum SupabaseSmokeTest {
-    nonisolated static func ping() async throws {
-        _ = try await SupabaseClientProvider.shared.auth.session
-    }
 }
