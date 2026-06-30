@@ -438,13 +438,31 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
     `supabase-swift` is quarantined to the app target so the package CI stays hermetic.
     *Tier-3 device verification (real Apple sign-in, end-to-end) still pending: enable the
     Sign-in-with-Apple capability for the app id and deploy the delete-account edge fn.*
-  - **SP2 live presence transport** (next): the `RideSession` layer — publish position/
-    progress via Realtime Broadcast, subscribe via Presence, background + reconnect +
-    backfill. Reuses `is_ride_member` as the Realtime authz primitive. (Also harden the
-    `join_ride` cap against its TOCTOU race here.)
+  - **SP2 live presence transport — IN PR #18, 2026-06-30.** The `RideSession` layer:
+    positions fan out via `realtime.send` from inside `record_track_points`
+    (Broadcast-from-Database, so a backgrounded rider stays visible), seeded/re-seeded by a
+    new `ride_live_snapshot` RPC (the correctness anchor; deltas are best-effort).
+    **No Presence and no raw speed on the wire** — peer status (riding/stopped/dropped) is
+    derived from the position stream, and only a sender-computed `moving`/`stopped` bit is
+    broadcast. Pure AuraCore (`MotionClassifier`, `PeerStatusReducer`, `LivePresenceState`,
+    `LiveShareCadence`, `PointOutbox`), an AuraKit `RideSessionTransport` seam +
+    push-driven `RideSession` + `GroupLocationSink` handoff, and an app-target
+    `SupabaseRideSessionTransport`. Migrations 0010–0015 add the topic parser, the
+    members-only `realtime.messages` RLS gate, the broadcast in `record_track_points`,
+    `ride_live_snapshot`, the `join_ride` advisory-lock cap fix, and `member_left` on
+    leave/end. Remaining: device-verify the reconnect path, two Realtime dashboard settings
+    (deployment checklist below), and SP3 UI.
   - **SP3 group-ride UI**: create/join-by-code flow, the live map with named dots + roster
     (progress, stopped/dropped), wired onto the route and `GuidanceSession`.
 - Push-to-talk voice within a session (Phase 3), Strava export, and HR/power sensors.
+
+### Group Rides SP2 — deployment checklist (Supabase `aura`)
+- [ ] Migrations 0010–0015 applied (`list_migrations` shows them).
+- [ ] Realtime → Settings → "Allow public access" is OFF (private channels enforced).
+- [ ] Realtime → message retention set to ≤ 48h (keeps broadcast coordinate copies
+      inside the SP1 ride-track retention promise; `realtime.messages` is not reaped
+      by the SP1 cron).
+- [ ] Manual gate check: subscribe to `ride:<id>` as a non-member → denied.
 
 ### Smaller fixes
 
