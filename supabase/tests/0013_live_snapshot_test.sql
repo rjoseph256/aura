@@ -27,7 +27,7 @@ end; $$;
 
 create temp table sf as select * from pg_temp.snap_flow();
 select is((select row_count from sf), 1, 'one row per member');
-select is((select latest_progress from sf), 50.0, 'returns the latest point per member');
+select is((select latest_progress from sf), 50.0::double precision, 'returns the latest point per member');
 select is((select nonmember_rejected from sf), true, 'snapshot is members-only');
 select * from finish();
 rollback;

@@ -5,9 +5,15 @@ import AuraCore
 
 @MainActor
 final class SpyGroupSink: GroupLocationSink {
-    var updates: [(Coordinate, Double, Double, Date)] = []
+    struct Update: Equatable {
+        let coordinate: Coordinate
+        let progressMeters: Double
+        let speed: Double
+        let at: Date
+    }
+    var updates: [Update] = []
     func locationDidUpdate(coordinate: Coordinate, progressMeters: Double, speed: Double, at: Date) {
-        updates.append((coordinate, progressMeters, speed, at))
+        updates.append(Update(coordinate: coordinate, progressMeters: progressMeters, speed: speed, at: at))
     }
 }
 
@@ -27,6 +33,6 @@ struct CoordinatorGroupSinkTests {
                           authorization: .authorized, groupSink: sink)
         await coordinator.streamTask?.value
         #expect(sink.updates.count == 1)
-        #expect(sink.updates.first?.0 == Coordinate(latitude: 1, longitude: 2))
+        #expect(sink.updates.first?.coordinate == Coordinate(latitude: 1, longitude: 2))
     }
 }
