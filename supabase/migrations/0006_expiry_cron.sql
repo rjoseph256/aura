@@ -1,4 +1,6 @@
 -- Mark an active ride ended when its last activity is older than 3 hours.
+-- sweep_stale_rides / reap_expired_rides are cron-only (called by the pg_cron
+-- scheduler, a superuser); intentionally not granted to authenticated.
 create function public.sweep_stale_rides()
 returns void
 language sql

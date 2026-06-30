@@ -32,6 +32,7 @@ declare
   v_uid uuid := (select auth.uid());
   v_role text;
   v_next uuid;
+  v_last timestamptz;
 begin
   select role into v_role from public.ride_members
     where ride_id = p_ride_id and user_id = v_uid;
@@ -43,8 +44,12 @@ begin
     select user_id into v_next from public.ride_members
       where ride_id = p_ride_id order by joined_at asc limit 1;
     if v_next is null then
+      -- Same retention formula as end_ride (not a flat now()+48h).
+      select max(recorded_at) into v_last from public.ride_track_points where ride_id = p_ride_id;
       update public.rides set status = 'ended', ended_at = now(),
-        expires_at = now() + interval '48 hours' where id = p_ride_id;
+        expires_at = least(now() + interval '48 hours',
+                           coalesce(v_last, now()) + interval '48 hours')
+        where id = p_ride_id;
     else
       update public.ride_members set role = 'host'
         where ride_id = p_ride_id and user_id = v_next;
