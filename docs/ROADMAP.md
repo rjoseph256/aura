@@ -431,16 +431,15 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
 
 ### Smaller fixes
 
-- Per-route elevation sparklines are normalized to their own min and max, so a flat route
-  and a hilly one can look similar. A shared vertical scale across the visible options would
-  make the comparison honest at a glance.
-- Elevation gain is sampled at only 16 points per route, which undersamples climb on longer
-  routes and weakens the "Flattest" ranking. Sample proportionally to distance.
-- The Mapbox alternative-to-label correlation matches on exact `Double` distance equality,
-  which can mis-map two equal-distance alternatives. Carry the Mapbox index through the
-  candidate pipeline instead.
-- `DestinationSearchView` keys its results `ForEach` on the array offset, which churns row
-  identity as suggestions stream in. Use a stable key.
+- **SHIPPED (2026-06-29).** The four correctness fixes that lived here are done. Elevation
+  now samples proportionally to route distance (`ElevationSampling.proportionalCount`, ~one
+  sample per 150 m clamped to 16–96) instead of a fixed 16 points, so longer routes no longer
+  undersample climb. The option sparklines share one vertical scale (`Sparkline.points`
+  gained a `range:` overload, fed a shared min/max across the visible routes), so a flat route
+  and a hilly one compare honestly. The Mapbox route correlation carries a `sourceIndex`
+  through `RouteRanker.labeled` instead of matching on exact `Double` distance equality, which
+  could mis-map two equal-distance alternatives. And `DestinationSearchView` keys its results
+  on stable content (name + description + coordinate) instead of the array offset.
 
 ## Testing
 
