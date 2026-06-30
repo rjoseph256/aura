@@ -4,8 +4,9 @@ import AuraCore
 import AuraKit
 
 /// Live Supabase implementation of GroupRideBackend. All writes go through the
-/// SECURITY DEFINER RPCs; RLS enforces members-only reads.
-public struct SupabaseGroupRideBackend: GroupRideBackend {
+/// SECURITY DEFINER RPCs; RLS enforces members-only reads. `nonisolated` because
+/// it is pure backend I/O (no main-actor state) under default-MainActor isolation.
+public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
     private let client: SupabaseClient
     public init(client: SupabaseClient = SupabaseClientProvider.shared) { self.client = client }
 
@@ -61,7 +62,7 @@ public struct SupabaseGroupRideBackend: GroupRideBackend {
 /// Wire row returned by create_ride / join_ride. CodingKeys map snake_case JSON
 /// to camelCase properties (avoids SwiftLint `identifier_name`); the PostgREST
 /// decoder does no key conversion of its own.
-private struct GroupRideRow: Decodable {
+private nonisolated struct GroupRideRow: Decodable {
     let id: UUID
     let hostID: UUID
     let joinCode: String
