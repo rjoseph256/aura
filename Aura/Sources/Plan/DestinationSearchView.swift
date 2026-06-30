@@ -75,11 +75,11 @@ struct DestinationSearchView: View {
                         .padding(.horizontal, AuraTheme.Spacing.xxl)
                 } else {
                     LazyVStack(spacing: 0) {
-                        ForEach(Array(suggestions.enumerated()), id: \.offset) { _, suggestion in
+                        ForEach(suggestions, id: \.rowKey) { suggestion in
                             SuggestionRow(suggestion: suggestion) {
                                 resolveSuggestion(suggestion)
                             }
-                            if suggestion.name != suggestions.last?.name {
+                            if suggestion.rowKey != suggestions.last?.rowKey {
                                 Divider()
                                     .background(AuraTheme.border)
                                     .padding(.leading, 60)
@@ -257,5 +257,16 @@ private struct SuggestionRow: View {
         case .address: return "mappin.circle.fill"
         default:       return "mappin"
         }
+    }
+}
+
+private extension PlaceAutocomplete.Suggestion {
+    /// Stable content key for SwiftUI list identity. The type exposes no id, and the
+    /// previous array-offset key churned row identity as results streamed in. Name +
+    /// description + coordinate is stable across a re-fetch of the same place.
+    var rowKey: String {
+        let lat = coordinate?.latitude ?? 0
+        let lon = coordinate?.longitude ?? 0
+        return "\(name)|\(description ?? "")|\(lat),\(lon)"
     }
 }
