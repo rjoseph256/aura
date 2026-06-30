@@ -14,9 +14,9 @@ struct TrackPointSpeedCodableTests {
 
     @Test func legacyBlobWithoutSpeedDecodesNil() throws {
         // A track encoded before this field existed: no "speedMetersPerSecond" key.
-        let legacy = """
+        let legacy = Data("""
         {"coordinate":{"latitude":40.44,"longitude":-80.0},"elevation":100,"timestamp":0}
-        """.data(using: .utf8)!
+        """.utf8)
         let back = try JSONDecoder().decode(TrackPoint.self, from: legacy)
         #expect(back.speedMetersPerSecond == nil)
         #expect(back.coordinate.latitude == 40.44)

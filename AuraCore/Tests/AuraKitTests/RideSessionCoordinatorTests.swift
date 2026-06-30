@@ -228,14 +228,21 @@ final class SpyRideActivity: RideActivityControlling {
         let units: DistanceUnits
         let destinationName: String?
     }
+    struct UpdateCall {
+        let stats: RideStats
+        let currentSpeedMetersPerSecond: Double
+        let maneuver: GuidanceUpdate?
+    }
     private(set) var started: StartCall?
-    private(set) var updates: [(stats: RideStats, currentSpeedMetersPerSecond: Double, maneuver: GuidanceUpdate?)] = []
+    private(set) var updates: [UpdateCall] = []
     private(set) var ended = false
     func start(kind: Ride.Kind, startedAt: Date, units: DistanceUnits, destinationName: String?) {
         started = StartCall(kind: kind, units: units, destinationName: destinationName)
     }
     func update(stats: RideStats, currentSpeedMetersPerSecond: Double, maneuver: GuidanceUpdate?) {
-        updates.append((stats, currentSpeedMetersPerSecond, maneuver))
+        updates.append(UpdateCall(stats: stats,
+                                  currentSpeedMetersPerSecond: currentSpeedMetersPerSecond,
+                                  maneuver: maneuver))
     }
     func end() { ended = true }
 }
