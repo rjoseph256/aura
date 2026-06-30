@@ -19,6 +19,7 @@
 - **DB security:** every write-API function is `SECURITY DEFINER`, `SET search_path = ''`, `REVOKE EXECUTE FROM public`, `GRANT EXECUTE TO authenticated`, and re-checks authorization in its body. `is_ride_member(ride_id)` derives `auth.uid()` itself (no caller-supplied uid). RLS policies use `(select auth.uid())` / `(select is_ride_member(ride_id))` forms.
 - **Retention:** `expires_at = LEAST(COALESCE(ended_at, created_at) + interval '48 hours', last_activity + interval '48 hours')`, ceiling `created_at + interval '36 hours'` before any activity. Cron every 5 minutes; staleness threshold 3 hours.
 - **Test DB:** pgTAP runs via `supabase test db` against the local stack (`supabase start`, needs Docker). Migrations live in `supabase/migrations/`, tests in `supabase/tests/`. If local Docker is unavailable, the controller runs the same SQL against a Supabase dev branch via the Supabase MCP `execute_sql` and records that substitution.
+- **pgTAP seeding convention (load-bearing — applies to every DB test):** `supabase test db` applies **all** migrations, then runs each test in its own transaction, so the `handle_new_user` trigger (migration 0007) is live during *every* test. Therefore: (1) **never `insert into public.profiles` explicitly** — the trigger creates the profile. (2) Seed users by inserting into `auth.users` with the full safe column set `(instance_id, id, aud, role, email)`, as the default superuser role, **before** any `set local role authenticated`. (3) Switch identity afterward only via `set local request.jwt.claims = '{"sub":"<uuid>"}'` (no re-seeding needed; SECURITY DEFINER functions work under `authenticated`).
 - **Privacy promise scope:** retention covers ride tracks + membership only; `profiles` + `auth.users` are durable, removed only by `delete_account`.
 
 ---
@@ -144,7 +145,7 @@ git commit -m "build(app): add supabase-swift to app target; verify Swift 6 comp
 # Use the Supabase MCP create_project OR the dashboard; record the project ref.
 supabase init        # creates supabase/config.toml
 ```
-In `supabase/config.toml`, ensure local DB + the `pg_cron` extension are enabled for the local stack (under `[db]` the default Postgres image already bundles pg_cron; the migration enables it).
+Keep the default `supabase/config.toml` local DB settings. `pg_cron` is created (guarded) in migration 0006, so no config change is needed for the local test stack; the real cron schedule lands on the remote project at Task 8 Step 5. Before writing Task 3's test, run `supabase start` and inspect the local `auth.users` columns (`\d auth.users`) to confirm the seed column set `(instance_id, id, aud, role, email)` satisfies all NOT NULLs for the bundled GoTrue schema version; widen the seed if the local schema requires more.
 
 - [ ] **Step 2: Write the failing pgTAP test** `supabase/tests/0001_schema_test.sql`:
 
@@ -174,7 +175,8 @@ Expected: FAIL — tables do not exist.
 - [ ] **Step 4: Write the migration** `supabase/migrations/0001_schema.sql`:
 
 ```sql
-create extension if not exists pg_cron;
+-- pg_cron is created (guarded) in migration 0006, not here, so a local test stack
+-- without pg_cron preloaded still applies this migration cleanly.
 
 create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -192,8 +194,11 @@ create table public.rides (
   ended_at timestamptz,
   expires_at timestamptz not null
 );
--- Unique among non-reaped rides (reaping deletes the row, freeing the code).
-create unique index rides_active_join_code on public.rides (join_code);
+-- Reaping DELETEs the ride row, which frees its code, so a FULL unique index over
+-- all rides already gives "unique among non-reaped rides". Do NOT make this a
+-- partial `WHERE status='active'` index — that would let an ended-but-not-reaped
+-- ride's code be reused while it is still reserved.
+create unique index rides_join_code_key on public.rides (join_code);
 
 create table public.ride_members (
   ride_id uuid not null references public.rides(id) on delete cascade,
@@ -279,12 +284,12 @@ git commit -m "feat(db): group-ride schema + pgTAP CI gate"
 ```sql
 begin;
 select plan(4);
--- Seed two users directly in auth.users (trigger creates profiles in Task 7;
--- here insert profiles explicitly to isolate this migration).
-insert into auth.users (id) values ('11111111-1111-1111-1111-111111111111');
-insert into auth.users (id) values ('22222222-2222-2222-2222-222222222222');
-insert into public.profiles (id) values ('11111111-1111-1111-1111-111111111111');
-insert into public.profiles (id) values ('22222222-2222-2222-2222-222222222222');
+-- Seed users as superuser BEFORE switching role; the handle_new_user trigger
+-- (migration 0007, live in every test) creates their profiles. Never insert
+-- into public.profiles directly.
+insert into auth.users (instance_id, id, aud, role, email) values
+  ('00000000-0000-0000-0000-000000000000','11111111-1111-1111-1111-111111111111','authenticated','authenticated','u1@test.dev'),
+  ('00000000-0000-0000-0000-000000000000','22222222-2222-2222-2222-222222222222','authenticated','authenticated','u2@test.dev');
 
 -- Act as user 1, create a ride.
 set local role authenticated;
@@ -407,39 +412,39 @@ git commit -m "feat(db): is_ride_member + create_ride + members-only RLS"
 ```sql
 begin;
 select plan(6);
--- Helper to seed a user+profile.
-insert into auth.users (id) values ('aaaaaaaa-0000-0000-0000-000000000001');
-insert into public.profiles (id) values ('aaaaaaaa-0000-0000-0000-000000000001');
+-- Seed 9 users as superuser up front (full column set); the trigger makes profiles.
+insert into auth.users (instance_id, id, aud, role, email)
+select '00000000-0000-0000-0000-000000000000',
+       ('aaaaaaaa-0000-0000-0000-00000000000'||g)::uuid,
+       'authenticated','authenticated','u'||g||'@test.dev'
+from generate_series(1,9) g;
+
 set local role authenticated;
+-- User 1 hosts.
 set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-0000-0000-000000000001"}';
--- Host creates a ride; capture its code.
 create temp table t as select (public.create_ride('{"steps":[]}'::jsonb)).*;
 
--- Joiner.
-insert into auth.users (id) values ('bbbbbbbb-0000-0000-0000-000000000002');
-insert into public.profiles (id) values ('bbbbbbbb-0000-0000-0000-000000000002');
-set local request.jwt.claims = '{"sub":"bbbbbbbb-0000-0000-0000-000000000002"}';
+-- User 2 joins, twice (idempotent).
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-0000-0000-000000000002"}';
 select lives_ok($$ select public.join_ride((select join_code from t)) $$, 'valid join succeeds');
 select lives_ok($$ select public.join_ride((select join_code from t)) $$, 'double join is idempotent');
 select is((select count(*)::int from public.ride_members where ride_id=(select id from t)),
   2, 'no duplicate membership row');
 select throws_ok($$ select public.join_ride('ZZZZZZZZ') $$, null, 'bad code fails generically');
 
--- Member cap: fill to 8, 9th rejected. (6 more joiners → 8 total.)
+-- Fill to 8 (users 3..8 join); user 9 is rejected. No user creation in the loop —
+-- all users already seeded; identity switches via the claims GUC (allowed for
+-- authenticated with set_config local), and join_ride is SECURITY DEFINER.
 do $$
-declare i int; uid uuid;
+declare g int;
 begin
-  for i in 3..8 loop
-    uid := ('cccccccc-0000-0000-0000-00000000000'||i)::uuid;
-    insert into auth.users (id) values (uid);
-    insert into public.profiles (id) values (uid);
-    perform set_config('request.jwt.claims', json_build_object('sub', uid)::text, true);
+  for g in 3..8 loop
+    perform set_config('request.jwt.claims',
+      json_build_object('sub', ('aaaaaaaa-0000-0000-0000-00000000000'||g)::uuid)::text, true);
     perform public.join_ride((select join_code from t));
   end loop;
 end $$;
-insert into auth.users (id) values ('dddddddd-0000-0000-0000-000000000009');
-insert into public.profiles (id) values ('dddddddd-0000-0000-0000-000000000009');
-set local request.jwt.claims = '{"sub":"dddddddd-0000-0000-0000-000000000009"}';
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-0000-0000-000000000009"}';
 select throws_ok($$ select public.join_ride((select join_code from t)) $$, null, '9th join rejected (cap 8)');
 select is((select count(*)::int from public.ride_members where ride_id=(select id from t)),
   8, 'exactly 8 members');
@@ -521,10 +526,9 @@ git commit -m "feat(db): join_ride with rate limit, 8-member cap, idempotency"
 ```sql
 begin;
 select plan(4);
-insert into auth.users (id) values ('aaaaaaaa-0000-0000-0000-000000000001');
-insert into public.profiles (id) values ('aaaaaaaa-0000-0000-0000-000000000001');
-insert into auth.users (id) values ('bbbbbbbb-0000-0000-0000-000000000002');
-insert into public.profiles (id) values ('bbbbbbbb-0000-0000-0000-000000000002');
+insert into auth.users (instance_id, id, aud, role, email) values
+  ('00000000-0000-0000-0000-000000000000','aaaaaaaa-0000-0000-0000-000000000001','authenticated','authenticated','u1@test.dev'),
+  ('00000000-0000-0000-0000-000000000000','bbbbbbbb-0000-0000-0000-000000000002','authenticated','authenticated','u2@test.dev');
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-0000-0000-000000000001"}';
 create temp table t as select (public.create_ride('{"steps":[]}'::jsonb)).*;
@@ -613,10 +617,9 @@ git commit -m "feat(db): record_track_points + track-store RLS"
 ```sql
 begin;
 select plan(5);
-insert into auth.users (id) values ('aaaaaaaa-0000-0000-0000-000000000001');
-insert into public.profiles (id) values ('aaaaaaaa-0000-0000-0000-000000000001');
-insert into auth.users (id) values ('bbbbbbbb-0000-0000-0000-000000000002');
-insert into public.profiles (id) values ('bbbbbbbb-0000-0000-0000-000000000002');
+insert into auth.users (instance_id, id, aud, role, email) values
+  ('00000000-0000-0000-0000-000000000000','aaaaaaaa-0000-0000-0000-000000000001','authenticated','authenticated','u1@test.dev'),
+  ('00000000-0000-0000-0000-000000000000','bbbbbbbb-0000-0000-0000-000000000002','authenticated','authenticated','u2@test.dev');
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-0000-0000-000000000001"}';
 create temp table t as select (public.create_ride('{"steps":[]}'::jsonb)).*;
@@ -734,8 +737,9 @@ git commit -m "feat(db): end_ride + leave_ride with host transfer"
 ```sql
 begin;
 select plan(3);
-insert into auth.users (id) values ('aaaaaaaa-0000-0000-0000-000000000001');
-insert into public.profiles (id) values ('aaaaaaaa-0000-0000-0000-000000000001');
+insert into auth.users (instance_id, id, aud, role, email) values
+  ('00000000-0000-0000-0000-000000000000','aaaaaaaa-0000-0000-0000-000000000001','authenticated','authenticated','u1@test.dev');
+-- profile auto-created by the trigger.
 -- A ride already past expires_at → reaped, cascades.
 insert into public.rides (id, host_id, join_code, route, status, expires_at)
   values ('99999999-9999-9999-9999-999999999999',
@@ -796,12 +800,20 @@ as $$
   delete from public.join_attempts where attempted_at < now() - interval '1 hour';
 $$;
 
--- Schedule both every 5 minutes. (No-op under pgTAP; tested by calling directly.)
-select cron.schedule('group-ride-sweep', '*/5 * * * *',
-  $$ select public.sweep_stale_rides(); select public.reap_expired_rides(); $$);
+-- Enable pg_cron and schedule both functions every 5 minutes. Wrapped so a local
+-- test stack without pg_cron preloaded still applies this migration cleanly (the
+-- whole block no-ops); the real schedule lands on the remote project via db push.
+-- The sweep/reap functions are tested by calling them DIRECTLY (see the test).
+do $$
+begin
+  create extension if not exists pg_cron;
+  perform cron.schedule('group-ride-sweep', '*/5 * * * *',
+    $sql$ select public.sweep_stale_rides(); select public.reap_expired_rides(); $sql$);
+exception when others then null;  -- pg_cron unavailable in local stack
+end $$;
 ```
 
-- [ ] **Step 4: Re-run and verify it passes.** Run: `supabase db reset && supabase test db` — Expected: PASS (3/3). (If the local stack lacks `cron.schedule`, guard the schedule call with `do $$ begin perform cron.schedule(...); exception when undefined_function then null; end $$;` and record that the schedule is applied only on the remote project.)
+- [ ] **Step 4: Re-run and verify it passes.** Run: `supabase db reset && supabase test db` — Expected: PASS (3/3). The migration's `do $$ … exception when others then null … $$` block already makes the pg_cron extension + schedule a clean no-op when the local stack lacks pg_cron; the schedule is applied for real on the remote project at Task 8 Step 5 (`supabase db push`). Confirm via `supabase db reset` that migration 0006 applies without error even if pg_cron is absent.
 
 - [ ] **Step 5: Commit.**
 
@@ -827,7 +839,8 @@ git commit -m "feat(db): expiry + staleness sweep on pg_cron"
 begin;
 select plan(3);
 -- Inserting an auth user auto-creates a profile via trigger.
-insert into auth.users (id) values ('aaaaaaaa-0000-0000-0000-000000000001');
+insert into auth.users (instance_id, id, aud, role, email) values
+  ('00000000-0000-0000-0000-000000000000','aaaaaaaa-0000-0000-0000-000000000001','authenticated','authenticated','u1@test.dev');
 select is((select display_name from public.profiles
            where id='aaaaaaaa-0000-0000-0000-000000000001'),
   'Rider', 'trigger created profile with placeholder name');
@@ -892,7 +905,12 @@ as $$
 declare v_uid uuid := (select auth.uid());
 begin
   if v_uid is null then raise exception 'unauthorized'; end if;
-  delete from auth.users where id = v_uid;  -- cascades to profile + all owned rows
+  -- Delete the profile; ON DELETE CASCADE clears all of this user's public ride
+  -- data (hosted rides, memberships, track points, join attempts). The auth.users
+  -- row itself is removed out-of-band via the Auth admin API (Step 5) — a
+  -- postgres-owned SECURITY DEFINER function cannot delete from auth.users on the
+  -- hosted project (auth.users is owned by supabase_auth_admin).
+  delete from public.profiles where id = v_uid;
 end;
 $$;
 revoke execute on function public.delete_account() from public;
@@ -901,12 +919,15 @@ grant execute on function public.delete_account() to authenticated;
 
 - [ ] **Step 4: Re-run and verify it passes.** Run: `supabase db reset && supabase test db` — Expected: PASS (3/3).
 
-- [ ] **Step 5: Push migrations to the remote dev project + commit.**
+- [ ] **Step 5: Push migrations to the remote dev project; wire the auth-deletion edge function; commit.**
+
+The pgTAP test proves the **public-data** cascade. Full account deletion (so the user truly cannot sign back in, per App Store 5.1.1(v)) also needs the `auth.users` row removed, which `delete_account` cannot do on the hosted project. Create a Supabase Edge Function `delete-account` that, authenticated as the caller, calls `supabase.auth.admin.deleteUser(uid)` with the service-role key; the app invokes it right after `delete_account()`. Its end-to-end behavior is verified in the Task 12 Tier-3 pass (sign in → delete → confirm cannot sign back into the same account without a fresh profile).
 
 ```bash
 supabase db push   # applies 0001-0007 to the remote project
-git add supabase/migrations/0007_identity.sql supabase/tests/0007_identity_test.sql
-git commit -m "feat(db): profiles trigger, display-name upsert, account deletion"
+# supabase functions new delete-account && supabase functions deploy delete-account
+git add supabase/migrations/0007_identity.sql supabase/tests/0007_identity_test.sql supabase/functions/delete-account
+git commit -m "feat(db): profiles trigger, display-name upsert, account deletion (public cascade + auth edge fn)"
 ```
 
 ---
@@ -1154,9 +1175,10 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var members: [UUID: [UUID]] = [:]   // rideID -> [userID]
         var codes: [String: UUID] = [:]     // joinCode -> rideID
     }
-    private let store: Store
+    // nonisolated so `init(sharing:)` can read it synchronously across actors;
+    // `Store` is @unchecked Sendable, and tests drive it via serial awaits.
+    nonisolated let store: Store
     private var currentUser: UUID?
-    private var seq = 0
 
     public init() { self.store = Store() }
     public init(sharing other: InMemoryGroupRideBackend) { self.store = other.store }
@@ -1166,9 +1188,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
     }
     public func createRide(route: Data) async throws -> GroupRide {
         guard let uid = currentUser else { throw GroupRideError.notAuthenticated }
-        seq += 1
-        let raw = String(format: "ABCDEFG%01d", seq % 10).prefix(8)
-        let code = JoinCode(rawValue: "ABCDEFGH")!   // fixed valid code for the fake
+        let code = JoinCode(rawValue: "ABCDEFGH")!   // fixed valid code for the fake (one ride per store)
         let ride = GroupRide(id: UUID(), hostID: uid, joinCode: code,
                              status: .active, createdAt: Date(timeIntervalSince1970: 0))
         store.rides[ride.id] = ride
@@ -1203,7 +1223,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
 }
 ```
 
-- [ ] **Step 5: Run to verify it passes.** Run: `cd AuraCore && swift test --filter InMemoryGroupRideBackend` — Expected: PASS. (If SwiftLint flags the unused `raw`, delete it — the fake uses a fixed code.)
+- [ ] **Step 5: Run to verify it passes.** Run: `cd AuraCore && swift test --filter InMemoryGroupRideBackend` — Expected: PASS. The `nonisolated let store` is what lets `init(sharing:)` compile under Swift 6 (synchronous cross-actor read of `@unchecked Sendable` state).
 
 - [ ] **Step 6: Run the full package suite + lint.**
 
@@ -1247,7 +1267,7 @@ public struct SupabaseGroupRideBackend: GroupRideBackend {
 
     public nonisolated func signIn(idToken: String, nonce: String, displayName: String?) async throws {
         try await client.auth.signInWithIdToken(
-            credentials: .init(provider: .apple, idToken: idToken, nonce: nonce))
+            credentials: OpenIDConnectCredentials(provider: .apple, idToken: idToken, nonce: nonce))
         if let displayName {
             _ = try await client.rpc("upsert_display_name", params: ["p_name": displayName]).execute()
         }
@@ -1266,12 +1286,19 @@ public struct SupabaseGroupRideBackend: GroupRideBackend {
         } catch { throw GroupRideError.joinFailed }
     }
     public nonisolated func recordTrackPoints(rideID: UUID, points: [RemoteTrackPoint]) async throws {
-        let payload = points.map { ["recorded_at": ISO8601DateFormatter().string(from: $0.recordedAt),
-                                    "lat": String($0.coordinate.latitude),
-                                    "lon": String($0.coordinate.longitude),
-                                    "progress_meters": String($0.progressMeters)] }
+        // Heterogeneous params (String + array) must be built as AnyJSON, not a
+        // [String: Any] dictionary (which is not Encodable and will not compile).
+        let payload: [AnyJSON] = points.map { p in
+            .object([
+                "recorded_at": .string(ISO8601DateFormatter().string(from: p.recordedAt)),
+                "lat": .double(p.coordinate.latitude),
+                "lon": .double(p.coordinate.longitude),
+                "progress_meters": .double(p.progressMeters),
+            ])
+        }
         _ = try await client.rpc("record_track_points",
-            params: ["p_ride_id": rideID.uuidString, "p_points": payload]).execute()
+            params: ["p_ride_id": AnyJSON.string(rideID.uuidString),
+                     "p_points": AnyJSON.array(payload)]).execute()
     }
     public nonisolated func endRide(rideID: UUID) async throws {
         _ = try await client.rpc("end_ride", params: ["p_ride_id": rideID.uuidString]).execute()
@@ -1284,19 +1311,27 @@ public struct SupabaseGroupRideBackend: GroupRideBackend {
     }
 }
 
-/// Wire row returned by create_ride / join_ride.
+/// Wire row returned by create_ride / join_ride. CodingKeys map snake_case JSON
+/// to camelCase properties (avoids SwiftLint `identifier_name`); the PostgREST
+/// decoder does no key conversion of its own.
 private struct GroupRideRow: Decodable {
     let id: UUID
-    let host_id: UUID
-    let join_code: String
+    let hostID: UUID
+    let joinCode: String
     let status: String
-    let created_at: Date
+    let createdAt: Date
+    enum CodingKeys: String, CodingKey {
+        case id, status
+        case hostID = "host_id"
+        case joinCode = "join_code"
+        case createdAt = "created_at"
+    }
     func toDomain() throws -> GroupRide {
-        guard let code = JoinCode(rawValue: join_code),
-              let status = GroupRide.Status(rawValue: status) else {
+        guard let code = JoinCode(rawValue: joinCode),
+              let rideStatus = GroupRide.Status(rawValue: status) else {
             throw GroupRideError.joinFailed
         }
-        return GroupRide(id: id, hostID: host_id, joinCode: code, status: status, createdAt: created_at)
+        return GroupRide(id: id, hostID: hostID, joinCode: code, status: rideStatus, createdAt: createdAt)
     }
 }
 ```
@@ -1309,7 +1344,7 @@ cd Aura && xcodegen generate && xcodebuild build \
   -project Aura.xcodeproj -scheme Aura \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
 ```
-Expected: BUILD SUCCEEDED. Fix any `AnyJSON`/param-encoding mismatch against the installed supabase-swift API (the param dictionary value type is the version-specific detail; adjust to the SDK's `rpc` signature).
+Expected: BUILD SUCCEEDED. Fix any `AnyJSON`/param-encoding mismatch against the installed supabase-swift API (the param dictionary value type is the version-specific detail; adjust to the SDK's `rpc` signature). **Runtime note (verify in Task 12 Tier-3, not at build time):** `GroupRideRow.createdAt` decodes a Postgres ISO8601 timestamp; if the PostgREST decoder's default date strategy rejects it, configure the client's decoder (or change `createdAt` to `String` and parse). The build will pass regardless — this only surfaces on a live round-trip.
 
 - [ ] **Step 4: Commit.**
 
@@ -1442,3 +1477,13 @@ git commit -m "feat(app): Sign in with Apple controller with hashed/raw nonce sp
 **Type consistency:** `JoinCode(rawValue:)` used consistently (Tasks 9-12). `GroupRideError.joinFailed` is the single generic join error across fake (10) and live (11). `is_ride_member(p_ride_id uuid)` single-arg everywhere (Tasks 3-8). `record_track_points(p_ride_id, p_points)` signature matches between SQL (Task 5) and the conformer (Task 11). Retention rule identical in SQL (Tasks 6/7) and Swift (Task 9).
 
 **Known environment risk:** Tasks 2-8 require Docker + the `supabase` CLI locally for `supabase test db`. If unavailable, the controller runs the migrations/tests against a Supabase dev branch via the MCP and records the substitution (noted in Global Constraints). Task 1 and Tasks 9-12 need only the existing Xcode/Swift toolchain.
+
+**Plan-review fixes folded (2026-06-29, two reviewers — SQL/pgTAP + Swift/build):**
+- *Build-breaker (SQL):* the `handle_new_user` trigger is live in every test → removed all explicit `insert into public.profiles`; seed `auth.users` (full column set) as superuser before any role switch. Global Constraints + Tasks 3-8 tests.
+- *Build-breaker (SQL):* seeding under the `authenticated` role → all user creation moved up front as superuser; identity switches via `request.jwt.claims` only. Task 4 cap loop restructured.
+- *Build-breaker (SQL):* unguarded `create extension pg_cron` could fail the whole suite → extension + schedule wrapped in a guarded `do $$ … exception when others then null $$`, moved to migration 0006. Task 2/6/7.
+- *Build-breaker (Swift):* `recordTrackPoints` heterogeneous params dict isn't `Encodable` → rebuilt with `AnyJSON`. Task 11.
+- *Build-breaker (Swift):* `init(sharing:)` cross-actor read → `nonisolated let store`. Task 10.
+- *Important:* `delete_account` can't delete `auth.users` from a postgres-owned function on the hosted project → it now deletes `profiles` (cascades public data) + a `delete-account` edge function removes the auth row. Task 8.
+- *Important:* `auth.users` NOT NULL columns are version-fragile → seed `(instance_id, id, aud, role, email)` + a Task 2 schema check.
+- *Minor:* `rides_join_code_key` renamed + comment (don't make it partial); `GroupRideRow` CodingKeys for SwiftLint; explicit `OpenIDConnectCredentials`; dead `seq`/`raw` removed; `created_at` decode flagged for Tier-3.
