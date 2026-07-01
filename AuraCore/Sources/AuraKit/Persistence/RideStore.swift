@@ -7,7 +7,7 @@ import AuraCore
 @MainActor
 @Observable
 public final class RideStore {
-    private let container: ModelContainer
+    public let container: ModelContainer
     /// True when rides live in a throwaway in-memory store (the on-disk container failed),
     /// so the UI can warn that rides won't persist across launches.
     public let isEphemeral: Bool
@@ -38,7 +38,8 @@ public final class RideStore {
 
     public static func inMemory() throws -> RideStore {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        return RideStore(container: try ModelContainer(for: RideRecord.self, configurations: config),
+        return RideStore(container: try ModelContainer(for: RideRecord.self, SavedPlaceRecord.self,
+                                                       configurations: config),
                          isEphemeral: true)
     }
 
@@ -47,7 +48,7 @@ public final class RideStore {
     /// migrated, and uploaded on first sync. `inMemory()` stays local.
     public static func persistent() throws -> RideStore {
         let config = ModelConfiguration(cloudKitDatabase: .private("iCloud.com.rohunjoseph.aura"))
-        let container = try ModelContainer(for: RideRecord.self,
+        let container = try ModelContainer(for: RideRecord.self, SavedPlaceRecord.self,
                                            migrationPlan: RideMigrationPlan.self,
                                            configurations: config)
         return RideStore(container: container)
