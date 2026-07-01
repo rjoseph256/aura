@@ -1,9 +1,15 @@
 import Foundation
 import AuraCore
 
-/// The group-ride session owner: create/join lifecycle, phase, and (in a later task)
-/// the live tick layer. This file covers lifecycle only — `tick`/`ingest`/`peers`/
-/// `nameMap`/`toasts`/`startTicker` are added by Task 10a/10b on top of this seam.
+/// A membership-related notification the UI drains from `GroupRideSession.toasts`.
+public enum GroupToastEvent: Equatable, Sendable {
+    case joined(String)
+    case left(String)
+    case hostEnded
+}
+
+/// The group-ride session owner: create/join lifecycle, phase, the live tick layer,
+/// and membership toasts (nameMap resolution + joined/left/hostEnded notifications).
 @MainActor
 @Observable
 public final class GroupRideSession {
@@ -18,6 +24,10 @@ public final class GroupRideSession {
     public private(set) var route: Route?
     public private(set) var peers: [RidePeer] = []
     public private(set) var isLive: Bool = false
+    /// userID -> display name, populated from `backend.roster(rideID:)`.
+    public private(set) var nameMap: [UUID: String] = [:]
+    /// Append-only membership notifications; the UI drains this.
+    public private(set) var toasts: [GroupToastEvent] = []
 
     private let backend: any GroupRideBackend
     private let transport: any RideSessionTransport
@@ -26,6 +36,7 @@ public final class GroupRideSession {
     private var rideSession: RideSession?
     private var currentLifecycle: RideLifecycle = .foreground
     private var tickerTask: Task<Void, Never>?
+    private var isRefreshingRoster = false
 
     public init(backend: any GroupRideBackend, transport: any RideSessionTransport,
                 displayNameProvider: @escaping @Sendable () -> String, cadence: LiveShareCadence = .init()) {
@@ -108,13 +119,38 @@ public final class GroupRideSession {
         isLive = session.isLive
     }
 
-    /// Forwards a transport event to the inner session, then snapshots peers/isLive.
-    /// Membership/toast logic is added in Task 10b — here `ingest` only forwards + snapshots.
+    /// Resolves membership toasts for a transport event, forwards it to the inner session,
+    /// then snapshots peers/isLive. A `.position` from an unknown peer triggers a throttled
+    /// roster refresh and (if a name resolves) a `.joined` toast; a motion-state change on an
+    /// already-known peer is deliberately silent (D11). `.memberLeft` always toasts `.left`.
     public func ingest(_ event: TransportEvent) async {
         guard let session = rideSession else { return }
+        switch event {
+        case .position(let payload) where nameMap[payload.userID] == nil:
+            await refreshRoster()
+            if let name = nameMap[payload.userID] {
+                toasts.append(.joined(name))
+            }
+        case .memberLeft(let id):
+            toasts.append(.left(nameMap[id] ?? "Rider"))
+        default:
+            break
+        }
         await session.ingest(event)
         peers = session.peers
         isLive = session.isLive
+    }
+
+    /// Merges the backend roster's display names into `nameMap`. Guarded by an in-flight
+    /// flag so a burst of unknown-peer positions collapses into a single fetch.
+    private func refreshRoster() async {
+        guard !isRefreshingRoster else { return }
+        isRefreshingRoster = true
+        defer { isRefreshingRoster = false }
+        guard let rideID, let members = try? await backend.roster(rideID: rideID) else { return }
+        for member in members {
+            nameMap[member.userID] = member.displayName
+        }
     }
 
     /// Production-only: drives `tick(now:)` off a real wall clock. Tests never call this —
