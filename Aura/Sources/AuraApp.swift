@@ -6,17 +6,24 @@ import MapboxMaps
 @main
 struct AuraApp: App {
     @State private var router = AppRouter()
-    @State private var rideStore = AuraApp.makeRideStore()
+    @State private var rideStore: RideStore
+    @State private var savedPlaces: SavedPlacesStore
     @State private var settings = SettingsStore(defaults: .standard, sync: UbiquitousKeyValueStore())
     @State private var location = LocationService()
 
-    init() { AuraApp.configureMapbox() }
+    init() {
+        AuraApp.configureMapbox()
+        let store = AuraApp.makeRideStore()
+        _rideStore = State(initialValue: store)
+        _savedPlaces = State(initialValue: SavedPlacesStore(container: store.container))
+    }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(router)
                 .environment(rideStore)
+                .environment(savedPlaces)
                 .environment(settings)
                 .environment(location)
                 .preferredColorScheme(.dark)
