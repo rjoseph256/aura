@@ -47,4 +47,38 @@ extension NavigateHUDView {
             .max { ($0.progressMeters ?? -.infinity) < ($1.progressMeters ?? -.infinity) }?
             .userID
     }
+
+    // MARK: - Group End / Leave
+
+    /// True only when this HUD is hosting a live group ride AND the rider is that ride's
+    /// host. `false` for members and on the solo path.
+    var isGroupHost: Bool { groupSession?.isHost == true }
+
+    var groupEndTitle: String {
+        isGroupHost ? "End the group ride for everyone?" : "Leave the crew or end your ride?"
+    }
+
+    /// Host: dissolve the crew for everyone (`end()` calls the backend, emitting the
+    /// host-left wire signal so every guest's crew chrome dissolves), then finish this
+    /// rider's own ride into the summary.
+    func endGroupRideAsHost() {
+        Task {
+            await groupSession?.end()
+            endRide()
+        }
+    }
+
+    /// Member choosing "Leave crew": drop out of the crew (chrome dissolves via phase) but
+    /// keep navigating solo (D10). The ride itself is NOT ended.
+    func leaveCrewKeepRiding() {
+        Task { await groupSession?.leave() }
+    }
+
+    /// Member choosing "End ride": leave the crew first (remove self), then finish the ride.
+    func endRideAsMember() {
+        Task {
+            await groupSession?.leave()
+            endRide()
+        }
+    }
 }

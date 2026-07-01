@@ -46,6 +46,12 @@ public final class GroupRideSession {
     private var rideSession: RideSession?
     private var currentLifecycle: RideLifecycle = .foreground
     private var tickerTask: Task<Void, Never>?
+    /// The event-consumption loop this session OWNS once live (so its own `ingest` — names/
+    /// toasts/host-end dissolve — runs on the live stream). Torn down alongside the ticker.
+    private var eventLoopTask: Task<Void, Never>?
+    /// Idempotency latch for `beginLiveSession()`: the lobby `.task` and the `.riding`
+    /// `.task` both call it, and it must subscribe exactly once. Reset on teardown.
+    private var didBeginLive = false
     private var isRefreshingRoster = false
     private var hostID: UUID?
 
@@ -114,13 +120,32 @@ public final class GroupRideSession {
         phase = .riding
     }
 
-    /// Called by the production call site once it has entered `.riding` (after `create`
-    /// + `startRiding()` or `join`): starts the inner live session + the wall-clock
-    /// ticker. Tests never call this — they drive `tick`/`ingest` directly.
-    public func beginLiveSession(roster: [RidePeer] = []) async {
-        guard let session = rideSession else { return }
-        await session.start(roster: roster)
+    /// Called by the production call sites (the lobby `.task` and the `.riding` `.task`)
+    /// once a session exists: subscribes to the live transport and OWNS the event loop so
+    /// this session's `ingest` (names/toasts/host-end dissolve) runs on the live stream —
+    /// `RideSession.start(roster:)` would instead spawn its own loop driving only
+    /// `RideSession.ingest` (dots), so the group layer would never see names/toasts live.
+    /// Idempotent (the lobby and the riding view both call it); tests may still drive
+    /// `tick`/`ingest` directly for the deterministic seams.
+    public func beginLiveSession() async {
+        guard !didBeginLive, let session = rideSession else { return }
+        didBeginLive = true
+
+        // Populate nameMap AND capture the roster so joined-but-not-yet-moving members
+        // seed presence (they show in the lobby/roster before their first position).
+        let members = await refreshRoster()
+        let seedPeers = members.map {
+            RidePeer(userID: $0.userID, displayName: $0.displayName, status: .awaiting)
+        }
+
+        let events = session.startManaged(roster: seedPeers)
+        eventLoopTask = Task { [weak self] in
+            for await event in events {
+                await self?.ingest(event)
+            }
+        }
         startTicker()
+        peers = session.peers
     }
 
     /// The sole time entry point. Publishes buffered own-points when due, ages silent
@@ -152,9 +177,7 @@ public final class GroupRideSession {
         case .memberLeft(let id) where id == hostID:
             toasts.append(.hostEnded)
             phase = .ended
-            session.stop()
-            tickerTask?.cancel()
-            tickerTask = nil
+            teardownLive(session)
         case .memberLeft(let id):
             toasts.append(.left(nameMap[id] ?? "Rider"))
         default:
@@ -165,16 +188,21 @@ public final class GroupRideSession {
         isLive = session.isLive
     }
 
-    /// Merges the backend roster's display names into `nameMap`. Guarded by an in-flight
-    /// flag so a burst of unknown-peer positions collapses into a single fetch.
-    private func refreshRoster() async {
-        guard !isRefreshingRoster else { return }
+    /// Merges the backend roster's display names into `nameMap` and returns the fetched
+    /// members (so `beginLiveSession` can seed presence with everyone who has joined).
+    /// Guarded by an in-flight flag so a burst of unknown-peer positions collapses into a
+    /// single fetch; a coalesced call returns `[]` (its caller only needs the name merge,
+    /// which the in-flight fetch is already doing).
+    @discardableResult
+    private func refreshRoster() async -> [RosterMember] {
+        guard !isRefreshingRoster else { return [] }
         isRefreshingRoster = true
         defer { isRefreshingRoster = false }
-        guard let rideID, let members = try? await backend.roster(rideID: rideID) else { return }
+        guard let rideID, let members = try? await backend.roster(rideID: rideID) else { return [] }
         for member in members {
             nameMap[member.userID] = member.displayName
         }
+        return members
     }
 
     /// Production-only: drives `tick(now:)` off a real wall clock. Tests never call this —
@@ -192,16 +220,24 @@ public final class GroupRideSession {
     public func end() async {
         if let rideID { try? await backend.endRide(rideID: rideID) }
         phase = .ended
-        rideSession?.stop()
-        tickerTask?.cancel()
-        tickerTask = nil
+        teardownLive(rideSession)
     }
 
     public func leave() async {
         if let rideID { try? await backend.leaveRide(rideID: rideID) }
         phase = .ended
-        rideSession?.stop()
+        teardownLive(rideSession)
+    }
+
+    /// Single teardown path for every dissolve (host end, member leave, host-end wire
+    /// signal): stops the inner session's subscription, cancels the owned event loop and
+    /// ticker, and clears `didBeginLive` so a fresh session could begin again.
+    private func teardownLive(_ session: RideSession?) {
+        session?.stop()
+        eventLoopTask?.cancel()
+        eventLoopTask = nil
         tickerTask?.cancel()
         tickerTask = nil
+        didBeginLive = false
     }
 }

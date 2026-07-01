@@ -61,6 +61,11 @@ struct GroupLobbyView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AuraTheme.background.ignoresSafeArea())
         .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows.count)
+        // Subscribe the host to the live layer while still in the lobby so joiners appear
+        // (their first position drives a roster refresh that names them) and the seed
+        // roster shows everyone who has already joined. beginLiveSession is idempotent, so
+        // the later `.riding` `.task` calling it again is a safe no-op.
+        .task { await session.beginLiveSession() }
     }
 
     // MARK: - Header
