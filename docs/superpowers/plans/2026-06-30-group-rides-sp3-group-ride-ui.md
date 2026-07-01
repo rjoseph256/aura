@@ -99,12 +99,14 @@ update public.profiles set display_name = 'Sara'   where id = 'bbbbbbbb-0000-000
 
 create function pg_temp.roster_flow(out member_rows int, out has_names boolean, out outsider_rejected boolean)
 language plpgsql security definer set search_path = '' as $$
-declare rid uuid;
+declare rid uuid; code text;
 begin
   perform set_config('request.jwt.claims','{"sub":"aaaaaaaa-0000-0000-0000-000000000001"}', true);
-  select id into rid from public.create_ride('{}'::jsonb);
+  -- Capture the join_code UNDER HOST CLAIMS: rides RLS (is_ride_member) hides the row from
+  -- the not-yet-member, so reading join_code after switching claims would return nothing.
+  select id, join_code into rid, code from public.create_ride('{}'::jsonb);
   perform set_config('request.jwt.claims','{"sub":"bbbbbbbb-0000-0000-0000-000000000002"}', true);
-  perform public.join_ride((select join_code from public.rides where id = rid));
+  perform public.join_ride(code);
   -- host reads the roster: 2 rows, names present
   perform set_config('request.jwt.claims','{"sub":"aaaaaaaa-0000-0000-0000-000000000001"}', true);
   select count(*)::int into member_rows from public.ride_roster(rid);
@@ -268,8 +270,8 @@ git commit -m "feat(core): PeerBearing pure heading helper for peer dots (SP3)"
 - Create: `AuraCore/Tests/AuraCoreTests/GroupRide/PeerDistanceTests.swift`
 
 **Interfaces:**
-- Consumes: `RidePeer` (`progressMeters: Double?`, `status`), and a units flag. **Check the existing units type** in `AuraCore` (used by `SpeedRail(units:)`); it is `Units` (values `.metric`/`.imperial`) — confirm the exact name/cases in `AuraCore/Sources/AuraCore` before writing; use it verbatim.
-- Produces: `enum PeerDistance { static func label(selfProgress: Double, peer: RidePeer, units: Units) -> String? }`. Returns `nil` for `.awaiting` (no position) and a "no signal" sentinel is NOT its job (the row handles `.dropped` copy); for a positioned peer returns e.g. `"0.4 mi ahead"`, `"120 m behind"`, `"even"`.
+- Consumes: `RidePeer` (`progressMeters: Double?`, `status`), and a plain **`isImperial: Bool`**. NOTE (reviewer-confirmed): the app's units type is `DistanceUnits` (`.imperial`/`.metric`) and lives in **AuraKit** (`AuraKit/Settings/SettingsStore.swift`), which AuraCore **cannot import** (dependency is one-way AuraKit→AuraCore). So a pure AuraCore helper must NOT reference `DistanceUnits`; it takes a `Bool`. Callers map `settings.units == .imperial` at the AuraKit/app boundary.
+- Produces: `enum PeerDistance { static func label(selfProgress: Double, peer: RidePeer, isImperial: Bool) -> String? }`. Returns `nil` for `.awaiting` (no position); a "no signal" sentinel is NOT its job (the row handles `.dropped` copy); for a positioned peer returns e.g. `"0.4 mi ahead"`, `"120 m behind"`, `"even"`.
 
 - [ ] **Step 1: Write the failing tests**
 ```swift
@@ -281,19 +283,19 @@ struct PeerDistanceTests {
         RidePeer(userID: UUID(), displayName: "x", progressMeters: p, status: s)
     }
     @Test func aheadImperial() {
-        let l = PeerDistance.label(selfProgress: 0, peer: peer(804.7, .riding), units: .imperial)
+        let l = PeerDistance.label(selfProgress: 0, peer: peer(804.7, .riding), isImperial: true)
         #expect(l == "0.5 mi ahead")
     }
     @Test func behindMetric() {
-        let l = PeerDistance.label(selfProgress: 200, peer: peer(80, .riding), units: .metric)
+        let l = PeerDistance.label(selfProgress: 200, peer: peer(80, .riding), isImperial: false)
         #expect(l == "120 m behind")
     }
     @Test func evenWhenClose() {
-        let l = PeerDistance.label(selfProgress: 100, peer: peer(105, .riding), units: .metric)
+        let l = PeerDistance.label(selfProgress: 100, peer: peer(105, .riding), isImperial: false)
         #expect(l == "even")
     }
     @Test func awaitingHasNoDistance() {
-        #expect(PeerDistance.label(selfProgress: 0, peer: peer(nil, .awaiting), units: .metric) == nil)
+        #expect(PeerDistance.label(selfProgress: 0, peer: peer(nil, .awaiting), isImperial: false) == nil)
     }
 }
 ```
@@ -309,18 +311,17 @@ import Foundation
 /// no position yet (`.awaiting`); `.dropped` copy is the row's job, not this helper's.
 public enum PeerDistance {
     private static let evenBandMeters = 15.0
-    public static func label(selfProgress: Double, peer: RidePeer, units: Units) -> String? {
+    public static func label(selfProgress: Double, peer: RidePeer, isImperial: Bool) -> String? {
         guard let p = peer.progressMeters else { return nil }
         let delta = p - selfProgress
         if abs(delta) < evenBandMeters { return "even" }
         let direction = delta > 0 ? "ahead" : "behind"
         let magnitude = abs(delta)
-        switch units {
-        case .imperial:
+        if isImperial {
             let miles = magnitude / 1609.34
             if miles >= 0.1 { return String(format: "%.1f mi %@", miles, direction) }
             return "\(Int((magnitude / 0.3048).rounded())) ft \(direction)"
-        case .metric:
+        } else {
             if magnitude >= 1000 { return String(format: "%.1f km %@", magnitude / 1000, direction) }
             return "\(Int(magnitude.rounded())) m \(direction)"
         }
@@ -409,7 +410,7 @@ git commit -m "feat(core): DisplayName validation (40-grapheme cap, Rider fallba
 - Create: `AuraCore/Tests/AuraCoreTests/GroupRide/GroupRosterViewDataTests.swift`
 
 **Interfaces:**
-- Consumes: `[RidePeer]`, `nameMap: [UUID: String]`, `selfUserID: UUID`, `units: Units`, and (for distance) self's `progressMeters`. Uses `PeerDistance`, `DisplayName`, `PeerStatus`.
+- Consumes: `[RidePeer]`, `nameMap: [UUID: String]`, `selfUserID: UUID`, `isImperial: Bool` (same layering reason as Task 4 — no `DistanceUnits` in AuraCore), and (for distance) self's `progressMeters`. Uses `PeerDistance`, `DisplayName`, `PeerStatus`.
 - Produces:
 ```swift
 public struct RosterRow: Equatable, Sendable, Identifiable {
@@ -421,7 +422,7 @@ public struct RosterRow: Equatable, Sendable, Identifiable {
 }
 public enum GroupRosterViewData {
     public static func rows(peers: [RidePeer], nameMap: [UUID: String],
-                            selfUserID: UUID, selfProgress: Double, units: Units) -> [RosterRow]
+                            selfUserID: UUID, selfProgress: Double, isImperial: Bool) -> [RosterRow]
 }
 ```
 Ordering: leader-first by `progressMeters` (desc, nil last); **self always present** (synthesize a self row if not in `peers`). Name resolves `nameMap[id]` → peer.displayName → "Rider". `.dropped` → `distanceLabel = "no signal"`; self → nil.
@@ -439,23 +440,23 @@ struct GroupRosterViewDataTests {
     @Test func ordersLeaderFirstAndPinsSelf() {
         let rows = GroupRosterViewData.rows(
             peers: [peer(me, 100, .riding), peer(sara, 300, .riding), peer(jordan, 50, .stopped)],
-            nameMap: [sara: "Sara", jordan: "Jordan"], selfUserID: me, selfProgress: 100, units: .metric)
+            nameMap: [sara: "Sara", jordan: "Jordan"], selfUserID: me, selfProgress: 100, isImperial: false)
         #expect(rows.map(\.id) == [sara, me, jordan])       // 300, 100(self), 50
         #expect(rows.first { $0.isSelf }?.id == me)
     }
     @Test func nameMapOverridesBlank_elseRider() {
         let rows = GroupRosterViewData.rows(
-            peers: [peer(sara, 10, .riding)], nameMap: [:], selfUserID: me, selfProgress: 0, units: .metric)
+            peers: [peer(sara, 10, .riding)], nameMap: [:], selfUserID: me, selfProgress: 0, isImperial: false)
         #expect(rows.first { $0.id == sara }?.name == "Rider")   // no name yet
     }
     @Test func droppedShowsNoSignal() {
         let rows = GroupRosterViewData.rows(
-            peers: [peer(jordan, 10, .dropped)], nameMap: [jordan: "Jordan"], selfUserID: me, selfProgress: 0, units: .metric)
+            peers: [peer(jordan, 10, .dropped)], nameMap: [jordan: "Jordan"], selfUserID: me, selfProgress: 0, isImperial: false)
         #expect(rows.first { $0.id == jordan }?.distanceLabel == "no signal")
     }
     @Test func synthesizesSelfWhenAbsent() {
         let rows = GroupRosterViewData.rows(
-            peers: [], nameMap: [:], selfUserID: me, selfProgress: 0, units: .metric)
+            peers: [], nameMap: [:], selfUserID: me, selfProgress: 0, isImperial: false)
         #expect(rows.map(\.id) == [me])
     }
 }
@@ -476,8 +477,10 @@ public struct RosterRow: Equatable, Sendable, Identifiable {
 }
 
 public enum GroupRosterViewData {
+    private static let selfLabel = "You"
+    private static let noSignalLabel = "no signal"
     public static func rows(peers: [RidePeer], nameMap: [UUID: String],
-                            selfUserID: UUID, selfProgress: Double, units: Units) -> [RosterRow] {
+                            selfUserID: UUID, selfProgress: Double, isImperial: Bool) -> [RosterRow] {
         var all = peers
         if !all.contains(where: { $0.userID == selfUserID }) {
             all.append(RidePeer(userID: selfUserID, displayName: "",
@@ -493,12 +496,12 @@ public enum GroupRosterViewData {
         }
         return sorted.map { peer in
             let isSelf = peer.userID == selfUserID
-            let name = isSelf ? "You"
+            let name = isSelf ? selfLabel
                 : DisplayName.forDisplay(nameMap[peer.userID] ?? peer.displayName)
             let distance: String?
             if isSelf { distance = nil }
-            else if peer.status == .dropped { distance = "no signal" }
-            else { distance = PeerDistance.label(selfProgress: selfProgress, peer: peer, units: units) }
+            else if peer.status == .dropped { distance = noSignalLabel }
+            else { distance = PeerDistance.label(selfProgress: selfProgress, peer: peer, isImperial: isImperial) }
             return RosterRow(id: peer.userID, name: name, isSelf: isSelf,
                              status: peer.status, distanceLabel: distance)
         }
@@ -589,16 +592,16 @@ git commit -m "feat(core): aura://join deep link + AppRoute.groupRide entry (SP3
 **Files:**
 - Modify: `AuraCore/Sources/AuraKit/GroupRide/GroupRideBackend.swift`
 - Modify: `AuraCore/Sources/AuraKit/GroupRide/InMemoryGroupRideBackend.swift`
-- Create: `AuraCore/Tests/AuraKitTests/GroupRide/InMemoryGroupRideBackendTests.swift`
+- **Modify** (NOT create — it already exists): `AuraCore/Tests/AuraKitTests/GroupRide/InMemoryGroupRideBackendTests.swift` — the file has existing tests (e.g. `createThenJoinReturnsSameRide` asserting `joined.id == ride.id`). Because `joinRide` now returns `JoinedRide`, update those assertions to `joined.ride.id`, and add the new test below. Do NOT overwrite the file.
 
 **Interfaces:**
 - Produces on the protocol:
 ```swift
 func currentUserID() async throws -> UUID
-func joinRide(code: JoinCode) async throws -> JoinedRide      // CHANGED return type
+func joinRide(code: JoinCode) async throws -> JoinedRide      // CHANGED return type (was GroupRide)
 func roster(rideID: UUID) async throws -> [RosterMember]
 ```
-with `public struct JoinedRide: Sendable { public let ride: GroupRide; public let route: Data }` and `public struct RosterMember: Equatable, Sendable { public let userID: UUID; public let displayName: String; public let role: GroupRide.Role /* or String */ }`. (Host keeps its own route locally, so `createRide` still returns `GroupRide`.) Consumed by `GroupRideSession` (Tasks 9/10) and the live conformer (Task 11).
+with `public struct JoinedRide: Sendable { public let ride: GroupRide; public let route: Data }` and `public struct RosterMember: Equatable, Sendable { public let userID: UUID; public let displayName: String; public let role: RideMember.Role }`. **`RideMember.Role`** (`{ case host, member }`) is the real, existing role enum — there is no `GroupRide.Role`. Also add a case to the existing `GroupRideError` for the create size limit: `case routeTooLarge` (§7 >256 KB state). (Host keeps its own route locally, so `createRide` still returns `GroupRide`.) Consumed by `GroupRideSession` (Tasks 9/10a/10b) and the live conformer (Task 11).
 
 - [ ] **Step 1: Write the failing tests** (the fake must round-trip route + return named roster + self id)
 ```swift
@@ -631,9 +634,9 @@ struct InMemoryGroupRideBackendTests {
 
 - [ ] **Step 3: Implement the protocol change + fake**
 
-`GroupRideBackend.swift`: add the two structs, add `currentUserID`, `roster`, change `joinRide` return to `JoinedRide`. `RosterMember.role` — reuse the existing `RideMember.Role` if present, else `String`.
+`GroupRideBackend.swift`: add the two structs, add `currentUserID`, `roster`, change `joinRide` return to `JoinedRide`, add `case routeTooLarge` to `GroupRideError`. `RosterMember.role` uses the existing `RideMember.Role`.
 
-`InMemoryGroupRideBackend.swift`: extend `Store` with `routes: [UUID: Data] = [:]` and `names: [UUID: String] = [:]`; keep `currentUser`. `signIn` records `names[currentUser!] = DisplayName.forDisplay(displayName ?? "")` (need to import AuraCore). `createRide` stores `store.routes[ride.id] = route`. `joinRide` returns `JoinedRide(ride: ride, route: store.routes[rideID] ?? Data())`. Add:
+`InMemoryGroupRideBackend.swift`: extend `Store` with `routes: [UUID: Data] = [:]`, `names: [UUID: String] = [:]`, test spies `leaveCalled = false` and `forceCreateError: GroupRideError? = nil`; keep `currentUser`. `signIn` records `names[currentUser!] = DisplayName.forDisplay(displayName ?? "")` (already `import AuraCore`). `createRide` throws `store.forceCreateError` first if set (so the Task-9 too-large test works), then stores `store.routes[ride.id] = route`. `joinRide` returns `JoinedRide(ride: ride, route: store.routes[rideID] ?? Data())`. `leaveRide` also sets `store.leaveCalled = true` (so Task 9's auto-leave test can assert it). Add:
 ```swift
 public func currentUserID() async throws -> UUID {
     guard let uid = currentUser else { throw GroupRideError.notAuthenticated }
@@ -646,6 +649,7 @@ public func roster(rideID: UUID) async throws -> [RosterMember] {
     }
 }
 ```
+Also update the **existing** tests in the file: any `joined.id`/`joined.status` becomes `joined.ride.id`/`joined.ride.status`.
 
 - [ ] **Step 4: Run — verify pass.** Run: `swift test --package-path AuraCore --filter InMemoryGroupRideBackendTests`.
 
@@ -667,7 +671,9 @@ git commit -m "feat(kit): GroupRideBackend gains currentUserID/roster + JoinedRi
 - Consumes: `GroupRideBackend`, `RideSessionTransport`, `LiveShareCadence`, `Route` (Codable), `DisplayName`, `JoinedRide`.
 - Produces (`@MainActor @Observable public final class GroupRideSession`):
 ```swift
-public enum Phase: Equatable, Sendable { case idle, lobby, riding, ended, routeUnavailable, needsDisplayName }
+public enum Phase: Equatable, Sendable {
+    case idle, lobby, riding, ended, routeUnavailable, createFailed, needsDisplayName
+}
 public private(set) var phase: Phase
 public private(set) var isHost: Bool
 public private(set) var rideID: UUID?
@@ -679,7 +685,10 @@ public func create(route: Route) async
 public func join(code: JoinCode) async
 public func startRiding()      // lobby -> riding (host)
 ```
-Gate: `create`/`join` set `phase = .needsDisplayName` and return early if `DisplayName.normalized(displayNameProvider()) == nil`. `join` decodes `JoinedRide.route` via `JSONDecoder().decode(Route.self, from:)`; decode failure → `phase = .routeUnavailable` + `try? await backend.leaveRide(rideID:)`.
+- **Gate:** `create`/`join` set `phase = .needsDisplayName` and return early if `DisplayName.normalized(displayNameProvider()) == nil` (covers both entry points; the join path is the deep-link-reachable one, so its gate is load-bearing).
+- **selfUserID:** `JoinedRide` has NO `selfUserID` field — obtain it from `try await backend.currentUserID()`; `isHost = (ride.hostID == selfUserID)`.
+- **create:** on a `GroupRideError.routeTooLarge` from the backend (the >256 KB `rides.route` check), set `phase = .createFailed` (§7).
+- **join:** decode `JoinedRide.route` via `JSONDecoder().decode(Route.self, from:)`; decode failure → `phase = .routeUnavailable` **and** `try? await backend.leaveRide(rideID:)` to free the slot. On success a joiner goes straight to `.riding` (D3 rolling join — never blocked in a lobby).
 
 - [ ] **Step 1: Write the failing tests**
 ```swift
@@ -716,19 +725,38 @@ struct GroupRideSessionLifecycleTests {
         s.startRiding()
         #expect(s.phase == .riding)
     }
-    @Test func joinDecodesHostRoute() async throws {
-        let (host, backend) = try await make(name: "Mike")
+    // Builds a signed-in guest session sharing the host's store, ready to join.
+    private func guest(sharing host: InMemoryGroupRideBackend, name: String) async throws
+        -> (GroupRideSession, InMemoryGroupRideBackend) {
+        let backend = InMemoryGroupRideBackend(sharing: host)
+        try await backend.signIn(idToken: "t2", nonce: "n2", displayName: name)
+        return (GroupRideSession(backend: backend, transport: InMemoryRideSessionTransport(),
+                                 displayNameProvider: { name }), backend)
+    }
+    @Test func joinEntersRidingAsMemberWithRoute() async throws {
+        let (host, hostBackend) = try await make(name: "Mike")
         await host.create(route: route())
-        let guest = GroupRideSession(backend: InMemoryGroupRideBackend(sharing: backend),
-                                     transport: InMemoryRideSessionTransport(),
-                                     displayNameProvider: { "Sara" })
-        // guest backend must be signed in:
-        // (InMemoryGroupRideBackend(sharing:) shares store; sign the guest in first)
-        // -> see impl note; then:
+        let (guest, _) = try await guest(sharing: hostBackend, name: "Sara")
         await guest.join(code: host.joinCode!)
-        #expect(guest.phase == .riding || guest.phase == .lobby)
+        #expect(guest.phase == .riding)          // D3 rolling join — never parked in a lobby
         #expect(guest.isHost == false)
         #expect(guest.route?.geometry.count == 2)
+    }
+    @Test func joinWithCorruptRouteEntersRouteUnavailableAndLeaves() async throws {
+        let (host, hostBackend) = try await make(name: "Mike")
+        await host.create(route: route())
+        // Corrupt the stored route bytes so JSONDecoder().decode(Route.self) fails on join.
+        hostBackend.store.routes[host.rideID!] = Data("not-a-route".utf8)
+        let (guest, guestBackend) = try await guest(sharing: hostBackend, name: "Sara")
+        await guest.join(code: host.joinCode!)
+        #expect(guest.phase == .routeUnavailable)
+        #expect(guestBackend.store.leaveCalled == true)   // auto-left to free the slot
+    }
+    @Test func createTooLargeEntersCreateFailed() async throws {
+        let (s, backend) = try await make()
+        backend.store.forceCreateError = .routeTooLarge   // simulates the >256 KB rides.route check
+        await s.create(route: route())
+        #expect(s.phase == .createFailed)
     }
     @Test func emptyNameGatesCreate() async throws {
         let backend = InMemoryGroupRideBackend()
@@ -737,6 +765,13 @@ struct GroupRideSessionLifecycleTests {
                                  displayNameProvider: { "   " })
         await s.create(route: route())
         #expect(s.phase == .needsDisplayName)
+    }
+    @Test func emptyNameGatesJoin() async throws {          // the deep-link-reachable gate
+        let (host, hostBackend) = try await make(name: "Mike")
+        await host.create(route: route())
+        let (guest, _) = try await guest(sharing: hostBackend, name: "")   // provider returns ""
+        await guest.join(code: host.joinCode!)
+        #expect(guest.phase == .needsDisplayName)
     }
 }
 ```
@@ -756,27 +791,27 @@ git commit -m "feat(kit): GroupRideSession lifecycle — create/join/gate/phase 
 
 ---
 
-## Task 10: `GroupRideSession` — live layer (tick seam, nameMap, toasts, snapshots)
+## Task 10a: `GroupRideSession` — tick seam, snapshot, reconnect, end/leave
 
 **Files:**
 - Modify: `AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift`
-- Create: `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionLiveTests.swift`
+- Create: `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionTickTests.swift`
 
 **Interfaces:**
 - Produces (added to `GroupRideSession`):
 ```swift
 public private(set) var peers: [RidePeer]        // snapshot of the inner RideSession
 public private(set) var isLive: Bool
-public private(set) var nameMap: [UUID: String]
-public private(set) var toasts: [GroupToastEvent] // append-only feed the UI drains
-public func tick(now: Date) async               // SOLE time entry: publishIfDue + stalenessTick + snapshot
-public func ingest(_ event: TransportEvent) async  // forwards to RideSession, diffs membership, refreshes names
-func startTicker()                               // PRODUCTION-ONLY: spawns the Date()/sleep loop calling tick(now:)
-public func end() async ; public func leave() async
+private var currentLifecycle: RideLifecycle = .foreground   // RideLifecycle cases: .foreground / .background
+public func tick(now: Date) async                // SOLE time entry: publishIfDue + stalenessTick + snapshot
+public func ingest(_ event: TransportEvent) async  // forwards to inner RideSession, then snapshots
+func startTicker()                               // PRODUCTION-ONLY: Date()/Task.sleep loop calling tick(now:)
+public func end() async
+public func leave() async
 ```
-`GroupToastEvent`: `enum GroupToastEvent: Equatable, Sendable { case joined(String), left(String), hostEnded }`. Membership diff: on a `.position` for a `userID` not seen before → refresh roster (throttled) → emit `.joined(name)`; on `.memberLeft(userID)` → emit `.left(name)` using `nameMap`. `tick` copies `session.peers`/`session.isLive` into the observable stored props (so SwiftUI repaints).
+Both `tick` and `ingest` end by copying `session.peers`/`session.isLive` into the observable stored props (so SwiftUI repaints promptly, not only on the next tick). `end()`/`leave()` call the SP1 RPCs and set `phase = .ended`, then tear down (`session.stop()`, cancel ticker).
 
-- [ ] **Step 1: Write the failing tests** (fully deterministic — drive `ingest`/`tick`, never `startTicker`)
+- [ ] **Step 1: Write the failing tests** (deterministic — drive `ingest`/`tick`, never `startTicker`)
 ```swift
 import Testing
 import Foundation
@@ -784,35 +819,61 @@ import AuraCore
 @testable import AuraKit
 
 @MainActor
-struct GroupRideSessionLiveTests {
-    // ... build a session in .riding via create(), grab its transport ...
-    @Test func positionFromNewPeerEmitsJoinedToastWithName() async throws {
-        // Arrange a session whose backend.roster returns [self:Mike, sara:Sara].
-        // Act: ingest .position(payload for sara); tick(now:).
-        // Assert: peers contains sara; nameMap[sara] == "Sara"; toasts contains .joined("Sara").
+struct GroupRideSessionTickTests {
+    private func ridingHost() async throws -> (GroupRideSession, InMemoryRideSessionTransport, UUID) {
+        let backend = InMemoryGroupRideBackend()
+        try await backend.signIn(idToken: "t", nonce: "n", displayName: "Mike")
+        let selfID = try await backend.currentUserID()
+        let transport = InMemoryRideSessionTransport()
+        let s = GroupRideSession(backend: backend, transport: transport, displayNameProvider: { "Mike" })
+        await s.create(route: Route(origin: .init(latitude: 0, longitude: 0),
+            destination: .init(latitude: 1, longitude: 1), waypoints: [],
+            geometry: [.init(latitude: 0, longitude: 0), .init(latitude: 1, longitude: 1)],
+            profile: .fastest, distanceMeters: 100, estimatedDurationSeconds: 60, elevationGainMeters: 0))
+        s.startRiding()
+        return (s, transport, selfID)
     }
-    @Test func memberLeftEmitsLeftToast() async throws {
-        // After sara is known, ingest .memberLeft(sara) -> toasts contains .left("Sara"); peer removed.
+    private func position(_ id: UUID, _ meters: Double, at t: TimeInterval) -> TransportEvent {
+        .position(LivePositionPayload(userID: id, coordinate: .init(latitude: 1, longitude: 1),
+                                      progressMeters: meters, recordedAt: Date(timeIntervalSince1970: t),
+                                      motionState: .moving))
     }
-    @Test func motionChangeEmitsNoToast() async throws {
-        // Two positions for the same known peer (moving then stopped) -> no new membership toast.
-    }
-    @Test func tickSnapshotsPeersForObservation() async throws {
-        // ingest a position; before tick, session.peers may be stale; after tick(now:), reflects it.
+    @Test func ingestSnapshotsPeersForObservation() async throws {
+        let (s, _, _) = try await ridingHost()
+        let peer = UUID()
+        await s.ingest(position(peer, 10, at: 100))
+        #expect(s.peers.contains { $0.userID == peer })
     }
     @Test func disconnectThenConnectReseeds() async throws {
-        // ingest .disconnected(nil) -> isLive false; set snapshotResult; ingest .connected -> isLive true, peers reseeded.
+        let (s, transport, _) = try await ridingHost()
+        await s.ingest(.disconnected(nil))
+        #expect(s.isLive == false)
+        let seeded = UUID()
+        transport.snapshotResult = [LivePositionPayload(userID: seeded, coordinate: .init(latitude: 2, longitude: 2),
+            progressMeters: 42, recordedAt: Date(timeIntervalSince1970: 200), motionState: .moving)]
+        await s.ingest(.connected)
+        #expect(s.isLive == true)
+        #expect(s.peers.contains { $0.userID == seeded })   // re-seeded from the snapshot
+    }
+    @Test func endTransitionsToEnded() async throws {
+        let (s, _, _) = try await ridingHost()
+        await s.end()
+        #expect(s.phase == .ended)
+    }
+    @Test func tickDoesNotUseWallClock() async throws {
+        // Purely exercises the injected-time entry; a fixed `now` must be accepted with no real waiting.
+        let (s, _, _) = try await ridingHost()
+        await s.tick(now: Date(timeIntervalSince1970: 500))
+        #expect(s.phase == .riding)
     }
 }
 ```
-(Flesh each out against the in-memory backend + `InMemoryRideSessionTransport.emit(...)`. Assert exact toast contents.)
 
-- [ ] **Step 2: Run — verify it fails.**
+- [ ] **Step 2: Run — verify it fails.** Run: `swift test --package-path AuraCore --filter GroupRideSessionTickTests` — Expected: FAIL.
 
-- [ ] **Step 3: Implement the live layer.**
-- `tick(now:)`: `await session.publishIfDue(now: now, lifecycle: currentLifecycle)`, `session.stalenessTick(now: now)`, then `self.peers = session.peers; self.isLive = session.isLive`.
-- `ingest`: `await session.ingest(event)`; then membership bookkeeping: for `.position(p)` where `p.userID` unknown → `await refreshRoster()` then `if let n = nameMap[p.userID] { append .joined(n) }`; for `.memberLeft(id)` → `append .left(nameMap[id] ?? "Rider")`. Throttle `refreshRoster` (e.g. min interval or an in-flight guard) so a burst of unknown peers triggers one fetch.
-- `refreshRoster()`: `let members = try? await backend.roster(rideID:)`; merge into `nameMap`.
+- [ ] **Step 3: Implement.**
+- `tick(now:)`: `await session.publishIfDue(now: now, lifecycle: currentLifecycle)`; `session.stalenessTick(now: now)`; `self.peers = session.peers; self.isLive = session.isLive`.
+- `ingest(_:)`: `await session.ingest(event)`; then `self.peers = session.peers; self.isLive = session.isLive`. (Membership/toast logic is added in Task 10b — here `ingest` only forwards + snapshots.)
 - `startTicker()` (production only), mirroring `RideSessionCoordinator`:
 ```swift
 func startTicker() {
@@ -825,15 +886,119 @@ func startTicker() {
     }
 }
 ```
-- `end()` → `try? await backend.endRide(rideID:)`, `phase = .ended`, `session.stop()`, cancel ticker. `leave()` → `try? await backend.leaveRide(rideID:)`, `phase = .ended`, teardown. Also start the inner `RideSession` subscription + `startTicker()` when entering `.riding` (production path); tests call `tick`/`ingest` directly.
+- `end()` → `try? await backend.endRide(rideID:)`; `phase = .ended`; `session.stop()`; `tickerTask?.cancel()`. `leave()` → `try? await backend.leaveRide(rideID:)`; same teardown. When `startRiding()`/`join` enters `.riding` in production, call `await session.start(roster:)` + `startTicker()`; tests drive `ingest`/`tick` directly and never start the ticker.
 
-- [ ] **Step 4: Run — verify pass.** Run: `swift test --package-path AuraCore --filter GroupRideSessionLiveTests`. Confirm no `Date()`/`Task.sleep` in the tested path (only inside `startTicker`, which tests never call).
+- [ ] **Step 4: Run — verify pass.** Confirm no `Date()`/`Task.sleep` in the tested path (only in `startTicker`, untouched by tests).
 
-- [ ] **Step 5: Full package test + commit**
-Run: `swift test --package-path AuraCore` — Expected: all green.
+- [ ] **Step 5: Commit**
 ```bash
-git add AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionLiveTests.swift
-git commit -m "feat(kit): GroupRideSession live layer — tick seam, nameMap, membership toasts (SP3)"
+git add AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionTickTests.swift
+git commit -m "feat(kit): GroupRideSession tick seam + snapshot + reconnect + end/leave (SP3)"
+```
+
+---
+
+## Task 10b: `GroupRideSession` — membership toasts + nameMap refresh
+
+**Files:**
+- Modify: `AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift`
+- Create: `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionToastTests.swift`
+
+**Interfaces:**
+- Produces (added to `GroupRideSession`):
+```swift
+public private(set) var nameMap: [UUID: String]   // userID -> display name, from ride_roster
+public private(set) var toasts: [GroupToastEvent]  // append-only; the UI drains it
+```
+and `public enum GroupToastEvent: Equatable, Sendable { case joined(String), left(String), hostEnded }` (in AuraKit). `ingest` now also: for a `.position(p)` whose `p.userID` is NOT in `nameMap` → `await refreshRoster()` (throttled by an in-flight guard so a burst = one fetch) → if a name resolved, append `.joined(name)`; for `.memberLeft(id)` → append `.left(nameMap[id] ?? "Rider")`. **No toast is emitted for a motion-state change on an already-known peer (D11).** `refreshRoster()` merges `try? await backend.roster(rideID:)` into `nameMap`. `end()` appends `.hostEnded` for the members' path when the ended signal arrives (host's own `end()` does not toast itself).
+
+- [ ] **Step 1: Write the failing tests** (real bodies — these guard D11 and Finding #1)
+```swift
+import Testing
+import Foundation
+import AuraCore
+@testable import AuraKit
+
+@MainActor
+struct GroupRideSessionToastTests {
+    // Host session in .riding, plus a guest who has actually joined (so backend.roster names them).
+    private func hostWithJoinedGuest(named guestName: String)
+        async throws -> (GroupRideSession, UUID) {
+        let backend = InMemoryGroupRideBackend()
+        try await backend.signIn(idToken: "t", nonce: "n", displayName: "Mike")
+        let host = GroupRideSession(backend: backend, transport: InMemoryRideSessionTransport(),
+                                    displayNameProvider: { "Mike" })
+        await host.create(route: Route(origin: .init(latitude: 0, longitude: 0),
+            destination: .init(latitude: 1, longitude: 1), waypoints: [],
+            geometry: [.init(latitude: 0, longitude: 0), .init(latitude: 1, longitude: 1)],
+            profile: .fastest, distanceMeters: 100, estimatedDurationSeconds: 60, elevationGainMeters: 0))
+        host.startRiding()
+        let guestBackend = InMemoryGroupRideBackend(sharing: backend)
+        try await guestBackend.signIn(idToken: "t2", nonce: "n2", displayName: guestName)
+        let guestID = try await guestBackend.currentUserID()
+        _ = try await guestBackend.joinRide(code: host.joinCode!)   // now a member with a name
+        return (host, guestID)
+    }
+    private func position(_ id: UUID, _ motion: MotionState, at t: TimeInterval) -> TransportEvent {
+        .position(LivePositionPayload(userID: id, coordinate: .init(latitude: 1, longitude: 1),
+                                      progressMeters: 10, recordedAt: Date(timeIntervalSince1970: t),
+                                      motionState: motion))
+    }
+    @Test func newPeerPositionEmitsJoinedToastWithResolvedName() async throws {
+        let (host, sara) = try await hostWithJoinedGuest(named: "Sara")
+        await host.ingest(position(sara, .moving, at: 100))
+        #expect(host.nameMap[sara] == "Sara")
+        #expect(host.toasts.contains(.joined("Sara")))
+    }
+    @Test func unnamedPeerBecomesNamedWithinOneRefresh() async throws {
+        // Finding #1 / §13 "nobody appears blank": after a new peer's first position, the roster
+        // refresh must resolve the real name (not leave it blank).
+        let (host, sara) = try await hostWithJoinedGuest(named: "Sara")
+        #expect(host.nameMap[sara] == nil)               // unknown before any position
+        await host.ingest(position(sara, .moving, at: 100))
+        #expect(host.nameMap[sara] == "Sara")            // resolved by the triggered refresh
+    }
+    @Test func motionChangeEmitsNoToast() async throws {   // D11 — the load-bearing invariant
+        let (host, sara) = try await hostWithJoinedGuest(named: "Sara")
+        await host.ingest(position(sara, .moving, at: 100))   // first sighting: one .joined
+        let afterJoin = host.toasts.count
+        await host.ingest(position(sara, .stopped, at: 101))  // motion change only
+        await host.ingest(position(sara, .moving, at: 102))
+        #expect(host.toasts.count == afterJoin)               // no new toast
+    }
+    @Test func memberLeftEmitsLeftToastAndRemovesPeer() async throws {
+        let (host, sara) = try await hostWithJoinedGuest(named: "Sara")
+        await host.ingest(position(sara, .moving, at: 100))   // learn Sara
+        await host.ingest(.memberLeft(sara))
+        #expect(host.toasts.contains(.left("Sara")))
+        #expect(!host.peers.contains { $0.userID == sara })
+    }
+}
+```
+
+- [ ] **Step 2: Run — verify it fails.** Run: `swift test --package-path AuraCore --filter GroupRideSessionToastTests` — Expected: FAIL.
+
+- [ ] **Step 3: Implement.** Extend `ingest` (from 10a): before the snapshot, branch on the event —
+```swift
+switch event {
+case .position(let p) where nameMap[p.userID] == nil:
+    await refreshRoster()
+    if let name = nameMap[p.userID] { toasts.append(.joined(name)) }
+case .memberLeft(let id):
+    toasts.append(.left(nameMap[id] ?? "Rider"))
+default: break
+}
+await session.ingest(event)
+peers = session.peers; isLive = session.isLive
+```
+`refreshRoster()` guards re-entrancy (`guard !isRefreshingRoster else { return }`) and merges `backend.roster(rideID:)` names into `nameMap`. Note the `.position where nameMap[...] == nil` guard is precisely what makes a *motion change on a known peer* emit nothing (D11).
+
+- [ ] **Step 4: Run — verify pass.** Run: `swift test --package-path AuraCore --filter GroupRideSessionToastTests`, then the full package: `swift test --package-path AuraCore` — all green.
+
+- [ ] **Step 5: Commit**
+```bash
+git add AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionToastTests.swift
+git commit -m "feat(kit): GroupRideSession membership toasts + nameMap refresh (D11-guarded) (SP3)"
 ```
 
 ---
@@ -861,6 +1026,24 @@ public nonisolated func joinRide(code: JoinCode) async throws -> JoinedRide {
     } catch { throw GroupRideError.joinFailed }
 }
 ```
+
+- [ ] **Step 2b: Map the create size-limit error to `routeTooLarge`**
+
+`createRide` currently lets any RPC error propagate. Wrap it so the `rides.route` `pg_column_size < 262144` check-constraint violation becomes the typed `.routeTooLarge` that `GroupRideSession.create` maps to `.createFailed`:
+```swift
+public nonisolated func createRide(route: Data) async throws -> GroupRide {
+    let routeJSON = try JSONDecoder().decode(AnyJSON.self, from: route)
+    do {
+        let row: GroupRideRow = try await client
+            .rpc("create_ride", params: ["p_route": routeJSON]).single().execute().value
+        return try row.toDomain()
+    } catch let error as PostgrestError where error.message.contains("rides_route_check")
+                                          || error.message.lowercased().contains("check constraint") {
+        throw GroupRideError.routeTooLarge
+    }
+}
+```
+(Confirm the `PostgrestError` type/`.message` accessor against the pinned supabase-swift; if the check-constraint name differs, match on the size-check substring the server actually returns — verify with one oversized probe via MCP.)
 
 - [ ] **Step 3: Implement `roster` + `currentUserID`**
 ```swift
@@ -921,7 +1104,8 @@ git commit -m "feat(sync): SupabaseGroupRideBackend decodes route + ride_roster 
 
 - [ ] **Step 1** Extend `RideMapView` to take `peers: [RidePeer] = []`, `nameMap: [UUID:String] = [:]`, `selfProgress: Double = 0`, and inside the `Map { }` content builder add, for each peer with a `coordinate`, a `MapViewAnnotation(coordinate:) { PeerDotView(...) }`. Keep the existing solo path (empty peers) unchanged.
 - [ ] **Step 2** `PeerDotView` (in `GroupRideMapOverlay.swift`): the disc + initial + cone (`rotationEffect` by bearing) + pulse (`.opacity`/`.scale` repeating animation, gated on `!reduceMotion`, else a static ring). Colour from a `status → Color` map using `AuraTheme.accent`/`.warning`/etc.
-- [ ] **Step 3** Route ribbon: split `Route.geometry` at the index nearest self's `progressMeters`; draw the "behind" polyline dimmed (`AuraTheme.routeLine.opacity(0.25)`) and "ahead" bright. (A cumulative-distance walk over `geometry`; a small pure helper `RouteSplit.index(geometry:atMeters:)` in AuraCore is worth a unit test if the math is non-trivial — add it if so, TDD.)
+- [ ] **Step 3a (TDD, pure): `RouteSplit` helper in AuraCore.** Create `AuraCore/Sources/AuraCore/GroupRide/RouteSplit.swift` + test. `enum RouteSplit { static func splitIndex(geometry: [Coordinate], atMeters: Double) -> Int }` — walk cumulative great-circle distance over `geometry`, return the index where cumulative distance first reaches `atMeters` (clamped to `0...geometry.count`). Tests: empty/1-point geometry → 0; `atMeters <= 0` → 0; `atMeters` beyond total → `geometry.count`; a mid-route value → the expected index on a known 3-point line. Write test → fail → implement → pass → commit before touching the view.
+- [ ] **Step 3b** Route ribbon: use `RouteSplit.splitIndex(geometry:atMeters: selfProgress)` to draw the "behind" polyline dimmed (`AuraTheme.routeLine.opacity(0.25)`) and the "ahead" polyline bright, as two `PolylineAnnotation`s in the `Map { }` content.
 - [ ] **Step 4** Build + **simulator screenshot** (builder/ios-build-verify): confirm dots render, colours match, pulse animates, tags aren't cluttered. Device-verify note carried to Task 18.
 - [ ] **Step 5** Commit `feat(app): GroupRideMapOverlay peer dots + heading cone + route ribbon (SP3)`.
 
@@ -969,7 +1153,7 @@ git commit -m "feat(sync): SupabaseGroupRideBackend decodes route + ride_roster 
 
 **Interfaces:**
 - Consumes: `AppRoute.groupRide(GroupRideEntry)`, `GroupRideSession`, `DisplayNameStore`, `GroupNavigateContainer` (Task 17).
-- Produces: `GroupRideFlowView(entry:)` owns `@State session`, on appear calls `create`/`join` (gated), and switches on `session.phase`: `.needsDisplayName` → name prompt (reuses `DisplayNameEditor`) → retry; `.lobby` → `GroupLobbyView`; `.riding` → `GroupNavigateContainer`; `.routeUnavailable`/`.ended` → a dismiss-with-message. `GroupLobbyView` shows the code, a Share button (`ShareLink(item: URL(string: "aura://join?code=\(code.rawValue)")!)`), the live roster (from `session`), and "Start riding" (`session.startRiding()`).
+- Produces: `GroupRideFlowView(entry:)` owns `@State session`, on appear calls `create`/`join` (gated), and switches on `session.phase`: `.needsDisplayName` → name prompt (reuses `DisplayNameEditor`) → retry; `.lobby` → `GroupLobbyView`; `.riding` → `GroupNavigateContainer`; `.createFailed` → a dismiss-with-message "This route is too detailed to share as a group ride." (§7); `.routeUnavailable` → "Couldn't load this ride's route." + dismiss; `.ended` → dismiss. `GroupLobbyView` shows the code, a Share button (`ShareLink(item: URL(string: "aura://join?code=\(code.rawValue)")!)`), the live roster (from `session`), and "Start riding" (`session.startRiding()`).
 
 - [ ] **Step 1** `GroupRideFlowView` phase switch + `.needsDisplayName` handling (present editor, then re-invoke create/join).
 - [ ] **Step 2** `GroupLobbyView` (code, ShareLink deep link, roster fills from `session.peers`+`nameMap`, Start).
@@ -987,7 +1171,8 @@ git commit -m "feat(sync): SupabaseGroupRideBackend decodes route + ride_roster 
 
 **Interfaces:**
 - Consumes: `JoinCode`, `AppRoute.groupRide(.join(code))`, `DeepLink.join`, `GroupRideSession`, the overlay/sheet/toast.
-- Produces: `GroupRideJoinView` (segmented 8-char input validating via `JoinCode`; single generic error on failure, D13); a "Join a ride" entry on `PlanView` presenting it; `AppRouter.handle` arm for `.join(code)`: `guard !isRideActive` then `selectedTab = .ride; path = [.groupRide(.join(code))]`; `GroupNavigateContainer` = `NavigateHUDView(route:destination:)` + `GroupRideMapOverlay` overlay + `GroupRosterSheet` + `GroupToastHost`, reading one `GroupRideSession`.
+- Produces: `GroupRideJoinView` (segmented 8-char input validating via `JoinCode`); a "Join a ride" entry on `PlanView` presenting it; `AppRouter.handle` arm for `.join(code)`: `guard !isRideActive` then `selectedTab = .ride; path = [.groupRide(.join(code))]`; `GroupNavigateContainer` = `NavigateHUDView(route:destination:)` + `GroupRideMapOverlay` overlay + `GroupRosterSheet` + `GroupToastHost` + a **"Reconnecting…" pill** (shown when `session.isLive == false`), reading one `GroupRideSession`.
+- **Error copy (§7, D13):** two distinct messages, not one. A transport/network error (`URLError`) → "Couldn't reach the ride — try again." A `GroupRideError.joinFailed` (wrong code / full / ended / rate-limited — the RPC's deliberately generic failure) → "Couldn't join — double-check the code with your host." D13 only collapses the *RPC reasons* into one message; it does not merge network errors into it.
 
 - [ ] **Step 1** `AppRouter.handle`: add
 ```swift
@@ -998,8 +1183,8 @@ case let .join(code):
 (the existing `guard !isRideActive` already blocks joining mid-ride). Add a unit test in `AuraKitTests`/app tests if `AppRouter` is testable, asserting the path after `handle(url: aura://join?code=…)`.
 - [ ] **Step 2** `GroupRideJoinView` — segmented input, paste, `JoinCode` validation, `router.push(.groupRide(.join(code)))` on submit; single inline error string for a failed join (the failure surfaces from `GroupRideFlowView`'s `join`, shown via `session.phase`/an error field).
 - [ ] **Step 3** Add "Join a ride" to `PlanView` (a button opening `GroupRideJoinView`).
-- [ ] **Step 4** `GroupNavigateContainer` composes the existing `NavigateHUDView` with the overlay + sheet + toast host bound to `session`.
-- [ ] **Step 5** Build + simulator (single-device: enter a code → generic error path; and the happy path validated end-to-end in Task 18 with two identities). Commit `feat(app): join-by-code + deep-link routing + group navigate container (SP3)`.
+- [ ] **Step 4** `GroupNavigateContainer` composes the existing `NavigateHUDView(route:destination:)` with the overlay + roster sheet + toast host bound to `session`. It shows the group chrome (overlay/sheet/toast) **only while `session.phase == .riding`**; when `phase == .ended` (host ended, D9) it hides all group chrome but keeps `NavigateHUDView` running so the rider continues solo. It renders a small "Reconnecting…" pill near the sheet whenever `session.isLive == false`.
+- [ ] **Step 5** Previews: `.riding` (crew chrome visible), `.ended` (chrome gone, solo HUD persists), `isLive == false` (pill shown). Build-verify each. (End-to-end two-identity happy path is Task 18.) Commit `feat(app): join-by-code + deep-link routing + group navigate container + reconnect pill (SP3)`.
 
 ---
 
@@ -1017,8 +1202,12 @@ case let .join(code):
 
 ## Self-review notes (author)
 
-- **Spec coverage:** every §5 component maps to a task (PeerBearing→T3, PeerDistance→T4, DisplayName→T5, GroupRosterViewData→T6, GroupRideSession→T9/T10, backend ext→T8, ride_roster→T1, live conformer→T11, DisplayNameStore→T12, overlay→T13, roster sheet→T14, toasts→T15, lobby/create/flow→T16, join/deep-link/container→T17). Amber token (D6)→T2. Deep-link (D7)→T7. Gate (D8)→T5+T9+T12. Host-End-only (D12)→T10/T16. Generic join error (D13)→T17.
+- **Spec coverage:** every §5 component maps to a task (PeerBearing→T3, PeerDistance→T4, DisplayName→T5, GroupRosterViewData→T6, GroupRideSession→T9/T10a/T10b, backend ext→T8, ride_roster→T1, live conformer→T11, DisplayNameStore→T12, overlay+RouteSplit→T13, roster sheet→T14, toasts→T15, lobby/create/flow→T16, join/deep-link/container→T17). Amber token (D6)→T2. Deep-link (D7)→T7. Gate (D8)→T5+T9(both create+join)+T12. Host-End-only (D12)→T10a/T16/T17. Generic join error (D13)→T17. §7 states: create-too-large→T8/T9/T11/T16; route-unavailable→T9/T16; reconnect pill→T17; waiting-for-crew→T14; peer-not-yet-named→T6/T10b.
 - **No route-vend migration** (spec §4.3) — confirmed: `create_ride`/`join_ride` already `return public.rides` incl. `route jsonb`; only the Swift decoder changes (T11).
-- **Type consistency:** `JoinedRide{ride,route:Data}`, `RosterMember{userID,displayName,role}`, `GroupRideEntry{.create(Route),.join(JoinCode)}`, `RosterRow`, `GroupToastEvent`, `GroupRideSession.Phase` used identically across tasks.
-- **Open item for the plan-reviewer:** confirm the exact `Units` type name/cases in AuraCore (T4/T6) and the supabase-swift auth-session accessor (T11) against the pinned SDK; both are flagged inline as "verify before finalizing."
+- **Type consistency:** `JoinedRide{ride,route:Data}`, `RosterMember{userID,displayName,role: RideMember.Role}`, `GroupRideEntry{.create(Route),.join(JoinCode)}`, `RosterRow`, `GroupToastEvent`, `GroupRideSession.Phase{idle,lobby,riding,ended,routeUnavailable,createFailed,needsDisplayName}` used identically across tasks. Pure helpers take `isImperial: Bool` (not `DistanceUnits`, which lives in AuraKit).
+
+### Plan revisions after the 2-reviewer adversarial pass
+
+- **Compile fixes:** `Units`→`isImperial: Bool` (T4/T6 — `DistanceUnits` is in AuraKit, unreachable from AuraCore); `RosterMember.role: RideMember.Role` (no `GroupRide.Role`); T8 test file is **Modify** not Create (existing `joined.id`→`joined.ride.id`); T1 pgTAP captures `join_code` under host claims before switching (RLS hides it pre-membership); `currentLifecycle: RideLifecycle` declared in T10a; `JoinedRide` has no `selfUserID` (T9 uses `backend.currentUserID()`). Verified accurate by the reviewer: `Route` init/Codable, `RidePeer` init, `RideSession` API, transport events, MapboxMaps v11 `MapViewAnnotation`, `client.auth.session.user.id`, SQL return shapes, `JoinCode`/`Route` not `Hashable` (manual `GroupRideEntry: Hashable` required).
+- **Coverage fixes:** added the >256 KB **create-failure** path (`GroupRideError.routeTooLarge` + `Phase.createFailed`, T8/T9/T11/T16); the **route-decode-failure→auto-leave** test (T9); the **name-refresh convergence** and **D11 no-toast-on-motion** tests with real bodies (T10b); the **join-side gate** test (T9); the **"Reconnecting…" pill** + **host-end dissolve** build steps + previews (T17); `RouteSplit` committed as a tested pure helper (T13); **distinct network vs join error copy** (T17). Task 10 split into **10a** (tick/snapshot/reconnect/end) and **10b** (toasts/nameMap) so each is one reviewer gate with real tests.
 ```
