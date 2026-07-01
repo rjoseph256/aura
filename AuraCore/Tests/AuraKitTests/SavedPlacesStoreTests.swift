@@ -108,10 +108,16 @@ struct SavedPlacesStoreTests {
         // by NSPersistentStoreRemoteChange. Mirrors the bounded-poll wait idiom
         // from RideStoreSyncRevisionTests.swift: a single yield is not enough
         // to guarantee the observer's MainActor hop landed.
+        //
+        // Posts on a private NotificationCenter (not `.default`) because Swift
+        // Testing runs suites in parallel: a `.default`-center post with
+        // object:nil is delivered to every object:nil observer registered on
+        // that center, including RideStore's in RideStoreSyncRevisionTests.
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: RideRecord.self, SavedPlaceRecord.self,
                                            configurations: config)
-        let store = SavedPlacesStore(container: container)
+        let center = NotificationCenter()
+        let store = SavedPlacesStore(container: container, center: center)
         #expect(store.places.isEmpty)
         container.mainContext.insert(SavedPlaceRecord(SavedPlace(
             name: "Remote", subtitle: nil,
@@ -119,7 +125,7 @@ struct SavedPlacesStoreTests {
             category: .custom, kind: .favorite,
             savedAt: Date(timeIntervalSince1970: 5))))
         try container.mainContext.save()
-        NotificationCenter.default.post(name: .NSPersistentStoreRemoteChange, object: nil)
+        center.post(name: .NSPersistentStoreRemoteChange, object: nil)
         for _ in 0..<100 where store.places.isEmpty {
             try await Task.sleep(for: .milliseconds(5))
         }

@@ -19,14 +19,20 @@ public final class SavedPlacesStore {
 
     private let container: ModelContainer
     @ObservationIgnored private let now: () -> Date
-    // Same shape and rationale as RideStore.remoteChangeObserver.
+    @ObservationIgnored private let center: NotificationCenter
+    // nonisolated(unsafe): NotificationCenter's opaque removal token is inert data — it's
+    // only ever passed back to `removeObserver`, never read — so it's safe to touch from
+    // the nonisolated `deinit`, which strict concurrency otherwise forbids for a
+    // non-Sendable-typed stored property. Same shape and rationale as RideStore.remoteChangeObserver.
     @ObservationIgnored private nonisolated(unsafe) var remoteChangeObserver: NSObjectProtocol?
 
-    public init(container: ModelContainer, now: @escaping () -> Date = Date.init) {
+    public init(container: ModelContainer, now: @escaping () -> Date = Date.init,
+                center: NotificationCenter = .default) {
         self.container = container
         self.now = now
+        self.center = center
         refetch()
-        remoteChangeObserver = NotificationCenter.default.addObserver(
+        remoteChangeObserver = center.addObserver(
             forName: .NSPersistentStoreRemoteChange, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.refetch() }
@@ -34,7 +40,7 @@ public final class SavedPlacesStore {
     }
 
     deinit {
-        if let remoteChangeObserver { NotificationCenter.default.removeObserver(remoteChangeObserver) }
+        if let remoteChangeObserver { center.removeObserver(remoteChangeObserver) }
     }
 
     public func refetch() {
