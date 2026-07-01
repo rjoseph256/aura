@@ -436,6 +436,12 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
     schema push (verify the `CD_RideRecord` record type in the CloudKit Dashboard Development
     environment); development-schema promotion to production before any App Store release
     (additive-only after).
+  - **Recommended follow-ups** (whole-branch review, non-blocking): add the two
+    device-independent schema-invariant guard tests the spec named (every non-optional
+    `RideRecord` attribute has a default; no `.unique`/relationships) so a future
+    non-defaulted column is caught in package CI, not only at the Dashboard; and have the
+    `initializeCloudKitSchema` step confirm the frozen `RideSchemaV1` `.unique` never trips
+    the mirror during the V1→V2 `didMigrate` on a store with V1 rows.
 - CarPlay, using the Mapbox v3 CarPlay templates and the existing `GuidanceSession`
   abstraction. Needs the CarPlay entitlement (Apple approval) and a scene delegate.
 - Apple Watch companion.
