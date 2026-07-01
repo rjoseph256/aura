@@ -471,17 +471,44 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
       Sign in with Apple + live Supabase): two-device peer visibility + naming via
       `ride_roster`; membership toasts on the wire; host-end → D9 dissolve on the member
       device; member Leave / host End freeing the ride; `selfProgress`/ahead-behind precision;
-      the reconnect path (`isLive` → pill → snapshot re-seed); the SP2 broadcast-envelope shape;
-      8-`ViewAnnotation` + pulse map budget under load; pgTAP `ride_roster` on the live project.
+      the reconnect path (`isLive` → pill → snapshot re-seed);
+      8-`ViewAnnotation` + pulse map budget under load.
+      - **SP2 broadcast-envelope field contract — PINNED BY TESTS (2026-07-01).** The
+        position/`member_left` wire decode moved into a pure `LiveBroadcastDecoder`
+        (AuraCore), unit-tested byte-for-byte against the SQL that emits it (migrations
+        0012/0015): `userID`/`lat`/`lon`/`progressMeters`/`recordedAt`/`motionState`,
+        both flat and nested-under-`payload`, plus bad-date / unknown-motion / missing-field
+        rejection (8 tests). `SupabaseRideSessionTransport` re-encodes the SDK message and
+        routes through it, so a rename on either side fails CI instead of a two-device ride.
+        Device-verify remaining is now only *which* of the two envelope shapes the pinned
+        SDK delivers — the decoder handles either.
+      - **pgTAP `ride_roster` on the live project — DONE (MCP, 2026-07-01).** Ran the
+        `0016_ride_roster_test` flow against live `aura` inside a rolled-back txn:
+        host+member roster returns 2 rows with display names, outsider gets 0
+        (members-only). `pgtap` is installed and `ride_roster`/`join_ride`/`create_ride`
+        are deployed. The remaining device-verify items still need two real identities.
 - Push-to-talk voice within a session (Phase 3), Strava export, and HR/power sensors.
 
 ### Group Rides SP2 — deployment checklist (Supabase `aura`)
-- [ ] Migrations 0010–0015 applied (`list_migrations` shows them).
-- [ ] Realtime → Settings → "Allow public access" is OFF (private channels enforced).
-- [ ] Realtime → message retention set to ≤ 48h (keeps broadcast coordinate copies
-      inside the SP1 ride-track retention promise; `realtime.messages` is not reaped
-      by the SP1 cron).
-- [ ] Manual gate check: subscribe to `ride:<id>` as a non-member → denied.
+- [x] Migrations 0010–0016 applied (verified via MCP `list_migrations`, 2026-07-01;
+      `ride_roster` is 0016).
+- [x] Members-only broadcast gate enforced at the DB (verified via MCP, 2026-07-01):
+      RLS is enabled on `realtime.messages` with one read policy whose `USING` is
+      `extension='broadcast' AND realtime.topic() ~~ 'ride:%' AND
+      is_ride_member(ride_id_from_topic(realtime.topic()))`. The same `is_ride_member`
+      predicate was proven to reject a non-member live (an outsider gets 0 rows from
+      `ride_roster`, which shares that guard). This is the DB half of the non-member
+      gate below.
+- [x] Realtime → Settings → "Allow public access" is OFF (private channels enforced;
+      completed by the user in the dashboard). The RLS gate above only protects
+      *private* channels; this toggle must be OFF or clients can use public channels
+      that skip authz.
+- [x] Realtime → message retention set to ≤ 48h (completed by the user in the
+      dashboard; keeps broadcast coordinate copies inside the SP1 ride-track retention
+      promise; `realtime.messages` is not reaped by the SP1 cron).
+- [ ] Manual gate check on the wire: subscribe to `ride:<id>` as a non-member → denied
+      (the DB predicate is proven above; this confirms the transport honors it — folds
+      into the device-verify pass).
 
 ### Smaller fixes
 

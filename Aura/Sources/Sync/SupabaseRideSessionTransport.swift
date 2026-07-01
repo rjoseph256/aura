@@ -74,8 +74,9 @@ private nonisolated struct SnapshotRow: Decodable {
 /// - `channel.subscribe()` — BEST-GUESS; may be named `join()` in some minor versions.
 /// - `AnyJSON` accessors `.stringValue`, `.doubleValue`, `.objectValue` — BEST-GUESS;
 ///   confirmed present in supabase-swift v2 Helpers but exact API shape needs the resolved source.
-/// - Broadcast envelope shape — BEST-GUESS; `body(of:)` reads from `"payload"` with a flat
-///   fallback. DEVICE-VERIFY required: the nested-encode decode cannot be caught by compile.
+/// - Broadcast envelope shape — the field contract is now pinned by `LiveBroadcastDecoder`
+///   (AuraCore), unit-tested against the emitting SQL; it reads the body flat or nested under
+///   `"payload"`. DEVICE-VERIFY remaining: only which of those two shapes the SDK delivers.
 @MainActor
 private final class SupabaseRideLiveSubscription: RideLiveSubscription {
     let events: AsyncStream<TransportEvent>
@@ -192,40 +193,21 @@ private final class SupabaseRideLiveSubscription: RideLiveSubscription {
         continuation.finish()
     }
 
-    // The Realtime broadcast envelope may nest the app data under a "payload" key, or the
-    // SDK may hand broadcastStream already-unwrapped field values. This helper reads from
-    // the nested object first, then falls back to the flat message, so both shapes work.
-    // DEVICE-VERIFY: confirm which envelope shape the pinned SDK version produces.
-    private static func body(of message: [String: AnyJSON]) -> [String: AnyJSON] {
-        message["payload"]?.objectValue ?? message
-    }
-
-    /// Decodes a live position from a broadcast message.
-    /// DEVICE-VERIFY: field names must match the record_track_points broadcast payload
-    /// (userID, lat, lon, progressMeters, recordedAt ISO8601, motionState).
+    // The broadcast field contract and the flat-vs-nested-"payload" envelope handling live
+    // in `LiveBroadcastDecoder` (AuraCore), unit-tested byte-for-byte against the SQL that
+    // emits these messages (migrations 0012/0015). We re-encode the SDK's `[String: AnyJSON]`
+    // message to JSON and hand it there, so a rename on either side is caught by CI rather
+    // than a two-device ride. `[String: AnyJSON]` is Encodable.
+    // DEVICE-VERIFY (unchanged): which envelope shape the pinned SDK version delivers — the
+    // decoder's flat/nested fallback handles either.
     private static func livePosition(from message: [String: AnyJSON]) -> LivePositionPayload? {
-        let m = body(of: message)
-        guard let userIDStr = m["userID"]?.stringValue,
-              let userID = UUID(uuidString: userIDStr),
-              let lat = m["lat"]?.doubleValue,
-              let lon = m["lon"]?.doubleValue,
-              let progress = m["progressMeters"]?.doubleValue,
-              let recordedAtStr = m["recordedAt"]?.stringValue,
-              let recordedAt = ISO8601DateFormatter().date(from: recordedAtStr),
-              let motionRaw = m["motionState"]?.stringValue,
-              let motion = MotionState(rawValue: motionRaw)
-        else { return nil }
-        return LivePositionPayload(
-            userID: userID,
-            coordinate: Coordinate(latitude: lat, longitude: lon),
-            progressMeters: progress,
-            recordedAt: recordedAt,
-            motionState: motion
-        )
+        guard let data = try? JSONEncoder().encode(message) else { return nil }
+        return LiveBroadcastDecoder.position(fromJSON: data)
     }
 
     private static func memberLeftUserID(from message: [String: AnyJSON]) -> UUID? {
-        body(of: message)["userID"]?.stringValue.flatMap(UUID.init)
+        guard let data = try? JSONEncoder().encode(message) else { return nil }
+        return LiveBroadcastDecoder.memberLeft(fromJSON: data)
     }
 }
 
