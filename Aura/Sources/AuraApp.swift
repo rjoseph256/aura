@@ -7,7 +7,7 @@ import MapboxMaps
 struct AuraApp: App {
     @State private var router = AppRouter()
     @State private var rideStore = AuraApp.makeRideStore()
-    @State private var settings = SettingsStore()
+    @State private var settings = SettingsStore(defaults: .standard, sync: UbiquitousKeyValueStore())
     @State private var location = LocationService()
 
     init() { AuraApp.configureMapbox() }
@@ -93,6 +93,15 @@ private struct RootView: View {
         }
         .tint(AuraTheme.accent)
         .task { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+        // Consumed exactly once for the app's lifetime (the underlying AsyncStream is single-consumer).
+        .task {
+            for await change in settings.kvSyncStream {
+                let changed = settings.applyRemoteChange(change)
+                if changed.contains("units") || changed.contains("weeklyGoalMeters") {
+                    WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+                }
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
         }

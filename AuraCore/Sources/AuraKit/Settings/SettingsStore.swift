@@ -43,6 +43,11 @@ public final class SettingsStore {
         turnHaptics = defaults.object(forKey: Key.turnHaptics) as? Bool ?? true
     }
 
+    /// The external-change stream from the injected sync store (empty if none).
+    public var kvSyncStream: AsyncStream<KeyValueChange> {
+        sync?.externalChanges ?? AsyncStream { $0.finish() }
+    }
+
     /// Apply an external iCloud change for the synced keys. Returns the keys whose value
     /// actually changed (the app uses this to decide whether to refresh the widgets).
     /// On `.initialSync`, remote wins over the just-seeded local defaults.
