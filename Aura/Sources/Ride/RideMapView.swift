@@ -36,7 +36,7 @@ struct RideMapView: View {
         Map(viewport: $viewport) {
             Puck2D(bearing: .heading)
             routeRibbon
-            ForEach(peers.filter { $0.coordinate != nil }, id: \.userID) { peer in
+            ForEvery(peers.filter { $0.coordinate != nil }, id: \.userID) { peer in
                 if let coordinate = peer.coordinate {
                     MapViewAnnotation(coordinate: CLLocationCoordinate2D(latitude: coordinate.latitude,
                                                                          longitude: coordinate.longitude)) {
@@ -64,8 +64,8 @@ struct RideMapView: View {
 
     /// The lit/dimmed route ribbon. When there are no peers to share progress against,
     /// this collapses to the original single bright polyline (unchanged solo behavior).
-    @ViewBuilder
-    private var routeRibbon: some View {
+    @MapContentBuilder
+    private var routeRibbon: some MapContent {
         if track.count > 1 {
             if peers.isEmpty {
                 PolylineAnnotationGroup {
