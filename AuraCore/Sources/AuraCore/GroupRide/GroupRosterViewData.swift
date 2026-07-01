@@ -6,6 +6,14 @@ public struct RosterRow: Equatable, Sendable, Identifiable {
     public let isSelf: Bool
     public let status: PeerStatus
     public let distanceLabel: String?
+
+    public init(id: UUID, name: String, isSelf: Bool, status: PeerStatus, distanceLabel: String?) {
+        self.id = id
+        self.name = name
+        self.isSelf = isSelf
+        self.status = status
+        self.distanceLabel = distanceLabel
+    }
 }
 
 public enum GroupRosterViewData {

@@ -334,7 +334,7 @@ private struct RosterSummary {
         RosterRow(id: UUID(), name: "Marcus", isSelf: false, status: .riding, distanceLabel: "0.1 mi behind"),
         RosterRow(id: UUID(), name: "Devon", isSelf: false, status: .stopped, distanceLabel: "0.6 mi behind")
     ]
-    return ZStack(alignment: .bottom) {
+    ZStack(alignment: .bottom) {
         AuraTheme.background.ignoresSafeArea()
         VStack {
             Spacer()
@@ -351,14 +351,14 @@ private struct RosterSummary {
         RosterRow(id: UUID(), name: "Marcus", isSelf: false, status: .riding, distanceLabel: "0.1 mi behind"),
         RosterRow(id: UUID(), name: "Devon", isSelf: false, status: .stopped, distanceLabel: "0.6 mi behind")
     ]
-    return previewHost(rows: rows, startsExpanded: true)
+    previewHost(rows: rows, startsExpanded: true)
 }
 
 #Preview("Solo — waiting for crew") {
     let rows: [RosterRow] = [
         RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil)
     ]
-    return previewHost(rows: rows, startsExpanded: true)
+    previewHost(rows: rows, startsExpanded: true)
 }
 
 #Preview("One dropped peer") {
@@ -367,7 +367,7 @@ private struct RosterSummary {
         RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
         RosterRow(id: UUID(), name: "Sam", isSelf: false, status: .dropped, distanceLabel: "no signal")
     ]
-    return previewHost(rows: rows, startsExpanded: true)
+    previewHost(rows: rows, startsExpanded: true)
 }
 
 @ViewBuilder
