@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Observation
+import CoreData
 import AuraCore
 
 @MainActor
@@ -10,10 +11,29 @@ public final class RideStore {
     /// True when rides live in a throwaway in-memory store (the on-disk container failed),
     /// so the UI can warn that rides won't persist across launches.
     public let isEphemeral: Bool
+    /// Bumps when CloudKit merges a remote change into the store, so views that hold
+    /// a fetched snapshot (HistoryView, the dashboard) can refetch. 0 until the first import.
+    public private(set) var syncRevision: Int = 0
+    // nonisolated(unsafe): NotificationCenter's opaque removal token is inert data — it's
+    // only ever passed back to `removeObserver`, never read — so it's safe to touch from
+    // the nonisolated `deinit`, which strict concurrency otherwise forbids for a
+    // non-Sendable-typed stored property.
+    @ObservationIgnored private nonisolated(unsafe) var remoteChangeObserver: NSObjectProtocol?
 
     public init(container: ModelContainer, isEphemeral: Bool = false) {
         self.container = container
         self.isEphemeral = isEphemeral
+        remoteChangeObserver = NotificationCenter.default.addObserver(
+            forName: .NSPersistentStoreRemoteChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Hop to the main actor via Task: the notification closure is @Sendable, so it
+            // cannot capture a non-Sendable @MainActor `self` for a synchronous call.
+            Task { @MainActor in self?.syncRevision &+= 1 }
+        }
+    }
+
+    deinit {
+        if let remoteChangeObserver { NotificationCenter.default.removeObserver(remoteChangeObserver) }
     }
 
     public static func inMemory() throws -> RideStore {
