@@ -9,8 +9,10 @@ public enum AuraPalette {
     public static let panel     = RGBColor(red: 0.055, green: 0.063, blue: 0.078) // #0E1014
     public static let lime      = RGBColor(red: 0.784, green: 0.980, blue: 0.294) // #C8FA4B
     public static let pink      = RGBColor(red: 1.0, green: 0.302, blue: 0.616)   // #FF4D9D
+    public static let amber     = RGBColor(red: 0.961, green: 0.761, blue: 0.294) // #F5C24B  stopped/paused
     public static let inkOnLime = RGBColor(red: 0.086, green: 0.129, blue: 0.039) // #16210A
     public static let inkOnPink = RGBColor(red: 0.165, green: 0.012, blue: 0.078) // #2A0314
+    public static let inkOnAmber = RGBColor(red: 0.165, green: 0.118, blue: 0.0)   // #2A1E00  ink on amber
 
     // Grayscale text levels (mirror SwiftUI `Color(white:)`).
     public static let textPrimaryWhite = 0.92
