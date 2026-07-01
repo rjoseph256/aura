@@ -41,6 +41,9 @@ final class AppRouter {
             remember(place)
             selectedTab = .ride
             path = [.preview(place)]
+        case let .join(code):
+            selectedTab = .ride
+            path = [.groupRide(.join(code))]
         }
     }
 
