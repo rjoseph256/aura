@@ -20,7 +20,7 @@ public enum GroupRosterViewData {
         }
         let sorted = all.sorted {
             switch ($0.progressMeters, $1.progressMeters) {
-            case let (a?, b?): return a > b
+            case let (a?, b?): return a != b ? a > b : $0.userID.uuidString < $1.userID.uuidString
             case (nil, _?):    return false
             case (_?, nil):    return true
             case (nil, nil):   return $0.userID.uuidString < $1.userID.uuidString
