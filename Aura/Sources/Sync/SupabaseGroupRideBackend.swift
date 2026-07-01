@@ -17,21 +17,35 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
             _ = try await client.rpc("upsert_display_name", params: ["p_name": displayName]).execute()
         }
     }
+    public nonisolated func currentUserID() async throws -> UUID {
+        try await client.auth.session.user.id
+    }
     public nonisolated func createRide(route: Data) async throws -> GroupRide {
         // Decode the route bytes into a JSON value so p_route arrives as real jsonb
         // (an object), not a quoted JSON string.
         let routeJSON = try JSONDecoder().decode(AnyJSON.self, from: route)
-        let row: GroupRideRow = try await client
-            .rpc("create_ride", params: ["p_route": routeJSON])
-            .single().execute().value
-        return try row.toDomain()
+        do {
+            let row: GroupRideRow = try await client
+                .rpc("create_ride", params: ["p_route": routeJSON])
+                .single().execute().value
+            return try row.toDomain()
+        } catch let error as PostgrestError where error.message.contains("rides_route_check")
+                                              || error.message.lowercased().contains("check constraint") {
+            throw GroupRideError.routeTooLarge
+        }
     }
-    public nonisolated func joinRide(code: JoinCode) async throws -> GroupRide {
+    public nonisolated func joinRide(code: JoinCode) async throws -> JoinedRide {
         do {
             let row: GroupRideRow = try await client
                 .rpc("join_ride", params: ["p_code": code.rawValue]).single().execute().value
-            return try row.toDomain()
+            return JoinedRide(ride: try row.toDomain(), route: try row.routeData())
         } catch { throw GroupRideError.joinFailed }
+    }
+    public nonisolated func roster(rideID: UUID) async throws -> [RosterMember] {
+        let rows: [RosterRow] = try await client
+            .rpc("ride_roster", params: ["p_ride_id": rideID.uuidString]).execute().value
+        return rows.map { RosterMember(userID: $0.userID, displayName: $0.displayName,
+                                       role: $0.role == "host" ? .host : .member) }
     }
     public nonisolated func recordTrackPoints(rideID: UUID, points: [RemoteTrackPoint]) async throws {
         // Heterogeneous params (String + array) must be built as AnyJSON, not a
@@ -68,8 +82,9 @@ private nonisolated struct GroupRideRow: Decodable {
     let joinCode: String
     let status: String
     let createdAt: Date
+    let route: AnyJSON
     enum CodingKeys: String, CodingKey {
-        case id, status
+        case id, status, route
         case hostID = "host_id"
         case joinCode = "join_code"
         case createdAt = "created_at"
@@ -80,5 +95,21 @@ private nonisolated struct GroupRideRow: Decodable {
             throw GroupRideError.joinFailed
         }
         return GroupRide(id: id, hostID: hostID, joinCode: code, status: rideStatus, createdAt: createdAt)
+    }
+    func routeData() throws -> Data {
+        try JSONEncoder().encode(route)
+    }
+}
+
+/// Wire row returned by ride_roster. CodingKeys map snake_case JSON to camelCase
+/// properties, matching the GroupRideRow convention above.
+private nonisolated struct RosterRow: Decodable {
+    let userID: UUID
+    let displayName: String
+    let role: String
+    enum CodingKeys: String, CodingKey {
+        case userID = "user_id"
+        case displayName = "display_name"
+        case role
     }
 }
