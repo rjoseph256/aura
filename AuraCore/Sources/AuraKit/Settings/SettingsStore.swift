@@ -60,27 +60,49 @@ public final class SettingsStore {
         isApplyingRemote = true
         defer { isApplyingRemote = false }
         for key in keys where Self.syncedKeys.contains(key) {
-            switch key {
-            case Key.units:
-                if let raw = sync.string(forKey: key), let v = DistanceUnits(rawValue: raw), v != units {
-                    units = v; changed.insert(key)
-                }
-            case Key.mapStyle:
-                if let raw = sync.string(forKey: key), let v = MapStyle(rawValue: raw), v != mapStyle {
-                    mapStyle = v; changed.insert(key)
-                }
-            case Key.voice:
-                if let v = sync.bool(forKey: key), v != voiceEnabled { voiceEnabled = v; changed.insert(key) }
-            case Key.turnHaptics:
-                if let v = sync.bool(forKey: key), v != turnHaptics { turnHaptics = v; changed.insert(key) }
-            case Key.weeklyGoal:
-                if let v = sync.double(forKey: key), v > 0, v != weeklyGoalMeters {
-                    weeklyGoalMeters = v; changed.insert(key)
-                }
-            default: break
-            }
+            if applyRemoteKey(key, from: sync) { changed.insert(key) }
         }
         return changed
+    }
+
+    /// Applies one synced key's remote value; returns true if the local value changed.
+    /// Split per key so each guard stays simple (keeps the dispatch flat, not complex).
+    private func applyRemoteKey(_ key: String, from sync: KeyValueSyncing) -> Bool {
+        switch key {
+        case Key.units: return applyRemoteUnits(sync)
+        case Key.mapStyle: return applyRemoteMapStyle(sync)
+        case Key.voice: return applyRemoteVoice(sync)
+        case Key.turnHaptics: return applyRemoteTurnHaptics(sync)
+        case Key.weeklyGoal: return applyRemoteWeeklyGoal(sync)
+        default: return false
+        }
+    }
+
+    private func applyRemoteUnits(_ sync: KeyValueSyncing) -> Bool {
+        guard let raw = sync.string(forKey: Key.units),
+              let v = DistanceUnits(rawValue: raw), v != units else { return false }
+        units = v; return true
+    }
+
+    private func applyRemoteMapStyle(_ sync: KeyValueSyncing) -> Bool {
+        guard let raw = sync.string(forKey: Key.mapStyle),
+              let v = MapStyle(rawValue: raw), v != mapStyle else { return false }
+        mapStyle = v; return true
+    }
+
+    private func applyRemoteVoice(_ sync: KeyValueSyncing) -> Bool {
+        guard let v = sync.bool(forKey: Key.voice), v != voiceEnabled else { return false }
+        voiceEnabled = v; return true
+    }
+
+    private func applyRemoteTurnHaptics(_ sync: KeyValueSyncing) -> Bool {
+        guard let v = sync.bool(forKey: Key.turnHaptics), v != turnHaptics else { return false }
+        turnHaptics = v; return true
+    }
+
+    private func applyRemoteWeeklyGoal(_ sync: KeyValueSyncing) -> Bool {
+        guard let v = sync.double(forKey: Key.weeklyGoal), v > 0, v != weeklyGoalMeters else { return false }
+        weeklyGoalMeters = v; return true
     }
 
     private func persist(_ value: String, _ key: String) {
