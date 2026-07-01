@@ -119,3 +119,29 @@ targets:
         SWIFT_VERSION: "6.0"
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+
+  AuraUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: Aura
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rohunjoseph.aura.uitests
+        GENERATE_INFOPLIST_FILE: "YES"
+        TEST_TARGET_NAME: Aura
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "6.0"
+
+schemes:
+  Aura:
+    build:
+      targets:
+        Aura: all
+        AuraUITests: [test]
+    test:
+      gatherCoverageData: false
+      targets:
+        - AuraUITests
