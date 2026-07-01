@@ -32,6 +32,7 @@ struct SettingsView: View {
                 row(icon: "hand.tap.fill", tint: AuraTheme.accent, title: "Turn haptics") {
                     Toggle("", isOn: $settings.turnHaptics)
                         .labelsHidden().tint(AuraTheme.accent)
+                        .accessibilityIdentifier("settings.turnHaptics")
                 }
                 HealthAccessRow()
                 row(icon: "target", tint: AuraTheme.accent, title: "Weekly goal") {
@@ -39,6 +40,7 @@ struct SettingsView: View {
                         Text(goalLabel(settings))
                             .foregroundStyle(AuraTheme.textSecondary)
                             .monospacedDigit()
+                            .accessibilityIdentifier("settings.weeklyGoalValue")
                     }
                     .fixedSize()
                 }
