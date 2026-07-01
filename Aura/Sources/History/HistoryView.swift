@@ -42,6 +42,9 @@ struct HistoryView: View {
                 withAnimation(.easeOut(duration: 0.45)) { appeared = true }
             }
         }
+        .onChange(of: store.syncRevision) {
+            summaries = (try? store.summaries()) ?? []
+        }
         .sheet(item: $selected) { ride in
             RideSummaryView(ride: ride)
         }

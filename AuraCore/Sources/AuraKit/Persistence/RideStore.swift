@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Observation
+import CoreData
 import AuraCore
 
 @MainActor
@@ -10,10 +11,29 @@ public final class RideStore {
     /// True when rides live in a throwaway in-memory store (the on-disk container failed),
     /// so the UI can warn that rides won't persist across launches.
     public let isEphemeral: Bool
+    /// Bumps when CloudKit merges a remote change into the store, so views that hold
+    /// a fetched snapshot (HistoryView, the dashboard) can refetch. 0 until the first import.
+    public private(set) var syncRevision: Int = 0
+    // nonisolated(unsafe): NotificationCenter's opaque removal token is inert data — it's
+    // only ever passed back to `removeObserver`, never read — so it's safe to touch from
+    // the nonisolated `deinit`, which strict concurrency otherwise forbids for a
+    // non-Sendable-typed stored property.
+    @ObservationIgnored private nonisolated(unsafe) var remoteChangeObserver: NSObjectProtocol?
 
     public init(container: ModelContainer, isEphemeral: Bool = false) {
         self.container = container
         self.isEphemeral = isEphemeral
+        remoteChangeObserver = NotificationCenter.default.addObserver(
+            forName: .NSPersistentStoreRemoteChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            // Hop to the main actor via Task: the notification closure is @Sendable, so it
+            // cannot capture a non-Sendable @MainActor `self` for a synchronous call.
+            Task { @MainActor in self?.syncRevision &+= 1 }
+        }
+    }
+
+    deinit {
+        if let remoteChangeObserver { NotificationCenter.default.removeObserver(remoteChangeObserver) }
     }
 
     public static func inMemory() throws -> RideStore {
@@ -22,11 +42,14 @@ public final class RideStore {
                          isEphemeral: true)
     }
 
-    /// The app's on-disk store, with the migration plan wired in. This is the only
-    /// container that migrates; `inMemory()` always starts fresh on the current schema.
+    /// The app's on-disk store, migrated and mirrored to the rider's private CloudKit
+    /// database. Same default store URL as before, so existing local rides are found,
+    /// migrated, and uploaded on first sync. `inMemory()` stays local.
     public static func persistent() throws -> RideStore {
+        let config = ModelConfiguration(cloudKitDatabase: .private("iCloud.com.rohunjoseph.aura"))
         let container = try ModelContainer(for: RideRecord.self,
-                                           migrationPlan: RideMigrationPlan.self)
+                                           migrationPlan: RideMigrationPlan.self,
+                                           configurations: config)
         return RideStore(container: container)
     }
 
@@ -38,14 +61,16 @@ public final class RideStore {
 
     public func allRides() throws -> [Ride] {
         let descriptor = FetchDescriptor<RideRecord>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
-        return try container.mainContext.fetch(descriptor).map { try RideMapper.ride(from: $0) }
+        let rides = try container.mainContext.fetch(descriptor).map { try RideMapper.ride(from: $0) }
+        return RideHistoryDedup.unique(rides, by: \.id)
     }
 
     /// Lightweight, newest-first projection for the list and dashboard. Never reads
     /// `trackData`, so the external blob never faults.
     public func summaries() throws -> [RideSummary] {
         let descriptor = FetchDescriptor<RideRecord>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
-        return try container.mainContext.fetch(descriptor).map(RideMapper.summary(from:))
+        let summaries = try container.mainContext.fetch(descriptor).map(RideMapper.summary(from:))
+        return RideHistoryDedup.unique(summaries, by: \.id)
     }
 
     /// The full ride (track + stats), for opening one ride into the detail sheet.

@@ -4,26 +4,35 @@ import Observation
 public enum DistanceUnits: String, Codable, Hashable, Sendable { case imperial, metric }
 public enum MapStyle: String, Sendable { case dark, standard }
 
-/// Stored (not computed) properties so the `@Observable` macro actually tracks them —
-/// the macro only instruments stored properties, so views reading these through the
-/// environment re-render when they change. Each `didSet` mirrors the value into
-/// `UserDefaults` for persistence; the initial values are seeded from `UserDefaults`.
+/// Stored (not computed) properties so `@Observable` tracks them. Each `didSet` mirrors
+/// the value into `UserDefaults` (source of truth for a launch) and, for the synced keys,
+/// into the injected `KeyValueSyncing` (iCloud). Applying a remote change sets the flag so
+/// the `didSet` KVS write is suppressed, breaking the didSet -> KVS -> notify -> didSet echo.
+/// `@MainActor` because remote changes arrive off-thread and mutate `@Observable` state.
+@MainActor
 @Observable
 public final class SettingsStore {
     @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let sync: KeyValueSyncing?
+    @ObservationIgnored private var isApplyingRemote = false
 
-    public var units: DistanceUnits { didSet { defaults.set(units.rawValue, forKey: Key.units) } }
-    public var voiceEnabled: Bool { didSet { defaults.set(voiceEnabled, forKey: Key.voice) } }
-    public var mapStyle: MapStyle { didSet { defaults.set(mapStyle.rawValue, forKey: Key.mapStyle) } }
+    public static let syncedKeys: Set<String> =
+        [Key.units, Key.weeklyGoal, Key.mapStyle, Key.voice, Key.turnHaptics]
+
+    public var units: DistanceUnits { didSet { persist(units.rawValue, Key.units) } }
+    public var voiceEnabled: Bool { didSet { persist(voiceEnabled, Key.voice) } }
+    public var mapStyle: MapStyle { didSet { persist(mapStyle.rawValue, Key.mapStyle) } }
     /// Weekly distance target the home ring fills toward, stored in meters (unit-agnostic).
-    public var weeklyGoalMeters: Double { didSet { defaults.set(weeklyGoalMeters, forKey: Key.weeklyGoal) } }
-    /// Opt-in: write finished rides to Apple Health as cycling workouts.
-    public var saveToHealth: Bool { didSet { defaults.set(saveToHealth, forKey: Key.saveToHealth) } }
+    public var weeklyGoalMeters: Double { didSet { persist(weeklyGoalMeters, Key.weeklyGoal) } }
     /// Opt-in: play a haptic on turn approach and arrival during a navigated ride.
-    public var turnHaptics: Bool { didSet { defaults.set(turnHaptics, forKey: Key.turnHaptics) } }
+    public var turnHaptics: Bool { didSet { persist(turnHaptics, Key.turnHaptics) } }
+    /// Opt-in: write finished rides to Apple Health as cycling workouts.
+    /// Device-local: bound to per-device HealthKit auth, so it is not synced.
+    public var saveToHealth: Bool { didSet { defaults.set(saveToHealth, forKey: Key.saveToHealth) } }
 
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard, sync: KeyValueSyncing? = nil) {
         self.defaults = defaults
+        self.sync = sync
         units = DistanceUnits(rawValue: defaults.string(forKey: Key.units) ?? "") ?? .imperial
         voiceEnabled = defaults.object(forKey: Key.voice) as? Bool ?? true
         mapStyle = MapStyle(rawValue: defaults.string(forKey: Key.mapStyle) ?? "") ?? .dark
@@ -32,6 +41,81 @@ public final class SettingsStore {
         weeklyGoalMeters = (storedGoal.map { $0 > 0 ? $0 : nil } ?? nil) ?? 40_000
         saveToHealth = defaults.object(forKey: Key.saveToHealth) as? Bool ?? false
         turnHaptics = defaults.object(forKey: Key.turnHaptics) as? Bool ?? true
+    }
+
+    /// The external-change stream from the injected sync store (empty if none).
+    public var kvSyncStream: AsyncStream<KeyValueChange> {
+        sync?.externalChanges ?? AsyncStream { $0.finish() }
+    }
+
+    /// Apply an external iCloud change for the synced keys. Returns the keys whose value
+    /// actually changed (the app uses this to decide whether to refresh the widgets).
+    /// On `.initialSync`, remote wins over the just-seeded local defaults.
+    @discardableResult
+    public func applyRemoteChange(_ change: KeyValueChange) -> Set<String> {
+        guard let sync else { return [] }
+        if change.reason == .quotaViolation { return [] }
+        let keys = change.keys.isEmpty ? Array(Self.syncedKeys) : change.keys
+        var changed: Set<String> = []
+        isApplyingRemote = true
+        defer { isApplyingRemote = false }
+        for key in keys where Self.syncedKeys.contains(key) {
+            if applyRemoteKey(key, from: sync) { changed.insert(key) }
+        }
+        return changed
+    }
+
+    /// Applies one synced key's remote value; returns true if the local value changed.
+    /// Split per key so each guard stays simple (keeps the dispatch flat, not complex).
+    private func applyRemoteKey(_ key: String, from sync: KeyValueSyncing) -> Bool {
+        switch key {
+        case Key.units: return applyRemoteUnits(sync)
+        case Key.mapStyle: return applyRemoteMapStyle(sync)
+        case Key.voice: return applyRemoteVoice(sync)
+        case Key.turnHaptics: return applyRemoteTurnHaptics(sync)
+        case Key.weeklyGoal: return applyRemoteWeeklyGoal(sync)
+        default: return false
+        }
+    }
+
+    private func applyRemoteUnits(_ sync: KeyValueSyncing) -> Bool {
+        guard let raw = sync.string(forKey: Key.units),
+              let v = DistanceUnits(rawValue: raw), v != units else { return false }
+        units = v; return true
+    }
+
+    private func applyRemoteMapStyle(_ sync: KeyValueSyncing) -> Bool {
+        guard let raw = sync.string(forKey: Key.mapStyle),
+              let v = MapStyle(rawValue: raw), v != mapStyle else { return false }
+        mapStyle = v; return true
+    }
+
+    private func applyRemoteVoice(_ sync: KeyValueSyncing) -> Bool {
+        guard let v = sync.bool(forKey: Key.voice), v != voiceEnabled else { return false }
+        voiceEnabled = v; return true
+    }
+
+    private func applyRemoteTurnHaptics(_ sync: KeyValueSyncing) -> Bool {
+        guard let v = sync.bool(forKey: Key.turnHaptics), v != turnHaptics else { return false }
+        turnHaptics = v; return true
+    }
+
+    private func applyRemoteWeeklyGoal(_ sync: KeyValueSyncing) -> Bool {
+        guard let v = sync.double(forKey: Key.weeklyGoal), v > 0, v != weeklyGoalMeters else { return false }
+        weeklyGoalMeters = v; return true
+    }
+
+    private func persist(_ value: String, _ key: String) {
+        defaults.set(value, forKey: key)
+        if !isApplyingRemote, Self.syncedKeys.contains(key) { sync?.set(value, forKey: key); sync?.synchronize() }
+    }
+    private func persist(_ value: Double, _ key: String) {
+        defaults.set(value, forKey: key)
+        if !isApplyingRemote, Self.syncedKeys.contains(key) { sync?.set(value, forKey: key); sync?.synchronize() }
+    }
+    private func persist(_ value: Bool, _ key: String) {
+        defaults.set(value, forKey: key)
+        if !isApplyingRemote, Self.syncedKeys.contains(key) { sync?.set(value, forKey: key); sync?.synchronize() }
     }
 
     private enum Key {
