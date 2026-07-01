@@ -38,7 +38,8 @@ struct SettingsScreen {
 @MainActor
 struct JoinRideScreen {
     let app: XCUIApplication
-    var codeField: XCUIElement { app.textFields["Join code"] }
+    // Cancel + Join together identify the join sheet. The code field is intentionally
+    // accessibility-hidden (custom VoiceOver composition), so it is not queried here.
     var joinButton: XCUIElement { app.buttons["Join"] }
     var cancelButton: XCUIElement { app.buttons["Cancel"] }
 }

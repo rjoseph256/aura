@@ -33,6 +33,8 @@ final class SettingsUITests: XCTestCase {
         let settings = openSettings()
         // Do NOT tap: turning it on shows the HealthKit auth sheet, which flakes CI.
         XCTAssertTrue(settings.saveToHealthSwitch.waitForExistence(timeout: 5))
-        XCTAssertNotNil(settings.saveToHealthSwitch.value as? String, "Health switch has no value")
+        // A switch reports "0" or "1"; assert a real boolean state, not merely non-nil.
+        let value = settings.saveToHealthSwitch.value as? String
+        XCTAssertTrue(value == "0" || value == "1", "Health switch has no boolean state (\(value ?? "nil"))")
     }
 }

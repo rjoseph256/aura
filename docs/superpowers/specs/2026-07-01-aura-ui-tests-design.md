@@ -14,11 +14,23 @@ In scope, because each is deterministic and self-contained:
 
 - Launch reaches the home dashboard and the tab bar shows Ride, History, and Settings.
 - History tab presents its list or its empty state.
-- Settings tab presents its rows, and the controls are wired: the "Save rides to Health"
-  and "Turn haptics" switches read a value and flip it, the distance-units control
-  changes, and the weekly-goal stepper increments.
-- The group-ride join screen is reachable from "Join a ride" and its code field accepts an
-  8-character entry, without actually joining a ride.
+- Settings tab presents its rows, and the controls are wired: the "Turn haptics" switch
+  reads a value and flips it, the weekly-goal stepper increments, and the "Save rides to
+  Health" switch is present with a real boolean state (it is not flipped, because turning
+  it on shows the HealthKit authorization sheet).
+- The group-ride join screen is reachable from "Join a ride": the sheet presents and
+  cancels, without actually joining a ride.
+
+Deferred within this pass (documented, not silent):
+
+- The distance-units control is a `.menu`-style `Picker`; driving its menu is flakier than
+  the plain toggles and stepper, so a units-change test is left for a follow-up.
+- Typing into the join code field is not UI-tested. `GroupRideJoinView` deliberately hides
+  the raw `TextField` from accessibility and composes a custom VoiceOver element over the
+  code boxes, so there is no text-field locator to type into without changing that
+  accessibility design. Code entry stays in the on-device pass.
+- The free-ride pre-start screen: its entry point was not confirmable on the home
+  dashboard during design, so a locator would be a guess.
 - The free-ride pre-start screen is reachable from the Ride tab.
 
 Out of scope, because they need a sensor, an account, a network peer, or a second device
