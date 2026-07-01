@@ -38,14 +38,16 @@ public final class RideStore {
 
     public func allRides() throws -> [Ride] {
         let descriptor = FetchDescriptor<RideRecord>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
-        return try container.mainContext.fetch(descriptor).map { try RideMapper.ride(from: $0) }
+        let rides = try container.mainContext.fetch(descriptor).map { try RideMapper.ride(from: $0) }
+        return RideHistoryDedup.unique(rides, by: \.id)
     }
 
     /// Lightweight, newest-first projection for the list and dashboard. Never reads
     /// `trackData`, so the external blob never faults.
     public func summaries() throws -> [RideSummary] {
         let descriptor = FetchDescriptor<RideRecord>(sortBy: [SortDescriptor(\.startedAt, order: .reverse)])
-        return try container.mainContext.fetch(descriptor).map(RideMapper.summary(from:))
+        let summaries = try container.mainContext.fetch(descriptor).map(RideMapper.summary(from:))
+        return RideHistoryDedup.unique(summaries, by: \.id)
     }
 
     /// The full ride (track + stats), for opening one ride into the detail sheet.
