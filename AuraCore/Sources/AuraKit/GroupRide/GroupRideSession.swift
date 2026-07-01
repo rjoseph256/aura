@@ -16,12 +16,16 @@ public final class GroupRideSession {
     public private(set) var rideID: UUID?
     public private(set) var joinCode: JoinCode?
     public private(set) var route: Route?
+    public private(set) var peers: [RidePeer] = []
+    public private(set) var isLive: Bool = false
 
     private let backend: any GroupRideBackend
     private let transport: any RideSessionTransport
     private let displayNameProvider: @Sendable () -> String
     private let cadence: LiveShareCadence
     private var rideSession: RideSession?
+    private var currentLifecycle: RideLifecycle = .foreground
+    private var tickerTask: Task<Void, Never>?
 
     public init(backend: any GroupRideBackend, transport: any RideSessionTransport,
                 displayNameProvider: @escaping @Sendable () -> String, cadence: LiveShareCadence = .init()) {
@@ -82,5 +86,62 @@ public final class GroupRideSession {
 
     public func startRiding() {
         phase = .riding
+    }
+
+    /// Called by the production call site once it has entered `.riding` (after `create`
+    /// + `startRiding()` or `join`): starts the inner live session + the wall-clock
+    /// ticker. Tests never call this — they drive `tick`/`ingest` directly.
+    public func beginLiveSession(roster: [RidePeer] = []) async {
+        guard let session = rideSession else { return }
+        await session.start(roster: roster)
+        startTicker()
+    }
+
+    /// The sole time entry point. Publishes buffered own-points when due, ages silent
+    /// peers, then snapshots the inner session's state into the observable stored props
+    /// so SwiftUI repaints promptly rather than waiting for the next tick.
+    public func tick(now: Date) async {
+        guard let session = rideSession else { return }
+        await session.publishIfDue(now: now, lifecycle: currentLifecycle)
+        session.stalenessTick(now: now)
+        peers = session.peers
+        isLive = session.isLive
+    }
+
+    /// Forwards a transport event to the inner session, then snapshots peers/isLive.
+    /// Membership/toast logic is added in Task 10b — here `ingest` only forwards + snapshots.
+    public func ingest(_ event: TransportEvent) async {
+        guard let session = rideSession else { return }
+        await session.ingest(event)
+        peers = session.peers
+        isLive = session.isLive
+    }
+
+    /// Production-only: drives `tick(now:)` off a real wall clock. Tests never call this —
+    /// they drive `tick`/`ingest` directly with injected times.
+    func startTicker() {
+        tickerTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                await self.tick(now: Date())
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
+    public func end() async {
+        if let rideID { try? await backend.endRide(rideID: rideID) }
+        phase = .ended
+        rideSession?.stop()
+        tickerTask?.cancel()
+        tickerTask = nil
+    }
+
+    public func leave() async {
+        if let rideID { try? await backend.leaveRide(rideID: rideID) }
+        phase = .ended
+        rideSession?.stop()
+        tickerTask?.cancel()
+        tickerTask = nil
     }
 }
