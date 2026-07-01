@@ -129,14 +129,16 @@ struct GroupRideFlowView: View {
     /// Builds the session against the app's real Group Rides backend/transport
     /// (both `nonisolated struct`s with parameterless live defaults — see
     /// `SupabaseGroupRideBackend`/`SupabaseRideSessionTransport`), reading the
-    /// crew display name from the same `crewDisplayName` UserDefaults key
-    /// `DisplayNameStore` owns.
+    /// crew display name from the same `DisplayNameStore.crewDisplayNameKey`
+    /// UserDefaults key `DisplayNameStore` owns.
     @MainActor
     private static func makeSession() -> GroupRideSession {
         GroupRideSession(
             backend: SupabaseGroupRideBackend(),
             transport: SupabaseRideSessionTransport(),
-            displayNameProvider: { UserDefaults.standard.string(forKey: "crewDisplayName") ?? "" }
+            displayNameProvider: {
+                UserDefaults.standard.string(forKey: DisplayNameStore.crewDisplayNameKey) ?? ""
+            }
         )
     }
 }

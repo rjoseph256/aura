@@ -39,9 +39,13 @@ public enum GroupRosterViewData {
             let name = isSelf ? selfLabel
                 : DisplayName.forDisplay(nameMap[peer.userID] ?? peer.displayName)
             let distance: String?
-            if isSelf { distance = nil }
-            else if peer.status == .dropped { distance = noSignalLabel }
-            else { distance = PeerDistance.label(selfProgress: selfProgress, peer: peer, isImperial: isImperial) }
+            if isSelf {
+                distance = nil
+            } else if peer.status == .dropped {
+                distance = noSignalLabel
+            } else {
+                distance = PeerDistance.label(selfProgress: selfProgress, peer: peer, isImperial: isImperial)
+            }
             return RosterRow(id: peer.userID, name: name, isSelf: isSelf,
                              status: peer.status, distanceLabel: distance)
         }

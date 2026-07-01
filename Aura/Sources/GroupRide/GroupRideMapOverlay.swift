@@ -19,7 +19,7 @@ struct PeerDotView: View {
     private static let coneLength: CGFloat = 16
 
     private var discColor: Color {
-        if isSelf { return .white }
+        if isSelf { return AuraTheme.textPrimary }
         switch status {
         case .riding:   return AuraTheme.accent
         case .stopped:  return AuraTheme.warning

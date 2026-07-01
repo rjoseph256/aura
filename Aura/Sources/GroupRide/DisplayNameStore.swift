@@ -29,7 +29,7 @@ public final class DisplayNameStore {
                 seedingFrom appleFullName: String? = nil) {
         self.defaults = defaults
         self.backend = backend
-        if let stored = defaults.string(forKey: Key.crewDisplayName), !stored.isEmpty {
+        if let stored = defaults.string(forKey: DisplayNameStore.crewDisplayNameKey), !stored.isEmpty {
             name = stored
         } else if let seed = DisplayName.normalized(appleFullName ?? "") {
             name = seed
@@ -49,13 +49,16 @@ public final class DisplayNameStore {
             throw DisplayNameError.invalid
         }
         name = normalized
-        defaults.set(normalized, forKey: Key.crewDisplayName)
+        defaults.set(normalized, forKey: DisplayNameStore.crewDisplayNameKey)
         try await backend.renameDisplayName(normalized)
     }
 
-    private enum Key {
-        static let crewDisplayName = "crewDisplayName"
-    }
+    /// The `UserDefaults` key under which the crew display name is mirrored locally.
+    /// Shared with `GroupRideFlowView.makeSession()`, which reads the same key to seed
+    /// the live session's `displayNameProvider` — kept as a single source of truth so
+    /// the string literal exists exactly once. `nonisolated` so it can be read from the
+    /// non-isolated `displayNameProvider` closure without hopping to the main actor.
+    nonisolated static let crewDisplayNameKey = "crewDisplayName"
 }
 
 public enum DisplayNameError: Error, Equatable, Sendable {
