@@ -17,6 +17,9 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
             _ = try await client.rpc("upsert_display_name", params: ["p_name": displayName]).execute()
         }
     }
+    public nonisolated func renameDisplayName(_ name: String) async throws {
+        _ = try await client.rpc("upsert_display_name", params: ["p_name": name]).execute()
+    }
     public nonisolated func currentUserID() async throws -> UUID {
         try await client.auth.session.user.id
     }

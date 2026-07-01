@@ -39,6 +39,7 @@ public struct RosterMember: Equatable, Sendable {
 /// app target's job; `signIn` receives an already-obtained identity token + nonce.
 public protocol GroupRideBackend: Sendable {
     func signIn(idToken: String, nonce: String, displayName: String?) async throws
+    func renameDisplayName(_ name: String) async throws
     func currentUserID() async throws -> UUID
     func createRide(route: Data) async throws -> GroupRide
     func joinRide(code: JoinCode) async throws -> JoinedRide

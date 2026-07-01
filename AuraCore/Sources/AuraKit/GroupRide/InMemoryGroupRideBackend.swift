@@ -24,6 +24,10 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         currentUser = uid
         store.names[uid] = DisplayName.forDisplay(displayName ?? "")
     }
+    public func renameDisplayName(_ name: String) async throws {
+        guard let uid = currentUser else { throw GroupRideError.notAuthenticated }
+        store.names[uid] = name
+    }
     public func currentUserID() async throws -> UUID {
         guard let uid = currentUser else { throw GroupRideError.notAuthenticated }
         return uid

@@ -1,5 +1,6 @@
 import SwiftUI
 import AuraCore
+import AuraKit
 
 /// Edits the rider's crew display name — the name other riders see on a group
 /// ride's roster. Live-validates via `DisplayName.normalized` (blank and >40
@@ -120,13 +121,15 @@ struct DisplayNameEditor: View {
 #Preview("Default") {
     NavigationStack {
         DisplayNameEditor(store: DisplayNameStore(defaults: UserDefaults(suiteName: "preview.default")!,
+                                                   backend: InMemoryGroupRideBackend(),
                                                    seedingFrom: "Jamie Rivera"))
     }
     .preferredColorScheme(.dark)
 }
 
 #Preview("Invalid — empty") {
-    let store = DisplayNameStore(defaults: UserDefaults(suiteName: "preview.empty")!)
+    let store = DisplayNameStore(defaults: UserDefaults(suiteName: "preview.empty")!,
+                                  backend: InMemoryGroupRideBackend())
     store.name = ""
     return NavigationStack {
         DisplayNameEditor(store: store)
@@ -135,7 +138,8 @@ struct DisplayNameEditor: View {
 }
 
 #Preview("Invalid — over max") {
-    let store = DisplayNameStore(defaults: UserDefaults(suiteName: "preview.overmax")!)
+    let store = DisplayNameStore(defaults: UserDefaults(suiteName: "preview.overmax")!,
+                                  backend: InMemoryGroupRideBackend())
     store.name = String(repeating: "a", count: 55)
     return NavigationStack {
         DisplayNameEditor(store: store)
