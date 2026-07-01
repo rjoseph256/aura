@@ -44,6 +44,9 @@ struct PlanView: View {
             }
         }
         .task { await loadRides() }
+        // Refetch when CloudKit merges a remote ride, so the weekly ring and last-ride
+        // card stay live on the dashboard (mirrors HistoryView's syncRevision refetch).
+        .onChange(of: rideStore.syncRevision) { Task { await loadRides() } }
         .sheet(isPresented: $showJoinRide) {
             NavigationStack {
                 GroupRideJoinView()
