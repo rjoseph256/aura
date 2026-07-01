@@ -419,9 +419,23 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
 
 ### Wave 4 and beyond — Platform and the group-ride future
 
-- iCloud sync with CloudKit, now unblocked by the Wave 1 schema changes. Needs the iCloud
-  capability, a CloudKit container, the remote-notifications background mode, and a
-  development-to-production schema rollout.
+- iCloud sync (ride history + settings) — SHIPPED correct-by-construction (branch
+  `claude/icloud-sync`, 2026-07-01). Ride history via SwiftData automatic CloudKit: defaults
+  added to `RideRecord` in place (hash-neutral, no migration), a `syncRevision`
+  remote-change observer refreshes History/dashboard, and dedup-on-read by `id` guards a
+  backup-restore double. Settings via `NSUbiquitousKeyValueStore` behind a `KeyValueSyncing`
+  seam (five synced keys — units, weekly goal, map style, voice, turn haptics; `saveToHealth`
+  stays device-local) with a `@MainActor` apply path, a re-entrancy echo guard, reason-code
+  handling, and a widget refresh on units/goal changes. Entitlements added (iCloud container,
+  CloudKit, KVS id); background silent push deferred (foreground/launch sync for v1). Built
+  through a three-reviewer adversarial spec+plan pass and per-task reviews; package suite green
+  and app builds.
+  - **iCloud-sync device-verify list** (needs 2 iCloud-signed devices/sims + a provisioned
+    container): two-device ride round-trip + `syncRevision` refresh; settings converge across
+    devices; account-change local-data retention (sign-out, Apple ID switch); the signed-sim
+    schema push (verify the `CD_RideRecord` record type in the CloudKit Dashboard Development
+    environment); development-schema promotion to production before any App Store release
+    (additive-only after).
 - CarPlay, using the Mapbox v3 CarPlay templates and the existing `GuidanceSession`
   abstraction. Needs the CarPlay entitlement (Apple approval) and a scene delegate.
 - Apple Watch companion.
