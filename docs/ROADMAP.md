@@ -419,8 +419,8 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
 
 ### Wave 4 and beyond — Platform and the group-ride future
 
-- iCloud sync (ride history + settings) — SHIPPED correct-by-construction (branch
-  `claude/icloud-sync`, 2026-07-01). Ride history via SwiftData automatic CloudKit: defaults
+- iCloud sync (ride history + settings) — SHIPPED correct-by-construction (PR #21, main
+  `b160fbe`, 2026-07-01). Ride history via SwiftData automatic CloudKit: defaults
   added to `RideRecord` in place (hash-neutral, no migration), a `syncRevision`
   remote-change observer refreshes History/dashboard, and dedup-on-read by `id` guards a
   backup-restore double. Settings via `NSUbiquitousKeyValueStore` behind a `KeyValueSyncing`
@@ -542,6 +542,76 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
   could mis-map two equal-distance alternatives. And `DestinationSearchView` keys its results
   on stable content (name + description + coordinate) instead of the array offset.
 
+## Verification debt (consolidated 2026-07-01)
+
+A lot of recent work shipped correct-by-construction: the unit tests and reviews prove the
+logic, but the end-to-end behavior has never been observed on real hardware. These items
+were scattered across the wave notes above and the individual specs; this is the one list.
+Most of them collapse into a single two-device session once the prerequisites land.
+
+Prerequisites the tooling cannot do alone:
+
+- Tier-3 Sign in with Apple: enable the capability on the app id and deploy the
+  delete-account edge function, then sign in on a real device (needed for every group-ride
+  item below).
+- A second identity on a second device or signed simulator (group rides and iCloud both
+  need it).
+- A provisioned iCloud container on a signed build (the CloudKit schema push).
+
+The list, oldest first:
+
+- Lock-screen background recording keeps the track recording on a real ride (Wave 0,
+  2026-06-24, still the oldest unclaimed item).
+- Turn-haptic arrival fires end to end (Wave 3; the simulator's teleporting GPS cannot
+  trigger Mapbox's arrival detector).
+- Group rides live between two devices: peer visibility and naming via `ride_roster`,
+  membership toasts, host-end dissolve on the member device, member Leave and host End
+  freeing the ride, ahead/behind precision, the reconnect path (`isLive` pill and snapshot
+  re-seed), and the 8-annotation map budget. Plus the one wire-level check left on the SP2
+  checklist: a non-member subscribing to `ride:<id>` is denied by the transport.
+- iCloud sync across two signed devices: the ride round-trip with the `syncRevision`
+  refresh, settings convergence, account-change retention, the `CD_RideRecord` record type
+  visible in the CloudKit Dashboard, and (before any App Store release) promoting the
+  development schema to production.
+
+Two device-independent test follow-ups from the iCloud review ride along: the
+schema-invariant guard tests (every non-optional `RideRecord` attribute has a default; no
+`.unique` or relationships) and confirming the frozen `RideSchemaV1` `.unique` never trips
+the CloudKit mirror during the V1-to-V2 migration.
+
+## Deferred and unscheduled (consolidated 2026-07-01)
+
+Everything below was deferred somewhere: in the v1 design spec, in a wave spec's
+out-of-scope section, or in a review. None of it is scheduled. Grouped by theme.
+
+Unbuilt v1 promises. Two features from the original design spec never shipped and never
+made it onto a wave: saved places (Home and favorites in destination search, spec section
+1) and the shareable ride-summary card (spec section 4). Both are small and rider-facing.
+
+Summary and map polish: an elevation profile on the ride summary (deferred from the Wave 2
+redesign), a custom Mapbox Studio map style, and the single hoisted Mapbox map across the
+navigation flow (both fast-follows from Wave 1).
+
+Group-ride tail: QR-code join (needs a camera scanner surface), a group-aware Live
+Activity and Dynamic Island, peer-focus (tap a rider to frame them), host leave with a
+graceful host transfer, distinct join-failure messages (full, ended, and bad code
+currently share one generic error), richer membership toasts, and route-geometry
+simplification if the 256 KB broadcast bound ever bites on a long route.
+
+System-surface tail: widget configurability plus a Control Center control and push
+reloads, a multi-stage turn-haptic countdown, an active-energy estimate for the HealthKit
+workout (deferred until there is an honest source, such as an HR sensor), and background
+silent push for iCloud sync (v1 syncs on foreground and launch).
+
+Platform bets, unchanged from the Wave 4 list: CarPlay, the Apple Watch companion,
+push-to-talk (Phase 3), Strava export, and HR/power sensors.
+
+Product-level opens from the v1 spec that no wave has picked up: the public name (Aura is
+a working codename; an App Store, domain, and trademark pass is owed before release),
+validating routing quality on real Pittsburgh hills before deciding whether Mapbox
+Directions is enough or a Valhalla/BRouter move is warranted, and the offline-routing
+scope question (today the app ships offline map display, not offline route computation).
+
 ## Testing
 
 The `AuraCore` package has 124 tests covering the pure layer: GPX parsing, stats and
@@ -556,9 +626,13 @@ track simplifier, the schema migration (round-trip plus fresh-install), and the 
 Wave 3 added more for HealthKit (the `WorkoutData` mapping and `RideWorkoutGate`, the
 `TrackPoint`→`CLLocation` route reconstruction, and the coordinator's gated workout write) and for
 turn haptics (the `TurnHapticEngine` edge-trigger and the `GuidanceViewModel` haptic wiring through
-a `HapticPlaying` spy). The gap is the app target: every SwiftUI view, every Mapbox-backed
-provider, and the live CoreLocation stream are built in CI now but still untested. Wave 0's free-ride record-to-summary flow was
-checked with a one-off simulator smoke test, not an automated one.
+a `HapticPlaying` spy). The app target gained its first automated UI coverage in
+`AuraUITests` (PR #22, 2026-07-01): seven XCUITest tests across launch, tab navigation,
+the join-ride flow, and Settings, run sim-first. A CI job for them is deferred; they run
+locally and on demand until the suite earns its own CI iteration. Below that suite, the
+Mapbox-backed providers and the live CoreLocation stream are still built in CI but
+untested, and Wave 0's free-ride record-to-summary flow remains a one-off simulator
+smoke test rather than an automated one.
 
 Near-term testing work, sequenced with the waves above: the app-target CI build and SwiftLint
 landed in Wave 1, and the schema migration test landed with the persistence rebuild (Wave 1).
