@@ -57,4 +57,31 @@ struct GroupRideSessionToastTests {
         #expect(host.toasts.contains(.left("Sara")))
         #expect(!host.peers.contains { $0.userID == sara })
     }
+    @Test func hostLeftSignalEmitsHostEndedAndDissolves() async throws {
+        // D9: the host has no graceful-leave action (D12) — a member_left carrying the
+        // host's own id is the wire's only signal that the host ended the ride. A guest
+        // session must recognize this and dissolve the group layer.
+        let backend = InMemoryGroupRideBackend()
+        try await backend.signIn(idToken: "t", nonce: "n", displayName: "Mike")
+        let host = GroupRideSession(backend: backend, transport: InMemoryRideSessionTransport(),
+                                    displayNameProvider: { "Mike" })
+        await host.create(route: Route(origin: .init(latitude: 0, longitude: 0),
+            destination: .init(latitude: 1, longitude: 1), waypoints: [],
+            geometry: [.init(latitude: 0, longitude: 0), .init(latitude: 1, longitude: 1)],
+            profile: .fastest, distanceMeters: 100, estimatedDurationSeconds: 60, elevationGainMeters: 0))
+        host.startRiding()
+        let hostID = try await backend.currentUserID()
+
+        let guestBackend = InMemoryGroupRideBackend(sharing: backend)
+        try await guestBackend.signIn(idToken: "t2", nonce: "n2", displayName: "Sara")
+        let guest = GroupRideSession(backend: guestBackend, transport: InMemoryRideSessionTransport(),
+                                     displayNameProvider: { "Sara" })
+        await guest.join(code: host.joinCode!)
+
+        await guest.ingest(.memberLeft(hostID))
+
+        #expect(guest.toasts.contains(.hostEnded))
+        #expect(guest.phase == .ended)
+        #expect(!guest.toasts.contains { if case .left = $0 { return true } else { return false } })
+    }
 }

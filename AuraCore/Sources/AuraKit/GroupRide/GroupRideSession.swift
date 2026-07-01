@@ -9,7 +9,10 @@ public enum GroupToastEvent: Equatable, Sendable {
 }
 
 /// The group-ride session owner: create/join lifecycle, phase, the live tick layer,
-/// and membership toasts (nameMap resolution + joined/left/hostEnded notifications).
+/// and membership toasts (nameMap resolution + joined/left notifications). On a
+/// member's session, a `.memberLeft` whose id matches the ride's host is recognized
+/// as the host ending the ride (D9/D12: the host has no graceful-leave action, so
+/// this is the wire's only signal) — it toasts `.hostEnded` and dissolves the live layer.
 @MainActor
 @Observable
 public final class GroupRideSession {
@@ -37,6 +40,7 @@ public final class GroupRideSession {
     private var currentLifecycle: RideLifecycle = .foreground
     private var tickerTask: Task<Void, Never>?
     private var isRefreshingRoster = false
+    private var hostID: UUID?
 
     public init(backend: any GroupRideBackend, transport: any RideSessionTransport,
                 displayNameProvider: @escaping @Sendable () -> String, cadence: LiveShareCadence = .init()) {
@@ -58,6 +62,7 @@ public final class GroupRideSession {
             rideID = ride.id
             joinCode = ride.joinCode
             route = inputRoute
+            hostID = ride.hostID
             isHost = (ride.hostID == selfUserID)
             rideSession = RideSession(rideID: ride.id, selfUserID: selfUserID,
                                       transport: transport, cadence: cadence)
@@ -89,6 +94,7 @@ public final class GroupRideSession {
         rideID = joined.ride.id
         joinCode = joined.ride.joinCode
         route = decodedRoute
+        hostID = joined.ride.hostID
         isHost = (joined.ride.hostID == selfUserID)
         rideSession = RideSession(rideID: joined.ride.id, selfUserID: selfUserID,
                                   transport: transport, cadence: cadence)
@@ -122,7 +128,10 @@ public final class GroupRideSession {
     /// Resolves membership toasts for a transport event, forwards it to the inner session,
     /// then snapshots peers/isLive. A `.position` from an unknown peer triggers a throttled
     /// roster refresh and (if a name resolves) a `.joined` toast; a motion-state change on an
-    /// already-known peer is deliberately silent (D11). `.memberLeft` always toasts `.left`.
+    /// already-known peer is deliberately silent (D11). `.memberLeft` toasts `.left` for a
+    /// normal member — but when the departing id is the ride's host (D9/D12: the host has no
+    /// graceful-leave action, so this is the only signal that the host ended the ride), it
+    /// instead toasts `.hostEnded`, moves to `.ended`, and tears down the live layer.
     public func ingest(_ event: TransportEvent) async {
         guard let session = rideSession else { return }
         switch event {
@@ -131,6 +140,12 @@ public final class GroupRideSession {
             if let name = nameMap[payload.userID] {
                 toasts.append(.joined(name))
             }
+        case .memberLeft(let id) where id == hostID:
+            toasts.append(.hostEnded)
+            phase = .ended
+            session.stop()
+            tickerTask?.cancel()
+            tickerTask = nil
         case .memberLeft(let id):
             toasts.append(.left(nameMap[id] ?? "Rider"))
         default:
