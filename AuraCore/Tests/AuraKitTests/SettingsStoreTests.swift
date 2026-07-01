@@ -3,6 +3,7 @@ import Observation
 import os
 @testable import AuraKit
 
+@MainActor
 final class SettingsStoreTests: XCTestCase {
     private func freshStore() -> SettingsStore {
         let suite = "test-\(UUID().uuidString)"
