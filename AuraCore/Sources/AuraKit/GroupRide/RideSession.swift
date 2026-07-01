@@ -58,6 +58,18 @@ public final class RideSession: GroupLocationSink {
         }
     }
 
+    /// Like `start(roster:)`, but does NOT spawn the internal event loop — it seeds the
+    /// roster, opens the subscription (stored so `stop()` still cancels it), and hands the
+    /// event stream back to the caller. `GroupRideSession` uses this so IT owns the loop
+    /// and its own `ingest` (names/toasts/host-end dissolve) runs on the live stream,
+    /// rather than only `RideSession.ingest` (dots) as with `start(roster:)`.
+    public func startManaged(roster: [RidePeer]) -> AsyncStream<TransportEvent> {
+        presence = LivePresenceState(roster: roster, droppedTimeout: cadence.droppedTimeout)
+        let sub = transport.liveSubscription(rideID: rideID)
+        subscription = sub
+        return sub.events
+    }
+
     /// The deterministic event seam. The production event task and the tests both call
     /// this; tests call it directly so event handling needs no `Task.sleep` to settle.
     public func ingest(_ event: TransportEvent) async {

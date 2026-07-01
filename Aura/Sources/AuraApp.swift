@@ -75,6 +75,8 @@ private struct RootView: View {
                             RoutePreviewView(destination: place)
                         case let .navigate(route, destination):
                             NavigateHUDView(route: route, destination: destination)
+                        case let .groupRide(entry):
+                            GroupRideFlowView(entry: entry)
                         }
                     }
             }

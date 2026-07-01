@@ -73,4 +73,15 @@ struct AuraPaletteContrastTests {
         let secondary = WCAGContrast.white(AuraPalette.textSecondaryWhite)
         #expect(WCAGContrast.ratio(secondary, scrim) >= 4.5)
     }
+
+    @Test func amberClearsGraphicalContrastOnDark() {
+        // Amber is a status *dot/pill* colour on the near-black map; graphical/large-text bar is 3:1.
+        #expect(WCAGContrast.ratio(AuraPalette.amber, AuraPalette.nearBlack) >= 3.0)
+        #expect(WCAGContrast.ratio(AuraPalette.amber, AuraPalette.panel) >= 3.0)
+    }
+
+    @Test func inkOnAmberClearsBodyContrast() {
+        // Dark ink on an amber pill must clear body text 4.5:1.
+        #expect(WCAGContrast.ratio(AuraPalette.inkOnAmber, AuraPalette.amber) >= 4.5)
+    }
 }

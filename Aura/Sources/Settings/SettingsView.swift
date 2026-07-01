@@ -4,6 +4,7 @@ import AuraKit
 struct SettingsView: View {
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
+    @State private var displayNameStore = DisplayNameStore()
 
     var body: some View {
         // Bind controls straight to the observable store — each change persists via the
@@ -12,6 +13,11 @@ struct SettingsView: View {
 
         return List {
             Section("Ride") {
+                NavigationLink {
+                    DisplayNameEditor(store: displayNameStore)
+                } label: {
+                    linkLabel(icon: "person.crop.circle.fill", tint: AuraTheme.accent, title: "Crew name")
+                }
                 row(icon: "ruler", tint: AuraTheme.accent, title: "Distance units") {
                     Picker("", selection: $settings.units) {
                         Text("Miles").tag(DistanceUnits.imperial)

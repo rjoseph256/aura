@@ -16,8 +16,10 @@ enum AuraTheme {
     static let accent        = rgb(AuraPalette.lime)
     static let routeLine     = rgb(AuraPalette.lime)
     static let destructive   = rgb(AuraPalette.pink)
+    static let warning       = rgb(AuraPalette.amber)
     static let onAccent      = rgb(AuraPalette.inkOnLime)
     static let onDestructive = rgb(AuraPalette.inkOnPink)
+    static let onWarning     = rgb(AuraPalette.inkOnAmber)
     static let border        = Color.white.opacity(AuraPalette.borderWhite)
 
     // MARK: - Contrast-aware resolvers

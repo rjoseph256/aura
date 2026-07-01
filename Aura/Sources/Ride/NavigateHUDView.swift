@@ -19,10 +19,15 @@ struct NavigateHUDView: View {
     let route: AuraCore.Route
     /// The place the rider chose in search, denormalized onto the saved ride for History.
     var destination: Place?
+    /// Non-nil only when this HUD is hosting a group ride (set by `GroupNavigateContainer`).
+    /// Solo navigation (the default `nil`) is completely unaffected by anything gated on
+    /// this: no `groupSink` is passed to the coordinator, no peer dots are added to the
+    /// map, and no crew chrome is overlaid.
+    var groupSession: GroupRideSession?
 
     @Environment(AppRouter.self) private var router
     @Environment(RideStore.self) private var rideStore
-    @Environment(SettingsStore.self) private var settings
+    @Environment(SettingsStore.self) var settings
     @Environment(LocationService.self) private var location
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -30,7 +35,7 @@ struct NavigateHUDView: View {
 
     // MARK: Ride lifecycle
 
-    @State private var coordinator: RideSessionCoordinator
+    @State var coordinator: RideSessionCoordinator
     @State private var showPermission = false
 
     // MARK: Guidance
@@ -43,15 +48,23 @@ struct NavigateHUDView: View {
 
     @State private var isMuted = false
     @State private var showEndConfirm = false
+    /// Group-ride End/Leave confirmation. Kept separate from `showEndConfirm` so the solo
+    /// End alert is byte-for-byte unchanged; only fired when `groupSession != nil`.
+    @State private var showGroupEndConfirm = false
     private let speechSynthesizer = AVSpeechSynthesizer()
 
     // MARK: Map
 
     @State private var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
+    /// Each peer's previous fix, so a heading cone can be derived on-device between
+    /// consecutive updates — mirrors `RideMapView`'s solo-map peer layer. Stays empty (and
+    /// this state unused) whenever `groupSession` is nil.
+    @State private var previousPeerCoordinates: [UUID: Coordinate] = [:]
 
-    init(route: AuraCore.Route, destination: Place? = nil) {
+    init(route: AuraCore.Route, destination: Place? = nil, groupSession: GroupRideSession? = nil) {
         self.route = route
         self.destination = destination
+        self.groupSession = groupSession
         _coordinator = State(initialValue: RideSessionCoordinator(
             kind: .navigate, destinationName: destination?.name,
             screen: ScreenWakeController(), activity: RideLiveActivityController.shared,
@@ -75,7 +88,7 @@ struct NavigateHUDView: View {
                         isMuted: isMuted,
                         onRecenter: { recenter() },
                         onToggleMute: { toggleMute() },
-                        onEndRide: { showEndConfirm = true })
+                        onEndRide: { onEndTapped() })
                     Spacer()
                     SpeedRail(stats: coordinator.stats, elapsed: coordinator.elapsed,
                              currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
@@ -86,6 +99,28 @@ struct NavigateHUDView: View {
                 TripStripView(state: cruisingState)
             }
             .padding(.bottom, AuraTheme.Spacing.sm)
+
+            // Crew roster: only while hosting a live group ride (D9 hides it once the
+            // host has ended the ride, same as the toasts/pill below). Solo path
+            // (groupSession == nil) never renders this.
+            if showsGroupChrome, let groupSession {
+                GroupRosterSheet(rows: rosterRows(for: groupSession))
+                    .padding(.horizontal, AuraTheme.Spacing.md)
+                    .padding(.bottom, AuraTheme.Spacing.xxxl)
+            }
+        }
+        // Crew membership toasts
+        .overlay(alignment: .top) {
+            if showsGroupChrome, let groupSession {
+                GroupToastHost(events: groupSession.toasts)
+            }
+        }
+        // "Reconnecting…" pill when the live layer has dropped
+        .overlay(alignment: .top) {
+            if showsGroupChrome, let groupSession, !groupSession.isLive {
+                reconnectingPill
+                    .padding(.top, 44)
+            }
         }
         // Turn card pinned below the status bar
         .overlay(alignment: .top) {
@@ -124,6 +159,20 @@ struct NavigateHUDView: View {
             Button("End ride", role: .destructive) { endRide() }
             Button("Keep riding", role: .cancel) { }
         }
+        // Group-ride End/Leave confirmation. Host ends the ride for everyone (dissolves the
+        // crew via the host-left wire signal) then finishes their own ride; a member leaves
+        // the crew (D10 — they keep navigating solo) or ends their own ride (leave first,
+        // then finish). Only presented on the group path; the solo alert above is untouched.
+        .confirmationDialog(groupEndTitle, isPresented: $showGroupEndConfirm, titleVisibility: .visible) {
+            if isGroupHost {
+                Button("End group ride", role: .destructive) { endGroupRideAsHost() }
+                Button("Keep riding", role: .cancel) { }
+            } else {
+                Button("Leave crew") { leaveCrewKeepRiding() }
+                Button("End ride", role: .destructive) { endRideAsMember() }
+                Button("Keep riding", role: .cancel) { }
+            }
+        }
         // Summary sheet: when dismissed, return to the home dashboard.
         .sheet(item: $coordinator.finishedRide, onDismiss: {
             router.popToRoot()
@@ -147,7 +196,8 @@ struct NavigateHUDView: View {
 
             let outcome = coordinator.start(
                 location: location, saving: rideStore, units: settings.units,
-                authorization: location.authorization, saveToHealth: settings.saveToHealth)
+                authorization: location.authorization, saveToHealth: settings.saveToHealth,
+                groupSink: groupSession?.locationSink)
             guard outcome == .started else {
                 showPermission = true
                 return
@@ -187,7 +237,7 @@ struct NavigateHUDView: View {
         return CruisingPresenter.state(for: update, units: settings.units, now: Date())
     }
 
-    // MARK: Map view (puck follow + live route polyline)
+    // MARK: Map view (puck follow + live route polyline + group peer dots)
 
     private var navigateMapView: some View {
         Map(viewport: $viewport) {
@@ -208,8 +258,36 @@ struct NavigateHUDView: View {
                     .lineWidth(6)
                 }
             }
+
+            // Group-ride peer dots. `groupSession?.peers` is nil/empty on the solo path,
+            // so `ForEvery` iterates zero peers and this is a no-op — the solo map is
+            // visually unchanged.
+            if let groupSession {
+                ForEvery(groupSession.peers.filter { $0.coordinate != nil }, id: \.userID) { peer in
+                    if let coordinate = peer.coordinate {
+                        MapViewAnnotation(coordinate: CLLocationCoordinate2D(
+                            latitude: coordinate.latitude, longitude: coordinate.longitude)) {
+                            PeerDotView(displayName: groupSession.nameMap[peer.userID] ?? peer.displayName,
+                                       status: peer.status,
+                                       isSelf: false,
+                                       bearing: PeerBearing.heading(from: previousPeerCoordinates[peer.userID],
+                                                                    to: coordinate),
+                                       showsNameTag: peer.userID == groupLeaderID)
+                        }
+                        .allowOverlapWithPuck(true)
+                    }
+                }
+            }
         }
         .mapStyle(settings.mapStyle.mapboxStyle)
+        .onChange(of: groupSession?.peers) { _, newPeers in
+            guard let newPeers else { return }
+            for peer in newPeers {
+                if let coordinate = peer.coordinate {
+                    previousPeerCoordinates[peer.userID] = coordinate
+                }
+            }
+        }
     }
 
     // MARK: Cluster actions
@@ -234,11 +312,25 @@ struct NavigateHUDView: View {
         }
     }
 
+    // MARK: End-tap routing (solo vs group)
+
+    /// Solo path (groupSession nil) is unchanged: open the solo End alert. On the group
+    /// path, open the host/member confirmation dialog instead.
+    private func onEndTapped() {
+        if groupSession != nil {
+            showGroupEndConfirm = true
+        } else {
+            showEndConfirm = true
+        }
+    }
+
     // MARK: Ride end (guidance teardown then coordinator finish)
 
     /// Idempotent through the coordinator: arrival and the End-ride button can both call
-    /// this. Tears down guidance (view-owned) first, then finishes the ride.
-    private func endRide() {
+    /// this. Tears down guidance (view-owned) first, then finishes the ride. `internal`
+    /// (not `private`) so the group End/Leave actions in `NavigateHUDView+GroupCrew` can
+    /// finish the rider's own ride after the crew lifecycle call.
+    func endRide() {
         teardownGuidance()
         coordinator.finish()
     }

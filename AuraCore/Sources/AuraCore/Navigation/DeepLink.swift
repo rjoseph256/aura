@@ -9,6 +9,7 @@ public enum DeepLink: Equatable, Sendable {
     case settings
     case freeRide      // Ride tab, pre-start free-ride HUD
     case preview(Place)
+    case join(JoinCode)
 
     /// Parses an `aura://…` URL. Returns nil for any scheme, host, or parameter set the app
     /// does not recognize, so an unknown link is a no-op rather than a guess.
@@ -24,6 +25,7 @@ public enum DeepLink: Equatable, Sendable {
         case "settings": return .settings
         case "ride":     return .freeRide
         case "preview":  return preview(from: components)
+        case "join":     return join(from: components)
         default:         return nil
         }
     }
@@ -42,5 +44,11 @@ public enum DeepLink: Equatable, Sendable {
                           coordinate: Coordinate(latitude: lat, longitude: lng),
                           category: .custom)
         return .preview(place)
+    }
+
+    private static func join(from components: URLComponents) -> DeepLink? {
+        guard let raw = (components.queryItems ?? []).first(where: { $0.name == "code" })?.value,
+              let code = JoinCode(rawValue: raw) else { return nil }
+        return .join(code)
     }
 }
