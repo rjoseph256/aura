@@ -452,8 +452,27 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
     `ride_live_snapshot`, the `join_ride` advisory-lock cap fix, and `member_left` on
     leave/end. Remaining: device-verify the reconnect path, two Realtime dashboard settings
     (deployment checklist below), and SP3 UI.
-  - **SP3 group-ride UI**: create/join-by-code flow, the live map with named dots + roster
-    (progress, stopped/dropped), wired onto the route and `GuidanceSession`.
+  - **SP3 group-ride UI — COMPLETE (branch `claude/group-rides-sp3`, 2026-07-01).** Create
+    ("Ride together" on route preview) / join-by-code (`aura://join?code=` deep link +
+    manual 8-char entry) → a rolling-join lobby → the live navigate HUD with named peer dots
+    on the Mapbox map (status-coloured: white you / lime riding / amber stopped / grey
+    dropped), a draggable roster bottom sheet (ahead/behind distance), arrival/left/host-ended
+    toasts, and a "Reconnecting…" pill. Host = End only (D12); member = Leave (keeps riding,
+    D10); host-end dissolves the crew layer but solo nav continues (D9). One new DB object
+    (`ride_roster` RPC, migration 0016, members-only). The route already round-trips in the
+    `rides` row (no route-vend migration). Editable, gated crew display name. Pure AuraCore
+    helpers (PeerBearing, PeerDistance, DisplayName, GroupRosterViewData, RouteSplit); an
+    `@Observable` `GroupRideSession` owner in AuraKit that owns the live event loop
+    (names/toasts/dissolve) + a push-injected clock; the crew layer composed into
+    `NavigateHUDView` (solo path unchanged). Local gates green: AuraCore 212 tests, app build,
+    `swiftlint --strict` (whole repo), simulator boot + join-screen reachability. **QR-code
+    join deferred** (needs a camera scanner surface).
+    - **SP3 device-verify list** (correct-by-construction, needs 2 identities + real
+      Sign in with Apple + live Supabase): two-device peer visibility + naming via
+      `ride_roster`; membership toasts on the wire; host-end → D9 dissolve on the member
+      device; member Leave / host End freeing the ride; `selfProgress`/ahead-behind precision;
+      the reconnect path (`isLive` → pill → snapshot re-seed); the SP2 broadcast-envelope shape;
+      8-`ViewAnnotation` + pulse map budget under load; pgTAP `ride_roster` on the live project.
 - Push-to-talk voice within a session (Phase 3), Strava export, and HR/power sensors.
 
 ### Group Rides SP2 — deployment checklist (Supabase `aura`)
