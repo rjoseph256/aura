@@ -23,6 +23,7 @@ public final class GroupRideSession {
     public private(set) var phase: Phase = .idle
     public private(set) var isHost: Bool = false
     public private(set) var rideID: UUID?
+    public private(set) var selfUserID: UUID?
     public private(set) var joinCode: JoinCode?
     public private(set) var route: Route?
     public private(set) var peers: [RidePeer] = []
@@ -56,15 +57,16 @@ public final class GroupRideSession {
             return
         }
         do {
-            let selfUserID = try await backend.currentUserID()
+            let resolvedSelfUserID = try await backend.currentUserID()
             let routeData = try JSONEncoder().encode(inputRoute)
             let ride = try await backend.createRide(route: routeData)
             rideID = ride.id
             joinCode = ride.joinCode
             route = inputRoute
             hostID = ride.hostID
-            isHost = (ride.hostID == selfUserID)
-            rideSession = RideSession(rideID: ride.id, selfUserID: selfUserID,
+            selfUserID = resolvedSelfUserID
+            isHost = (ride.hostID == resolvedSelfUserID)
+            rideSession = RideSession(rideID: ride.id, selfUserID: resolvedSelfUserID,
                                       transport: transport, cadence: cadence)
             phase = .lobby
         } catch {
@@ -77,10 +79,10 @@ public final class GroupRideSession {
             phase = .needsDisplayName
             return
         }
-        let selfUserID: UUID
+        let resolvedSelfUserID: UUID
         let joined: JoinedRide
         do {
-            selfUserID = try await backend.currentUserID()
+            resolvedSelfUserID = try await backend.currentUserID()
             joined = try await backend.joinRide(code: code)
         } catch {
             phase = .joinFailed
@@ -95,8 +97,9 @@ public final class GroupRideSession {
         joinCode = joined.ride.joinCode
         route = decodedRoute
         hostID = joined.ride.hostID
-        isHost = (joined.ride.hostID == selfUserID)
-        rideSession = RideSession(rideID: joined.ride.id, selfUserID: selfUserID,
+        selfUserID = resolvedSelfUserID
+        isHost = (joined.ride.hostID == resolvedSelfUserID)
+        rideSession = RideSession(rideID: joined.ride.id, selfUserID: resolvedSelfUserID,
                                   transport: transport, cadence: cadence)
         phase = .riding
     }

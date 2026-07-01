@@ -5,8 +5,8 @@ import AuraKit
 /// Owns the group-ride session for one navigation-stack entry: constructs the live
 /// `GroupRideSession` around the app's real Supabase backend/transport, drives the
 /// create-or-join call the entry asks for, and switches on `session.phase` to present
-/// the right screen. `Task 17` swaps the `.riding` placeholder for the full
-/// `GroupNavigateContainer`; everything else here is final.
+/// the right screen. `.riding` renders `GroupNavigateContainer`, which composes the crew
+/// chrome (roster/toasts/pill) over the existing solo `NavigateHUDView`.
 struct GroupRideFlowView: View {
     let entry: GroupRideEntry
 
@@ -42,9 +42,18 @@ struct GroupRideFlowView: View {
         case .lobby:
             GroupLobbyView(session: session)
 
-        case .riding:
-            if let route = session.route {
-                NavigateHUDView(route: route, destination: nil)
+        // `.riding` and `.ended` share one branch: once the crew layer has started, a
+        // host-end (D9) only flips `session.phase` to `.ended` — it must NOT tear this
+        // view back down, or the rider's in-progress solo navigation (owned by the
+        // `RideSessionCoordinator` inside `GroupNavigateContainer`'s `NavigateHUDView`)
+        // would be abandoned along with it. `GroupNavigateContainer` itself reads
+        // `session.phase` to hide the crew chrome once `.ended`, while the solo HUD
+        // underneath keeps running. `.task` re-invokes `beginLiveSession()` only on the
+        // very first entry into this branch (SwiftUI keys `.task` to the view identity,
+        // not to phase, so the ended transition doesn't restart it).
+        case .riding, .ended:
+            if session.route != nil {
+                GroupNavigateContainer(session: session)
                     .task { await session.beginLiveSession() }
             } else {
                 // Guarded per the brief: `.riding` with no route is unreachable in
@@ -73,10 +82,6 @@ struct GroupRideFlowView: View {
                 title: "Couldn't join — double-check the code with your host.",
                 systemImage: "person.crop.circle.badge.xmark"
             )
-
-        case .ended:
-            Color.clear
-                .onAppear { router.pop() }
         }
     }
 

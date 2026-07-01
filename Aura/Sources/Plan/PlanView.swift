@@ -10,6 +10,7 @@ struct PlanView: View {
     @Environment(SettingsStore.self) private var settings
     @State private var query: String = ""
     @State private var summaries: [RideSummary] = []
+    @State private var showJoinRide = false
     @ScaledMetric(relativeTo: .title) private var brandSize: CGFloat = 24
 
     private var weekStats: WeeklyRideStats {
@@ -38,10 +39,16 @@ struct PlanView: View {
 
                 Spacer(minLength: 0)
 
+                joinRideButton
                 freeRideButton
             }
         }
         .task { await loadRides() }
+        .sheet(isPresented: $showJoinRide) {
+            NavigationStack {
+                GroupRideJoinView()
+            }
+        }
     }
 
     // MARK: Data
@@ -167,6 +174,20 @@ struct PlanView: View {
             .foregroundStyle(AuraTheme.textSecondary)
             .textCase(.uppercase)
             .tracking(0.5)
+    }
+
+    // MARK: Join-a-ride CTA
+
+    private var joinRideButton: some View {
+        Button {
+            showJoinRide = true
+        } label: {
+            Label("Join a ride", systemImage: "person.2.badge.plus")
+                .font(.system(.headline, design: .rounded).weight(.semibold))
+        }
+        .buttonStyle(.ctaSecondary)
+        .padding(.horizontal, AuraTheme.Spacing.xxl)
+        .padding(.top, AuraTheme.Spacing.sm)
     }
 
     // MARK: Free-ride CTA
