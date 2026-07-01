@@ -8,3 +8,6 @@ Aura/Aura.xcodeproj/
 Aura/build/
 *.xcconfig.local
 xcuserdata/
+
+# Mapbox secret downloads token (per-worktree, never commit)
+.mapbox
