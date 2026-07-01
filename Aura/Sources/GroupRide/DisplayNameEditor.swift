@@ -8,6 +8,10 @@ import AuraKit
 /// affordance so the 40-character cap never feels like a surprise truncation.
 struct DisplayNameEditor: View {
     @Bindable var store: DisplayNameStore
+    /// Called after a successful save. Defaults to a no-op so the Settings call site
+    /// (which just wants persistence) is unaffected; the group-ride "needs a name"
+    /// gate (Task 16) uses this to re-invoke the create/join it deferred.
+    var onSaved: () -> Void = {}
 
     @State private var isSaving = false
     @State private var saveError: String?
@@ -111,6 +115,7 @@ struct DisplayNameEditor: View {
             defer { isSaving = false }
             do {
                 try await store.save()
+                onSaved()
             } catch {
                 saveError = "Couldn't save — check your connection and try again."
             }

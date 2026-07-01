@@ -75,9 +75,8 @@ private struct RootView: View {
                             RoutePreviewView(destination: place)
                         case let .navigate(route, destination):
                             NavigateHUDView(route: route, destination: destination)
-                        case .groupRide:
-                            // TODO(SP3 Task 16): replace with GroupRideFlowView(entry:)
-                            ProgressView()
+                        case let .groupRide(entry):
+                            GroupRideFlowView(entry: entry)
                         }
                     }
             }

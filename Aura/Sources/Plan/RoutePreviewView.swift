@@ -225,13 +225,23 @@ struct RoutePreviewView: View {
     // MARK: Start CTA
 
     private var startButton: some View {
-        Button("Start RIDE") {
-            if let selected {
-                router.push(.navigate(route: selected, destination: destination))
+        VStack(spacing: AuraTheme.Spacing.sm) {
+            Button("Start RIDE") {
+                if let selected {
+                    router.push(.navigate(route: selected, destination: destination))
+                }
             }
+            .buttonStyle(.ctaPrimary)
+            .disabled(selected == nil)
+
+            Button("Ride together") {
+                if let selected {
+                    router.push(.groupRide(.create(selected)))
+                }
+            }
+            .buttonStyle(.ctaSecondary)
+            .disabled(selected == nil)
         }
-        .buttonStyle(.ctaPrimary)
-        .disabled(selected == nil)
         .animation(.easeOut(duration: 0.18), value: selected?.id)
     }
 
