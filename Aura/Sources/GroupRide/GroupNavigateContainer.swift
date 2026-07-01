@@ -2,74 +2,23 @@ import SwiftUI
 import AuraCore
 import AuraKit
 
-/// Composes the group-ride crew chrome on top of the existing solo `NavigateHUDView`.
-/// `NavigateHUDView` itself is untouched — it keeps recording, guiding, and saving the ride
-/// exactly as it does for a solo rider. This container only adds a floating layer above it:
-/// the crew roster sheet, membership toasts, and a "Reconnecting…" pill, all bound to one
-/// `GroupRideSession`.
-///
-/// Group chrome is visible only while `session.phase == .riding`. Once the host ends the
-/// ride (D9: `phase == .ended`), the chrome is hidden — but `NavigateHUDView` is left running
-/// underneath, so the rider keeps navigating to their destination solo rather than being
-/// booted out of an in-progress ride.
+/// Thin adapter from a `GroupRideSession` to the `NavigateHUDView` it rides on top of.
+/// `NavigateHUDView` now owns the whole crew layer itself (peer dots on the map, the
+/// roster sheet, membership toasts, and the "Reconnecting…" pill) whenever it's handed a
+/// non-nil `groupSession` — see Task 17. This container's only remaining job is picking
+/// the session's route (or a sane fallback) and passing the session through.
 struct GroupNavigateContainer: View {
     let session: GroupRideSession
 
-    @Environment(SettingsStore.self) private var settings
-
     var body: some View {
-        ZStack(alignment: .bottom) {
-            if let route = session.route {
-                NavigateHUDView(route: route, destination: nil)
-            } else {
-                // Guarded per the brief: `.riding` with no route is unreachable in practice
-                // (create/join both set `route` before this phase), but render something
-                // sane rather than a blank screen.
-                Color.clear
-            }
-
-            if showsGroupChrome {
-                GroupRosterSheet(rows: rosterRows)
-                    .padding(.horizontal, AuraTheme.Spacing.md)
-                    .padding(.bottom, AuraTheme.Spacing.xxxl)
-            }
+        if let route = session.route {
+            NavigateHUDView(route: route, destination: nil, groupSession: session)
+        } else {
+            // Guarded per the brief: `.riding` with no route is unreachable in practice
+            // (create/join both set `route` before this phase), but render something
+            // sane rather than a blank screen.
+            Color.clear
         }
-        .overlay(alignment: .top) {
-            if showsGroupChrome {
-                GroupToastHost(events: session.toasts)
-            }
-        }
-        .overlay(alignment: .top) {
-            if showsGroupChrome, !session.isLive {
-                reconnectingPill
-                    .padding(.top, 44)
-            }
-        }
-    }
-
-    /// The crew layer is only meaningful while the ride is actively live; once the host has
-    /// ended it (`.ended`), every group-specific element disappears and the solo HUD beneath
-    /// is all that remains.
-    private var showsGroupChrome: Bool {
-        session.phase == .riding
-    }
-
-    private var rosterRows: [RosterRow] {
-        GroupRosterViewData.rows(peers: session.peers, nameMap: session.nameMap,
-                                 selfUserID: session.selfUserID ?? UUID(),
-                                 selfProgress: 0, isImperial: settings.units == .imperial)
-    }
-
-    private var reconnectingPill: some View {
-        Label("Reconnecting…", systemImage: "wifi.exclamationmark")
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(AuraTheme.textPrimary)
-            .padding(.horizontal, AuraTheme.Spacing.md)
-            .padding(.vertical, AuraTheme.Spacing.sm)
-            .background(AuraTheme.surface.opacity(0.9), in: Capsule())
-            .overlay(Capsule().strokeBorder(AuraTheme.border))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Reconnecting to the group ride")
     }
 }
 
@@ -77,20 +26,39 @@ struct GroupNavigateContainer: View {
 
 #Preview("Riding — crew chrome visible") {
     GroupNavigateContainerPreviewHost(phase: .riding, isLive: true)
+        .environment(AppRouter())
+        .environment(previewRideStore())
         .environment(SettingsStore())
+        .environment(LocationService())
         .preferredColorScheme(.dark)
 }
 
 #Preview("Ended — chrome gone, solo HUD persists") {
     GroupNavigateContainerPreviewHost(phase: .ended, isLive: true)
+        .environment(AppRouter())
+        .environment(previewRideStore())
         .environment(SettingsStore())
+        .environment(LocationService())
         .preferredColorScheme(.dark)
 }
 
 #Preview("Reconnecting pill") {
     GroupNavigateContainerPreviewHost(phase: .riding, isLive: false)
+        .environment(AppRouter())
+        .environment(previewRideStore())
         .environment(SettingsStore())
+        .environment(LocationService())
         .preferredColorScheme(.dark)
+}
+
+/// An in-memory `RideStore` for these previews. `NavigateHUDView` (which
+/// `GroupNavigateContainer` now hosts directly) reads `RideStore` from the environment
+/// even in a group ride, so the preview needs one — an in-memory container should never
+/// fail to build, so a crash here would only ever surface a real regression.
+@MainActor
+private func previewRideStore() -> RideStore {
+    // swiftlint:disable:next force_try
+    try! RideStore.inMemory()
 }
 
 /// Drives a real `GroupRideSession` against in-memory fakes (no network) into the requested

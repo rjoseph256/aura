@@ -19,10 +19,15 @@ struct NavigateHUDView: View {
     let route: AuraCore.Route
     /// The place the rider chose in search, denormalized onto the saved ride for History.
     var destination: Place?
+    /// Non-nil only when this HUD is hosting a group ride (set by `GroupNavigateContainer`).
+    /// Solo navigation (the default `nil`) is completely unaffected by anything gated on
+    /// this: no `groupSink` is passed to the coordinator, no peer dots are added to the
+    /// map, and no crew chrome is overlaid.
+    var groupSession: GroupRideSession?
 
     @Environment(AppRouter.self) private var router
     @Environment(RideStore.self) private var rideStore
-    @Environment(SettingsStore.self) private var settings
+    @Environment(SettingsStore.self) var settings
     @Environment(LocationService.self) private var location
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -30,7 +35,7 @@ struct NavigateHUDView: View {
 
     // MARK: Ride lifecycle
 
-    @State private var coordinator: RideSessionCoordinator
+    @State var coordinator: RideSessionCoordinator
     @State private var showPermission = false
 
     // MARK: Guidance
@@ -48,10 +53,15 @@ struct NavigateHUDView: View {
     // MARK: Map
 
     @State private var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
+    /// Each peer's previous fix, so a heading cone can be derived on-device between
+    /// consecutive updates — mirrors `RideMapView`'s solo-map peer layer. Stays empty (and
+    /// this state unused) whenever `groupSession` is nil.
+    @State private var previousPeerCoordinates: [UUID: Coordinate] = [:]
 
-    init(route: AuraCore.Route, destination: Place? = nil) {
+    init(route: AuraCore.Route, destination: Place? = nil, groupSession: GroupRideSession? = nil) {
         self.route = route
         self.destination = destination
+        self.groupSession = groupSession
         _coordinator = State(initialValue: RideSessionCoordinator(
             kind: .navigate, destinationName: destination?.name,
             screen: ScreenWakeController(), activity: RideLiveActivityController.shared,
@@ -86,6 +96,28 @@ struct NavigateHUDView: View {
                 TripStripView(state: cruisingState)
             }
             .padding(.bottom, AuraTheme.Spacing.sm)
+
+            // Crew roster: only while hosting a live group ride (D9 hides it once the
+            // host has ended the ride, same as the toasts/pill below). Solo path
+            // (groupSession == nil) never renders this.
+            if showsGroupChrome, let groupSession {
+                GroupRosterSheet(rows: rosterRows(for: groupSession))
+                    .padding(.horizontal, AuraTheme.Spacing.md)
+                    .padding(.bottom, AuraTheme.Spacing.xxxl)
+            }
+        }
+        // Crew membership toasts
+        .overlay(alignment: .top) {
+            if showsGroupChrome, let groupSession {
+                GroupToastHost(events: groupSession.toasts)
+            }
+        }
+        // "Reconnecting…" pill when the live layer has dropped
+        .overlay(alignment: .top) {
+            if showsGroupChrome, let groupSession, !groupSession.isLive {
+                reconnectingPill
+                    .padding(.top, 44)
+            }
         }
         // Turn card pinned below the status bar
         .overlay(alignment: .top) {
@@ -147,7 +179,8 @@ struct NavigateHUDView: View {
 
             let outcome = coordinator.start(
                 location: location, saving: rideStore, units: settings.units,
-                authorization: location.authorization, saveToHealth: settings.saveToHealth)
+                authorization: location.authorization, saveToHealth: settings.saveToHealth,
+                groupSink: groupSession?.locationSink)
             guard outcome == .started else {
                 showPermission = true
                 return
@@ -187,7 +220,7 @@ struct NavigateHUDView: View {
         return CruisingPresenter.state(for: update, units: settings.units, now: Date())
     }
 
-    // MARK: Map view (puck follow + live route polyline)
+    // MARK: Map view (puck follow + live route polyline + group peer dots)
 
     private var navigateMapView: some View {
         Map(viewport: $viewport) {
@@ -208,8 +241,36 @@ struct NavigateHUDView: View {
                     .lineWidth(6)
                 }
             }
+
+            // Group-ride peer dots. `groupSession?.peers` is nil/empty on the solo path,
+            // so `ForEvery` iterates zero peers and this is a no-op — the solo map is
+            // visually unchanged.
+            if let groupSession {
+                ForEvery(groupSession.peers.filter { $0.coordinate != nil }, id: \.userID) { peer in
+                    if let coordinate = peer.coordinate {
+                        MapViewAnnotation(coordinate: CLLocationCoordinate2D(
+                            latitude: coordinate.latitude, longitude: coordinate.longitude)) {
+                            PeerDotView(displayName: groupSession.nameMap[peer.userID] ?? peer.displayName,
+                                       status: peer.status,
+                                       isSelf: false,
+                                       bearing: PeerBearing.heading(from: previousPeerCoordinates[peer.userID],
+                                                                    to: coordinate),
+                                       showsNameTag: peer.userID == groupLeaderID)
+                        }
+                        .allowOverlapWithPuck(true)
+                    }
+                }
+            }
         }
         .mapStyle(settings.mapStyle.mapboxStyle)
+        .onChange(of: groupSession?.peers) { _, newPeers in
+            guard let newPeers else { return }
+            for peer in newPeers {
+                if let coordinate = peer.coordinate {
+                    previousPeerCoordinates[peer.userID] = coordinate
+                }
+            }
+        }
     }
 
     // MARK: Cluster actions

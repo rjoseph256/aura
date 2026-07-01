@@ -33,6 +33,12 @@ public final class GroupRideSession {
     /// Append-only membership notifications; the UI drains this.
     public private(set) var toasts: [GroupToastEvent] = []
 
+    /// The seam the ride's `RideSessionCoordinator` publishes the rider's own position
+    /// through, so peers see this rider's dot on the map. `rideSession` (the private inner
+    /// live session) conforms to `GroupLocationSink`; this simply exposes it read-only for
+    /// the production call site (`NavigateHUDView`) to hand to `coordinator.start(groupSink:)`.
+    public var locationSink: (any GroupLocationSink)? { rideSession }
+
     private let backend: any GroupRideBackend
     private let transport: any RideSessionTransport
     private let displayNameProvider: @Sendable () -> String
