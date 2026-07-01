@@ -42,11 +42,14 @@ public final class RideStore {
                          isEphemeral: true)
     }
 
-    /// The app's on-disk store, with the migration plan wired in. This is the only
-    /// container that migrates; `inMemory()` always starts fresh on the current schema.
+    /// The app's on-disk store, migrated and mirrored to the rider's private CloudKit
+    /// database. Same default store URL as before, so existing local rides are found,
+    /// migrated, and uploaded on first sync. `inMemory()` stays local.
     public static func persistent() throws -> RideStore {
+        let config = ModelConfiguration(cloudKitDatabase: .private("iCloud.com.rohunjoseph.aura"))
         let container = try ModelContainer(for: RideRecord.self,
-                                           migrationPlan: RideMigrationPlan.self)
+                                           migrationPlan: RideMigrationPlan.self,
+                                           configurations: config)
         return RideStore(container: container)
     }
 
