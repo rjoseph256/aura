@@ -11,7 +11,23 @@ struct InMemoryGroupRideBackendTests {
         let joiner = InMemoryGroupRideBackend(sharing: backend)
         try await joiner.signIn(idToken: "t2", nonce: "n2", displayName: "Guest")
         let joined = try await joiner.joinRide(code: ride.joinCode)
-        #expect(joined.id == ride.id)
+        #expect(joined.ride.id == ride.id)
+    }
+    @Test func joinReturnsStoredRouteAndRoster() async throws {
+        let host = InMemoryGroupRideBackend()
+        try await host.signIn(idToken: "t", nonce: "n", displayName: "Mike")
+        let routeBytes = Data("{\"hello\":1}".utf8)
+        let ride = try await host.createRide(route: routeBytes)
+
+        let guest = InMemoryGroupRideBackend(sharing: host)
+        try await guest.signIn(idToken: "t2", nonce: "n2", displayName: "Sara")
+        let joined = try await guest.joinRide(code: ride.joinCode)
+        #expect(joined.route == routeBytes)
+
+        let roster = try await host.roster(rideID: ride.id)
+        #expect(Set(roster.map(\.displayName)) == ["Mike", "Sara"])
+        let selfID = try await guest.currentUserID()
+        #expect(roster.contains { $0.userID == selfID })
     }
     @Test func joinRejectsNinthMember() async throws {
         let backend = InMemoryGroupRideBackend()
