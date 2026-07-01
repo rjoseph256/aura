@@ -79,7 +79,10 @@ In `AuraCore/Sources/AuraKit/Persistence/RideSchemaV2.swift`, change the four pr
 ```swift
         public var id: UUID = UUID()
         public var kindRaw: String = "free"
-        public var startedAt: Date = .now
+        // Fixed sentinel, not `.now`: a default is only used when CloudKit materializes a
+        // record missing this key, and "now" would be a misleading start time. Every
+        // app-created row sets startedAt in init, so the sentinel is never seen normally.
+        public var startedAt: Date = Date(timeIntervalSince1970: 0)
         public var endedAt: Date?
         @Attribute(.externalStorage) public var trackData: Data = Data()   // JSON-encoded [TrackPoint]
 ```
@@ -241,8 +244,11 @@ struct RideStoreSyncRevisionTests {
         let store = RideStore(container: container)
         #expect(store.syncRevision == 0)
         NotificationCenter.default.post(name: .NSPersistentStoreRemoteChange, object: nil)
-        // The observer hops to the main actor; yield so it runs.
-        await Task.yield()
+        // The observer hops to the main actor via a Task; a single yield is not enough to
+        // guarantee it ran, so poll with a bounded wait.
+        for _ in 0..<100 where store.syncRevision == 0 {
+            try await Task.sleep(for: .milliseconds(5))
+        }
         #expect(store.syncRevision == 1)
     }
 }
@@ -275,7 +281,9 @@ Add the stored properties and revise `init`:
         remoteChangeObserver = NotificationCenter.default.addObserver(
             forName: .NSPersistentStoreRemoteChange, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.syncRevision &+= 1 }
+            // Hop to the main actor via Task: the notification closure is @Sendable, so it
+            // cannot capture a non-Sendable @MainActor `self` for a synchronous call.
+            Task { @MainActor in self?.syncRevision &+= 1 }
         }
     }
 
@@ -388,9 +396,11 @@ final class FakeKeyValueStore: KeyValueSyncing, @unchecked Sendable {
     func double(forKey key: String) -> Double? { storage[key] as? Double }
     func bool(forKey key: String) -> Bool? { storage[key] as? Bool }
     func hasValue(forKey key: String) -> Bool { storage[key] != nil }
-    func set(_ value: String?, forKey key: String) { storage[key] = value }
-    func set(_ value: Double, forKey key: String) { storage[key] = value }
-    func set(_ value: Bool, forKey key: String) { storage[key] = value }
+    /// Per-key write count, so a test can assert the echo guard suppressed a write-back.
+    private(set) var setCounts: [String: Int] = [:]
+    func set(_ value: String?, forKey key: String) { storage[key] = value; setCounts[key, default: 0] += 1 }
+    func set(_ value: Double, forKey key: String) { storage[key] = value; setCounts[key, default: 0] += 1 }
+    func set(_ value: Bool, forKey key: String) { storage[key] = value; setCounts[key, default: 0] += 1 }
     @discardableResult func synchronize() -> Bool { true }
 
     /// Seed a value as if a peer had written it, then emit the change.
@@ -448,34 +458,21 @@ struct SettingsStoreSyncTests {
         return (SettingsStore(defaults: defaults, sync: fake), fake, defaults)
     }
 
-    @Test func localChangeMirrorsToKVS() {
+    @Test func localChangeMirrorsToKVSExactlyOnce() {
         let (store, fake, _) = make()
         store.units = .metric
         #expect(fake.string(forKey: "units") == "metric")
+        #expect(fake.setCounts["units"] == 1)   // proves the counter is wired and mirroring works
     }
 
-    @Test func remoteChangeAppliesWithoutEchoingBack() {
+    @Test func remoteApplyDoesNotWriteBackToKVS() {
         let (store, fake, _) = make()
         fake.seed("metric", forKey: "units")
-        // Track writes after seeding by counting a re-write of the same key.
         let changed = store.applyRemoteChange(KeyValueChange(keys: ["units"], reason: .server))
         #expect(store.units == .metric)
         #expect(changed == ["units"])
-        // Echo guard: applying a remote change must not have pushed a new value back.
-        // (No assertion on write count here beyond value stability; see loop test below.)
-    }
-
-    @Test func remoteApplyDoesNotRetriggerKVSWrite() {
-        let (store, fake, _) = make()
-        // Overwrite the fake's setter to detect an echo: wrap by re-seeding then applying.
-        fake.seed("metric", forKey: "units")
-        _ = store.applyRemoteChange(KeyValueChange(keys: ["units"], reason: .server))
-        // If didSet echoed, it would have written units again; value stays metric either way,
-        // so assert the store did NOT flip the flag off prematurely by applying a second change.
-        fake.seed("imperial", forKey: "units")
-        let changed = store.applyRemoteChange(KeyValueChange(keys: ["units"], reason: .server))
-        #expect(store.units == .imperial)
-        #expect(changed == ["units"])
+        // The echo guard held: applying a remote value must NOT push a write back to KVS.
+        #expect(fake.setCounts["units", default: 0] == 0)
     }
 
     @Test func initialSyncLetsRemoteWinOverSeededDefaults() {
@@ -624,7 +621,16 @@ final class SettingsStoreTests: XCTestCase {
 Run: `cd AuraCore && swift test --filter SettingsStore`
 Expected: PASS (both `SettingsStoreTests` and `SettingsStoreSyncTests`).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Confirm the app still builds at this boundary**
+
+The `@MainActor` change is source-compatible: every app call site is already main-isolated, and
+`SettingsStore()` still resolves via the defaulted `sync:` parameter (Task 5 injects the real
+conformer). Verify so a break is caught now, not two tasks later:
+
+Run: `cd Aura && xcodegen generate && xcodebuild -project Aura.xcodeproj -scheme Aura -destination 'generic/platform=iOS Simulator' build`
+Expected: `BUILD SUCCEEDED`
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add AuraCore/Sources/AuraKit/Settings/SettingsStore.swift AuraCore/Tests/AuraKitTests/SettingsStoreTests.swift AuraCore/Tests/AuraKitTests/SettingsStoreSyncTests.swift
@@ -706,17 +712,22 @@ final class UbiquitousKeyValueStore: KeyValueSyncing, @unchecked Sendable {
 
 - [ ] **Step 2: Wire it in AuraApp**
 
-In `Aura/Sources/AuraApp.swift`, construct the store with the sync conformer where `SettingsStore` is created (replace the existing `SettingsStore(...)` construction), and add a `.task` on the root that consumes external changes. Locate `makeSettings()` / the `SettingsStore` initializer and change it to:
+`SettingsStore` is constructed inline at `Aura/Sources/AuraApp.swift:10` as
+`@State private var settings = SettingsStore()` — there is no `makeSettings()` helper. Change
+that line to inject the conformer (`UbiquitousKeyValueStore()` is constructible here because
+`AuraApp` is main-actor isolated):
 
 ```swift
-    private static func makeSettings() -> SettingsStore {
-        SettingsStore(defaults: .standard, sync: UbiquitousKeyValueStore())
-    }
+    @State private var settings = SettingsStore(defaults: .standard, sync: UbiquitousKeyValueStore())
 ```
 
-Then on the root view (near the existing `.task { WidgetRefresh.reload(...) }` at `AuraApp.swift:95`), add:
+Then add the consumer `.task` **inside `RootView.body`**, next to the existing
+`.task { WidgetRefresh.reload(...) }` (around `AuraApp.swift:95`) — that is the only scope where
+both `settings` and `rideStore` resolve (they are `@Environment` values on `RootView`, not on
+`AuraApp`):
 
 ```swift
+        // Consumed exactly once for the app's lifetime (the underlying AsyncStream is single-consumer).
         .task {
             for await change in settings.kvSyncStream {
                 let changed = settings.applyRemoteChange(change)
@@ -727,9 +738,11 @@ Then on the root view (near the existing `.task { WidgetRefresh.reload(...) }` a
         }
 ```
 
-To expose the stream, add a passthrough on `SettingsStore` (AuraKit) so the app can await it without holding the conformer:
+To expose the stream, add a passthrough on `SettingsStore` (AuraKit) so the app can await it
+without holding the conformer:
 
-In `AuraCore/Sources/AuraKit/Settings/SettingsStore.swift`, add:
+In `AuraCore/Sources/AuraKit/Settings/SettingsStore.swift`, add (consume exactly once — the
+underlying stream is single-consumer):
 
 ```swift
     /// The external-change stream from the injected sync store (empty if none).

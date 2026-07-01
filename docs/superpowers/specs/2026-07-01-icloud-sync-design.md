@@ -35,7 +35,9 @@ scalars, not blanket-optionalize them):
 
 - `id` = `UUID()`
 - `kindRaw` = `"free"`
-- `startedAt` = `.now`
+- `startedAt` = `Date(timeIntervalSince1970: 0)` (a fixed sentinel, not `.now`: the default is
+  only used if CloudKit materializes a record missing this key, and "now" would be a misleading
+  start time; every app-created row sets it in init)
 - `trackData` = `Data()`
 
 **This is not a schema version bump and needs no migration stage.** A default value is not
