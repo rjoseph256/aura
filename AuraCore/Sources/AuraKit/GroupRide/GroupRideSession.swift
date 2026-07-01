@@ -8,7 +8,7 @@ import AuraCore
 @Observable
 public final class GroupRideSession {
     public enum Phase: Equatable, Sendable {
-        case idle, lobby, riding, ended, routeUnavailable, createFailed, needsDisplayName
+        case idle, lobby, riding, ended, routeUnavailable, createFailed, needsDisplayName, joinFailed
     }
 
     public private(set) var phase: Phase = .idle
@@ -57,24 +57,27 @@ public final class GroupRideSession {
             phase = .needsDisplayName
             return
         }
+        let selfUserID: UUID
+        let joined: JoinedRide
         do {
-            let selfUserID = try await backend.currentUserID()
-            let joined = try await backend.joinRide(code: code)
-            guard let decodedRoute = try? JSONDecoder().decode(Route.self, from: joined.route) else {
-                phase = .routeUnavailable
-                try? await backend.leaveRide(rideID: joined.ride.id)
-                return
-            }
-            rideID = joined.ride.id
-            joinCode = joined.ride.joinCode
-            route = decodedRoute
-            isHost = (joined.ride.hostID == selfUserID)
-            rideSession = RideSession(rideID: joined.ride.id, selfUserID: selfUserID,
-                                      transport: transport, cadence: cadence)
-            phase = .riding
+            selfUserID = try await backend.currentUserID()
+            joined = try await backend.joinRide(code: code)
         } catch {
-            phase = .createFailed
+            phase = .joinFailed
+            return
         }
+        guard let decodedRoute = try? JSONDecoder().decode(Route.self, from: joined.route) else {
+            phase = .routeUnavailable
+            try? await backend.leaveRide(rideID: joined.ride.id)
+            return
+        }
+        rideID = joined.ride.id
+        joinCode = joined.ride.joinCode
+        route = decodedRoute
+        isHost = (joined.ride.hostID == selfUserID)
+        rideSession = RideSession(rideID: joined.ride.id, selfUserID: selfUserID,
+                                  transport: transport, cadence: cadence)
+        phase = .riding
     }
 
     public func startRiding() {

@@ -58,6 +58,17 @@ struct GroupRideSessionLifecycleTests {
         #expect(guest.phase == .routeUnavailable)
         #expect(guestBackend.store.leaveCalled == true)   // auto-left to free the slot
     }
+    @Test func joinWithBadCodeEntersJoinFailed() async throws {
+        let (host, hostBackend) = try await make(name: "Mike")
+        await host.create(route: route())
+        let (guest, _) = try await guest(sharing: hostBackend, name: "Sara")
+        // "ZZZZZZZZ" matches no ride in the shared store — the fake throws
+        // GroupRideError.joinFailed from joinRide(code:) before any route decode happens.
+        await guest.join(code: JoinCode(rawValue: "ZZZZZZZZ")!)
+        #expect(guest.phase == .joinFailed)
+        #expect(guest.phase != .createFailed)
+        #expect(guest.phase != .routeUnavailable)
+    }
     @Test func createTooLargeEntersCreateFailed() async throws {
         let (s, backend) = try await make()
         backend.store.forceCreateError = .routeTooLarge   // simulates the >256 KB rides.route check
