@@ -210,7 +210,8 @@ types = {l.get("type") for l in s.get("layers", [])}
 if "hillshade" not in types: errs.append("missing hillshade layer")
 # Static guardrail: forbid time-varying / animated properties anywhere in the style.
 import re
-if re.search(r'"(sky|raster-fade-duration|fill-extrusion-height|line-dasharray-transition)"', blob):
+if re.search(r'"(sky|raster-fade-duration|fill-extrusion-height|line-dasharray-transition)"', blob) \
+   or "feature-state" in blob:
     errs.append("style declares an animated/time-varying property")
 if errs:
     print("FAIL: " + "; ".join(errs)); sys.exit(1)
@@ -418,9 +419,13 @@ git commit -m "feat(roh6): Home backdrop renders the authored terrain style"
 
 Build + install to the iPhone, launch, screenshot Home. Confirm: the authored style renders (charcoal-green land, visible hills, cool roads, muted labels), NOT the dark preset; the lime "Where to?" and route headroom read clearly over it.
 
+- [ ] **Step 1a: Sunlight legibility gate (enforces the spec's legibility floor)**
+
+Capture Home in direct sunlight (outdoors, or screen brightness ≥ 80%). At a 1–2 second glance, is the hillshade relief visually distinct from the land base, and is land distinct from water? If relief reads as flat/muddy, raise `hillshade-highlight-color` (toward a lighter cool grey, e.g. `#6A7A8C`) and/or `hillshade-exaggeration` **before** tuning variants. Legibility beats atmosphere (Chunk 0) — the floor is non-negotiable; the exact values are not.
+
 - [ ] **Step 2: Produce 2–3 variants and pick**
 
-Vary `hillshade-exaggeration` (e.g. 0.35 / 0.45 / 0.6) and label density (place-only vs place + neighborhood). Capture each on-device; pick the one that reads at a sub-second glance in bright sun without going muddy. Apply the chosen values to the JSON.
+Vary `hillshade-exaggeration` (e.g. 0.35 / 0.45 / 0.6) and label density (place-only vs place + neighborhood). Capture each on-device; pick the one that reads at a sub-second glance in bright sun without going muddy **and keeps the backdrop aesthetic** — the terrain is a supporting, partly-occluded backdrop, not the hero (the hero is Chunk 3's summary medal / the navigate cockpit). Prefer the subtler relief that stays distinct over pronounced relief that dominates the visible band. Apply the chosen values to the JSON.
 
 - [ ] **Step 3: Bump the version if needed and verify the fallback**
 
