@@ -8,9 +8,12 @@ struct PlanView: View {
     @Environment(AppRouter.self) private var router
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
+    @Environment(SavedPlacesStore.self) private var savedPlaces
     @State private var query: String = ""
     @State private var summaries: [RideSummary] = []
     @State private var showJoinRide = false
+    @State private var renameTarget: SavedPlace?
+    @State private var renameText = ""
     @ScaledMetric(relativeTo: .title) private var brandSize: CGFloat = 24
 
     private var weekStats: WeeklyRideStats {
@@ -51,6 +54,19 @@ struct PlanView: View {
             NavigationStack {
                 GroupRideJoinView()
             }
+        }
+        .alert("Rename saved place", isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        )) {
+            TextField("Name", text: $renameText)
+            Button("Save") {
+                if let target = renameTarget {
+                    savedPlaces.rename(id: target.id, to: renameText)
+                }
+                renameTarget = nil
+            }
+            Button("Cancel", role: .cancel) { renameTarget = nil }
         }
     }
 
@@ -94,11 +110,15 @@ struct PlanView: View {
                 weeklyBlock
                     .padding(.top, AuraTheme.Spacing.xxl)
 
+                if !savedPlaces.places.isEmpty {
+                    savedSection
+                }
+
                 if let lastRide {
                     lastRideSection(lastRide)
                 }
 
-                if !router.recents.isEmpty {
+                if !visibleRecents.isEmpty {
                     recentsSection
                 }
             }
@@ -136,6 +156,34 @@ struct PlanView: View {
         return "\(Int(value.rounded())) \(unit)"
     }
 
+    // MARK: Saved
+
+    private var savedSection: some View {
+        VStack(alignment: .leading, spacing: AuraTheme.Spacing.sm) {
+            sectionHeader("Saved")
+            VStack(spacing: 0) {
+                ForEach(savedPlaces.places) { saved in
+                    SavedPlaceRow(
+                        saved: saved,
+                        onTap: { router.push(.preview(saved.place)) },
+                        onRename: { renameText = saved.name; renameTarget = saved },
+                        onSetHome: { savedPlaces.setHome(id: saved.id) },
+                        onRemoveHome: { savedPlaces.removeHome(id: saved.id) },
+                        onDelete: { savedPlaces.delete(id: saved.id) }
+                    )
+                    if saved.id != savedPlaces.places.last?.id {
+                        Divider()
+                            .background(AuraTheme.border)
+                            .padding(.leading, 58)
+                    }
+                }
+            }
+            .background(AuraTheme.surface)
+            .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous))
+        }
+        .padding(.horizontal, AuraTheme.Spacing.xxl)
+    }
+
     // MARK: Last-ride section
 
     private func lastRideSection(_ ride: RideSummary) -> some View {
@@ -150,15 +198,21 @@ struct PlanView: View {
 
     // MARK: Recents
 
+    /// Recents already saved (Home or favorite) are surfaced in the Saved
+    /// section instead, so they're filtered out here to avoid duplicates.
+    private var visibleRecents: [Place] {
+        router.recents.filter { !savedPlaces.isSaved($0) }
+    }
+
     private var recentsSection: some View {
         VStack(alignment: .leading, spacing: AuraTheme.Spacing.sm) {
             sectionHeader("Recents")
             VStack(spacing: 0) {
-                ForEach(router.recents) { place in
+                ForEach(visibleRecents) { place in
                     RecentRow(place: place) {
                         router.push(.preview(place))
                     }
-                    if place.id != router.recents.last?.id {
+                    if place.id != visibleRecents.last?.id {
                         Divider()
                             .background(AuraTheme.border)
                             .padding(.leading, 58)

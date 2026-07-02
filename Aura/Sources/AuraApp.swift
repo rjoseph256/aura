@@ -6,17 +6,24 @@ import MapboxMaps
 @main
 struct AuraApp: App {
     @State private var router = AppRouter()
-    @State private var rideStore = AuraApp.makeRideStore()
+    @State private var rideStore: RideStore
+    @State private var savedPlaces: SavedPlacesStore
     @State private var settings = SettingsStore(defaults: .standard, sync: UbiquitousKeyValueStore())
     @State private var location = LocationService()
 
-    init() { AuraApp.configureMapbox() }
+    init() {
+        AuraApp.configureMapbox()
+        let store = AuraApp.makeRideStore()
+        _rideStore = State(initialValue: store)
+        _savedPlaces = State(initialValue: SavedPlacesStore(container: store.container))
+    }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(router)
                 .environment(rideStore)
+                .environment(savedPlaces)
                 .environment(settings)
                 .environment(location)
                 .preferredColorScheme(.dark)
@@ -93,6 +100,15 @@ private struct RootView: View {
         }
         .tint(AuraTheme.accent)
         .task { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+        // UI-test support: "-openURL <url>" routes through the normal deep-link path
+        // on first appearance. Inert in production (no argument, no effect).
+        .task {
+            if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-openURL"),
+               ProcessInfo.processInfo.arguments.indices.contains(index + 1),
+               let url = URL(string: ProcessInfo.processInfo.arguments[index + 1]) {
+                router.handle(url: url)
+            }
+        }
         // Consumed exactly once for the app's lifetime (the underlying AsyncStream is single-consumer).
         .task {
             for await change in settings.kvSyncStream {

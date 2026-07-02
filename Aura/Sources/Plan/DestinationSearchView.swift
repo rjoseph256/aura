@@ -3,6 +3,7 @@ import MapboxSearch
 import MapboxMaps
 import CoreLocation
 import AuraCore
+import AuraKit
 
 // MARK: - DestinationSearchView
 
@@ -13,10 +14,16 @@ struct DestinationSearchView: View {
     @Binding var query: String
     let onPick: (Place) -> Void
 
+    @Environment(SavedPlacesStore.self) private var savedPlaces
+
     @State private var suggestions: [PlaceAutocomplete.Suggestion] = []
     @State private var isLoading: Bool = false
     @State private var errorMessage: String?
     @State private var debounceTask: Task<Void, Never>?
+
+    private var savedMatches: [SavedPlace] {
+        SavedPlaceMatcher.matches(query: query, in: savedPlaces.places)
+    }
 
     // The Search SDK does NOT read MapboxOptions.accessToken; it requires an explicit
     // token (or Info.plist MBXAccessToken). We pass the token configured at launch.
@@ -67,6 +74,37 @@ struct DestinationSearchView: View {
 
             // Results list (only visible when typing)
             if !query.isEmpty {
+                if !savedMatches.isEmpty {
+                    VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
+                        Text("Saved")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AuraTheme.textSecondary)
+                            .textCase(.uppercase)
+                            .tracking(0.5)
+                            .padding(.horizontal, AuraTheme.Spacing.lg)
+                            .padding(.top, AuraTheme.Spacing.sm)
+
+                        LazyVStack(spacing: 0) {
+                            ForEach(savedMatches) { saved in
+                                SavedMatchRow(saved: saved) {
+                                    onPick(saved.place)
+                                    query = ""
+                                    suggestions = []
+                                }
+                                if saved.id != savedMatches.last?.id {
+                                    Divider()
+                                        .background(AuraTheme.border)
+                                        .padding(.leading, 60)
+                                }
+                            }
+                        }
+                    }
+                    .background(AuraTheme.surface.opacity(0.5))
+                    .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.md, style: .continuous))
+                    .padding(.horizontal, AuraTheme.Spacing.xxl)
+                    .padding(.top, AuraTheme.Spacing.sm)
+                }
+
                 if let error = errorMessage {
                     Text(error)
                         .font(.subheadline)
@@ -144,6 +182,7 @@ struct DestinationSearchView: View {
         if let coord = suggestion.coordinate, CLLocationCoordinate2DIsValid(coord) {
             let place = Place(
                 name: suggestion.name,
+                subtitle: suggestion.description,
                 coordinate: Coordinate(latitude: coord.latitude, longitude: coord.longitude),
                 category: inferCategory(from: suggestion)
             )
@@ -167,6 +206,7 @@ struct DestinationSearchView: View {
                     }
                     let place = Place(
                         name: resolved.name,
+                        subtitle: suggestion.description,
                         coordinate: Coordinate(latitude: coord.latitude, longitude: coord.longitude),
                         category: inferCategory(from: suggestion, resolved: resolved)
                     )
@@ -257,6 +297,43 @@ private struct SuggestionRow: View {
         case .address: return "mappin.circle.fill"
         default:       return "mappin"
         }
+    }
+}
+
+// MARK: - SavedMatchRow
+
+private struct SavedMatchRow: View {
+    let saved: SavedPlace
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: AuraTheme.Spacing.lg) {
+                Image(systemName: saved.kind == .home ? "house.fill" : "star.fill")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(AuraTheme.accent)
+                    .frame(width: 28)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(saved.kind == .home ? "Home" : saved.name)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(AuraTheme.textPrimary)
+                        .lineLimit(1)
+                    if let line = saved.kind == .home ? saved.name : saved.subtitle {
+                        Text(line)
+                            .font(.footnote)
+                            .foregroundStyle(AuraTheme.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+            .frame(minHeight: 56)
+            .padding(.horizontal, AuraTheme.Spacing.lg)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
     }
 }
 

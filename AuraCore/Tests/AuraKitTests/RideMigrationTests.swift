@@ -14,6 +14,24 @@ struct RideMigrationTests {
 
     private func encode<T: Encodable>(_ value: T) throws -> Data { try JSONEncoder().encode(value) }
 
+    /// Writes two V1-shaped rows to `url`, then releases the container.
+    private func writeV1Rows(navId: UUID, freeId: UUID, track: [TrackPoint], stats: RideStats,
+                             url: URL) throws {
+        let cfg = ModelConfiguration(url: url)
+        let v1 = try ModelContainer(for: RideSchemaV1.RideRecord.self, configurations: cfg)
+        let ctx = v1.mainContext
+        ctx.insert(RideSchemaV1.RideRecord(
+            id: navId, kindRaw: "navigate", startedAt: Date(timeIntervalSince1970: 1000),
+            endedAt: Date(timeIntervalSince1970: 2800),
+            trackData: try encode(track), statsData: try encode(stats),
+            destinationName: "Frick Park", routeId: nil, destinationPlaceId: nil))
+        ctx.insert(RideSchemaV1.RideRecord(
+            id: freeId, kindRaw: "freeRide", startedAt: Date(timeIntervalSince1970: 500),
+            endedAt: nil, trackData: try encode([TrackPoint]()), statsData: nil,
+            destinationName: nil, routeId: nil, destinationPlaceId: nil))
+        try ctx.save()
+    }
+
     @Test func migratesV1StoreToV2BackfillingColumnsAndThumbnail() throws {
         let url = tempStoreURL()
         defer {
@@ -33,25 +51,12 @@ struct RideMigrationTests {
                               elevationGainMeters: 120)
 
         // 1. Write two V1-shaped rows, then release the container.
-        do {
-            let cfg = ModelConfiguration(url: url)
-            let v1 = try ModelContainer(for: RideSchemaV1.RideRecord.self, configurations: cfg)
-            let ctx = v1.mainContext
-            ctx.insert(RideSchemaV1.RideRecord(
-                id: navId, kindRaw: "navigate", startedAt: Date(timeIntervalSince1970: 1000),
-                endedAt: Date(timeIntervalSince1970: 2800),
-                trackData: try encode(track), statsData: try encode(stats),
-                destinationName: "Frick Park", routeId: nil, destinationPlaceId: nil))
-            ctx.insert(RideSchemaV1.RideRecord(
-                id: freeId, kindRaw: "freeRide", startedAt: Date(timeIntervalSince1970: 500),
-                endedAt: nil, trackData: try encode([TrackPoint]()), statsData: nil,
-                destinationName: nil, routeId: nil, destinationPlaceId: nil))
-            try ctx.save()
-        }
+        try writeV1Rows(navId: navId, freeId: freeId, track: track, stats: stats, url: url)
 
-        // 2. Reopen the same file through the migration plan on V2.
+        // 2. Reopen the same file through the migration plan on V3 (both models, so the
+        // migration destination resolves to V3 and the V2→V3 lightweight stage runs).
         let cfg = ModelConfiguration(url: url)
-        let v2 = try ModelContainer(for: RideRecord.self,
+        let v2 = try ModelContainer(for: RideRecord.self, SavedPlaceRecord.self,
                                     migrationPlan: RideMigrationPlan.self,
                                     configurations: cfg)
         let records = try v2.mainContext.fetch(
@@ -74,13 +79,23 @@ struct RideMigrationTests {
         // Thumbnail backfilled for the ride with a track, nil for the empty one.
         #expect(nav.thumbnailData != nil)
         #expect(free.thumbnailData == nil)
+
+        // The V2→V3 lightweight stage ran: the new entity is live in the same store.
+        let context = v2.mainContext
+        context.insert(SavedPlaceRecord(SavedPlace(
+            name: "Post-migration save", subtitle: nil,
+            coordinate: Coordinate(latitude: 40.44, longitude: -79.99),
+            category: .custom, kind: .favorite,
+            savedAt: Date(timeIntervalSince1970: 1))))
+        try context.save()
+        #expect(try context.fetch(FetchDescriptor<SavedPlaceRecord>()).count == 1)
     }
 
     /// The path every new user hits: a brand-new store opened through the migration
     /// plan should start cleanly on V2 and round-trip a saved ride.
     @Test func freshStoreThroughMigrationPlanWorks() throws {
         let container = try ModelContainer(
-            for: RideRecord.self,
+            for: RideRecord.self, SavedPlaceRecord.self,
             migrationPlan: RideMigrationPlan.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let store = RideStore(container: container)

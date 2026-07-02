@@ -442,6 +442,26 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
     non-defaulted column is caught in package CI, not only at the Dashboard; and have the
     `initializeCloudKitSchema` step confirm the frozen `RideSchemaV1` `.unique` never trips
     the mirror during the V1→V2 `didMigrate` on a store with V1 rows.
+- Saved places (Home + favorites) — SHIPPED (branch `claude/saved-places`, 2026-07-01).
+  `SavedPlaceRecord` joins the existing CloudKit container as a `RideSchemaV3` lightweight
+  migration stage (a new model type beside the unchanged V2 `RideRecord`, so no data
+  migration). All invariants are pure `SavedPlacesLogic`/`SavedPlaceMatcher`/`SavedPlaceKey`
+  in AuraCore — matching is by a rounded-to-5-decimal coordinate identity, not raw `Double`
+  equality — and `SavedPlacesStore` sits over the shared container with its own
+  `NSPersistentStoreRemoteChange` observer, mirroring `RideStore`'s pattern. Three surfaces:
+  a 44pt star on the route-preview header plus a transient Saved/Set-as-Home moment;
+  a dashboard Saved section with per-row ellipsis management (rename, set/remove Home,
+  delete) that filters Saved entries out of Recents; and search pinning of saved places
+  under a "Saved" header from the first character typed. Two decisions came out of an
+  adversarial review: per-record CloudKit sync instead of an iCloud-KVS whole-list
+  last-write-wins (a single edit on one device would otherwise clobber concurrent edits on
+  another), and the rounded-coordinate identity, learned from the `RouteRanker`
+  exact-equality bug earlier in the roadmap. Tests: `SavedPlacesLogic`/`SavedPlaceMatcher`/
+  `SavedPlaceKey`/`SavedPlacesStore` suites plus the schema-invariant CloudKit guards, and a
+  `SavedPlacesUITests` case driving the star-to-dashboard path through an `-openURL` test
+  hook (the UI-test CI job stays deferred, per the AuraUITests plan). Device-verify folds
+  into the existing two-device CloudKit session below: confirm `CD_SavedPlaceRecord` in the
+  schema push, then a save on device A appears on device B and a deletion propagates.
 - CarPlay, using the Mapbox v3 CarPlay templates and the existing `GuidanceSession`
   abstraction. Needs the CarPlay entitlement (Apple approval) and a scene delegate.
 - Apple Watch companion.
@@ -584,9 +604,9 @@ the CloudKit mirror during the V1-to-V2 migration.
 Everything below was deferred somewhere: in the v1 design spec, in a wave spec's
 out-of-scope section, or in a review. None of it is scheduled. Grouped by theme.
 
-Unbuilt v1 promises. Two features from the original design spec never shipped and never
-made it onto a wave: saved places (Home and favorites in destination search, spec section
-1) and the shareable ride-summary card (spec section 4). Both are small and rider-facing.
+Unbuilt v1 promise. One feature from the original design spec never shipped and never made
+it onto a wave: the shareable ride-summary card (spec section 4). It's small and
+rider-facing.
 
 Summary and map polish: an elevation profile on the ride summary (deferred from the Wave 2
 redesign), a custom Mapbox Studio map style, and the single hoisted Mapbox map across the

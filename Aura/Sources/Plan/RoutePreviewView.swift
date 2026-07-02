@@ -4,6 +4,15 @@ import Turf
 import AuraCore
 import AuraKit
 
+// MARK: - SaveMoment
+
+/// Transient state shown under the route-preview header after the save star
+/// is tapped: the "Saved" + Set-as-Home offer, then its confirmation.
+enum SaveMoment: Equatable {
+    case saved(SavedPlace)          // "Saved" + Set as Home offer
+    case homeSet(demoted: Bool)     // confirmation after taking the offer
+}
+
 // MARK: - RoutePreviewView
 
 struct RoutePreviewView: View {
@@ -12,6 +21,7 @@ struct RoutePreviewView: View {
     @Environment(AppRouter.self) private var router
     @Environment(SettingsStore.self) private var settings
     @Environment(LocationService.self) private var location
+    @Environment(SavedPlacesStore.self) private var savedPlaces
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let provider: any AuraCore.RoutingProvider = MapboxRoutingProvider()
@@ -24,6 +34,9 @@ struct RoutePreviewView: View {
     @State private var selected: Route?
     @State private var phase: Phase = .loading
     @State private var viewport: Viewport = .styleDefault
+    @State private var saveMoment: SaveMoment?
+    @State private var saveMomentDismiss: Task<Void, Never>?
+    @State private var showFullAlert = false
 
     // MARK: Body
 
@@ -95,19 +108,15 @@ struct RoutePreviewView: View {
 
     private var bottomPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
-            VStack(alignment: .leading, spacing: 2) {
-                Text(destination.name)
-                    .font(.title3.bold())
-                    .foregroundStyle(AuraTheme.textPrimary)
-                    .lineLimit(1)
-                Text("Choose a route")
-                    .font(.subheadline)
-                    .foregroundStyle(AuraTheme.textSecondary)
+            PreviewHeader(
+                destinationName: destination.name,
+                isSaved: isSaved,
+                saveMoment: saveMoment,
+                onToggleSaved: toggleSaved
+            ) { saved in
+                let demoted = savedPlaces.setHome(id: saved.id)
+                setSaveMoment(.homeSet(demoted: demoted))
             }
-            .padding(.horizontal, AuraTheme.Spacing.xxl)
-            .padding(.top, AuraTheme.Spacing.xl)
-            .padding(.bottom, AuraTheme.Spacing.lg)
 
             // Route options / skeleton / error
             Group {
@@ -131,6 +140,43 @@ struct RoutePreviewView: View {
                 .padding(.bottom, AuraTheme.Spacing.xxl)
         }
         .background(AuraTheme.background)
+        .alert("Saved places is full. Remove one to save another.",
+               isPresented: $showFullAlert) {
+            Button("OK", role: .cancel) {}
+        }
+    }
+
+    // MARK: Save star
+
+    private var isSaved: Bool { savedPlaces.isSaved(destination) }
+
+    private func toggleSaved() {
+        if savedPlaces.savedPlace(for: destination) != nil {
+            savedPlaces.unsave(destination)   // no moment on unsave
+            setSaveMoment(nil)
+            return
+        }
+        switch savedPlaces.save(destination, subtitle: destination.subtitle) {
+        case .full: showFullAlert = true
+        case let .saved(saved): setSaveMoment(.saved(saved))
+        }
+    }
+
+    /// House convention: animate the moment change unless Reduce Motion is on.
+    private func setSaveMoment(_ moment: SaveMoment?) {
+        saveMomentDismiss?.cancel()
+        withMomentAnimation { saveMoment = moment }
+        guard moment != nil else { return }
+        saveMomentDismiss = Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+            withMomentAnimation { saveMoment = nil }
+        }
+    }
+
+    private func withMomentAnimation(_ change: () -> Void) {
+        guard !reduceMotion else { return change() }
+        withAnimation(.easeOut(duration: 0.2), change)
     }
 
     // MARK: Route rows
@@ -184,20 +230,16 @@ struct RoutePreviewView: View {
     // MARK: Empty / failed states
 
     private var emptyMessage: some View {
-        VStack(spacing: AuraTheme.Spacing.lg) {
-            Text("No bike route found to here — try another destination.")
-                .font(.subheadline)
-                .foregroundStyle(AuraTheme.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, AuraTheme.Spacing.xxl)
-            backButton
-        }
-        .frame(maxWidth: .infinity)
+        statusMessage("No bike route found to here — try another destination.")
     }
 
     private var failedMessage: some View {
+        statusMessage("Couldn't fetch routes right now. Check your connection and try again.")
+    }
+
+    private func statusMessage(_ text: String) -> some View {
         VStack(spacing: AuraTheme.Spacing.lg) {
-            Text("Couldn't fetch routes right now. Check your connection and try again.")
+            Text(text)
                 .font(.subheadline)
                 .foregroundStyle(AuraTheme.textSecondary)
                 .multilineTextAlignment(.center)
