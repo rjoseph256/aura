@@ -28,7 +28,9 @@ self_test() {
 }
 
 self_test
-matches=$(grep -rniE 'free ride' --include="*.swift" Aura | detect)
+# Scope to the shipping surfaces (app sources + widgets), NOT test code — a UI test may
+# legitimately assert the OLD copy is absent (e.g. buttons["Free ride"] does not exist).
+matches=$(grep -rniE 'free ride' --include="*.swift" Aura/Sources Aura/Widgets | detect)
 if [ -n "$matches" ]; then
   echo "FAIL: user-facing 'free ride' strings remain:"
   echo "$matches"

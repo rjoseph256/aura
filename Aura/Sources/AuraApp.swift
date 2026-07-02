@@ -73,7 +73,7 @@ private struct RootView: View {
         @Bindable var router = router
         TabView(selection: $router.selectedTab) {
             NavigationStack(path: $router.path) {
-                PlanView()
+                HomeView()
                     .navigationDestination(for: AppRoute.self) { route in
                         switch route {
                         case .freeRide:

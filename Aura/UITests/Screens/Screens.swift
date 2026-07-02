@@ -4,6 +4,11 @@ import XCTest
 struct HomeScreen {
     let app: XCUIApplication
     var joinRideButton: XCUIElement { app.buttons["Join a ride"] }
+    var whereTo: XCUIElement { app.buttons["home.whereTo"] }
+    var exploreButton: XCUIElement { app.buttons["Explore"] }
+    var glance: XCUIElement { app.staticTexts["home.glance"] }
+    var searchField: XCUIElement { app.textFields["home.searchField"] }
+    var searchCancel: XCUIElement { app.buttons["home.searchCancel"] }
 
     @discardableResult func goToHistory() -> HistoryScreen {
         app.tabBars.buttons["History"].tap()
@@ -47,6 +52,15 @@ struct JoinRideScreen {
 extension XCUIApplication {
     @MainActor static func launched() -> XCUIApplication {
         let app = XCUIApplication()
+        app.launch()
+        return app
+    }
+
+    /// Launch seeded past first-run via the built-in NSArgumentDomain, so Home shows the
+    /// populated layout (not the first-run composition) without any app-side test-seed code.
+    @MainActor static func launched(onboarded: Bool) -> XCUIApplication {
+        let app = XCUIApplication()
+        if onboarded { app.launchArguments += ["-auraDidCompleteOnboarding", "YES"] }
         app.launch()
         return app
     }
