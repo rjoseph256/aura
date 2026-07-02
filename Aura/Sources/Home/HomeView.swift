@@ -97,7 +97,7 @@ struct HomeView: View {
                 WeeklyGlanceView(week: weekStats, goalMeters: settings.weeklyGoalMeters,
                                  lastRide: lastRide, units: settings.units)
                 if let lastRide {
-                    LastRideCard(summary: lastRide, units: settings.units) { router.selectedTab = .history }
+                    LastRideCard(summary: lastRide, units: settings.units) { router.push(.history) }
                 } else if !didLoad {
                     RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous)
                         .fill(AuraTheme.surface).frame(height: 88) // quiet loading placeholder
@@ -114,14 +114,41 @@ struct HomeView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(greeting).font(.footnote.weight(.medium)).foregroundStyle(AuraTheme.textSecondary)
                 Text("Aura").font(AuraTheme.Typography.metricBrand(brandSize)).foregroundStyle(AuraTheme.textPrimary)
             }
             Spacer()
+            headerControls
         }
         .padding(.horizontal, AuraTheme.Spacing.xxl)
+    }
+
+    /// Maps-style utility cluster over the terrain — History + Settings, reached by pushing
+    /// (which empties the dashboard sheet, so each opens full-screen with a back button). Uses
+    /// the shipped cockpit control style, so Reduce Transparency / Motion / Contrast are handled.
+    private var headerControls: some View {
+        HStack(spacing: AuraTheme.Spacing.sm) {
+            Button { router.push(.history) } label: {
+                Image(systemName: "clock.arrow.circlepath")
+            }
+            .buttonStyle(.hudControl)
+            .accessibilityLabel("History")
+            .accessibilityHint("Your past rides")
+            .accessibilityIdentifier("home.history")
+
+            Button { router.push(.settings) } label: {
+                Image(systemName: "gearshape.fill")
+            }
+            .buttonStyle(.hudControl)
+            .accessibilityLabel("Settings")
+            .accessibilityHint("App settings and preferences")
+            .accessibilityIdentifier("home.settings")
+        }
+        // Utilities read after the primary "Where to?" (3), glance (2), and Explore/Join (1)
+        // in VoiceOver — never before the dominant action, despite sitting at the top.
+        .accessibilitySortPriority(-1)
     }
 
     private var greeting: String {

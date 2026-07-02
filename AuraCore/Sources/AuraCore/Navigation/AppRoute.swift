@@ -1,6 +1,6 @@
 import Foundation
 
-/// A destination on the Ride tab's navigation stack. Held by `NavigationStack(path:)`.
+/// A destination on the app's navigation stack. Held by `NavigationStack(path:)`.
 ///
 /// `Equatable` and `Hashable` are written by hand against the stable ids of the payloads,
 /// not their contents, so the path stays cheap to hash and a `Route`'s geometry is never
@@ -13,6 +13,26 @@ public enum AppRoute: Sendable {
     /// The group-ride join-code entry screen, pushed on the nav stack (not a sheet) so it
     /// never conflicts with Home's always-present dashboard sheet.
     case joinRide
+    /// Ride history, pushed on the nav stack. Reached from the Home control cluster (there
+    /// is no tab bar); pushing it empties Home's dashboard sheet so it shows full-screen.
+    case history
+    /// App settings, pushed on the nav stack — same rationale as `history`.
+    case settings
+
+    /// The navigation path a parsed `DeepLink` resolves to. Pure so it is unit-testable
+    /// (the app target has no test bundle). `.home` maps to an empty path (pop to root);
+    /// every other link becomes a single-entry stack. Side effects (remembering a previewed
+    /// place, the ride-active guard) stay in `AppRouter.handle(url:)`.
+    public static func stack(for link: DeepLink) -> [AppRoute] {
+        switch link {
+        case .home:              return []
+        case .history:           return [.history]
+        case .settings:          return [.settings]
+        case .freeRide:          return [.freeRide]
+        case let .preview(place): return [.preview(place)]
+        case let .join(code):    return [.groupRide(.join(code))]
+        }
+    }
 }
 
 /// The entry point into the group-ride flow: either creating a session around a
@@ -63,6 +83,10 @@ extension AppRoute: Hashable {
             return a == b
         case (.joinRide, .joinRide):
             return true
+        case (.history, .history):
+            return true
+        case (.settings, .settings):
+            return true
         default:
             return false
         }
@@ -84,6 +108,10 @@ extension AppRoute: Hashable {
             hasher.combine(entry)
         case .joinRide:
             hasher.combine(4)
+        case .history:
+            hasher.combine(5)
+        case .settings:
+            hasher.combine(6)
         }
     }
 }

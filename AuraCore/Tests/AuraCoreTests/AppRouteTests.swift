@@ -54,4 +54,42 @@ struct AppRouteTests {
         #expect(AppRoute.freeRide != AppRoute.preview(place()))
         #expect(AppRoute.preview(place()) != AppRoute.navigate(route: route(), destination: nil))
     }
+
+    @Test func historyAndSettingsEqualThemselves() {
+        #expect(AppRoute.history == AppRoute.history)
+        #expect(AppRoute.settings == AppRoute.settings)
+        #expect(AppRoute.history.hashValue == AppRoute.history.hashValue)
+        #expect(AppRoute.settings.hashValue == AppRoute.settings.hashValue)
+    }
+
+    @Test func historyAndSettingsAreDistinctFromEachOtherAndOthers() {
+        #expect(AppRoute.history != AppRoute.settings)
+        #expect(AppRoute.history != AppRoute.joinRide)
+        #expect(AppRoute.settings != AppRoute.freeRide)
+    }
+
+    // MARK: stack(for:) — deep-link → nav path
+
+    @Test func homeLinkMapsToEmptyPath() {
+        #expect(AppRoute.stack(for: .home).isEmpty)
+    }
+
+    @Test func historyAndSettingsLinksPushThemselves() {
+        #expect(AppRoute.stack(for: .history) == [.history])
+        #expect(AppRoute.stack(for: .settings) == [.settings])
+    }
+
+    @Test func freeRideLinkPushesFreeRide() {
+        #expect(AppRoute.stack(for: .freeRide) == [.freeRide])
+    }
+
+    @Test func previewLinkPushesPreviewWithSamePlace() {
+        let id = UUID()
+        #expect(AppRoute.stack(for: .preview(place(id))) == [.preview(place(id))])
+    }
+
+    @Test func joinLinkWrapsInGroupRide() {
+        let code = JoinCode(rawValue: "7K2Q9FX3")!
+        #expect(AppRoute.stack(for: .join(code)) == [.groupRide(.join(code))])
+    }
 }

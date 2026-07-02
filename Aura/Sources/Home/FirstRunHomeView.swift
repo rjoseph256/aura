@@ -7,6 +7,7 @@ import AuraKit
 /// Tapping the primary marks onboarding complete and routes into planning (the location
 /// prompt is triggered by the app's existing entry point, not a competing second CTA).
 struct FirstRunHomeView: View {
+    @Environment(AppRouter.self) private var router
     let renderer: TerrainSnapshotRendering
     let onStart: () -> Void
 
@@ -30,6 +31,19 @@ struct FirstRunHomeView: View {
             }
             .padding(.horizontal, AuraTheme.Spacing.xxl)
             .padding(.bottom, AuraTheme.Spacing.xxl)
+        }
+        // With no tab bar, Settings must stay reachable during onboarding (e.g. a metric
+        // rider changing units before the first ride). History is omitted here — there are
+        // no rides yet — so only Settings is offered, top-right, matching the populated cluster.
+        .overlay(alignment: .topTrailing) {
+            Button { router.push(.settings) } label: {
+                Image(systemName: "gearshape.fill")
+            }
+            .buttonStyle(.hudControl)
+            .accessibilityLabel("Settings")
+            .accessibilityHint("App settings and preferences")
+            .accessibilityIdentifier("home.settings")
+            .padding(.horizontal, AuraTheme.Spacing.xxl)
         }
     }
 }

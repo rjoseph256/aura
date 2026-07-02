@@ -7,9 +7,8 @@ final class JoinRideUITests: XCTestCase {
     func testJoinScreenPresentsAndCancels() {
         // Seed past first-run so Home shows the populated layout (with the launch band).
         let app = XCUIApplication.launched(onboarded: true)
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 30))
         let home = HomeScreen(app: app)
-        home.goToRide()
+        XCTAssertTrue(home.whereTo.waitForExistence(timeout: 30))
         let joinButton = home.joinRideButton
         XCTAssertTrue(joinButton.waitForExistence(timeout: 5), "Join a ride button missing")
         // "Join a ride" is a demoted secondary in the always-visible launch band.
