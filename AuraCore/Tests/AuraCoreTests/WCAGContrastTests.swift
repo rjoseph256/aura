@@ -65,6 +65,18 @@ struct AuraPaletteContrastTests {
         #expect(inc >= 7.0)
     }
 
+    @Test func cardHighContrastSecondaryClearsOverScrim() {
+        // The share card can't honor Increase Contrast (it's a fixed PNG), so it always uses
+        // the high-contrast secondary value. Its true worst case is text over the HUD scrim
+        // (surface @ mapScrimOpacity) composited over the near-black route field — lock that
+        // exact pairing, not just solid panel (CI otherwise only asserts the standard 0.62).
+        let s = WCAGContrast.white(AuraPalette.textSecondaryWhiteHighContrast)
+        let scrim = WCAGContrast.composite(AuraPalette.panel, over: AuraPalette.nearBlack,
+                                           alpha: AuraPalette.mapScrimOpacity)
+        #expect(WCAGContrast.ratio(s, scrim) >= 4.5)
+        #expect(WCAGContrast.ratio(s, AuraPalette.nearBlack) >= 4.5)
+    }
+
     @Test func liftedSecondaryHoldsOverBrightMapScrim() {
         // Worst-case: secondary text over the map scrim (surface @ mapScrimOpacity) on a
         // bright sunlit map pixel. Documents the design's over-map target; >=4.5.
