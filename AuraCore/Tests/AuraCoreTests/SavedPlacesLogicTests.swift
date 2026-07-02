@@ -112,6 +112,40 @@ struct SavedPlacesLogicTests {
         #expect(list[1].name == "Fav")              // favorites by savedAt desc
     }
 
+    @Test func reconciledPicksStableHomeWinnerWhenSavedAtTies() {
+        // Two Homes with an identical savedAt — possible after a CloudKit merge.
+        // The lower uuidString must win regardless of input order.
+        var homeA = favorite("Home A", lat: 40.1, lon: -79.1, savedAt: 5, kind: .home)
+        homeA.id = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        var homeB = favorite("Home B", lat: 40.2, lon: -79.2, savedAt: 5, kind: .home)
+        homeB.id = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let forward = SavedPlacesLogic.reconciled([homeA, homeB])
+        let reversed = SavedPlacesLogic.reconciled([homeB, homeA])
+        #expect(forward.filter { $0.kind == .home }.count == 1)
+        #expect(forward[0].kind == .home)
+        #expect(forward[0].id == homeA.id)          // lower uuidString wins
+        #expect(reversed[0].id == homeA.id)         // stable across input order
+    }
+
+    @Test func savedMatchingPrefersIDOverCoordinate() {
+        // The query's id matches `here` but its coordinate matches `there` —
+        // id must win even though a rounded-key match also exists.
+        let here = favorite("Here", lat: 40.1, lon: -79.1, savedAt: 1)
+        let there = favorite("There", lat: 41.0, lon: -79.0, savedAt: 2)
+        let place = Place(id: here.id, name: "Query", coordinate: coord(41.0, -79.0),
+                          category: .custom)
+        #expect(SavedPlacesLogic.saved(matching: place, in: [there, here])?.id == here.id)
+    }
+
+    @Test func savedMatchingFallsBackToKeyWhenIDDiffers() {
+        // No id match anywhere, but the rounded coordinate matches `saved` — key wins.
+        let saved = favorite("Saved", lat: 40.44060, lon: -79.99590, savedAt: 1)
+        let place = Place(name: "Fresh id", coordinate: coord(40.440601, -79.995899),
+                          category: .custom)
+        #expect(place.id != saved.id)
+        #expect(SavedPlacesLogic.saved(matching: place, in: [saved])?.id == saved.id)
+    }
+
     @Test func savedMatchingByIDThenKey() {
         let saved = favorite("Cafe", lat: 40.44060, lon: -79.99590, savedAt: 1)
         // Fresh UUID (search mints one) but jittered-same coordinate → key match.

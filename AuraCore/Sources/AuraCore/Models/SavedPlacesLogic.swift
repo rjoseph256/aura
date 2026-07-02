@@ -92,7 +92,10 @@ public enum SavedPlacesLogic {
             }
         }
         var result = Array(byKey.values)
-        let homes = result.filter { $0.kind == .home }.sorted { $0.savedAt > $1.savedAt }
+        let homes = result.filter { $0.kind == .home }.sorted { a, b in
+            if a.savedAt != b.savedAt { return a.savedAt > b.savedAt }
+            return a.id.uuidString < b.id.uuidString   // stable when savedAt ties (CloudKit merge)
+        }
         if homes.count > 1 {
             let winner = homes[0].id
             result = result.map { item in
@@ -104,7 +107,8 @@ public enum SavedPlacesLogic {
         }
         return result.sorted { a, b in
             if (a.kind == .home) != (b.kind == .home) { return a.kind == .home }
-            return a.savedAt > b.savedAt
+            if a.savedAt != b.savedAt { return a.savedAt > b.savedAt }
+            return a.id.uuidString < b.id.uuidString   // deterministic order across launches
         }
     }
 
