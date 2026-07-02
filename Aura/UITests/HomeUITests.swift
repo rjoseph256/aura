@@ -21,6 +21,22 @@ final class HomeUITests: XCTestCase {
         XCTAssertTrue(home.glance.waitForExistence(timeout: 30), "weekly glance not visible at peek")
     }
 
+    // At the largest accessibility Dynamic Type size, the primary launch action and the
+    // motivation hook must still be present and hittable (the fixed-region floating layout is
+    // where reflow clips).
+    func testAX5_primaryAndGlanceRemainHittable() {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-auraDidCompleteOnboarding", "YES",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge"
+        ]
+        app.launch()
+        let home = HomeScreen(app: app)
+        XCTAssertTrue(home.whereTo.waitForExistence(timeout: 30), "primary clipped/absent at AX5")
+        XCTAssertTrue(home.whereTo.isHittable, "primary not hittable at AX5")
+        XCTAssertTrue(home.glance.waitForExistence(timeout: 5), "glance clipped/absent at AX5")
+    }
+
     // Tapping the primary expands the search overlay (focused field); Cancel collapses it.
     func testSearchExpandsAndCollapses() {
         let app = XCUIApplication.launched(onboarded: true)
