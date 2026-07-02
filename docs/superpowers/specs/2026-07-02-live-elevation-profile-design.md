@@ -1,7 +1,7 @@
 # Live Ride-Summary Elevation Profile — Design Spec
 
 **Date:** 2026-07-02
-**Status:** Approved (design), pending adversarial spec review
+**Status:** Approved (design + adversarial spec review reconciled), pending user sign-off
 **Roadmap item:** "Summary and map polish — an elevation profile on the ride summary
 (deferred from the Wave 2 redesign)" (docs/ROADMAP.md).
 
@@ -12,89 +12,127 @@ story* — make the climbs read as climbs at a glance, answering "how hard was t
 ride?" It is a companion to the existing route map and distance hero, not an
 analysis tool.
 
-## Product decisions (from PO interview)
+## Product decisions (from PO interview + adversarial spec review)
 
 1. **Job:** effort story. The silhouette should make the ride *felt*, not report data.
 2. **Prominence:** a confident, hero-adjacent band. Total climb is called out on it.
    The standalone "climbed" stat leaves the three-stat row (no double-telling).
-3. **Flat rides:** show the real profile only above a relief threshold; below it, a
-   slim "Mostly flat" treatment. Never the misleading solid-fill blob.
-4. **Interaction:** static for v1. (Drag-to-read/scrub is an explicit *future*
+3. **What "counts" as a climb — cumulative gain, not range.** The profile/flat
+   decision keys on **cumulative climb** (`RideStats.elevationGainMeters`), the same
+   number shown on the callout — so the label and the number can never disagree.
+   (The earlier draft gated on peak-to-trough *range*; review showed range and the
+   climbed callout can openly contradict — a net-downhill ride reading "↑ 3 ft
+   climbed" under a plunging line, or a rolling loop reading "Mostly flat · 180 ft
+   climbed." Gating on gain removes both contradictions. The **share card adopts the
+   same gate**, so the two surfaces stay consistent.)
+4. **Flat rides:** below the climb floor, a slim "Mostly flat" treatment — never the
+   misleading solid-fill blob. Gain-gating inherently excludes the blob: a near-flat
+   series can't clear a climb floor, so `.profile` never receives a flat trace.
+5. **Interaction:** static for v1. (Drag-to-read/scrub is an explicit *future*
    enhancement, belonging with a dedicated ride-detail view — out of scope here.)
-5. **Callouts:** just the silhouette + total climb. Built so a "highlight the big
+6. **Callouts:** just the silhouette + total climb. Built so a "highlight the big
    climb" accent glow can layer on later without rework. No peak/low/grade in v1.
-6. **Scope:** appears anywhere the summary shows — ride finish **and** History
+7. **Scope:** appears anywhere the summary shows — ride finish **and** History
    (History reuses `RideSummaryView`). Shares the share card's visual language,
    scaled up, so a rider's card and summary feel like one family.
+8. **Pre-elevation rides show no climb.** Rides recorded before elevation capture
+   (fewer than two elevation samples) resolve to `.unavailable` and omit the whole
+   section. Those rides only ever computed `0` gain, so this hides a "0 ft climbed"
+   that was always noise, not real data. Ratified with the PO.
 
 ## Architecture
 
 Three-layer discipline, matching the share card:
 
-- **AuraCore/AuraKit (pure):** all effort logic — the relief gate, the
-  profile/flat/unavailable fork, and climb formatting — lives here and is unit
-  tested without the app target.
+- **AuraCore/AuraKit (pure):** all effort logic — the climb classification and climb
+  formatting — lives here and is unit tested without the app target.
 - **Aura (app target):** a dumb SwiftUI band that projects the view-model; reuses
   the existing pure-Canvas `ElevationSparkline`.
+
+### Shared classifier: `ElevationProfile` (AuraKit)
+
+One pure classifier both the summary and the share card call, so the two silhouettes
+can never diverge on what counts as a climb. Location:
+`AuraCore/Sources/AuraKit/Plotting/ElevationProfile.swift` (alongside `Sparkline`).
+
+```swift
+public enum ElevationProfile {
+    /// Minimum cumulative climb (meters) for a ride to headline an elevation profile.
+    /// Tunable; settled during the on-device pass (the share card previously used a
+    /// 5 m *range* floor — this is a *gain* floor, a different and stricter measure).
+    public static let minGainMeters = 10.0
+
+    public enum Kind: Equatable, Sendable {
+        case profile([Double])   // gain ≥ floor: draw the silhouette from these samples
+        case flat                // ≥2 elevation samples but gain < floor: "Mostly flat"
+        case unavailable         // < 2 elevation samples (pre-elevation rides): omit
+    }
+
+    /// `gainMeters` is the ride's cumulative ascent (RideStats.elevationGainMeters);
+    /// `track` supplies the elevation samples the silhouette is drawn from.
+    public static func classify(track: [TrackPoint], gainMeters: Double) -> Kind {
+        let elevations = track.compactMap(\.elevation)
+        guard elevations.count >= 2 else { return .unavailable }
+        return gainMeters >= minGainMeters ? .profile(elevations) : .flat
+    }
+}
+```
+
+`.unavailable` is decided **only** by `elevations.count < 2` — a single non-nil
+sample is `.unavailable`, never `.flat`. (This removes the earlier draft's
+contradiction where two definitions disagreed on the single-sample case.)
 
 ### New pure type: `ElevationProfileContent` (AuraKit)
 
 Location: `AuraCore/Sources/AuraKit/Summary/ElevationProfileContent.swift` (new
-`Summary/` folder, sibling to `Sharing/ShareCardContent.swift`).
+`Summary/` folder, sibling to `Sharing/ShareCardContent.swift`). It wraps
+`ElevationProfile.classify` and adds display-ready climb text.
 
 ```swift
 public struct ElevationProfileContent: Equatable, Sendable {
-    public enum State: Equatable, Sendable {
-        case profile([Double])   // real relief ≥ threshold: draw the silhouette
-        case flat                // elevation recorded but < threshold: "Mostly flat"
-        case unavailable         // no elevation samples at all: omit the section
+    public let kind: ElevationProfile.Kind
+    public let climbedValue: String   // formatted cumulative climb, e.g. "1,240"
+    public let climbedUnit: String     // "ft" or "m"
+    public let climbedUnitSpoken: String  // e.g. "feet" — for the VoiceOver label
+    public let isTrivialClimb: Bool    // gain rounds to ~0: drop the climb clause
+
+    public init(ride: Ride, units: DistanceUnits) {
+        let stats = ride.stats ?? .zero
+        let fmt = RideStatsFormatter(units: units)
+        kind = ElevationProfile.classify(track: ride.track,
+                                         gainMeters: stats.elevationGainMeters)
+        climbedValue = fmt.elevationValue(stats.elevationGainMeters)
+        climbedUnit = fmt.elevationUnit
+        climbedUnitSpoken = fmt.elevationUnitSpoken   // exists (RideStatsFormatter)
+        isTrivialClimb = climbedValue == "0"           // formatted climb reads zero ⇒ no climb clause
     }
-    public let state: State
-    public let climbedValue: String   // formatted total climb, e.g. "1,240"
-    public let climbedUnit: String    // "ft" or "m"
-
-    public init(ride: Ride, units: DistanceUnits) { ... }
 }
 ```
 
-Resolution rules in `init`:
+Because the callout number and the `.profile`/`.flat` decision are both cumulative
+gain, `.flat` always carries a climb **below** the floor — so "Mostly flat · X
+climbed" can never show a large number. When the gain rounds to zero
+(`isTrivialClimb`), the flat line drops the climb clause entirely ("Mostly flat"),
+matching the "0 ft climbed is noise" rationale used for `.unavailable`.
 
-- `elevations = ride.track.compactMap(\.elevation)`
-- `elevations.isEmpty || elevations.count < 2` → `state = .unavailable`
-- else if `elevations.max()! - elevations.min()! >= threshold` → `state = .profile(elevations)`
-- else → `state = .flat`
-- `climbedValue`/`climbedUnit` come from `RideStatsFormatter(units:)` over
-  `(ride.stats ?? .zero).elevationGainMeters` — always populated (the `.flat` line
-  needs it; `.profile` uses it for the callout; `.unavailable` ignores it).
+### Share card refactor
 
-### Shared relief gate (no drift with the share card)
-
-Extract the threshold + relief test into one pure helper both the card and the
-summary call, so the two silhouettes always agree on "has relief."
-
-Location: `AuraCore/Sources/AuraKit/Plotting/` (alongside `Sparkline`).
-
-```swift
-public enum ElevationRelief {
-    /// Minimum peak-to-trough range (meters) to treat a ride as having real relief.
-    public static let minRangeMeters = 5.0
-
-    /// The elevation samples to plot, or [] when the ride is flat/absent.
-    /// (count > 1 AND max-min >= minRangeMeters).
-    public static func profileSamples(from track: [TrackPoint]) -> [Double]
-}
-```
-
-`ShareCardContent` is refactored to call `ElevationRelief.profileSamples(from:)`
-instead of its private `minElevationRangeMeters` + inline gate. Its existing tests
-must stay green (behavior identical). `ElevationProfileContent` uses the same
-helper to decide `.profile` vs `.flat` (it additionally distinguishes
-`.unavailable` by whether *any* samples exist).
+`ShareCardContent` migrates its inline range gate to `ElevationProfile.classify`:
+`elevationSamples` becomes the `.profile(samples)` payload, or `[]` for `.flat`/
+`.unavailable`. This is a **behavior change**, not a no-op: the card now gates on
+cumulative gain instead of 5 m of range, so borderline single-bump rides (e.g. a
+6 m climb) move from silhouette to plain stat. Its existing boundary tests are
+**updated to the gain semantics** (not assumed unchanged), and a new parity test
+pins that the card and the summary classify the same ride identically.
 
 ## The on-screen band (app target)
 
 New view: `Aura/Sources/Ride/ElevationProfileBand.swift`, taking an
-`ElevationProfileContent`. Rendered by `RideSummaryView` in a new slot.
+`ElevationProfileContent`. Its per-state rendering is a `switch` over `kind` — **not
+a ternary** (avoids the `void_function_in_ternary` SwiftLint error). Rendered by
+`RideSummaryView` in a new slot. (`ElevationSparkline` already lives in the same app
+target and is used cross-folder by `ShareCardView`; no move or target-membership
+work is needed.)
 
 **Placement.** Reading order in `RideSummaryView` becomes:
 map → titleBlock → **heroDistance** → **elevation band** → supportingStats.
@@ -104,74 +142,97 @@ weight without displacing the greeting or dethroning the distance numeral.)
 **Treatment (per-state):**
 
 - `.profile([Double])` — an open, editorial element (NOT a bordered card; the map
-  is already one). Full container width, ~110pt tall, silhouette baseline-anchored
-  to a thin hairline rule. `ElevationSparkline(elevations:, stroke: AuraTheme
-  route-line/accent, fill: accent at low opacity)` with a **self-scaling** range
-  (single ride → own min…max). A modest top-left callout `↑ {climbedValue}
-  {climbedUnit} climbed` in the accent color, caption/subhead weight —
-  deliberately not hero-sized (distance stays the one giant numeral).
+  is already one). Full container width, ~110 pt tall, silhouette baseline-anchored
+  to a thin hairline rule. `ElevationSparkline(elevations:, stroke: accent/route
+  line, fill: accent at low opacity)` with a **self-scaling** range (single ride →
+  own min…max). A modest top-left callout `↑ {climbedValue} {climbedUnit} climbed`
+  in the accent color, caption/subhead weight — deliberately not hero-sized
+  (distance stays the one giant numeral).
 - `.flat` — no silhouette. A slim single line in the band's slot:
-  `Mostly flat · {climbedValue} {climbedUnit} climbed`, secondary weight, accent
-  tick. Keeps layout rhythm; this is the case that would otherwise blob.
-- `.unavailable` — the band renders nothing (the whole section is omitted). Older
-  rides that predate elevation capture simply don't show it; "0 ft climbed" would
-  be noise and there is nothing honest to draw.
+  `Mostly flat · {climbedValue} {climbedUnit} climbed` (secondary weight, accent
+  tick), or just `Mostly flat` when `isTrivialClimb`. Keeps layout rhythm; this is
+  the case that would otherwise blob.
+- `.unavailable` — the band renders nothing (the whole section is omitted).
 
-**Motion.** Joins the existing staggered reveal (opacity + 8pt rise) at the band's
-delay slot. No count-up (static, matching the static map). Reduce Motion already
-covered by the screen's pattern.
+**Self-scaling is an accepted v1 tradeoff — silhouette = shape, number = magnitude.**
+Because each ride self-scales to its own min…max, a mountain ride and a gentle ride
+can fill the band with equally dramatic silhouettes; the **climb callout carries the
+true magnitude** ("3,000 ft" vs "180 ft"), so a rider comparing History entries is
+never misled by the number even when the shapes look similar. A shared/absolute
+vertical scale across History is noted as a future enhancement, not v1.
+
+**Motion.** Joins the existing staggered reveal (opacity + 8 pt rise). Inserting the
+band between `heroDistance` and `supportingStats` **shifts the stagger**: band takes
+`.delay(0.15)` and `supportingStats` moves from `0.15` to `.delay(0.20)`, so the
+cadence stays sequential rather than the band and stats firing together. No count-up
+(static, matching the static map). Reduce Motion already covered by the pattern.
 
 **Accessibility.** The `Canvas` stays `accessibilityHidden` (already true in
 `ElevationSparkline`). The band exposes ONE combined element:
-- `.profile` → "Elevation. Climbed {climbedValue} {climbedUnit spoken}."
-- `.flat` → "Mostly flat. Climbed {climbedValue} {climbedUnit spoken}."
+- `.profile` → "Elevation. Climbed {climbedValue} {climbedUnitSpoken}."
+- `.flat` → "Mostly flat. Climbed {climbedValue} {climbedUnitSpoken}." (or
+  "Mostly flat." when `isTrivialClimb`).
 - `.unavailable` → not present.
 
 *(Visual craft pass — exact spacing, weights, the hairline, callout position —
-goes through `impeccable` + `swiftui-layout-components` during implementation,
-consistent with the rest of the summary.)*
+goes through `impeccable` + `swiftui-layout-components` during implementation.)*
 
 ## Stat row change
 
 `supportingCells` in `RideSummaryView` drops the "climbed" cell. The row becomes
-two stats: `moving · top speed`, in every state (climb now lives in the band or
-its flat line; `.unavailable` rides legitimately have no climb to show). No filler
-third stat is added (YAGNI); the `ViewThatFits` horizontal→vertical reflow already
-handles two items.
+two stats: `moving · top speed`, in every state (climb now lives in the band or its
+flat line; `.unavailable` rides legitimately have no climb to show). No filler third
+stat is added (YAGNI); the `ViewThatFits` horizontal→vertical reflow already handles
+two items. Confirmed with the PO: pre-elevation rides show climb nowhere on the
+summary (they only ever computed 0).
+
+## Small-screen check
+
+The band adds ~110 pt between the hero and the stats. On an SE/mini-class device —
+especially with the "Longest ride yet" badge and/or the `saveFailed` warning already
+adding height — verify the stats are still reachable with minimal scrolling and the
+first-glance moment still lands. Everything is inside a `ScrollView`, so nothing is
+truly cut off, but the band must stay compact and the layout must be checked at the
+smallest supported width, not asserted.
 
 ## Testing
 
-**`ElevationProfileContentTests` (Swift Testing, AuraKit):**
-- Relief ≥ 5 m → `.profile` carrying the elevation samples.
-- Elevation present (≥ 2 samples) but < 5 m relief → `.flat`.
-- No elevation samples (or a single sample) → `.unavailable`.
-- Boundary: exactly 5 m of relief → `.profile` (gate is inclusive, matching card).
-- GPS-noise jitter (sub-threshold wiggle across many samples) → `.flat`, not a
-  fake jagged profile.
-- `climbedValue`/`climbedUnit` correct in metric and imperial.
-- **Cross-check:** the same ride fed to `ShareCardContent` and
-  `ElevationProfileContent` agrees on relief-vs-flat (guards against the two
-  silhouettes drifting; enforced by the shared `ElevationRelief` helper).
+**`ElevationProfileTests` (Swift Testing, AuraKit) — the classifier:**
+- Gain ≥ 10 m with ≥2 elevation samples → `.profile` carrying the samples.
+- ≥2 samples but gain < 10 m → `.flat`.
+- Fewer than 2 elevation samples (0 or 1) → `.unavailable`.
+- Boundary: gain exactly 10 m → `.profile` (inclusive).
+- Net-downhill (big range, gain < floor) → `.flat` — the regression case, so no
+  "plunging silhouette + tiny-climb callout."
+- Rolling ride (gain ≥ floor) → `.profile` — no "Mostly flat · big number."
 
-**`ElevationReliefTests`:** `profileSamples(from:)` returns [] below threshold and
-for < 2 points; returns the samples at/above threshold.
+**`ElevationProfileContentTests`:**
+- `climbedValue`/`climbedUnit`/`climbedUnitSpoken` correct in metric and imperial.
+- `isTrivialClimb` true when gain rounds to ~0 (drives the flat line dropping the
+  climb clause); false otherwise.
+- **Parity cross-check:** the same ride fed to `ShareCardContent` and
+  `ElevationProfileContent` classifies identically (both delegate to
+  `ElevationProfile.classify`) — the guard against the two silhouettes drifting.
 
-**Regression:** `ShareCardContent` tests stay green after the refactor to the
-shared helper (identical behavior).
+**`ShareCardContent` tests:** updated to the gain-gate semantics (a 6 m single-bump
+ride now classifies `.flat`/empty samples; a real-climb ride stays `.profile`), plus
+the parity test above. Not assumed unchanged.
 
 **On-device visual pass (sim, via History since seeded rides live there):**
-- A `.flat` ride renders the slim line and NOT a solid bar (the exact I1
-  regression that only surfaced visually last time).
-- A real hilly ride shows the silhouette + climb callout.
+- A `.flat` ride renders the slim line and NOT a solid bar (the I1 regression that
+  only surfaced visually last time).
+- A real hilly ride shows the silhouette + climb callout that agree with each other.
 - A pre-elevation ride shows no band.
+- Small-screen (SE/mini) layout check per the section above.
 
 ## Out of scope (v1)
 
 - Drag-to-read / scrubbing (future; ride-detail view).
+- Shared/absolute vertical scale across History (future; v1 self-scales, number
+  carries magnitude).
 - Highlighting the single biggest climb / grade coloring (the `.profile` view is
   built so this can layer on later).
 - Peak/low elevation callouts, max grade, average grade.
-- Any change to the share card's rendering (it only gains the shared helper).
 - Adding the profile to widgets or the Live Activity.
 
 ## Global Constraints
@@ -180,9 +241,16 @@ shared helper (identical behavior).
   Mapbox in the pure layer); band view in the app target.
 - Reuse the existing pure-Canvas `ElevationSparkline` (offscreen-safe); do NOT
   introduce Swift Charts or Mapbox for the profile.
-- Relief threshold = 5.0 m, shared with the share card via one helper — the two
-  must never disagree.
+- One shared classifier (`ElevationProfile.classify`, `minGainMeters` floor) drives
+  BOTH the summary and the share card — the two must never disagree.
+- The profile/flat gate and the climb callout are the **same measure** (cumulative
+  gain), so the label and the number can never contradict on screen.
 - Static in v1; no interactivity.
-- `swift test` (AuraCore) green; `swiftlint --strict` clean (line ≤140 warn/200
-  err; `void_function_in_ternary` is an error); app builds on the iPhone 17 sim.
+- Per-state rendering is a `switch`, never a ternary (`void_function_in_ternary` is a
+  SwiftLint error). Watch interpolated label lines against the 140-col limit
+  (warnings are build-gating).
+- Run `xcodegen generate` before building locally (the `.xcodeproj` is gitignored and
+  regenerated); new files under `Aura/Sources/**` are picked up only after regen.
+- `swift test` (AuraCore) green; `swiftlint --strict` clean (line ≤140 warn/200 err);
+  app builds on the iPhone 17 sim.
 - Local-only until the user says "push."
