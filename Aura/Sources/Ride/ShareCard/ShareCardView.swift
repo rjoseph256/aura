@@ -63,7 +63,7 @@ struct ShareCardView: View {
         }
         .padding(.horizontal, AuraTheme.Spacing.md)
         .padding(.vertical, AuraTheme.Spacing.sm)
-        .background(AuraTheme.surface.opacity(AuraPalette.mapScrimOpacity),
+        .background(AuraTheme.surface,
                     in: RoundedRectangle(cornerRadius: AuraTheme.Radius.md, style: .continuous))
     }
 

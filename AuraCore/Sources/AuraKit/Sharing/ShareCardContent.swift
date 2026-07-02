@@ -5,6 +5,10 @@ import AuraCore
 /// pure layer so the branching (units, has-elevation, has-route, has-destination) is unit
 /// tested without the app target. The SwiftUI card view is a dumb projection of this.
 public struct ShareCardContent: Equatable, Sendable {
+    /// Minimum peak-to-trough elevation range (meters) for the card to draw an elevation
+    /// profile; below this a ride is treated as flat and the climb shows as a plain stat.
+    private static let minElevationRangeMeters = 5.0
+
     public let distanceValue: String
     public let distanceUnit: String
     public let movingTime: String
@@ -34,7 +38,13 @@ public struct ShareCardContent: Equatable, Sendable {
 
         routeCoordinates = ride.track.count > 1 ? ride.track.map(\.coordinate) : []
 
+        // Show the elevation profile only when there's real relief. A flat/near-flat series
+        // (common on Pittsburgh riverfront rides) would render as a misleading solid fill bar,
+        // and GPS-noise-level variation as a fake jagged profile — below the floor the card
+        // shows the climb as a plain stat instead (the view's no-elevation branch).
         let elevations = ride.track.compactMap(\.elevation)
-        elevationSamples = elevations.count > 1 ? elevations : []
+        let hasRelief = elevations.count > 1
+            && (elevations.max()! - elevations.min()!) >= Self.minElevationRangeMeters
+        elevationSamples = hasRelief ? elevations : []
     }
 }

@@ -63,6 +63,18 @@ struct ShareCardContentTests {
         #expect(ShareCardContent(ride: none, units: .imperial).elevationSamples.isEmpty)
     }
 
+    @Test func flatOrTinyElevationYieldsEmptyButRealReliefKept() {
+        // Perfectly flat -> empty (was the on-device solid-bar bug).
+        let flat = ride(track: [point(0, 0, elevation: 12), point(1, 1, elevation: 12)], stats: stats())
+        #expect(ShareCardContent(ride: flat, units: .imperial).elevationSamples.isEmpty)
+        // Below the 5 m relief floor (GPS-noise scale) -> empty.
+        let tiny = ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 13)], stats: stats())
+        #expect(ShareCardContent(ride: tiny, units: .imperial).elevationSamples.isEmpty)
+        // Real relief (range 30 m >= 5) -> kept.
+        let real = ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 40)], stats: stats())
+        #expect(ShareCardContent(ride: real, units: .imperial).elevationSamples == [10, 40])
+    }
+
     @Test func routeRequiresTwoPoints() {
         let multi = ride(track: [point(0, 0), point(1, 1)], stats: stats())
         #expect(ShareCardContent(ride: multi, units: .imperial).routeCoordinates.count == 2)
