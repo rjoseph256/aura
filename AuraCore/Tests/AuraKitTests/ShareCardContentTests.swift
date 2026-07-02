@@ -63,16 +63,43 @@ struct ShareCardContentTests {
         #expect(ShareCardContent(ride: none, units: .imperial).elevationSamples.isEmpty)
     }
 
-    @Test func flatOrTinyElevationYieldsEmptyButRealReliefKept() {
-        // Perfectly flat -> empty (was the on-device solid-bar bug).
-        let flat = ride(track: [point(0, 0, elevation: 12), point(1, 1, elevation: 12)], stats: stats())
-        #expect(ShareCardContent(ride: flat, units: .imperial).elevationSamples.isEmpty)
-        // Below the 5 m relief floor (GPS-noise scale) -> empty.
-        let tiny = ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 13)], stats: stats())
-        #expect(ShareCardContent(ride: tiny, units: .imperial).elevationSamples.isEmpty)
-        // Real relief (range 30 m >= 5) -> kept.
+    @Test func gainGateDrivesElevationSamples() {
+        // Discriminating cases: their result DIFFERS between the old 5 m-range gate and
+        // the new 10 m-gain gate, so they go red against the un-migrated source and green
+        // after — a real TDD red, not a coincidence that passes both ways.
+        // Big range (30 m) but low gain (6 m < 10) -> empty. (Old range gate kept it.)
+        let bigRangeLowGain = ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 40)],
+                                   stats: stats(climb: 6))
+        #expect(ShareCardContent(ride: bigRangeLowGain, units: .imperial).elevationSamples.isEmpty)
+        // Small range (3 m) but real gain (30 m >= 10) -> kept. (Old range gate dropped it.)
+        let smallRangeRealGain = ride(track: [point(0, 0, elevation: 100), point(1, 1, elevation: 103)],
+                                      stats: stats(climb: 30))
+        #expect(ShareCardContent(ride: smallRangeRealGain, units: .imperial).elevationSamples == [100, 103])
+        // Real climb -> kept (agrees under both gates; sanity anchor).
         let real = ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 40)], stats: stats())
         #expect(ShareCardContent(ride: real, units: .imperial).elevationSamples == [10, 40])
+    }
+
+    @Test func cardAndSummaryClassifyIdentically() {
+        // The card draws the silhouette (non-empty samples) exactly when the summary is
+        // `.profile`, with the same samples; both are empty for `.flat` and `.unavailable`.
+        func assertParity(_ r: Ride) {
+            let cardSamples = ShareCardContent(ride: r, units: .imperial).elevationSamples
+            switch ElevationProfileContent(ride: r, units: .imperial).kind {
+            case .profile(let s): #expect(cardSamples == s)
+            case .flat, .unavailable: #expect(cardSamples.isEmpty)
+            }
+        }
+        // Profile.
+        assertParity(ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 40)], stats: stats()))
+        // Boundary: gain exactly 10 -> profile on both.
+        assertParity(ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 20)], stats: stats(climb: 10)))
+        // Flat.
+        assertParity(ride(track: [point(0, 0, elevation: 12), point(1, 1, elevation: 12)], stats: stats(climb: 2)))
+        // Discriminating: big range, low gain -> flat/empty (fails before migration, passes after).
+        assertParity(ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 40)], stats: stats(climb: 6)))
+        // Unavailable: no elevation samples.
+        assertParity(ride(track: [point(0, 0), point(1, 1)], stats: stats(climb: 0)))
     }
 
     @Test func routeRequiresTwoPoints() {
