@@ -606,13 +606,13 @@ out-of-scope section, or in a review. None of it is scheduled. Grouped by theme.
 
 Unbuilt v1 promises: none remaining. The shareable ride-summary card (spec section 4) —
 the last one — shipped 2026-07-01: a 4:5 instrument-field PNG shared from the ride summary
-via ShareLink. See docs/superpowers/specs/2026-07-01-share-card-design.md. (The elevation
-profile lives on the shared card only; the live-summary elevation profile below stays
-deferred.)
+via ShareLink. See docs/superpowers/specs/2026-07-01-share-card-design.md. (A ride-summary
+elevation profile shipped 2026-07-02, commit 7392547, sharing the gain-gate with the share
+card so the label and number can't disagree.)
 
-Summary and map polish: an elevation profile on the ride summary (deferred from the Wave 2
-redesign), a custom Mapbox Studio map style, and the single hoisted Mapbox map across the
-navigation flow (both fast-follows from Wave 1).
+Summary and map polish: a custom Mapbox Studio map style and the single hoisted Mapbox map
+across the navigation flow (both fast-follows from Wave 1). The ride-summary elevation profile
+once listed here shipped 2026-07-02 (commit 7392547).
 
 Group-ride tail: QR-code join (needs a camera scanner surface), a group-aware Live
 Activity and Dynamic Island, peer-focus (tap a rider to frame them), host leave with a
