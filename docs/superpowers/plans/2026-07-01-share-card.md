@@ -205,12 +205,15 @@ git commit -m "feat(core): ShareCardContent — pure share-card view model"
 Add this method inside `struct AuraPaletteContrastTests` (after `increasedContrastSecondaryIsStronger`):
 
 ```swift
-    @Test func cardHighContrastSecondaryClearsOnSurface() {
+    @Test func cardHighContrastSecondaryClearsOverScrim() {
         // The share card can't honor Increase Contrast (it's a fixed PNG), so it always uses
-        // the high-contrast secondary value — including over the `panel`/surface scrim. Lock
-        // that pairing (CI otherwise only asserts the standard 0.62 on surface).
+        // the high-contrast secondary value. Its true worst case is text over the HUD scrim
+        // (surface @ mapScrimOpacity) composited over the near-black route field — lock that
+        // exact pairing, not just solid panel (CI otherwise only asserts the standard 0.62).
         let s = WCAGContrast.white(AuraPalette.textSecondaryWhiteHighContrast)
-        #expect(WCAGContrast.ratio(s, AuraPalette.panel) >= 4.5)
+        let scrim = WCAGContrast.composite(AuraPalette.panel, over: AuraPalette.nearBlack,
+                                           alpha: AuraPalette.mapScrimOpacity)
+        #expect(WCAGContrast.ratio(s, scrim) >= 4.5)
         #expect(WCAGContrast.ratio(s, AuraPalette.nearBlack) >= 4.5)
     }
 ```
@@ -427,12 +430,30 @@ struct ShareCardView: View {
                    destinationName: nil, routeId: nil, destinationPlaceId: nil),
         units: .imperial))
 }
+
+#Preview("Route, no elevation") {
+    // Exercises the routed layout's climbed-fallback branch (metricsRow shows a second
+    // StatPair) when the track has coordinates but no elevation samples.
+    ShareCardView(content: ShareCardContent(
+        ride: Ride(kind: .navigate, startedAt: Date(timeIntervalSince1970: 1_782_907_200),
+                   endedAt: nil,
+                   track: (0..<30).map { i in
+                       TrackPoint(coordinate: Coordinate(latitude: 40.44 + Double(i) * 0.001,
+                                                         longitude: -79.99 + Double(i) * 0.0012),
+                                  elevation: nil, timestamp: Date())
+                   },
+                   stats: RideStats(distanceMeters: 6400, movingTimeSeconds: 1800,
+                                    averageSpeedMetersPerSecond: 4, maxSpeedMetersPerSecond: 8,
+                                    elevationGainMeters: 55),
+                   destinationName: "Downtown", routeId: nil, destinationPlaceId: nil),
+        units: .imperial))
+}
 ```
 
-- [ ] **Step 2: Regenerate project + build**
+- [ ] **Step 2: Regenerate project + build + eyeball previews**
 
 Run (delegate to the builder agent): `cd Aura && xcodegen generate` then build the `Aura` scheme on the iPhone 17 simulator.
-Expected: BUILD SUCCEEDED. Fix any compile error before proceeding.
+Expected: BUILD SUCCEEDED. Fix any compile error before proceeding. Eyeball all three `#Preview`s (route+elevation, no route, route-no-elevation) for the mono-lime bar and that each branch composes intentionally.
 
 - [ ] **Step 3: Lint + commit**
 
@@ -490,9 +511,9 @@ enum RideCardRenderer {
 }
 ```
 
-- [ ] **Step 2: Build**
+- [ ] **Step 2: Regenerate project + build**
 
-Run (builder agent): build the `Aura` scheme on the iPhone 17 simulator.
+Run (builder agent): `cd Aura && xcodegen generate` **first** — this new file lives under the `Sources` glob and must be added to the (gitignored) pbxproj, or it won't compile and Task 5 will fail to find `RideCardRenderer`. Then build the `Aura` scheme on the iPhone 17 simulator.
 Expected: BUILD SUCCEEDED. (No Swift 6 concurrency warnings: `RideCardRenderer` is `@MainActor`, `UIImage` is `Sendable`, and `make` is only called on the MainActor.)
 
 - [ ] **Step 3: Lint + commit**
@@ -561,6 +582,7 @@ Add a `.task` to the `ScrollView`, directly after the existing `.onAppear { ... 
 ```swift
         .task {
             guard ride.stats != nil, shareImage == nil else { return }
+            await Task.yield()   // let the entrance animation start before the synchronous render
             let content = ShareCardContent(ride: ride, units: settings.units)
             shareImage = RideCardRenderer.make(content)
         }
