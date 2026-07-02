@@ -84,6 +84,11 @@ private struct RootView: View {
                             NavigateHUDView(route: route, destination: destination)
                         case let .groupRide(entry):
                             GroupRideFlowView(entry: entry)
+                        case .joinRide:
+                            // Pushed (not a sheet) so it never conflicts with Home's
+                            // always-present dashboard sheet; only the view's own Cancel shows.
+                            GroupRideJoinView()
+                                .navigationBarBackButtonHidden(true)
                         }
                     }
             }

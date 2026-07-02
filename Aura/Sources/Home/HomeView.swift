@@ -15,10 +15,13 @@ struct HomeView: View {
     @State private var query = ""
     @State private var summaries: [RideSummary] = []
     @State private var didLoad = false
-    @State private var showJoinRide = false
     @State private var renameTarget: SavedPlace?
     @State private var renameText = ""
     @State private var searchExpanded = false
+    /// Kept in sync (via onChange/onAppear) so the dashboard sheet shows only at Home root and
+    /// when not searching — a pushed screen (Explore, preview, join) is never covered by the
+    /// sheet, and search never stacks with it. Using @State (not a derived binding) so the
+    /// sheet reliably presents/dismisses when the nav path changes.
     @State private var sheetPresented = true
     @ScaledMetric(relativeTo: .title) private var brandSize: CGFloat = 24
     @ScaledMetric(relativeTo: .body) private var peekHeight: CGFloat = 250
@@ -31,6 +34,9 @@ struct HomeView: View {
         HomeMode.resolve(hasCompletedOnboarding: settings.didCompleteOnboarding,
                          hasRides: !summaries.isEmpty, auth: location.authorization)
     }
+
+    /// Recomputes dashboard-sheet visibility from nav + search state.
+    private func syncSheet() { sheetPresented = router.path.isEmpty && !searchExpanded }
 
     var body: some View {
         Group {
@@ -47,7 +53,9 @@ struct HomeView: View {
         // Refetch when CloudKit merges a remote ride, so the glance + last-ride stay live even
         // with the sheet at peek (the subscription is on the always-mounted container).
         .onChange(of: rideStore.syncRevision) { Task { await loadRides() } }
-        .sheet(isPresented: $showJoinRide) { NavigationStack { GroupRideJoinView() } }
+        .onChange(of: router.path) { syncSheet() }
+        .onChange(of: searchExpanded) { syncSheet() }
+        .onAppear { syncSheet() }
         .alert("Rename saved place", isPresented: Binding(
             get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } })) {
             TextField("Name", text: $renameText)
@@ -70,9 +78,9 @@ struct HomeView: View {
                 Spacer(minLength: 0)
                 if !searchExpanded {
                     HomeLaunchBand(
-                        onWhereTo: { searchExpanded = true; sheetPresented = false },
+                        onWhereTo: { searchExpanded = true },
                         onExplore: { router.push(.freeRide) },
-                        onJoin: { showJoinRide = true })
+                        onJoin: { router.push(.joinRide) })
                         .padding(.bottom, peekHeight + AuraTheme.Spacing.md) // sit above the peek sheet
                 }
             }
@@ -81,7 +89,7 @@ struct HomeView: View {
                 SearchOverlay(
                     query: $query,
                     onPick: { place in router.remember(place); router.push(.preview(place)) },
-                    onCollapse: { searchExpanded = false; sheetPresented = true })
+                    onCollapse: { searchExpanded = false })
             }
         }
         .homeDashboardSheet(isPresented: $sheetPresented, peekHeight: peekHeight) {

@@ -10,6 +10,9 @@ public enum AppRoute: Sendable {
     case preview(Place)
     case navigate(route: Route, destination: Place?)
     case groupRide(GroupRideEntry)
+    /// The group-ride join-code entry screen, pushed on the nav stack (not a sheet) so it
+    /// never conflicts with Home's always-present dashboard sheet.
+    case joinRide
 }
 
 /// The entry point into the group-ride flow: either creating a session around a
@@ -58,6 +61,8 @@ extension AppRoute: Hashable {
             return ra.id == rb.id && da?.id == db?.id
         case let (.groupRide(a), .groupRide(b)):
             return a == b
+        case (.joinRide, .joinRide):
+            return true
         default:
             return false
         }
@@ -77,6 +82,8 @@ extension AppRoute: Hashable {
         case let .groupRide(entry):
             hasher.combine(3)
             hasher.combine(entry)
+        case .joinRide:
+            hasher.combine(4)
         }
     }
 }
