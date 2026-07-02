@@ -43,7 +43,10 @@ public final class SettingsStore {
         weeklyGoalMeters = (storedGoal.map { $0 > 0 ? $0 : nil } ?? nil) ?? 40_000
         saveToHealth = defaults.object(forKey: Key.saveToHealth) as? Bool ?? false
         turnHaptics = defaults.object(forKey: Key.turnHaptics) as? Bool ?? true
-        didCompleteOnboarding = defaults.object(forKey: Key.didCompleteOnboarding) as? Bool ?? false
+        // `bool(forKey:)` (not `object as? Bool`) so a value seeded via the launch argument
+        // `-auraDidCompleteOnboarding YES` — which lands in NSArgumentDomain as the STRING
+        // "YES" — is coerced to true for UI tests; absent still reads false.
+        didCompleteOnboarding = defaults.bool(forKey: Key.didCompleteOnboarding)
     }
 
     /// The external-change stream from the injected sync store (empty if none).
