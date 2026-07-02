@@ -74,6 +74,8 @@ jobs:
         run: swiftlint lint --strict
       - name: Explore rename guard
         run: bash scripts/check-explore-rename.sh
+      - name: Terrain style guard
+        run: bash scripts/check-terrain-style.sh
 
   db-tests:
     name: DB tests (pgTAP)
