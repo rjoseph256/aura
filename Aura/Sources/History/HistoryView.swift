@@ -101,7 +101,7 @@ struct HistoryView: View {
                 .font(.system(.title3, design: .rounded).weight(.semibold))
                 .foregroundStyle(AuraTheme.textPrimary)
 
-            Text("Start a free ride or navigate somewhere — your rides land here.")
+            Text("Explore or navigate somewhere — your rides land here.")
                 .font(.subheadline)
                 .foregroundStyle(AuraTheme.textSecondary)
                 .multilineTextAlignment(.center)
@@ -147,7 +147,7 @@ private struct RideRow: View {
         if let name = summary.destinationName, !name.isEmpty {
             lead = name
         } else {
-            lead = isNavigate ? "Navigated" : "Free ride"
+            lead = isNavigate ? "Navigated" : "Explore"
         }
         let climb = "\(fmt.elevationValue(summary.elevationGainMeters)) \(fmt.elevationUnit)"
         return "\(lead) · \(fmt.minutes(summary.movingTimeSeconds)) · ↑ \(climb)"

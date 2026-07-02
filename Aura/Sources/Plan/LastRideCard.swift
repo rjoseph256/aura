@@ -78,7 +78,7 @@ struct LastRideCard: View {
 
     private var title: String {
         if let name = summary.destinationName, !name.isEmpty { return name }
-        return summary.kind == .navigate ? "Ride" : "Free ride"
+        return summary.kind == .navigate ? "Ride" : "Explore"
     }
 
     private var statsLine: String {

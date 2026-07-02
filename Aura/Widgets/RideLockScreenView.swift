@@ -39,7 +39,7 @@ struct RideLockScreenView: View {
 
     private var freeRide: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header(title: "Free ride", glyph: "bicycle", imminent: false)
+            header(title: "Explore", glyph: "bicycle", imminent: false)
 
             HStack(alignment: .top, spacing: 12) {
                 RideTimerStatCell(start: attributes.startedAt, label: "TIME")
@@ -55,7 +55,7 @@ struct RideLockScreenView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Free ride in progress")
+        .accessibilityLabel("Explore in progress")
     }
 
     // MARK: Navigate

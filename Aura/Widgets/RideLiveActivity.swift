@@ -70,7 +70,7 @@ struct RideLiveActivity: Widget {
                 Text("Aura")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(AuraTheme.accent)
-                Text(nav ? "Next turn" : "Free ride")
+                Text(nav ? "Next turn" : "Explore")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(AuraTheme.textSecondary)
             }

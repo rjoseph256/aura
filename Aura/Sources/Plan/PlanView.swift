@@ -250,7 +250,7 @@ struct PlanView: View {
     // MARK: Free-ride CTA
 
     private var freeRideButton: some View {
-        Button("Free ride") {
+        Button("Explore") {
             router.push(.freeRide)
         }
         .buttonStyle(.ctaPrimary)
