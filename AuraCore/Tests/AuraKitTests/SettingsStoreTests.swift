@@ -43,6 +43,13 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertFalse(s.turnHaptics)
     }
 
+    func test_didCompleteOnboarding_defaultsOffAndPersists() {
+        let s = freshStore()
+        XCTAssertFalse(s.didCompleteOnboarding)
+        s.didCompleteOnboarding = true
+        XCTAssertTrue(s.didCompleteOnboarding)
+    }
+
     func test_unitsChange_firesObservation() {
         let s = freshStore()
         // Swift 6: the onChange closure is @Sendable, so a captured local `var`
