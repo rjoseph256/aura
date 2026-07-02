@@ -51,4 +51,11 @@ struct SavedPlaceMatcherTests {
     @Test func emptyQueryMatchesNothing() {
         #expect(SavedPlaceMatcher.matches(query: "  ", in: [make("A")]).isEmpty)
     }
+
+    @Test func trimsSurroundingWhitespaceBeforeMatching() {
+        // Pins the trim step: a padded query must still match. `emptyQueryMatchesNothing`
+        // stays green even without trimming, so it can't catch a regression here.
+        let list = [make("Café Colado", lon: -79.1)]
+        #expect(SavedPlaceMatcher.matches(query: "  cafe  ", in: list).count == 1)
+    }
 }
