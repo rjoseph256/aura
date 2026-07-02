@@ -30,7 +30,13 @@ public enum WeeklyGlance {
         if calendar.isDate(date, inSameDayAs: now) { return "today" }
         if let y = calendar.date(byAdding: .day, value: -1, to: now),
            calendar.isDate(date, inSameDayAs: y) { return "yesterday" }
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "EEE"
+        // Pin the formatter to the injected calendar's timezone so the weekday is consistent
+        // with the today/yesterday bucketing above — otherwise a date near a day boundary could
+        // bucket in one zone but render its weekday in another. Fully deterministic in tests.
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = calendar.timeZone
+        f.dateFormat = "EEE"
         return f.string(from: date) // e.g. "Tue"
     }
 }
