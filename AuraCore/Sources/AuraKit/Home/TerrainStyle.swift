@@ -1,25 +1,28 @@
 import Foundation
 
-/// Resolves which Mapbox style the Home terrain backdrop renders. Pure (no MapboxMaps import)
-/// so it tests on the macOS CI host; the app target bridges the URI to a `StyleURI`. The
-/// custom Studio style is ROH-6's authored deliverable — until it is published the resolver
-/// degrades to a dark fallback so the snapshotter always has a valid style.
+/// Resolves the Home terrain backdrop style. Pure (no MapboxMaps import) so it tests on the
+/// macOS CI host; the app target bridges the authored JSON and the fallback URI to the SDK.
 public enum TerrainStyle {
-    /// Safe dark fallback used until the authored terrain style is pasted in.
+    /// Safe dark fallback, used only when the authored style fails to load.
     public static let fallbackStyleURI = "mapbox://styles/mapbox/dark-v11"
 
-    /// Authored custom terrain style URI (ROH-6). Set to the published
-    /// `mapbox://styles/aura/<id>` once the Studio style ships. `nil` → fallback.
-    static let customStyleURI: String? = nil
+    /// Bump when `AuraTerrainStyle.json`'s look changes, to invalidate cached snapshots.
+    public static let styleVersion = "1"
 
-    /// Pure selection: custom when present, else fallback. Tested directly.
+    /// Resource base name of the bundled authored style (`Aura/Resources/AuraTerrainStyle.json`).
+    public static let authoredStyleResource = "AuraTerrainStyle"
+
+    /// Cache-key identity for the authored style. Version-bearing so a restyle invalidates
+    /// snapshots; also the signal the snapshotter uses to load the bundled JSON (vs a URI).
+    public static var authoredStyleIdentity: String { "aura-terrain-v\(styleVersion)" }
+
+    /// Pure selection kept for the fallback path. Tested directly.
     public static func resolve(custom: String?) -> String { custom ?? fallbackStyleURI }
 
-    /// The style the backdrop should render right now.
-    public static var styleURI: String { resolve(custom: customStyleURI) }
+    /// The fallback style URI the snapshotter uses when the authored style is unavailable.
+    public static var styleURI: String { fallbackStyleURI }
 
-    /// Whether `uri` is an Aura-authored terrain style (feeds the "real terrain" gate).
-    /// Defined against the authored namespace, not "not the fallback", so a stock Mapbox
-    /// style never passes the gate.
-    public static func isCustom(_ uri: String) -> Bool { uri.hasPrefix("mapbox://styles/aura/") }
+    /// Whether `identity` is Aura's authored terrain style (not the fallback preset). Defined
+    /// against the authored identity, so a stock Mapbox style never reads as the authored one.
+    public static func isCustom(_ identity: String) -> Bool { identity.hasPrefix("aura-terrain") }
 }

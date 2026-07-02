@@ -14,10 +14,18 @@ import Testing
         #expect(TerrainStyle.resolve(custom: nil) == TerrainStyle.fallbackStyleURI)
     }
 
-    @Test func isCustomTrueOnlyForAuraAuthoredStyles() {
-        #expect(TerrainStyle.isCustom("mapbox://styles/aura/terrain123") == true)
+    @Test func isCustomTrueOnlyForTheAuthoredIdentity() {
+        #expect(TerrainStyle.isCustom(TerrainStyle.authoredStyleIdentity) == true)
         #expect(TerrainStyle.isCustom(TerrainStyle.fallbackStyleURI) == false)
-        // A stock non-fallback Mapbox style must NOT read as the authored terrain.
         #expect(TerrainStyle.isCustom("mapbox://styles/mapbox/outdoors-v12") == false)
+    }
+
+    @Test func authoredIdentityCarriesTheVersion() {
+        #expect(TerrainStyle.authoredStyleIdentity == "aura-terrain-v\(TerrainStyle.styleVersion)")
+        #expect(TerrainStyle.authoredStyleIdentity != TerrainStyle.fallbackStyleURI)
+    }
+
+    @Test func authoredResourceIsTheBundledBaseName() {
+        #expect(TerrainStyle.authoredStyleResource == "AuraTerrainStyle")
     }
 }
