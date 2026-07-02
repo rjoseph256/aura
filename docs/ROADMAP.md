@@ -604,9 +604,11 @@ the CloudKit mirror during the V1-to-V2 migration.
 Everything below was deferred somewhere: in the v1 design spec, in a wave spec's
 out-of-scope section, or in a review. None of it is scheduled. Grouped by theme.
 
-Unbuilt v1 promise. One feature from the original design spec never shipped and never made
-it onto a wave: the shareable ride-summary card (spec section 4). It's small and
-rider-facing.
+Unbuilt v1 promises: none remaining. The shareable ride-summary card (spec section 4) —
+the last one — shipped 2026-07-01: a 4:5 instrument-field PNG shared from the ride summary
+via ShareLink. See docs/superpowers/specs/2026-07-01-share-card-design.md. (The elevation
+profile lives on the shared card only; the live-summary elevation profile below stays
+deferred.)
 
 Summary and map polish: an elevation profile on the ride summary (deferred from the Wave 2
 redesign), a custom Mapbox Studio map style, and the single hoisted Mapbox map across the
