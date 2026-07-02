@@ -216,6 +216,21 @@ struct ElevationProfileContentTests {
                                         units: .imperial)
         #expect(c.kind == .unavailable)
     }
+
+    @Test func accessibilityLabelsPerState() {
+        let profile = ElevationProfileContent(ride: ride(track: [pt(10), pt(40)], climb: 73.152),
+                                              units: .imperial)
+        #expect(profile.accessibilityLabel == "Elevation. Climbed 240 feet.")
+        let flat = ElevationProfileContent(ride: ride(track: [pt(10), pt(13)], climb: 6),
+                                           units: .imperial)
+        #expect(flat.accessibilityLabel == "Mostly flat. Climbed 20 feet.")
+        let trivial = ElevationProfileContent(ride: ride(track: [pt(12), pt(12)], climb: 0),
+                                              units: .imperial)
+        #expect(trivial.accessibilityLabel == "Mostly flat.")
+        let unavailable = ElevationProfileContent(ride: ride(track: [pt(nil), pt(nil)], climb: 0),
+                                                  units: .imperial)
+        #expect(unavailable.accessibilityLabel == nil)
+    }
 }
 ```
 
@@ -251,7 +266,23 @@ public struct ElevationProfileContent: Equatable, Sendable {
         climbedValue = fmt.elevationValue(stats.elevationGainMeters)
         climbedUnit = fmt.elevationUnit
         climbedUnitSpoken = fmt.elevationUnitSpoken
-        isTrivialClimb = climbedValue == "0"
+        isTrivialClimb = climbedValue == "0"   // depends on RideStatsFormatter's %.0f contract
+    }
+
+    /// The single combined VoiceOver label for the band, per state. `nil` for
+    /// `.unavailable` (the band renders nothing). Lives here (pure) so the exact spoken
+    /// strings are unit-tested, not trapped inside the SwiftUI view.
+    public var accessibilityLabel: String? {
+        switch kind {
+        case .profile:
+            return "Elevation. Climbed \(climbedValue) \(climbedUnitSpoken)."
+        case .flat:
+            return isTrivialClimb
+                ? "Mostly flat."
+                : "Mostly flat. Climbed \(climbedValue) \(climbedUnitSpoken)."
+        case .unavailable:
+            return nil
+        }
     }
 }
 ```
@@ -259,7 +290,7 @@ public struct ElevationProfileContent: Equatable, Sendable {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd AuraCore && swift test --filter ElevationProfileContentTests`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 
@@ -288,36 +319,49 @@ In `AuraCore/Tests/AuraKitTests/ShareCardContentTests.swift`, REPLACE the whole 
 
 ```swift
     @Test func gainGateDrivesElevationSamples() {
-        // Below the 10 m climb floor -> empty, regardless of track shape.
-        let flatStats = stats(climb: 2)
-        let flat = ride(track: [point(0, 0, elevation: 12), point(1, 1, elevation: 12)], stats: flatStats)
-        #expect(ShareCardContent(ride: flat, units: .imperial).elevationSamples.isEmpty)
-        let tiny = ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 13)], stats: flatStats)
-        #expect(ShareCardContent(ride: tiny, units: .imperial).elevationSamples.isEmpty)
-        // Real climb (stats gain 73 m >= 10) -> samples kept.
+        // Discriminating cases: their result DIFFERS between the old 5 m-range gate and
+        // the new 10 m-gain gate, so they go red against the un-migrated source and green
+        // after — a real TDD red, not a coincidence that passes both ways.
+        // Big range (30 m) but low gain (6 m < 10) -> empty. (Old range gate kept it.)
+        let bigRangeLowGain = ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 40)],
+                                   stats: stats(climb: 6))
+        #expect(ShareCardContent(ride: bigRangeLowGain, units: .imperial).elevationSamples.isEmpty)
+        // Small range (3 m) but real gain (30 m >= 10) -> kept. (Old range gate dropped it.)
+        let smallRangeRealGain = ride(track: [point(0, 0, elevation: 100), point(1, 1, elevation: 103)],
+                                      stats: stats(climb: 30))
+        #expect(ShareCardContent(ride: smallRangeRealGain, units: .imperial).elevationSamples == [100, 103])
+        // Real climb -> kept (agrees under both gates; sanity anchor).
         let real = ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 40)], stats: stats())
         #expect(ShareCardContent(ride: real, units: .imperial).elevationSamples == [10, 40])
     }
 
     @Test func cardAndSummaryClassifyIdentically() {
-        func cardHasProfile(_ r: Ride) -> Bool {
-            !ShareCardContent(ride: r, units: .imperial).elevationSamples.isEmpty
+        // The card draws the silhouette (non-empty samples) exactly when the summary is
+        // `.profile`, with the same samples; both are empty for `.flat` and `.unavailable`.
+        func assertParity(_ r: Ride) {
+            let cardSamples = ShareCardContent(ride: r, units: .imperial).elevationSamples
+            switch ElevationProfileContent(ride: r, units: .imperial).kind {
+            case .profile(let s): #expect(cardSamples == s)
+            case .flat, .unavailable: #expect(cardSamples.isEmpty)
+            }
         }
-        func summaryHasProfile(_ r: Ride) -> Bool {
-            if case .profile = ElevationProfileContent(ride: r, units: .imperial).kind { return true }
-            return false
-        }
-        let real = ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 40)], stats: stats())
-        let flat = ride(track: [point(0, 0, elevation: 12), point(1, 1, elevation: 12)], stats: stats(climb: 2))
-        #expect(cardHasProfile(real) == summaryHasProfile(real))   // both true
-        #expect(cardHasProfile(flat) == summaryHasProfile(flat))   // both false
+        // Profile.
+        assertParity(ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 40)], stats: stats()))
+        // Boundary: gain exactly 10 -> profile on both.
+        assertParity(ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 20)], stats: stats(climb: 10)))
+        // Flat.
+        assertParity(ride(track: [point(0, 0, elevation: 12), point(1, 1, elevation: 12)], stats: stats(climb: 2)))
+        // Discriminating: big range, low gain -> flat/empty (fails before migration, passes after).
+        assertParity(ride(track: [point(0, 0, elevation: 10), point(1, 1, elevation: 40)], stats: stats(climb: 6)))
+        // Unavailable: no elevation samples.
+        assertParity(ride(track: [point(0, 0), point(1, 1)], stats: stats(climb: 0)))
     }
 ```
 
 - [ ] **Step 2: Run tests to verify the new ones fail**
 
 Run: `cd AuraCore && swift test --filter ShareCardContentTests`
-Expected: FAIL — `gainGateDrivesElevationSamples` fails (old range gate keeps `tiny`/`flat` logic differently) and/or `cardAndSummaryClassifyIdentically` fails to compile until the source is migrated. (Confirms the tests exercise the new behavior.)
+Expected: FAIL (compiles — both types exist from Task 2) on the discriminating cases against the still-range-gated source: `gainGateDrivesElevationSamples` fails both discriminators (old gate keeps the big-range/low-gain ride instead of emptying it, and drops the small-range/real-gain ride instead of keeping it), and `cardAndSummaryClassifyIdentically` fails its big-range/low-gain case (card still emits `[10,40]` while the summary classifies `.flat`). This confirms the tests actually exercise the migration, not a range/gain coincidence.
 
 - [ ] **Step 3: Migrate the source**
 
@@ -418,7 +462,7 @@ struct ElevationProfileBand: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(profileLabel)
+        .accessibilityLabel(content.accessibilityLabel ?? "")
     }
 
     private var flatLine: some View {
@@ -427,21 +471,15 @@ struct ElevationProfileBand: View {
             .foregroundStyle(AuraTheme.secondaryText(contrast))
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(flatLabel)
+            .accessibilityLabel(content.accessibilityLabel ?? "")
     }
 
+    // Visible flat copy uses the mid-dot / abbreviated-unit voice; the spoken VoiceOver
+    // string is the pure `content.accessibilityLabel` (unit-tested in Task 2).
     private var flatText: String {
         content.isTrivialClimb
             ? "Mostly flat"
             : "Mostly flat · \(content.climbedValue) \(content.climbedUnit) climbed"
-    }
-    private var profileLabel: String {
-        "Elevation. Climbed \(content.climbedValue) \(content.climbedUnitSpoken)."
-    }
-    private var flatLabel: String {
-        content.isTrivialClimb
-            ? "Mostly flat."
-            : "Mostly flat. Climbed \(content.climbedValue) \(content.climbedUnitSpoken)."
     }
 }
 ```
@@ -502,6 +540,7 @@ Boot the iPhone 17 sim, open the app, and via History (seeded rides live there) 
 - A flat ride: the slim "Mostly flat …" line renders and NOT a solid bar (the I1 regression).
 - A pre-elevation ride (no elevation samples): no band at all; the stat row shows `moving · top` only.
 - Small-screen check: resize to an SE/mini-class sim (or inspect layout) and confirm the stats stay reachable with minimal scroll and the entrance stagger reads sequentially (hero → band → stats).
+- VoiceOver spot-check: the band reads as ONE element. The exact spoken strings are already unit-tested in Task 2 (`accessibilityLabelsPerState`); here just confirm the accessibility tree shows a single combined node for the band (not the sub-Label + Canvas separately) and nothing for a pre-elevation ride.
 
 Capture screenshots for the review package. Prefer the accessibility tree / screenshots per the sim tooling notes.
 
