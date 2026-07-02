@@ -17,6 +17,7 @@ struct RideSummaryView: View {
     @State private var isLongest = false
     @State private var animatedMeters: Double = 0
     @State private var revealed = false
+    @State private var shareImage: RideShareImage?
 
     // Brand (SF Pro Rounded) is fixed-size, so @ScaledMetric drives Dynamic Type for the
     // hero. (Cockpit Saira self-scales via relativeTo: — not used here.)
@@ -58,6 +59,21 @@ struct RideSummaryView: View {
                     .offset(y: revealed ? 0 : 8)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.45).delay(0.15), value: revealed)
 
+                if ride.stats != nil {
+                    Group {
+                        if let shareImage {
+                            ShareLink(item: shareImage.fileURL,
+                                      preview: SharePreview("Aura ride", image: shareImage.preview)) {
+                                Text("Share")
+                            }
+                        } else {
+                            Button("Share") {}.disabled(true)
+                        }
+                    }
+                    .buttonStyle(.ctaSecondary)
+                    .padding(.top, AuraTheme.Spacing.md)
+                }
+
                 Button("Done") { dismiss() }
                     .buttonStyle(.ctaPrimary)
                     .padding(.top, AuraTheme.Spacing.xs)
@@ -70,6 +86,12 @@ struct RideSummaryView: View {
         .onAppear {
             computeRecord()
             startAppearance()
+        }
+        .task {
+            guard ride.stats != nil, shareImage == nil else { return }
+            await Task.yield()   // let the entrance animation start before the synchronous render
+            let content = ShareCardContent(ride: ride, units: settings.units)
+            shareImage = RideCardRenderer.make(content)
         }
     }
 
