@@ -101,10 +101,12 @@ struct ShareCardView: View {
 
     private var metricsRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.xxl) {
-            StatPair(value: content.movingTime, label: "moving", context: .cockpit)
+            StatPair(value: content.movingTime, label: "moving", context: .cockpit,
+                     labelFont: .system(.subheadline, design: .rounded))
             if !hasElevation {
                 StatPair(value: "\(content.climbedValue) \(content.climbedUnit)",
-                         label: "climbed", context: .cockpit)
+                         label: "climbed", context: .cockpit,
+                         labelFont: .system(.subheadline, design: .rounded))
             }
         }
     }
@@ -136,9 +138,11 @@ struct ShareCardView: View {
             }
             HStack(spacing: AuraTheme.Spacing.xxl) {
                 StatPair(value: content.movingTime, label: "moving",
-                         context: .cockpit, alignment: .center)
+                         context: .cockpit, alignment: .center,
+                         labelFont: .system(.subheadline, design: .rounded))
                 StatPair(value: "\(content.climbedValue) \(content.climbedUnit)",
-                         label: "climbed", context: .cockpit, alignment: .center)
+                         label: "climbed", context: .cockpit, alignment: .center,
+                         labelFont: .system(.subheadline, design: .rounded))
             }
             Spacer()
             wordmark

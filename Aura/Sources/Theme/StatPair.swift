@@ -8,6 +8,9 @@ struct StatPair: View {
     /// How the value stacks over the label. Cockpit instrument rows read best leading
     /// (the default); centered 3-up grids (e.g. the ride summary) pass `.center`.
     var alignment: HorizontalAlignment = .leading
+    /// Label font. Defaults to `.caption2` (cockpit/summary rows); the share card passes a
+    /// larger size so labels survive feed-thumbnail scale.
+    var labelFont: Font = .caption2
     // Brand (system) font has a fixed size → @ScaledMetric drives Dynamic Type.
     @ScaledMetric(relativeTo: .title2) private var brandValueSize: CGFloat = 21
     // Cockpit (Saira) font self-scales via relativeTo: → plain base size (no @ScaledMetric).
@@ -21,7 +24,7 @@ struct StatPair: View {
                       : AuraTheme.Typography.metricBrand(brandValueSize))
                 .foregroundStyle(AuraTheme.textPrimary)
             Text(label)
-                .font(.caption2)
+                .font(labelFont)
                 .foregroundStyle(AuraTheme.textSecondary)
         }
     }
