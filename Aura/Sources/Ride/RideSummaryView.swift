@@ -54,10 +54,15 @@ struct RideSummaryView: View {
                     .offset(y: revealed ? 0 : 8)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.45).delay(0.10), value: revealed)
 
-                supportingStats
+                ElevationProfileBand(content: ElevationProfileContent(ride: ride, units: settings.units))
                     .opacity(revealed ? 1 : 0)
                     .offset(y: revealed ? 0 : 8)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.45).delay(0.15), value: revealed)
+
+                supportingStats
+                    .opacity(revealed ? 1 : 0)
+                    .offset(y: revealed ? 0 : 8)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.45).delay(0.20), value: revealed)
 
                 if ride.stats != nil {
                     Group {
@@ -169,7 +174,6 @@ struct RideSummaryView: View {
 
     @ViewBuilder private var supportingCells: some View {
         stat(fmt.minutes(stats.movingTimeSeconds), "moving")
-        stat(fmt.elevationValue(stats.elevationGainMeters), metric ? "m climbed" : "ft climbed")
         stat(fmt.speedValue(stats.maxSpeedMetersPerSecond, decimals: 1), metric ? "km/h top" : "mph top")
     }
 
