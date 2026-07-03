@@ -138,4 +138,14 @@ final class GuidanceViewModelTests: XCTestCase {
         XCTAssertEqual(vm.turn.distanceText, "120 m")
         XCTAssertEqual(vm.turn.accessibilityLabel, "In 120 meters, Right onto Penn Ave")
     }
+
+    // Slice 2: the structured maneuver rides the existing .progress event through the
+    // scripted session and lands on the turn card — the wire the directional arrow needs.
+    func test_progressManeuver_reachesTurnCard() async {
+        let update = GuidanceUpdate(distanceToManeuverMeters: 100, instruction: "Turn right",
+                                    maneuver: Maneuver(kind: .turn, modifier: .right))
+        let vm = GuidanceViewModel(session: ScriptedGuidanceSession(script: [.progress(update)]))
+        await vm.run(route: makeRoute())
+        XCTAssertEqual(vm.turn.maneuver?.modifier, .right)
+    }
 }
