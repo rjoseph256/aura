@@ -15,17 +15,26 @@ public struct GuidanceUpdate: Equatable, Sendable {
     /// The road the rider is currently on, e.g. "Penn Ave". nil when the engine has no
     /// name for the current step.
     public var currentStreetName: String?
+    /// The structured upcoming maneuver (which way the rider turns). nil when the engine
+    /// supplies no maneuver — the turn card then falls back to the generic arrow.
+    public var maneuver: Maneuver?
+    /// The maneuver after the upcoming one, driving the "then …" preview. nil when absent.
+    public var nextManeuver: Maneuver?
 
     public init(distanceToManeuverMeters: Double,
                 instruction: String,
                 distanceRemainingMeters: Double? = nil,
                 durationRemainingSeconds: Double? = nil,
-                currentStreetName: String? = nil) {
+                currentStreetName: String? = nil,
+                maneuver: Maneuver? = nil,
+                nextManeuver: Maneuver? = nil) {
         self.distanceToManeuverMeters = distanceToManeuverMeters
         self.instruction = instruction
         self.distanceRemainingMeters = distanceRemainingMeters
         self.durationRemainingSeconds = durationRemainingSeconds
         self.currentStreetName = currentStreetName
+        self.maneuver = maneuver
+        self.nextManeuver = nextManeuver
     }
 }
 
