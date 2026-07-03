@@ -41,8 +41,8 @@ import Foundation
 
 @Suite struct MapStyleDefaultTests {
     private func emptyDefaults() -> UserDefaults {
-        let d = UserDefaults(suiteName: "MapStyleDefaultTests-\(UUID().uuidString)")!
-        d.removePersistentDomain(forName: d.description); return d
+        // A unique suite name yields a fresh, empty domain — no removal needed.
+        UserDefaults(suiteName: "MapStyleDefaultTests-\(UUID().uuidString)")!
     }
 
     @Test func defaultsToAuraTerrainWhenNothingStored() {
@@ -87,10 +87,17 @@ In `SettingsStore.swift` line 40:
 mapStyle = MapStyle(rawValue: defaults.string(forKey: Key.mapStyle) ?? "") ?? .auraTerrain
 ```
 
+- [ ] **Step 3b: Add a remote-sync guard for the new case**
+
+Add one case to `MapStyleDefaultTests` that mirrors the existing map-style sync test in
+`SettingsStoreTests` (reuse that file's `KeyValueSyncing` double): apply a remote change of
+`"auraTerrain"` and assert the local `mapStyle` becomes `.auraTerrain`. This covers the new enum
+case through `applyRemoteMapStyle` so the parse-and-apply path is proven, not just assumed.
+
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `swift test --package-path AuraCore --filter MapStyleDefaultTests`
-Expected: PASS (4 tests). Also run the full `applyRemoteMapStyle` path is unaffected: `swift test --package-path AuraCore --filter SettingsStore`
+Expected: PASS (5 tests). Also confirm the existing suite still passes: `swift test --package-path AuraCore --filter SettingsStore`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -104,7 +111,7 @@ git commit -m "feat(theme): add MapStyle.auraTerrain and default the map to it"
 
 **Files:**
 - Modify: `Aura/Sources/Theme/MapStyle+Mapbox.swift` (bridge)
-- Modify: the map-style Settings picker (find it: `grep -rn "mapStyle" Aura/Sources/Settings`) to list `.auraTerrain` as the first option labeled "Terrain (Aura)", keeping "Dark"/"Standard".
+- Modify: `Aura/Sources/Settings/SettingsView.swift:52-54` — the hand-coded map-style `Picker` (NOT a `ForEach`).
 - No package test (app target); build + device-verified.
 
 **Interfaces:**
@@ -134,7 +141,14 @@ extension AuraKit.MapStyle {
 
 - [ ] **Step 2: Add `.auraTerrain` to the Settings map-style picker**
 
-Add a "Terrain (Aura)" case first in the picker's `ForEach`/options (mirror the existing Dark/Standard rows; label copy: `Terrain (Aura)`).
+`SettingsView.swift:52-54` is a hand-coded `Picker`. Add the terrain row first:
+```swift
+Picker("", selection: $settings.mapStyle) {
+    Text("Terrain (Aura)").tag(MapStyle.auraTerrain)   // ← add this line first
+    Text("Dark").tag(MapStyle.dark)
+    Text("Standard").tag(MapStyle.standard)
+}
+```
 
 - [ ] **Step 3: Regenerate the project and build the app**
 
@@ -153,7 +167,7 @@ Launch on the iPhone 17 sim; open (a) navigate preview / free-ride (`RideMapView
 
 ```bash
 git checkout AuraCore/Package.resolved 2>/dev/null || true
-git add Aura/Sources/Theme/MapStyle+Mapbox.swift Aura/Sources/Settings
+git add Aura/Sources/Theme/MapStyle+Mapbox.swift Aura/Sources/Settings/SettingsView.swift
 git commit -m "feat(map): render the authored terrain style on the live maps (ROH-46)"
 ```
 
@@ -171,7 +185,7 @@ Record/replay a 30-minute ride in navigate mode on the terrain style. Capture In
 
 - [ ] **Step 3: Judge against the gate**
 
-PASS = sustained 60 fps (120 on ProMotion), bounded hitch ratio, no sustained `.serious`/`.critical` thermal attributable to the style. If FAIL: open a follow-up to simplify the style JSON (shed relief/label layers) and re-measure; do NOT proceed to make terrain the shipped default until it passes. Record the result in the PR / Linear.
+PASS = sustained 60 fps (120 on ProMotion), bounded hitch ratio, no sustained `.serious`/`.critical` thermal attributable to the style. **If FAIL: stop — do not merge any of Slices 2–4 until Slice 1 clears the gate or `.auraTerrain` is reverted to a non-default opt-in.** The fix on a miss is to simplify the style JSON (shed relief/label layers) and re-measure. Record the go/no-go and the measured numbers in the PR / Linear (the PO owns the call).
 
 - [ ] **Step 4: Commit the finding** (docs only, if any style simplification lands)
 
@@ -298,6 +312,12 @@ import AuraCore
 }
 ```
 
+The completeness test asserts non-empty (Swift's exhaustive `switch` already guarantees every
+kind is handled at compile time). It deliberately does NOT call `UIImage(systemName:)` — UIKit is
+unavailable in the macOS package test host, and the pure layer must not import it. SF-Symbol name
+*validity* (a typo renders a blank square) is caught on device in Tasks 9 and 17, where the glyphs
+actually render.
+
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `swift test --package-path AuraCore --filter ManeuverIconTests` → FAIL (no `ManeuverIcon`).
@@ -400,7 +420,11 @@ Run: `swift test --package-path AuraCore --filter TurnCardPresenterTests` → FA
 
 - [ ] **Step 3: Implement**
 
-Add `public var maneuver: Maneuver?` to `TurnCardState` (default `nil` in the initializer; update the two static states `.starting`/`.unavailable` to pass `nil`). Add:
+Add `public var maneuver: Maneuver?` as a stored property on `TurnCardState`, give the initializer
+a trailing `maneuver: Maneuver? = nil` parameter (so existing 4-arg call sites still compile), and
+because the two static states `.starting`/`.unavailable` construct `TurnCardState(...)` positionally
+they keep compiling unchanged (the new param defaults to `nil`) — no edit needed there, but confirm
+they still read `maneuver == nil`. Add:
 ```swift
 public struct NextManeuver: Equatable, Sendable {
     public var maneuver: Maneuver
@@ -408,7 +432,16 @@ public struct NextManeuver: Equatable, Sendable {
     public init(maneuver: Maneuver, label: String) { self.maneuver = maneuver; self.label = label }
 }
 ```
-In `TurnCardPresenter.state(distanceToManeuverMeters:instruction:units:expandWithinMeters:)` add a `maneuver: Maneuver?` parameter (default `nil`), set it on the returned state, and when a next maneuver is passed, append `", then \(label)"` to the accessibilityLabel. Simplest: give the `state(for:units:)` overload the whole update so it can read both `maneuver` and `nextManeuver`:
+Give the low-level `state(...)` a `maneuver:` parameter positioned **before** `expandWithinMeters`
+(so its default keeps the existing overload working), then have the `state(for:units:)` overload
+read both `maneuver` and `nextManeuver` off the update:
+```swift
+public static func state(distanceToManeuverMeters: Double,
+                         instruction: String,
+                         units: DistanceUnits,
+                         maneuver: Maneuver? = nil,
+                         expandWithinMeters: Double = 150) -> TurnCardState { /* set state.maneuver = maneuver */ }
+```
 ```swift
 public static func state(for update: GuidanceUpdate, units: DistanceUnits,
                          expandWithinMeters: Double = 150) -> TurnCardState {
@@ -447,16 +480,18 @@ git commit -m "feat(guidance): thread maneuver + next-maneuver through TurnCardS
 
 - [ ] **Step 1: Write the failing test**
 
+`GuidanceViewModelTests.swift` is **XCTest** (not Swift Testing) and already has a `makeRoute()`
+helper. Add an XCTest method that reuses it:
 ```swift
-@Test func progressWithManeuverSetsTurnManeuver() async {
+func test_progressManeuver_reachesTurnCard() async {
     let update = GuidanceUpdate(distanceToManeuverMeters: 100, instruction: "Turn right",
                                 maneuver: Maneuver(kind: .turn, modifier: .right))
     let vm = GuidanceViewModel(session: ScriptedGuidanceSession(script: [.progress(update)]))
-    await vm.run(route: .init(geometry: [], distanceMeters: 0, expectedTravelTimeSeconds: 0))
-    #expect(vm.turn.maneuver?.modifier == .right)
+    await vm.run(route: makeRoute())
+    XCTAssertEqual(vm.turn.maneuver?.modifier, .right)
 }
 ```
-(Match the `Route` initializer to the real one — check `AuraCore/Sources/AuraCore/Models/Route.swift` and copy its exact signature.)
+(`makeRoute()` builds the real 8-arg `Route(origin:destination:waypoints:geometry:profile:distanceMeters:estimatedDurationSeconds:elevationGainMeters:)`.)
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -487,13 +522,25 @@ git commit -m "test(guidance): maneuver reaches the turn card through the view m
 
 - [ ] **Step 1: API audit (first, no view depends on it)**
 
-In `MapboxGuidanceSession.swift`, confirm the Mapbox `RouteStep` exposes `maneuverType: ManeuverType` and `maneuverDirection: ManeuverDirection?`, and how to reach the step AFTER `upcomingStep` (e.g. `currentLegProgress.remainingSteps` — index the one following the upcoming step, or `leg.steps[stepIndex + 2]`). Write a 3-line note in the PR of the exact accessors used. If a field is absent, the mapping returns `.other`/`.none` and the arrow degrades to generic — not a blocker.
+Confirm the exact SDK names before writing the switch (a wrong case name fails the build):
+```bash
+DIR=$(find ~/Library/Developer/Xcode/DerivedData -path '*mapbox-directions-swift*/Sources/MapboxDirections' -type d | head -1)
+grep -rn "public enum ManeuverType" -A40 "$DIR"
+grep -rn "public enum ManeuverDirection" -A20 "$DIR"
+grep -rn "var remainingSteps\|var upcomingStep\|var stepIndex\|var currentStep\b" "$(find ~/Library/Developer/Xcode/DerivedData -path '*mapbox-navigation*' -name 'RouteLegProgress.swift' | head -1)"
+```
+Record the real case names and the accessor for the step after `upcomingStep`. Expected accessors
+on `currentLegProgress`: `upcomingStep: RouteStep?` (the approached maneuver → `maneuver`) and the
+one after it via `remainingSteps` (the array of not-yet-completed steps; the step after `upcomingStep`
+is `remainingSteps.dropFirst().first`, since `remainingSteps.first` is the upcoming step) — confirm
+and use whichever the SDK actually exposes. If a maneuver field is absent, the mapping returns
+`.other`/`.none` and the arrow degrades to generic; that is acceptable, not a blocker.
 
 - [ ] **Step 2: Implement the mapping + populate both fields**
 
 Add:
 ```swift
-private static func mapManeuver(_ step: RouteStep?) -> Maneuver? {
+private static func mapManeuver(_ step: RouteStep?, label: String? = nil) -> Maneuver? {
     guard let step else { return nil }
     let kind: Maneuver.Kind = {
         switch step.maneuverType {
@@ -525,10 +572,23 @@ private static func mapManeuver(_ step: RouteStep?) -> Maneuver? {
         default: return .none
         }
     }()
-    return Maneuver(kind: kind, modifier: modifier, label: nil)
+    return Maneuver(kind: kind, modifier: modifier, label: label)
 }
 ```
-(Adjust the Mapbox enum case names to the exact SDK spelling found in Step 1.) In `guidanceUpdate(from:)` pass `maneuver: mapManeuver(progress.currentLegProgress.upcomingStep)` and `nextManeuver: mapManeuver(stepAfterUpcoming)` where `stepAfterUpcoming` is the step following `upcomingStep` (nil on the final leg). Set the next-maneuver's `label` to that step's short street name when available (`step.names?.first` or the step's instruction street) so the then-chip has text.
+(Adjust the Mapbox enum case names to the exact SDK spelling found in Step 1.) In
+`guidanceUpdate(from:)`:
+```swift
+let leg = progress.currentLegProgress
+let upcoming = leg.upcomingStep
+let afterUpcoming = leg.remainingSteps.dropFirst().first   // step after `upcomingStep`; nil on final leg
+// … existing fields …
+maneuver: Self.mapManeuver(upcoming),
+nextManeuver: Self.mapManeuver(afterUpcoming, label: afterUpcoming?.names?.first ?? afterUpcoming?.instructions)
+```
+The `nextManeuver` **label is required** for the then-chip to render — `TurnCardPresenter.nextManeuver(for:)`
+(Task 6) returns `nil` when the label is empty, so if the label is not populated here the then-chip
+never appears. Use the next step's short street name (`names?.first`), falling back to its
+`instructions` string. `maneuver` (the current turn) needs no label.
 
 - [ ] **Step 3: Build**
 
@@ -610,7 +670,7 @@ git commit -m "feat(cockpit): directional turn arrow + then-chip preview"
 - Consumes: `RideStats`, `RideStatsFormatter`, `SpeedReadout`, `StatPair`, `AuraTheme`.
 - Produces: `InstrumentPanel(currentSpeedMetersPerSecond:cruising:units:)` — a bumped bottom panel: a ~56pt Saira speed hero (via `AuraTheme.Typography.speedHero`) on the leading side and a right-aligned to-go / ETA block (reusing `CruisingState.distanceRemaining`/`eta`), on the opaque `mapScrim` fill; caps at `.accessibility1`; one composed VoiceOver label.
 
-- [ ] **Step 1: Implement the panel** (compose from existing `SpeedReadout` + `StatPair`; speed hero left, to-go/ETA right; opaque `AuraTheme.mapScrim(reduceTransparency:contrast)` background; single `.accessibilityElement(children: .ignore)` with a composed label "18 miles per hour, 2.1 miles to go, arriving 4:38 PM"). Match the mockup proportions (speed ~56pt, stats ~26pt).
+- [ ] **Step 1: Implement the panel** (compose from existing `SpeedReadout` + `StatPair`; speed hero left, to-go/ETA right; opaque `AuraTheme.mapScrim(reduceTransparency:contrast)` background; single `.accessibilityElement(children: .ignore)` with a composed label "18 miles per hour, 2.1 miles to go, arriving 4:38 PM"). Match the mockup proportions (speed ~56pt, stats ~26pt). **Units:** the panel takes `units: DistanceUnits` and passes it to `RideStatsFormatter` for the speed unit and the to-go distance (imperial → "mph"/"mi", metric → "km/h"/"km"); read to-go/ETA text from the passed `CruisingState` (already unit-formatted by `CruisingPresenter`). Do NOT hardcode any unit label.
 
 - [ ] **Step 2: Build + sim smoke** (render in a preview + on the HUD once wired in Task 12). Screenshot.
 
@@ -669,7 +729,8 @@ git commit -m "feat(cockpit): recompose the navigate HUD around the turn-forward
 
 **Files:** Modify `Aura/Sources/Ride/TurnCardView.swift`, `ThenChip.swift`, `NavigateHUDView.swift`.
 
-- [ ] **Step 1: Turn arrow + completion beat** — arrow swaps via `.contentTransition(.symbolEffect(.replace))` on `state.maneuver` change; on maneuver advance, a single subtle scale settle on the band; `.symbolEffectsRemoved(reduceMotion)`; under Reduce Motion, opacity crossfade only. Keep the existing `.smooth(0.38)` collapsed→expanded morph but with NO added per-turn bounce.
+- [ ] **Step 1: Turn arrow + completion beat** — arrow swaps via `.contentTransition(.symbolEffect(.replace))` on `state.maneuver` change; on maneuver advance, a single subtle scale settle on the band; `.symbolEffectsRemoved(reduceMotion)`; under Reduce Motion, opacity crossfade only. Keep the existing `.smooth(0.38)` collapsed→expanded morph but with NO added per-turn bounce. **The mint fill's color and opacity remain visible under Reduce Motion** (it is the legibility signal for imminence); only the scale/morph is suppressed (crossfade instead of transform).
+- [ ] **Step 1b: Zero residual map drift** — confirm the map view adds no camera parallax / terrain-drift / continuous animation while recording (the HUD uses a static `.followPuck` viewport, so there is nothing to suppress today; this step guards against a future addition). Under Reduce Motion the map must be fully static, not merely reduced (Chunk 0 accessibility matrix). Verified on device in Task 17.
 - [ ] **Step 2: ThenChip transition** — `.transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))`, animated with `.snappy` on `next` change.
 - [ ] **Step 3: Numerics** — confirm speed/ETA/to-go use `.contentTransition(.numericText())` + `.snappy` in `InstrumentPanel` (no per-tick animation).
 - [ ] **Step 4: Build + sim smoke.** Screenshot.
@@ -688,14 +749,16 @@ git commit -m "feat(cockpit): recompose the navigate HUD around the turn-forward
 
 **Files:** Modify `NavigateHUDView.swift`, `NavigateHUDView+GroupCrew.swift`.
 
-- [ ] **Step 1: Reflow spacing** — dock `GroupRosterSheet` above the new `InstrumentPanel` with explicit spacing so collapsed roster, expanded roster max-height, and the instrument+rail block clear each other within the safe area; keep `GroupToastHost` top-center and the reconnecting pill top. Preserve `showsGroupChrome`/`phase` logic.
+- [ ] **Step 1: Reflow spacing** — dock `GroupRosterSheet` above the new `InstrumentPanel`, laid out inside a `GeometryReader` so it is safe-area-aware (do NOT use the deprecated `UIScreen.main.bounds`). Concrete starting values: collapsed roster ~56pt, expanded roster capped at ~40% of the available height, `AuraTheme.Spacing.lg` between the roster and the instrument+rail block; the instrument+rail block reserves its measured height at the bottom. Keep `GroupToastHost` top-center and the reconnecting pill top. Preserve `showsGroupChrome`/`phase` logic. Verify on the shortest viewport in the sim (iPhone SE) that collapsed roster + expanded roster + instrument + rail never overlap.
 - [ ] **Step 2: Peer-dot legibility** — verify peer dots (`.riding` mint, `.stopped` amber, self) read on the authored terrain; if any status color washes out, apply a minimal contrast fix (outline/opacity) only. Do NOT redesign the color system (Chunk 3).
 - [ ] **Step 3: Build + sim smoke** (group preview). Screenshot.
 - [ ] **Step 4: Commit** `feat(cockpit): reflow the group crew layer against the new bottom`.
 
 ### Task 16: Live Activity glyph (scope-lite)
 
-**Files:** Modify `Aura/Sources/LiveActivity/RideActivityAttributes.swift` (add `turnGlyphSystemName: String?` to `ContentState` + init), `RideLiveActivityController.swift` (set it via `ManeuverIcon.symbol(for:)`), `Aura/Widgets/RideLockScreenView.swift` (render `Image(systemName: state.turnGlyphSystemName ?? "arrow.turn.up.right")`).
+**Depends on Task 4** (`GuidanceUpdate.maneuver` must exist). Tasks run in order, so this holds; do not cherry-pick Task 16 onto a branch without Task 4.
+
+**Files:** Modify `Aura/Sources/LiveActivity/RideActivityAttributes.swift` (add `turnGlyphSystemName: String?` to `ContentState` + init), `RideLiveActivityController.swift` (set it via `ManeuverIcon.symbol(for:)`), `Aura/Widgets/RideLockScreenView.swift` (render `Image(systemName: state.turnGlyphSystemName ?? "arrow.turn.up.right")` — the `nil` fallback is `ManeuverIcon.genericSymbol`'s value, so a pre-maneuver or non-navigate activity shows the generic arrow, never a blank).
 
 - [ ] **Step 1: Add the field** to `ContentState` (Codable/Hashable auto-synthesize; default `nil` in init to keep call sites compiling).
 - [ ] **Step 2: Populate** in `RideLiveActivityController` where it already sets `turnInstruction`/`turnDistanceMeters`: `turnGlyphSystemName: ManeuverIcon.symbol(for: maneuver?.maneuver)` (the controller has the `GuidanceUpdate`; read its `.maneuver`).
@@ -708,8 +771,8 @@ git commit -m "feat(cockpit): recompose the navigate HUD around the turn-forward
 **Files:** none (verification). Ask the user to open the tunnel; build pinned to this worktree, verify the binary (screenshot a distinguishing feature), clean install.
 
 - [ ] **Step 1: Ride-at-speed** — arrow direction correct at a sub-second glance; then-chip advances; instrument legible in sun; Reduce Motion path calm.
-- [ ] **Step 2: Glanceability gate** — if the then-chip adds dwell, gate it to imminence (show only within N seconds of the turn). Record the decision.
-- [ ] **Step 3: Ownability gate** — capture the HUD chrome alone (map hidden); with the user, judge "unmistakably Aura?" If no, add ONE non-climb identity signal (terrain-contour panel-edge motif or a signature route/speed treatment) and re-judge.
+- [ ] **Step 2: Glanceability gate** — ride with the then-chip always-on. If it reads as clutter / adds dwell, gate it to imminence: show the `ThenChip` only when `distanceToManeuverMeters < 400` (≈ the point the turn card starts mattering), hidden otherwise. Default to always-on; switch to the gated form only if the device pass says so. Record the decision in the PR.
+- [ ] **Step 3: Ownability gate** (PO judges) — (a) capture the HUD chrome alone (map hidden); (b) place it side by side with a current navigate screen from Komoot / Gaia / FATMAP; (c) with the PO, write the one sentence stating what is unmistakably Aura; (d) if that sentence stands on its own (Saira + mint + the opaque chrome read as Aura), the gate passes; (e) if the sentence only works because of the terrain map, add ONE non-climb chrome signal (a terrain-contour panel-edge motif or a signature route/speed treatment — NOT the climb stat) and repeat (a)–(d).
 - [ ] **Step 4: Group reflow** — roster reachable one-handed; peer dots legible on terrain.
 - [ ] **Step 5: Record results** in the PR / Linear; open follow-ups for anything deferred.
 
