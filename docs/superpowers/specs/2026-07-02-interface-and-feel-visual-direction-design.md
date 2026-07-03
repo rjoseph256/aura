@@ -224,8 +224,10 @@ each surface is built.
   identity in the cockpit.
 - **`AuraPalette.panel` gains a frosted-glass treatment for calm surfaces only,** with an opaque
   fallback; contour texture is a separate calm-surface asset behind text plates.
-- **`AuraPalette.lime` (`#C8FA4B`), `amber` (warning), `pink` (destructive): unchanged.**
-- **New peer-dot slots:** moving-peer and host/leader colors, non-colliding with lime and amber.
+- **Accent, `amber` (warning), `pink` (destructive): the single-accent model is unchanged; the accent
+  hue itself was later rethemed `lime #C8FA4B` → `mint #7CF0A8` during ROH-6 device review (`AuraPalette.mint`),
+  because lime clashed with the cool-charcoal terrain. Amber and pink keep their roles.**
+- **New peer-dot slots:** moving-peer and host/leader colors, non-colliding with the accent (mint) and amber.
 - **`textPrimaryWhite` / `textSecondaryWhite`: revalidated** against the new base and any opaque text
   plate. The Wave 2 lift (secondary at 0.62 white) is a floor.
 
