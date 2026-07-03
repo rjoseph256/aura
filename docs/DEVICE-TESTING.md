@@ -103,7 +103,7 @@ Device B as rider 2.
 1. Create and join. On A, plan a route and tap "Ride together," then share the 8-character code
    or the `aura://join?code=` link. On B, join by the code or the link.
    Pass: both reach the rolling-join lobby, then the live navigate HUD. Each device shows the other
-   as a named dot on the map, colored by status (white for you, lime riding, amber stopped, grey
+   as a named dot on the map, colored by status (white for you, mint riding, amber stopped, grey
    dropped). The roster sheet shows ahead or behind distance for each peer.
 2. Membership toasts. Watch for the join, left, and host-ended toasts as riders come and go.
 3. Host End. The host taps End. On the member's device the crew layer should dissolve while solo
