@@ -82,11 +82,23 @@ def expand_hex(h):
     return "#" + d[:6]                                    # ignore alpha for hue/luminance
 def channels(hex6):
     return int(hex6[1:3],16), int(hex6[3:5],16), int(hex6[5:7],16)
+def strings_in(node):
+    # every string anywhere under `node` (a plain colour string OR a colour stop buried in a
+    # Mapbox expression array like ["interpolate",["linear"],["zoom"],10,"#FFF",14,"#5A6470"]).
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, list):
+        for v in node:
+            yield from strings_in(v)
+    elif isinstance(node, dict):
+        for v in node.values():
+            yield from strings_in(v)
 def collect_colors(node):
     if isinstance(node, dict):
         for k, v in node.items():
-            if isinstance(k, str) and k.endswith("-color") and isinstance(v, str):
-                yield k, v
+            if isinstance(k, str) and k.endswith("-color"):
+                for s in strings_in(v):   # catches expression-valued paint, not just plain strings
+                    yield k, s
             else:
                 yield from collect_colors(v)
     elif isinstance(node, list):
@@ -133,12 +145,16 @@ w("good.json", good)
 w("not_a_style.json", {"not": "a style"})
 d = copy.deepcopy(good); d["layers"][1]["paint"]["background-color"] = "#C8FA4B"; w("reserved_lime.json", d)
 d = copy.deepcopy(good); d["layers"][1]["paint"]["background-color"] = "#FFFFFF"; w("white_casing.json", d)
+# a reserved hue hidden inside a zoom-interpolated expression must also be rejected
+d = copy.deepcopy(good)
+d["layers"][0]["paint"]["hillshade-highlight-color"] = ["interpolate", ["linear"], ["zoom"], 10, "#5A6470", 16, "#C8FA4B"]
+w("expr_lime.json", d)
 d = copy.deepcopy(good); d["layers"][1]["paint"]["background-color-transition"] = {"duration": 300}; w("animated_transition.json", d)
 d = copy.deepcopy(good); d["layers"].append({"id": "sky", "type": "sky"}); w("sky_layer.json", d)
 d = copy.deepcopy(good); d["sources"]["dem"]["type"] = "vector"; w("bad_dem.json", d)
 PY
   local bad
-  for bad in not_a_style reserved_lime white_casing animated_transition sky_layer bad_dem; do
+  for bad in not_a_style reserved_lime white_casing expr_lime animated_transition sky_layer bad_dem; do
     if validate "$tmp/$bad.json" >/dev/null 2>&1; then
       echo "SELF-TEST FAIL: validator passed a bad style ($bad)"; rm -rf "$tmp"; exit 1
     fi
