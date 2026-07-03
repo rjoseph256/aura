@@ -1,4 +1,5 @@
 import XCTest
+import AuraCore
 @testable import AuraKit
 
 final class TurnCardPresenterTests: XCTestCase {
@@ -38,5 +39,44 @@ final class TurnCardPresenterTests: XCTestCase {
     func test_staticStates_accessibilityLabel() {
         XCTAssertEqual(TurnCardState.starting.accessibilityLabel, "Starting navigation.")
         XCTAssertEqual(TurnCardState.unavailable.accessibilityLabel, "Navigate to destination.")
+    }
+
+    // MARK: - Maneuver + next-maneuver (Slice 2)
+
+    func test_stateCarriesTheManeuver() {
+        let u = GuidanceUpdate(distanceToManeuverMeters: 120, instruction: "Turn right onto Penn Ave",
+                               maneuver: Maneuver(kind: .turn, modifier: .right))
+        XCTAssertEqual(TurnCardPresenter.state(for: u, units: .imperial).maneuver?.modifier, .right)
+    }
+
+    func test_staticStates_haveNoManeuver() {
+        XCTAssertNil(TurnCardState.starting.maneuver)
+        XCTAssertNil(TurnCardState.unavailable.maneuver)
+    }
+
+    func test_nextManeuverIsNilWhenAbsent() {
+        let u = GuidanceUpdate(distanceToManeuverMeters: 120, instruction: "Turn right")
+        XCTAssertNil(TurnCardPresenter.nextManeuver(for: u))
+    }
+
+    func test_nextManeuverIsNilWhenLabelEmpty() {
+        let u = GuidanceUpdate(distanceToManeuverMeters: 120, instruction: "Turn right",
+                               nextManeuver: Maneuver(kind: .turn, modifier: .left, label: ""))
+        XCTAssertNil(TurnCardPresenter.nextManeuver(for: u))
+    }
+
+    func test_nextManeuverCarriesLabelAndManeuver() {
+        let u = GuidanceUpdate(distanceToManeuverMeters: 120, instruction: "Turn right",
+                               nextManeuver: Maneuver(kind: .turn, modifier: .left, label: "Highland Ave"))
+        let next = TurnCardPresenter.nextManeuver(for: u)
+        XCTAssertEqual(next?.label, "Highland Ave")
+        XCTAssertEqual(next?.maneuver.modifier, .left)
+    }
+
+    func test_composedLabelAppendsThenClause() {
+        let u = GuidanceUpdate(distanceToManeuverMeters: 120, instruction: "Turn right onto Penn Ave",
+                               maneuver: Maneuver(kind: .turn, modifier: .right),
+                               nextManeuver: Maneuver(kind: .turn, modifier: .left, label: "Highland Ave"))
+        XCTAssertTrue(TurnCardPresenter.state(for: u, units: .imperial).accessibilityLabel.contains("then Highland Ave"))
     }
 }
