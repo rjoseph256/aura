@@ -661,25 +661,32 @@ git add Aura/Sources/Ride/TurnCardView.swift Aura/Sources/Ride/ThenChip.swift
 git commit -m "feat(cockpit): directional turn arrow + then-chip preview"
 ```
 
-### Task 10: `InstrumentPanel`
+### Task 10: `InstrumentPanel` ✅ DONE (pulled forward + device-locked 2026-07-02)
+
+> **Reconciliation:** built and its proportion/hierarchy locked live on-device with the PO
+> during the Slice 1 device session, ahead of Slices 2–3. The design changed materially from
+> the original ~56 pt "bumped rail" below: it is now a **quarter-screen, speed-dominant gauge**.
+> The bottom-of-`NavigateHUDView` swap (drop `SpeedRail(.speedOnly)` + `TripStripView`, add
+> `InstrumentPanel`, keep the control cluster floating above) landed with it; the *top*
+> re-layout (maneuver hero + then-chip, Task 9's other half) still follows Slice 2. Shipped in
+> `feat(cockpit): quarter-screen instrument panel …`.
 
 **Files:**
 - Create: `Aura/Sources/Ride/InstrumentPanel.swift`
+- Delete: `Aura/Sources/Ride/TripStripView.swift` (superseded — folded into the panel)
+- Modify: `Aura/Sources/Ride/NavigateHUDView.swift` (bottom swap)
 
 **Interfaces:**
-- Consumes: `RideStats`, `RideStatsFormatter`, `SpeedReadout`, `StatPair`, `AuraTheme`.
-- Produces: `InstrumentPanel(currentSpeedMetersPerSecond:cruising:units:)` — a bumped bottom panel: a ~56pt Saira speed hero (via `AuraTheme.Typography.speedHero`) on the leading side and a right-aligned to-go / ETA block (reusing `CruisingState.distanceRemaining`/`eta`), on the opaque `mapScrim` fill; caps at `.accessibility1`; one composed VoiceOver label.
+- Consumes: `RideStatsFormatter`, `CruisingState`, `SpeedRailVoice`, `AuraTheme`.
+- Produces: `InstrumentPanel(currentSpeedMetersPerSecond:units:trip:)` — a quarter-screen bottom gauge. A speed-**dominant** ~150 pt Saira hero (via `AuraTheme.Typography.speedHero`; realistic 1–2-digit speeds, `minimumScaleFactor(0.5)` guards overflow) beside a stacked to-go / ETA pair (`trip.distanceRemaining` / `trip.eta`), the two grouped as one centered cluster; slim street caption above; opaque `AuraTheme.surface` fill + hairline top edge + rounded top corners; sized via `containerRelativeFrame(.vertical, count: 4, span: 1)`; caps at `.accessibility1`. Speed reads as one VoiceOver element ("Speed", value via `SpeedRailVoice.speedValue`); the to-go/ETA pair reads once via `trip.accessibilityLabel`.
 
-- [ ] **Step 1: Implement the panel** (compose from existing `SpeedReadout` + `StatPair`; speed hero left, to-go/ETA right; opaque `AuraTheme.mapScrim(reduceTransparency:contrast)` background; single `.accessibilityElement(children: .ignore)` with a composed label "18 miles per hour, 2.1 miles to go, arriving 4:38 PM"). Match the mockup proportions (speed ~56pt, stats ~26pt). **Units:** the panel takes `units: DistanceUnits` and passes it to `RideStatsFormatter` for the speed unit and the to-go distance (imperial → "mph"/"mi", metric → "km/h"/"km"); read to-go/ETA text from the passed `CruisingState` (already unit-formatted by `CruisingPresenter`). Do NOT hardcode any unit label.
+- [x] **Step 1: Implement the panel** — speed-dominant hero + centered to-go/ETA cluster; opaque `AuraTheme.surface` background; giant speed reads as one element, the trip pair composed via `trip.accessibilityLabel`. **Units:** the panel takes `units: DistanceUnits` for the speed value/unit via `RideStatsFormatter`; to-go/ETA text comes pre-formatted from the passed `CruisingState`. No hardcoded unit labels.
 
-- [ ] **Step 2: Build + sim smoke** (render in a preview + on the HUD once wired in Task 12). Screenshot.
+- [x] **Step 2: Device-verify** — driven into the live navigate cockpit on the iPhone 13 Pro Max via the Appium/WDA tunnel; three iterations screenshotted; PO locked the ¼-screen proportion + speed-dominant hierarchy.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit** — `feat(cockpit): quarter-screen instrument panel (speed-dominant hero + to-go + ETA)`.
 
-```bash
-git add Aura/Sources/Ride/InstrumentPanel.swift
-git commit -m "feat(cockpit): bumped bottom instrument panel (speed hero + to-go + ETA)"
-```
+**Follow-ups owed at merge (whole-branch review):** the panel is a pure view over already-tested presenters (`CruisingPresenter`/`RideStatsFormatter`), so it has no unit test; consider an `AuraUITests` assertion that the cockpit shows the speed / TO GO / ARRIVE elements. The composed VoiceOver contract (one speed element + one trip element) is unverified by test.
 
 ### Task 11: `ControlRail`
 

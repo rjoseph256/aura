@@ -80,25 +80,26 @@ struct NavigateHUDView: View {
             navigateMapView
                 .ignoresSafeArea()
 
-            // Bottom cockpit: controls + speed on one row, trip strip beneath them.
+            // Bottom cockpit: map controls float just above a prominent instrument panel
+            // (hero speed + to-go + ETA) that fills the bottom quarter of the screen.
             VStack(spacing: AuraTheme.Spacing.sm) {
-                HStack(alignment: .bottom) {
+                HStack {
+                    Spacer()
                     ControlCluster(
                         isFollowing: viewport.followPuck != nil,
                         isMuted: isMuted,
                         onRecenter: { recenter() },
                         onToggleMute: { toggleMute() },
                         onEndRide: { onEndTapped() })
-                    Spacer()
-                    SpeedRail(stats: coordinator.stats, elapsed: coordinator.elapsed,
-                             currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
-                             units: settings.units, layout: .speedOnly)
                 }
                 .padding(.horizontal, AuraTheme.Spacing.lg)
 
-                TripStripView(state: cruisingState)
+                InstrumentPanel(
+                    currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
+                    units: settings.units,
+                    trip: cruisingState)
+                    .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
             }
-            .padding(.bottom, AuraTheme.Spacing.sm)
 
             // Crew roster: only while hosting a live group ride (D9 hides it once the
             // host has ended the ride, same as the toasts/pill below). Solo path

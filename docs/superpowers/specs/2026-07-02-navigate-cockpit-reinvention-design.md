@@ -34,16 +34,20 @@ Layout, top to bottom:
   rider can plan one turn ahead.
 - **Terrain map** (full-bleed, behind everything): the authored `AuraTerrainStyle.json`, live,
   with the mint route line on top. The identity carrier.
-- **Instrument panel** (bottom): bumped up from the Wave 2 rail — a confident speed hero
-  (~56 pt Saira, between the old 34 pt and a speed-dominant 76 pt), with distance-to-go and ETA
-  as a paired block. No climb stat (chosen: the terrain identity is carried by the map, not a
-  number).
+- **Instrument panel** (bottom): a full-bleed cockpit gauge filling the bottom ~quarter of the
+  screen. A speed-*dominant* Saira hero (~150 pt — the number owns the panel, since realistic
+  cycling speeds are only 1–2 digits) sits beside a stacked to-go / ETA pair, the two grouped as
+  one centered cluster so the panel's slack falls to the outer margins instead of a gap down the
+  middle. The current street reads as a slim caption above. No climb stat (chosen: the terrain
+  identity is carried by the map, not a number). *Proportion and hierarchy were locked on-device
+  with the PO on 2026-07-02 — see the reconciliation note at the end.*
 - **Control rail** (bottom-leading): recenter, mute, end-ride at 44 pt tap targets.
 - **GPS chip** (top-leading), unchanged in role.
 
 What is deliberately *not* here: no live blur over the moving map (Chunk 0 Rule 1); cockpit data
-sits on opaque `mapScrim` fills. No climb-ahead / grade instrument (that was the climb-hero
-option C, not chosen). No peer-dot color-system redesign (deferred to Chunk 3, see Scope).
+sits on opaque fills — the quarter-screen instrument panel on `AuraTheme.surface`, smaller chrome
+on `mapScrim`. No climb-ahead / grade instrument (that was the climb-hero option C, not chosen).
+No peer-dot color-system redesign (deferred to Chunk 3, see Scope).
 
 ## Build order — four slices
 
@@ -162,9 +166,13 @@ Rebuild the cockpit views against the approved hierarchy.
 - These views are **navigate-only**: free ride (`RideHUDView` / `RideMapView`) has no turn card,
   then-chip, or maneuver band, so nothing here touches the free-ride path.
 - `InstrumentPanel`: replaces the navigate-mode `SpeedRail(.speedOnly)` + `TripStripView` pair
-  with one bumped panel — speed hero + a right-aligned to-go / ETA block — built on existing
-  `SpeedReadout` / `StatPair` / `RideStatsFormatter` tokens and the `mapScrim` opaque fill.
-  `SpeedRail`'s free-ride `.full` layout is untouched.
+  (`TripStripView` is deleted — its street / to-go / ETA fold into this panel) with one
+  quarter-screen gauge: a speed-dominant ~150 pt Saira hero beside a stacked to-go / ETA pair,
+  the two centered as a single cluster, with a slim street caption above. Built on
+  `RideStatsFormatter` + `AuraTheme.Typography.speedHero` / `.metricCockpit` over an opaque
+  `AuraTheme.surface` fill with a hairline top edge and rounded top corners; sized via
+  `containerRelativeFrame(.vertical, count: 4, span: 1)`. `SpeedRail`'s free-ride `.full` layout
+  is untouched.
 - `ControlRail`: `ControlCluster` re-expressed as a leading vertical rail (recenter / mute /
   end). Same actions, same `HUDControlButton` styling, same accessibility.
 - `NavigateHUDView` body recomposed to place band + then-chip at top and the instrument panel +
