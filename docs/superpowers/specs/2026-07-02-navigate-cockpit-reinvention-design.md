@@ -125,11 +125,13 @@ Give the turn card a real direction to point, and give the then-chip a real next
   uTurn) and a `modifier` (left, right, slightLeft, slightRight, sharpLeft, sharpRight, straight,
   uTurn, none), plus an optional short label (e.g. the next street, or a roundabout exit ordinal
   where the SDK supplies one). Both fields optional so a stream that cannot supply them degrades.
-- Populate both in the app-target `MapboxGuidanceSession.guidanceUpdate()` from
-  `currentLegProgress.currentStep` (→ `maneuver`) and `.upcomingStep` (→ `nextManeuver`). The
+- Populate both in the app-target `MapboxGuidanceSession.guidanceUpdate()`: `maneuver` from
+  `currentLegProgress.upcomingStep` (the turn being approached — same step that drives the
+  co-located `instruction`/`distanceToManeuver`), and `nextManeuver` from the step *after* it
+  (`remainingSteps.dropFirst().first`, since `remainingSteps.first == upcomingStep`). The
   `Route` model has no step list, so the then-chip is driven by this event field, **not** derived
   from `Route` (the earlier draft's wording was wrong). `nextManeuver` is nil when there is no
-  upcoming step (final leg), which hides the then-chip.
+  step after the upcoming one (final leg), which hides the then-chip.
 - Thread both fields through `ScriptedGuidanceSession` and every guidance test that emits
   `.progress`, so the scripted double can seed current + next for presenter and view tests.
 - A pure `ManeuverIcon.symbol(for: Maneuver?) -> String` (AuraKit) maps kind+modifier to an SF
@@ -262,8 +264,8 @@ guidance event protocol shape, the summary and permission sheets, the group sess
 
 ## Data flow
 
-`MapboxGuidanceSession` reads `currentLegProgress.currentStep` and `.upcomingStep` → emits
-`GuidanceUpdate(maneuver:…, nextManeuver:…)` → `GuidanceViewModel` derives `TurnCardState`
+`MapboxGuidanceSession` reads `currentLegProgress.upcomingStep` (→ `maneuver`) and the step
+after it (→ `nextManeuver`) → emits `GuidanceUpdate(maneuver:…, nextManeuver:…)` → `GuidanceViewModel` derives `TurnCardState`
 (+ a `NextManeuver` from `update.nextManeuver`) → `TurnCardView` / `ThenChip` render, reading
 `ManeuverIcon` for glyphs. The coordinator continues to own stats and feeds the instrument panel
 (speed, elapsed, distance) and the Live Activity. `settings.mapStyle` (read-time default
@@ -372,9 +374,9 @@ first draft with a refuting mandate. Resolved into the spec above:
 - **"Explore" is not a fourth live map** — it is the Chunk-1 rename of free ride (`RideMapView`).
   Corrected to three live-map surfaces (Slice 1).
 - **Then-chip had no data source** — `Route` has no step list and `GuidanceUpdate` had no next
-  step. Added `nextManeuver` to `GuidanceUpdate`, populated from `currentLegProgress.upcomingStep`,
-  threaded through `ScriptedGuidanceSession` + tests (Slice 2, Data flow). The Mapbox fields are
-  confirmed available.
+  step. Added `nextManeuver` to `GuidanceUpdate`, populated from the step *after* `upcomingStep`
+  (`remainingSteps.dropFirst().first`), threaded through `ScriptedGuidanceSession` + tests
+  (Slice 2, Data flow). The Mapbox fields are confirmed available.
 - **Default-flip migration** — resolved to a read-time-fallback flip that needs no migration code
   and cannot diverge a synced account (Slice 1). Removed the punted open question.
 - **`AuraLiveMapStyle` was undefined** — dropped it; the bridge calls the existing
