@@ -1,7 +1,7 @@
 {
   "version": 8,
   "name": "Aura Terrain",
-  "metadata": { "aura:version": "1" },
+  "metadata": { "aura:version": "2" },
   "glyphs": "mapbox://fonts/mapbox/{fontstack}/{range}.pbf",
   "sprite": "mapbox://sprites/mapbox/dark-v11",
   "sources": {
@@ -18,7 +18,7 @@
       "paint": { "fill-color": "#0A1418", "fill-opacity": 1.0 } },
     { "id": "hillshade", "type": "hillshade", "source": "dem",
       "paint": {
-        "hillshade-exaggeration": 0.45,
+        "hillshade-exaggeration": 0.6,
         "hillshade-shadow-color": "#05080A",
         "hillshade-highlight-color": "#5A6470",
         "hillshade-accent-color": "#0D1411" } },
