@@ -65,7 +65,7 @@ struct RideLockScreenView: View {
         let turnTint = imminent ? AuraTheme.accent : AuraTheme.textPrimary
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                AuraGlyph(systemName: rideActivityManeuverSymbol(for: state.turnInstruction),
+                AuraGlyph(systemName: state.turnGlyphSystemName ?? "arrow.turn.up.right",
                           imminent: imminent, size: 38)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(turnDistanceText)

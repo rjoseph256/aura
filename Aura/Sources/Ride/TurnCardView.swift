@@ -18,23 +18,29 @@ struct TurnCardView: View {
 
     // Arrow sizes stay @ScaledMetric (SF Symbol point size). Distance numerals use the
     // Saira cockpit face, which self-scales via `relativeTo:` — so those are plain base sizes.
-    @ScaledMetric(relativeTo: .title2)     private var arrowCollapsed: CGFloat = 24
-    @ScaledMetric(relativeTo: .largeTitle) private var arrowExpanded: CGFloat = 34
+    // The maneuver arrow is the card's hero — the direction is the fastest thing to read at
+    // a glance, so it runs larger than the distance numeral in both states.
+    @ScaledMetric(relativeTo: .title2)     private var arrowCollapsed: CGFloat = 32
+    @ScaledMetric(relativeTo: .largeTitle) private var arrowExpanded: CGFloat = 60
 
     private let distCollapsed: CGFloat = 22
-    private let distExpanded: CGFloat = 36
+    private let distExpanded: CGFloat = 42
 
     // MARK: Body
 
     var body: some View {
         HStack(spacing: state.isExpanded ? AuraTheme.Spacing.md : AuraTheme.Spacing.sm) {
-            // Maneuver arrow
-            Image(systemName: "arrow.turn.up.right")
+            // Maneuver arrow — the real directional glyph for the upcoming turn (generic
+            // arrow when the engine supplies no structured maneuver).
+            Image(systemName: ManeuverIcon.symbol(for: state.maneuver))
                 .font(.system(
                     size: state.isExpanded ? arrowExpanded : arrowCollapsed,
                     weight: .bold
                 ))
                 .foregroundStyle(state.isExpanded ? AuraTheme.onAccent : AuraTheme.accent)
+                // The glyph swaps with a symbol-replace transition as the maneuver changes
+                // (right → left as turns advance); a plain crossfade under Reduce Motion.
+                .contentTransition(reduceMotion ? .opacity : .symbolEffect(.replace))
                 // Scale instead of animating .font size (font size doesn't interpolate).
                 .scaleEffect(reduceMotion ? 1 : (state.isExpanded ? 1.0 : 0.72))
                 .animation(
@@ -62,7 +68,7 @@ struct TurnCardView: View {
 
                 // Street / instruction text — fades on change.
                 Text(state.primaryText)
-                    .font(.subheadline.weight(.semibold))
+                    .font(state.isExpanded ? .headline.weight(.semibold) : .subheadline.weight(.semibold))
                     .foregroundStyle(
                         state.isExpanded ? AuraTheme.onAccent.opacity(0.75) : AuraTheme.textPrimary.opacity(0.9)
                     )
@@ -103,5 +109,17 @@ struct TurnCardView: View {
         )
         // Horizontal inset from screen edges; safe area inset handled by caller.
         .padding(.horizontal, 12)
+        // Completion beat: one subtle scale settle on the whole band when the maneuver
+        // advances — celebrating a completed turn, NOT its imminence (Chunk 0 motion rule).
+        // Keyed on the instruction so a new step fires it even when two turns share a
+        // direction; fully suppressed under Reduce Motion.
+        .keyframeAnimator(initialValue: 1.0, trigger: state.primaryText) { content, scale in
+            content.scaleEffect(reduceMotion ? 1 : scale)
+        } keyframes: { _ in
+            KeyframeTrack {
+                SpringKeyframe(1.03, duration: 0.18)
+                SpringKeyframe(1.0, duration: 0.30)
+            }
+        }
     }
 }

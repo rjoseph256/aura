@@ -37,6 +37,9 @@ struct NavigateHUDView: View {
 
     @State var coordinator: RideSessionCoordinator
     @State private var showPermission = false
+    /// Measured HUD height, used to cap the group roster at ~40% so a full crew never
+    /// pushes the controls/instrument off a short screen. 0 until first layout.
+    @State private var hudHeight: CGFloat = 0
 
     // MARK: Guidance
 
@@ -80,34 +83,9 @@ struct NavigateHUDView: View {
             navigateMapView
                 .ignoresSafeArea()
 
-            // Bottom cockpit: controls + speed on one row, trip strip beneath them.
-            VStack(spacing: AuraTheme.Spacing.sm) {
-                HStack(alignment: .bottom) {
-                    ControlCluster(
-                        isFollowing: viewport.followPuck != nil,
-                        isMuted: isMuted,
-                        onRecenter: { recenter() },
-                        onToggleMute: { toggleMute() },
-                        onEndRide: { onEndTapped() })
-                    Spacer()
-                    SpeedRail(stats: coordinator.stats, elapsed: coordinator.elapsed,
-                             currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
-                             units: settings.units, layout: .speedOnly)
-                }
-                .padding(.horizontal, AuraTheme.Spacing.lg)
-
-                TripStripView(state: cruisingState)
-            }
-            .padding(.bottom, AuraTheme.Spacing.sm)
-
-            // Crew roster: only while hosting a live group ride (D9 hides it once the
-            // host has ended the ride, same as the toasts/pill below). Solo path
-            // (groupSession == nil) never renders this.
-            if showsGroupChrome, let groupSession {
-                GroupRosterSheet(rows: rosterRows(for: groupSession))
-                    .padding(.horizontal, AuraTheme.Spacing.md)
-                    .padding(.bottom, AuraTheme.Spacing.xxxl)
-            }
+            // Bottom cockpit: crew roster (when hosting) + controls + quarter-screen
+            // instrument panel. Extracted to keep this view's body under the length limit.
+            bottomCockpit
         }
         // Crew membership toasts
         .overlay(alignment: .top) {
@@ -122,12 +100,21 @@ struct NavigateHUDView: View {
                     .padding(.top, 44)
             }
         }
-        // Turn card pinned below the status bar
+        // Turn card pinned below the status bar, with the next-turn preview beneath it.
         .overlay(alignment: .top) {
-            TurnCardView(state: guidance.turn, reduceMotion: reduceMotion)
-                .padding(.top, 8) // sits in the safe area; no hardcoded status-bar inset
-                .animation(reduceMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.38),
-                           value: guidance.turn)
+            VStack(spacing: AuraTheme.Spacing.sm) {
+                TurnCardView(state: guidance.turn, reduceMotion: reduceMotion)
+                if let update = guidance.lastUpdate,
+                   let next = TurnCardPresenter.nextManeuver(for: update) {
+                    ThenChip(next: next)
+                        .transition(reduceMotion
+                            ? .opacity
+                            : .move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .padding(.top, 8) // sits in the safe area; no hardcoded status-bar inset
+            .animation(reduceMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.38),
+                       value: guidance.turn)
         }
         // GPS signal chip — top leading
         .overlay(alignment: .topLeading) {
@@ -150,6 +137,7 @@ struct NavigateHUDView: View {
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: guidance.isRerouting)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { hudHeight = $0 }
         .background(AuraTheme.background)
         // End-ride confirmation: the cluster's End button opens this. An alert (not a
         // confirmationDialog) is used so the "Keep riding" cancel button reliably renders
@@ -363,5 +351,40 @@ struct NavigateHUDView: View {
             ?? AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         speechSynthesizer.speak(utterance)
+    }
+}
+
+private extension NavigateHUDView {
+    /// The bottom cockpit: crew roster (when hosting a live group ride) docked just above the
+    /// map controls, which float above the quarter-screen instrument panel (hero speed +
+    /// to-go + ETA). Stacked here — not as a bottom-padded overlay — so the roster stays clear
+    /// of the panel; its expanded height is capped at ~40% of the HUD so a full crew can't
+    /// push the controls off a short screen. (D9 hides it once the host ends the ride; the
+    /// solo path never renders it.)
+    @ViewBuilder var bottomCockpit: some View {
+        VStack(spacing: AuraTheme.Spacing.sm) {
+            if showsGroupChrome, let groupSession {
+                GroupRosterSheet(rows: rosterRows(for: groupSession))
+                    .padding(.horizontal, AuraTheme.Spacing.md)
+                    .frame(maxHeight: hudHeight > 0 ? hudHeight * 0.4 : 320, alignment: .bottom)
+            }
+
+            HStack {
+                Spacer()
+                ControlCluster(
+                    isFollowing: viewport.followPuck != nil,
+                    isMuted: isMuted,
+                    onRecenter: { recenter() },
+                    onToggleMute: { toggleMute() },
+                    onEndRide: { onEndTapped() })
+            }
+            .padding(.horizontal, AuraTheme.Spacing.lg)
+
+            InstrumentPanel(
+                currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
+                units: settings.units,
+                trip: cruisingState)
+                .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
+        }
     }
 }

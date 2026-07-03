@@ -11,11 +11,11 @@ final class SettingsStoreTests: XCTestCase {
         return SettingsStore(defaults: defaults)
     }
 
-    func test_defaults_areImperialVoiceOnDarkMap() {
+    func test_defaults_areImperialVoiceOnAuraTerrainMap() {
         let s = freshStore()
         XCTAssertEqual(s.units, .imperial)
         XCTAssertTrue(s.voiceEnabled)
-        XCTAssertEqual(s.mapStyle, .dark)
+        XCTAssertEqual(s.mapStyle, .auraTerrain) // ROH-46: terrain is the read-time default
     }
 
     func test_persistsChanges() {

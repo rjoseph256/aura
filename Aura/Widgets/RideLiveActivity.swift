@@ -37,7 +37,7 @@ struct RideLiveActivity: Widget {
                 expandedBottom(context, nav: nav)
             }
         } compactLeading: {
-            Image(systemName: nav ? rideActivityManeuverSymbol(for: context.state.turnInstruction) : "bicycle")
+            Image(systemName: nav ? (context.state.turnGlyphSystemName ?? "arrow.turn.up.right") : "bicycle")
                 .foregroundStyle(accent)
         } compactTrailing: {
             if nav {
@@ -53,7 +53,7 @@ struct RideLiveActivity: Widget {
                     .frame(maxWidth: 56)
             }
         } minimal: {
-            Image(systemName: nav ? rideActivityManeuverSymbol(for: context.state.turnInstruction) : "bicycle")
+            Image(systemName: nav ? (context.state.turnGlyphSystemName ?? "arrow.turn.up.right") : "bicycle")
                 .foregroundStyle(accent)
         }
         .keylineTint(accent)
@@ -64,7 +64,7 @@ struct RideLiveActivity: Widget {
     private func expandedLeading(_ context: ActivityViewContext<RideActivityAttributes>,
                                  nav: Bool, imminent: Bool) -> some View {
         HStack(spacing: 8) {
-            AuraGlyph(systemName: nav ? rideActivityManeuverSymbol(for: context.state.turnInstruction) : "bicycle",
+            AuraGlyph(systemName: nav ? (context.state.turnGlyphSystemName ?? "arrow.turn.up.right") : "bicycle",
                       imminent: nav && imminent, size: 30)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Aura")
