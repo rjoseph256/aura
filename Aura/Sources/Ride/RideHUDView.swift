@@ -67,9 +67,9 @@ struct RideHUDView: View {
         Button {
             coordinator.isRecording ? coordinator.finish() : startRide()
         } label: {
-            Text(coordinator.isRecording ? "End ride" : "Start free ride")
+            Text(coordinator.isRecording ? "End ride" : "Start ride")
         }
-        // Primary lime when starting; destructive pink only for end-ride.
+        // Primary mint when starting; destructive pink only for end-ride.
         .buttonStyle(coordinator.isRecording ? .ctaDestructive : .ctaPrimary)
         .padding(.horizontal, AuraTheme.Spacing.xxl).padding(.bottom, 28)
         .frame(maxWidth: .infinity, alignment: .center)

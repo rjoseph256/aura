@@ -8,7 +8,7 @@ import AuraKit
 /// `RideLockScreenView`; this type owns the configuration and the Dynamic Island.
 ///
 /// Free ride leads with the elapsed clock; navigate leads with the next maneuver, which
-/// inverts to a solid lime fill when imminent — the same cue the HUD's turn card uses.
+/// inverts to a solid mint fill when imminent — the same cue the HUD's turn card uses.
 struct RideLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: RideActivityAttributes.self) { context in
@@ -70,7 +70,7 @@ struct RideLiveActivity: Widget {
                 Text("Aura")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .foregroundStyle(AuraTheme.accent)
-                Text(nav ? "Next turn" : "Free ride")
+                Text(nav ? "Next turn" : "Explore")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(AuraTheme.textSecondary)
             }

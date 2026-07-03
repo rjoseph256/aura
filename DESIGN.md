@@ -7,15 +7,15 @@ This file is the summary for design tooling; when they disagree, the code wins.
 
 ## Theme
 
-Dark only. Near-black background, panel surfaces, hairline borders. One electric
-lime accent; pink is destructive (end ride) only; amber is warning only. No
+Dark only. Near-black background, panel surfaces, hairline borders. One mint
+accent; pink is destructive (end ride) only; amber is warning only. No
 gradients anywhere.
 
 ## Color roles (AuraTheme)
 
 - background (near-black), surface (panel)
 - textPrimary (white 0.92), textSecondary (white 0.62, 7.5:1 on background)
-- accent (lime #C8FA4B) with inkOnAccent; destructive (pink #FF4D9D);
+- accent (mint #7CF0A8) with inkOnAccent; destructive (pink #FF4D9D);
   warning (amber); border (hairline white opacity); routeLine (flows from accent)
 
 ## Typography
@@ -34,7 +34,7 @@ Radius: xs 4, sm 8, md 12, lg 16, xl 20.
 
 ## Components
 
-- `CTAButtonStyle`: primary (lime fill), secondary (lime stroke), tertiary
+- `CTAButtonStyle`: primary (mint fill), secondary (mint stroke), tertiary
   (text-only), destructive (pink fill). 50pt height on filled variants.
 - `HUDControlButton`: circular 44pt map-floating control, ultraThinMaterial with
   a solid fallback under Reduce Transparency; normal and destructive roles.

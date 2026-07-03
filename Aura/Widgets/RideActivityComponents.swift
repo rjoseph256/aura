@@ -4,11 +4,11 @@ import AuraKit
 
 // Shared building blocks for the in-progress-ride Live Activity. They reuse AuraTheme
 // (shared into this target) so the Lock Screen and Dynamic Island read like a slice of
-// the migrated cockpit: near-black surface, solid lime identity mark, lime accents, and
+// the migrated cockpit: near-black surface, solid mint identity mark, mint accents, and
 // the same Saira Condensed cockpit numerals the SpeedReadout and StatPair use.
 
 /// Distance (m) within which the next maneuver is treated as imminent — the turn arrow
-/// and distance hold the lime accent (the active cue), echoing the navigate HUD's turn
+/// and distance hold the mint accent (the active cue), echoing the navigate HUD's turn
 /// card expanding.
 /// Matches `TurnCardPresenter`'s 150 m expand threshold.
 let rideActivityImminentMeters: Double = 150
@@ -55,7 +55,7 @@ struct RideStatCell: View {
 
 /// Like `RideStatCell` but its value is a self-ticking elapsed clock counting up from
 /// `start`. The system renders it on-device, so elapsed time stays live without the app
-/// pushing a state update every second. Lime tint marks it as the live, trustworthy value.
+/// pushing a state update every second. Mint tint marks it as the live, trustworthy value.
 struct RideTimerStatCell: View {
     let start: Date
     let label: String
@@ -76,9 +76,9 @@ struct RideTimerStatCell: View {
     }
 }
 
-/// A small SF Symbol in a lime-keyed disc — the app's mark, miniaturized. Identifies the
+/// A small SF Symbol in a mint-keyed disc — the app's mark, miniaturized. Identifies the
 /// activity (bicycle for a free ride, a maneuver arrow for navigate). When `imminent`, the
-/// disc inverts to a solid lime fill with an ink-on-lime glyph — the same cue the cockpit's
+/// disc inverts to a solid mint fill with an ink-on-mint glyph — the same cue the cockpit's
 /// turn card uses when a maneuver is close.
 struct AuraGlyph: View {
     let systemName: String

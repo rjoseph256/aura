@@ -11,3 +11,11 @@ xcuserdata/
 
 # Mapbox secret downloads token (per-worktree, never commit)
 .mapbox
+
+# Local device/sim build output (xcodebuild -derivedDataPath)
+Aura/build-device/
+Aura/build-sim/
+build-device/
+build-sim/
+build-device.log
+build-sim.log

@@ -43,6 +43,23 @@ final class SettingsStoreTests: XCTestCase {
         XCTAssertFalse(s.turnHaptics)
     }
 
+    func test_didCompleteOnboarding_defaultsOffAndPersists() {
+        let s = freshStore()
+        XCTAssertFalse(s.didCompleteOnboarding)
+        s.didCompleteOnboarding = true
+        XCTAssertTrue(s.didCompleteOnboarding)
+    }
+
+    /// Guards the UI-test seeding path: a launch argument lands in UserDefaults as the STRING
+    /// "YES" (NSArgumentDomain), which must still read as `true`. Using `object(_:) as? Bool`
+    /// would fail this coercion and silently keep the app in first-run.
+    func test_didCompleteOnboarding_coercesLaunchArgumentString() {
+        let suite = "test-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set("YES", forKey: "auraDidCompleteOnboarding")
+        XCTAssertTrue(SettingsStore(defaults: defaults).didCompleteOnboarding)
+    }
+
     func test_unitsChange_firesObservation() {
         let s = freshStore()
         // Swift 6: the onChange closure is @Sendable, so a captured local `var`

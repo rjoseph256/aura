@@ -20,8 +20,8 @@ trusting it for every ride without fiddling.
 
 ## Brand Personality
 
-Instrument cluster, not fitness dashboard. Dark, calm, precise. One electric lime
-accent (#C8FA4B) on near-black; pink reserved for ending a ride. Two voices: Saira
+Instrument cluster, not fitness dashboard. Dark, calm, precise. One mint
+accent (#7CF0A8) on near-black; pink reserved for ending a ride. Two voices: Saira
 Condensed numerals for the cockpit, SF Pro Rounded for the chrome.
 
 ## Anti-references

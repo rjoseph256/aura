@@ -5,6 +5,15 @@ import CoreLocation
 import AuraCore
 import AuraKit
 
+/// Applies `.focused` only when a binding is supplied, so legacy callers can omit it while
+/// the search overlay opts in to programmatic focus.
+private struct OptionalFocused: ViewModifier {
+    let binding: FocusState<Bool>.Binding?
+    func body(content: Content) -> some View {
+        if let binding { content.focused(binding) } else { content }
+    }
+}
+
 // MARK: - DestinationSearchView
 
 /// A live-search field backed by Mapbox PlaceAutocomplete.
@@ -12,6 +21,9 @@ import AuraKit
 /// then resolves the coordinate on selection via `placeAutocomplete.select(suggestion:)`.
 struct DestinationSearchView: View {
     @Binding var query: String
+    /// Optional external focus control (the search overlay drives this to raise the keyboard);
+    /// omitted by legacy callers.
+    var isFocused: FocusState<Bool>.Binding?
     let onPick: (Place) -> Void
 
     @Environment(SavedPlacesStore.self) private var savedPlaces
@@ -46,6 +58,8 @@ struct DestinationSearchView: View {
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
                 .submitLabel(.search)
+                .modifier(OptionalFocused(binding: isFocused))
+                .accessibilityIdentifier("home.searchField")
 
                 if !query.isEmpty {
                     Button {

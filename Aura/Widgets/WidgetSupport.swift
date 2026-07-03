@@ -9,9 +9,9 @@ extension Date {
 }
 
 extension WidgetSnapshot.LastRide {
-    /// "Free ride" or the navigated destination name.
+    /// "Explore" or the navigated destination name.
     var kindCaption: String {
-        kind == .navigate ? (destinationName ?? "Ride") : "Free ride"
+        kind == .navigate ? (destinationName ?? "Ride") : "Explore"
     }
     /// Moving time as "1:02" (h:mm) for an hour or more, else "12:30" (m:ss).
     var movingTimeText: String {

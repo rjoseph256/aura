@@ -46,16 +46,16 @@ struct AuraPaletteContrastTests {
         #expect(WCAGContrast.ratio(.white(AuraPalette.textPrimaryWhite), AuraPalette.nearBlack) >= 4.5)
     }
 
-    @Test func inkOnLimeClearsBodyContrast() {
-        #expect(WCAGContrast.ratio(AuraPalette.inkOnLime, AuraPalette.lime) >= 4.5)
+    @Test func inkOnMintClearsBodyContrast() {
+        #expect(WCAGContrast.ratio(AuraPalette.inkOnMint, AuraPalette.mint) >= 4.5)
     }
 
     @Test func inkOnPinkClearsBodyContrast() {
         #expect(WCAGContrast.ratio(AuraPalette.inkOnPink, AuraPalette.pink) >= 4.5)
     }
 
-    @Test func limeOnBackgroundClearsContrast() {
-        #expect(WCAGContrast.ratio(AuraPalette.lime, AuraPalette.nearBlack) >= 4.5)
+    @Test func mintOnBackgroundClearsContrast() {
+        #expect(WCAGContrast.ratio(AuraPalette.mint, AuraPalette.nearBlack) >= 4.5)
     }
 
     @Test func increasedContrastSecondaryIsStronger() {

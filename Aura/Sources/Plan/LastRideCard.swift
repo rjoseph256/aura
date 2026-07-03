@@ -10,6 +10,8 @@ struct LastRideCard: View {
     let units: DistanceUnits
     let onTap: () -> Void
 
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     private var fmt: RideStatsFormatter { RideStatsFormatter(units: units) }
 
     var body: some View {
@@ -56,8 +58,11 @@ struct LastRideCard: View {
         let isNavigate = summary.kind == .navigate
         ZStack {
             AuraTheme.background
+            // Subtle terrain foreshadow behind the route line (Chunk 3 medal thread); off
+            // under Reduce Transparency where extra texture would only reduce legibility.
+            if !reduceTransparency { ContourForeshadow().opacity(0.12) }
             if coords.count > 1 {
-                // Both ride kinds draw the route in lime; the navigate-vs-free distinction
+                // Both ride kinds draw the route in mint; the navigate-vs-free distinction
                 // is carried non-chromatically by the line weight (a navigated route reads
                 // heavier than a casual free ride), not by hue.
                 RouteThumbnail(coordinates: coords,
@@ -78,7 +83,7 @@ struct LastRideCard: View {
 
     private var title: String {
         if let name = summary.destinationName, !name.isEmpty { return name }
-        return summary.kind == .navigate ? "Ride" : "Free ride"
+        return summary.kind == .navigate ? "Ride" : "Explore"
     }
 
     private var statsLine: String {
@@ -97,5 +102,25 @@ struct LastRideCard: View {
         let f = DateFormatter()
         f.dateFormat = "MMM d"
         return f.string(from: summary.startedAt)
+    }
+}
+
+/// A faint terrain-contour motif drawn behind the route thumbnail on the last-ride card —
+/// a restrained foreshadow of the Chunk 3 terrain-carved summary medal. Decorative only,
+/// never behind text; the caller drops it under Reduce Transparency.
+private struct ContourForeshadow: View {
+    var body: some View {
+        Canvas { ctx, size in
+            let lines = 5
+            for i in 0..<lines {
+                let y = size.height * (CGFloat(i) + 0.5) / CGFloat(lines)
+                var path = Path()
+                path.move(to: CGPoint(x: 0, y: y))
+                path.addQuadCurve(to: CGPoint(x: size.width, y: y),
+                                  control: CGPoint(x: size.width / 2, y: y - 7 + CGFloat(i) * 3))
+                ctx.stroke(path, with: .color(AuraTheme.accent), lineWidth: 1)
+            }
+        }
+        .accessibilityHidden(true)
     }
 }

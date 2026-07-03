@@ -5,9 +5,10 @@ final class SettingsUITests: XCTestCase {
     override func setUp() { super.setUp(); continueAfterFailure = false }
 
     private func openSettings() -> SettingsScreen {
-        let app = XCUIApplication.launched()
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 30))
-        return HomeScreen(app: app).goToSettings()
+        let app = XCUIApplication.launched(onboarded: true)
+        let home = HomeScreen(app: app)
+        XCTAssertTrue(home.whereTo.waitForExistence(timeout: 30))
+        return home.goToSettings()
     }
 
     func testTurnHapticsSwitchFlips() {

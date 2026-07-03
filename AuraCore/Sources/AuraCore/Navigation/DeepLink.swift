@@ -1,13 +1,13 @@
 import Foundation
 
-/// A parsed deep-link intent. Separate from `AppRoute` because `home`, `history`, and
-/// `settings` select a tab rather than push a route, so this is not a subset of the path
-/// element. The app maps an intent onto `selectedTab` and the path in `AppRouter.handle(url:)`.
+/// A parsed deep-link intent. Separate from `AppRoute` because `home` maps to an empty path
+/// (pop to root) rather than a pushed route, so this is not a subset of the path element.
+/// `AppRoute.stack(for:)` maps an intent onto the nav path; `AppRouter.handle(url:)` applies it.
 public enum DeepLink: Equatable, Sendable {
-    case home          // Ride tab, pop to root
+    case home          // pop to root
     case history
     case settings
-    case freeRide      // Ride tab, pre-start free-ride HUD
+    case freeRide      // pre-start free-ride HUD
     case preview(Place)
     case join(JoinCode)
 

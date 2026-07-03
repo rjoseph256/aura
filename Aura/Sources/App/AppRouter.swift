@@ -5,12 +5,9 @@ import AuraCore
 @Observable
 @MainActor
 final class AppRouter {
-    /// Selected tab on the plan screen (bound by the Ride tab's NavigationStack). Lets the home
-    /// dashboard switch to History when the rider taps their last ride.
-    enum Tab: Hashable { case ride, history, settings }
-    var selectedTab: Tab = .ride
-
-    /// The Ride tab's navigation stack, bound by the NavigationStack in RootView.
+    /// The app's single navigation stack, bound by the NavigationStack in RootView. There is
+    /// no tab bar — History and Settings are pushed routes reached from the Home control
+    /// cluster, so the always-present Home dashboard sheet never buries navigation chrome.
     var path: [AppRoute] = []
 
     /// True while a ride HUD is recording. The HUDs drive it from `coordinator.isRecording`;
@@ -21,30 +18,15 @@ final class AppRouter {
     func pop() { if !path.isEmpty { path.removeLast() } }
     func popToRoot() { path.removeAll() }
 
-    /// Routes an `aura://…` deep link to the tab and path. A recording ride takes precedence:
+    /// Routes an `aura://…` deep link onto the nav path. A recording ride takes precedence:
     /// a URL must never abandon it, so every link is dropped while `isRideActive`. Unknown
-    /// links are dropped too, because the parser returns nil for them.
+    /// links are dropped too, because the parser returns nil for them. The link→path mapping
+    /// lives in `AppRoute.stack(for:)` (pure, unit-tested); the only side effect kept here is
+    /// remembering a previewed place.
     func handle(url: URL) {
         guard !isRideActive, let link = DeepLink.parse(url) else { return }
-        switch link {
-        case .home:
-            selectedTab = .ride
-            path.removeAll()
-        case .history:
-            selectedTab = .history
-        case .settings:
-            selectedTab = .settings
-        case .freeRide:
-            selectedTab = .ride
-            path = [.freeRide]
-        case let .preview(place):
-            remember(place)
-            selectedTab = .ride
-            path = [.preview(place)]
-        case let .join(code):
-            selectedTab = .ride
-            path = [.groupRide(.join(code))]
-        }
+        if case let .preview(place) = link { remember(place) }
+        path = AppRoute.stack(for: link)
     }
 
     /// Most-recent-first, de-duped by name+coord, cap ~8. Persisted across launches.

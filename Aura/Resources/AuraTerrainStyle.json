@@ -1,0 +1,46 @@
+{
+  "version": 8,
+  "name": "Aura Terrain",
+  "metadata": { "aura:version": "5" },
+  "glyphs": "mapbox://fonts/mapbox/{fontstack}/{range}.pbf",
+  "sprite": "mapbox://sprites/mapbox/dark-v11",
+  "sources": {
+    "composite": { "type": "vector", "url": "mapbox://mapbox.mapbox-streets-v8" },
+    "dem": { "type": "raster-dem", "url": "mapbox://mapbox.mapbox-terrain-dem-v1", "tileSize": 512 }
+  },
+  "layers": [
+    { "id": "background", "type": "background",
+      "paint": { "background-color": "#0A0C0F" } },
+    { "id": "landuse-park", "type": "fill", "source": "composite", "source-layer": "landuse",
+      "filter": ["match", ["get", "class"], ["park", "grass", "pitch"], true, false],
+      "paint": { "fill-color": "#101315", "fill-opacity": 1.0 } },
+    { "id": "water", "type": "fill", "source": "composite", "source-layer": "water",
+      "paint": { "fill-color": "#0A1418", "fill-opacity": 1.0 } },
+    { "id": "hillshade", "type": "hillshade", "source": "dem",
+      "paint": {
+        "hillshade-exaggeration": 0.35,
+        "hillshade-shadow-color": "#05080A",
+        "hillshade-highlight-color": "#464E58",
+        "hillshade-accent-color": "#0A0C0F" } },
+    { "id": "road-minor", "type": "line", "source": "composite", "source-layer": "road",
+      "filter": ["match", ["get", "class"],
+        ["street", "street_limited", "service", "track"], true, false],
+      "paint": { "line-color": "#252C33",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 12, 0.4, 16, 2.0] } },
+    { "id": "road-major", "type": "line", "source": "composite", "source-layer": "road",
+      "filter": ["match", ["get", "class"],
+        ["motorway", "trunk", "primary", "secondary", "tertiary"], true, false],
+      "paint": { "line-color": "#3A434C",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 12, 0.8, 16, 3.5] } },
+    { "id": "place-label", "type": "symbol", "source": "composite", "source-layer": "place_label",
+      "filter": ["match", ["get", "class"],
+        ["settlement", "settlement_subdivision"], true, false],
+      "layout": {
+        "text-field": ["get", "name_en"],
+        "text-font": ["DIN Pro Medium", "Arial Unicode MS Regular"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 10, 11, 14, 15],
+        "text-max-width": 7 },
+      "paint": { "text-color": "#8A94A0", "text-halo-color": "#07080C",
+        "text-halo-width": 1.2, "text-opacity": 0.9 } }
+  ]
+}

@@ -8,10 +8,10 @@ import AuraKit
 ///
 /// - **Free ride:** identity header, then a row of glanceable stats — elapsed, distance,
 ///   speed.
-/// - **Navigate:** the next turn as the hero (distance + instruction, lime when imminent),
+/// - **Navigate:** the next turn as the hero (distance + instruction, mint when imminent),
 ///   then a quiet row of elapsed + distance.
 ///
-/// Near-black surface; lime accents and high-contrast cockpit numerals stay legible over
+/// Near-black surface; mint accents and high-contrast cockpit numerals stay legible over
 /// the Lock Screen's variable backdrop.
 struct RideLockScreenView: View {
     let context: ActivityViewContext<RideActivityAttributes>
@@ -39,7 +39,7 @@ struct RideLockScreenView: View {
 
     private var freeRide: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header(title: "Free ride", glyph: "bicycle", imminent: false)
+            header(title: "Explore", glyph: "bicycle", imminent: false)
 
             HStack(alignment: .top, spacing: 12) {
                 RideTimerStatCell(start: attributes.startedAt, label: "TIME")
@@ -55,7 +55,7 @@ struct RideLockScreenView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Free ride in progress")
+        .accessibilityLabel("Explore in progress")
     }
 
     // MARK: Navigate

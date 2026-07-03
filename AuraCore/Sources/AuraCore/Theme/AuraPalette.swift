@@ -1,16 +1,16 @@
 import Foundation
 
-/// The raw mono-lime palette as plain values (no SwiftUI). The SwiftUI `AuraTheme` in
+/// The raw single-accent (mint) palette as plain values (no SwiftUI). The SwiftUI `AuraTheme` in
 /// the app target builds its `Color` roles from these, and the `WCAGContrast` tests read
 /// the same numbers, so lowering a token below its contrast target fails CI.
 public enum AuraPalette {
     // Hues
     public static let nearBlack = RGBColor(red: 0.027, green: 0.031, blue: 0.047) // #07080C
     public static let panel     = RGBColor(red: 0.055, green: 0.063, blue: 0.078) // #0E1014
-    public static let lime      = RGBColor(red: 0.784, green: 0.980, blue: 0.294) // #C8FA4B
+    public static let mint      = RGBColor(red: 0.486, green: 0.941, blue: 0.659) // #7CF0A8
     public static let pink      = RGBColor(red: 1.0, green: 0.302, blue: 0.616)   // #FF4D9D
     public static let amber     = RGBColor(red: 0.961, green: 0.761, blue: 0.294) // #F5C24B  stopped/paused
-    public static let inkOnLime = RGBColor(red: 0.086, green: 0.129, blue: 0.039) // #16210A
+    public static let inkOnMint = RGBColor(red: 0.043, green: 0.165, blue: 0.094) // #0B2A18
     public static let inkOnPink = RGBColor(red: 0.165, green: 0.012, blue: 0.078) // #2A0314
     public static let inkOnAmber = RGBColor(red: 0.165, green: 0.118, blue: 0.0)   // #2A1E00  ink on amber
 

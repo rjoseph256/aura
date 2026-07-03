@@ -29,6 +29,8 @@ public final class SettingsStore {
     /// Opt-in: write finished rides to Apple Health as cycling workouts.
     /// Device-local: bound to per-device HealthKit auth, so it is not synced.
     public var saveToHealth: Bool { didSet { defaults.set(saveToHealth, forKey: Key.saveToHealth) } }
+    /// Device-local: whether the rider has completed the first-run composition. Not synced.
+    public var didCompleteOnboarding: Bool { didSet { defaults.set(didCompleteOnboarding, forKey: Key.didCompleteOnboarding) } }
 
     public init(defaults: UserDefaults = .standard, sync: KeyValueSyncing? = nil) {
         self.defaults = defaults
@@ -41,6 +43,10 @@ public final class SettingsStore {
         weeklyGoalMeters = (storedGoal.map { $0 > 0 ? $0 : nil } ?? nil) ?? 40_000
         saveToHealth = defaults.object(forKey: Key.saveToHealth) as? Bool ?? false
         turnHaptics = defaults.object(forKey: Key.turnHaptics) as? Bool ?? true
+        // `bool(forKey:)` (not `object as? Bool`) so a value seeded via the launch argument
+        // `-auraDidCompleteOnboarding YES` — which lands in NSArgumentDomain as the STRING
+        // "YES" — is coerced to true for UI tests; absent still reads false.
+        didCompleteOnboarding = defaults.bool(forKey: Key.didCompleteOnboarding)
     }
 
     /// The external-change stream from the injected sync store (empty if none).
@@ -123,5 +129,6 @@ public final class SettingsStore {
         static let weeklyGoal = "weeklyGoalMeters"
         static let saveToHealth = "saveToHealth"
         static let turnHaptics = "turnHaptics"
+        static let didCompleteOnboarding = "auraDidCompleteOnboarding"
     }
 }
