@@ -55,7 +55,9 @@ struct HomeBackdrop: View {
         guard size.width > 0, size.height > 0 else { return nil }
         return TerrainSnapshotRequest(
             center: TerrainSnapshotRequest.center(forRider: riderCoordinate),
-            styleURI: TerrainStyle.styleURI,
+            // The authored-style identity signals the snapshotter to load the bundled JSON, and
+            // its version bakes into the cache key so a restyle invalidates stale snapshots.
+            styleURI: TerrainStyle.authoredStyleIdentity,
             width: size.width,
             height: size.height)
     }
