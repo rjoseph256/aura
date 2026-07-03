@@ -197,6 +197,8 @@ public final class MapboxGuidanceSession: GuidanceSession {
         )
     }
 
+    // Two exhaustive SDK-enum mapping switches; the branch count is inherent, not a smell.
+    // swiftlint:disable cyclomatic_complexity
     /// Maps a Mapbox `RouteStep` to the engine-independent `AuraCore.Maneuver`. A `default`
     /// on each switch degrades unknown/new SDK cases to `.other` / `.none` (a generic arrow)
     /// rather than failing the build — acceptable, not a blocker. Note Mapbox has no
@@ -233,4 +235,5 @@ public final class MapboxGuidanceSession: GuidanceSession {
         }
         return Maneuver(kind: kind, modifier: modifier, label: label)
     }
+    // swiftlint:enable cyclomatic_complexity
 }

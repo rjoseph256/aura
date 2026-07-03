@@ -83,37 +83,9 @@ struct NavigateHUDView: View {
             navigateMapView
                 .ignoresSafeArea()
 
-            // Bottom cockpit: the crew roster (when hosting a live group ride) docks just
-            // above the map controls, which float above a prominent instrument panel (hero
-            // speed + to-go + ETA) filling the bottom quarter of the screen. Stacking the
-            // roster here — instead of as a bottom-padded overlay — keeps it clear of the
-            // panel; its expanded height is capped at ~40% of the HUD so a full crew can't
-            // push the controls off a short screen (D9 hides it once the host ends the ride;
-            // the solo path never renders it).
-            VStack(spacing: AuraTheme.Spacing.sm) {
-                if showsGroupChrome, let groupSession {
-                    GroupRosterSheet(rows: rosterRows(for: groupSession))
-                        .padding(.horizontal, AuraTheme.Spacing.md)
-                        .frame(maxHeight: hudHeight > 0 ? hudHeight * 0.4 : 320, alignment: .bottom)
-                }
-
-                HStack {
-                    Spacer()
-                    ControlCluster(
-                        isFollowing: viewport.followPuck != nil,
-                        isMuted: isMuted,
-                        onRecenter: { recenter() },
-                        onToggleMute: { toggleMute() },
-                        onEndRide: { onEndTapped() })
-                }
-                .padding(.horizontal, AuraTheme.Spacing.lg)
-
-                InstrumentPanel(
-                    currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
-                    units: settings.units,
-                    trip: cruisingState)
-                    .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
-            }
+            // Bottom cockpit: crew roster (when hosting) + controls + quarter-screen
+            // instrument panel. Extracted to keep this view's body under the length limit.
+            bottomCockpit
         }
         // Crew membership toasts
         .overlay(alignment: .top) {
@@ -379,5 +351,40 @@ struct NavigateHUDView: View {
             ?? AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         speechSynthesizer.speak(utterance)
+    }
+}
+
+private extension NavigateHUDView {
+    /// The bottom cockpit: crew roster (when hosting a live group ride) docked just above the
+    /// map controls, which float above the quarter-screen instrument panel (hero speed +
+    /// to-go + ETA). Stacked here — not as a bottom-padded overlay — so the roster stays clear
+    /// of the panel; its expanded height is capped at ~40% of the HUD so a full crew can't
+    /// push the controls off a short screen. (D9 hides it once the host ends the ride; the
+    /// solo path never renders it.)
+    @ViewBuilder var bottomCockpit: some View {
+        VStack(spacing: AuraTheme.Spacing.sm) {
+            if showsGroupChrome, let groupSession {
+                GroupRosterSheet(rows: rosterRows(for: groupSession))
+                    .padding(.horizontal, AuraTheme.Spacing.md)
+                    .frame(maxHeight: hudHeight > 0 ? hudHeight * 0.4 : 320, alignment: .bottom)
+            }
+
+            HStack {
+                Spacer()
+                ControlCluster(
+                    isFollowing: viewport.followPuck != nil,
+                    isMuted: isMuted,
+                    onRecenter: { recenter() },
+                    onToggleMute: { toggleMute() },
+                    onEndRide: { onEndTapped() })
+            }
+            .padding(.horizontal, AuraTheme.Spacing.lg)
+
+            InstrumentPanel(
+                currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
+                units: settings.units,
+                trip: cruisingState)
+                .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
+        }
     }
 }
