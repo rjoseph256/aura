@@ -114,15 +114,20 @@ struct GroupRosterSheet: View {
             if isSoloCrew {
                 emptyState
             } else {
-                VStack(spacing: AuraTheme.Spacing.xs) {
-                    ForEach(rows) { row in
-                        RosterRowView(row: row)
-                        if row.id != rows.last?.id {
-                            Divider().overlay(AuraTheme.border)
+                // Scrolls only when a large crew exceeds the caller's height cap; a small
+                // crew sits at natural height with no bounce.
+                ScrollView {
+                    VStack(spacing: AuraTheme.Spacing.xs) {
+                        ForEach(rows) { row in
+                            RosterRowView(row: row)
+                            if row.id != rows.last?.id {
+                                Divider().overlay(AuraTheme.border)
+                            }
                         }
                     }
+                    .padding(.horizontal, AuraTheme.Spacing.lg)
                 }
-                .padding(.horizontal, AuraTheme.Spacing.lg)
+                .scrollBounceBehavior(.basedOnSize)
             }
         }
     }
