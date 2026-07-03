@@ -18,11 +18,13 @@ struct TurnCardView: View {
 
     // Arrow sizes stay @ScaledMetric (SF Symbol point size). Distance numerals use the
     // Saira cockpit face, which self-scales via `relativeTo:` — so those are plain base sizes.
-    @ScaledMetric(relativeTo: .title2)     private var arrowCollapsed: CGFloat = 24
-    @ScaledMetric(relativeTo: .largeTitle) private var arrowExpanded: CGFloat = 34
+    // The maneuver arrow is the card's hero — the direction is the fastest thing to read at
+    // a glance, so it runs larger than the distance numeral in both states.
+    @ScaledMetric(relativeTo: .title2)     private var arrowCollapsed: CGFloat = 32
+    @ScaledMetric(relativeTo: .largeTitle) private var arrowExpanded: CGFloat = 60
 
     private let distCollapsed: CGFloat = 22
-    private let distExpanded: CGFloat = 36
+    private let distExpanded: CGFloat = 42
 
     // MARK: Body
 
@@ -63,7 +65,7 @@ struct TurnCardView: View {
 
                 // Street / instruction text — fades on change.
                 Text(state.primaryText)
-                    .font(.subheadline.weight(.semibold))
+                    .font(state.isExpanded ? .headline.weight(.semibold) : .subheadline.weight(.semibold))
                     .foregroundStyle(
                         state.isExpanded ? AuraTheme.onAccent.opacity(0.75) : AuraTheme.textPrimary.opacity(0.9)
                     )
