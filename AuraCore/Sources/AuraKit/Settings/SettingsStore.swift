@@ -2,7 +2,7 @@ import Foundation
 import Observation
 
 public enum DistanceUnits: String, Codable, Hashable, Sendable { case imperial, metric }
-public enum MapStyle: String, Sendable { case dark, standard }
+public enum MapStyle: String, Sendable { case auraTerrain, dark, standard }
 
 /// Stored (not computed) properties so `@Observable` tracks them. Each `didSet` mirrors
 /// the value into `UserDefaults` (source of truth for a launch) and, for the synced keys,
@@ -37,7 +37,7 @@ public final class SettingsStore {
         self.sync = sync
         units = DistanceUnits(rawValue: defaults.string(forKey: Key.units) ?? "") ?? .imperial
         voiceEnabled = defaults.object(forKey: Key.voice) as? Bool ?? true
-        mapStyle = MapStyle(rawValue: defaults.string(forKey: Key.mapStyle) ?? "") ?? .dark
+        mapStyle = MapStyle(rawValue: defaults.string(forKey: Key.mapStyle) ?? "") ?? .auraTerrain
         // Default ≈ 40 km / 25 mi. Guard against a corrupt/zero stored value.
         let storedGoal = defaults.object(forKey: Key.weeklyGoal) as? Double
         weeklyGoalMeters = (storedGoal.map { $0 > 0 ? $0 : nil } ?? nil) ?? 40_000
