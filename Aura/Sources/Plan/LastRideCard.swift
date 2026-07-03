@@ -62,7 +62,7 @@ struct LastRideCard: View {
             // under Reduce Transparency where extra texture would only reduce legibility.
             if !reduceTransparency { ContourForeshadow().opacity(0.12) }
             if coords.count > 1 {
-                // Both ride kinds draw the route in lime; the navigate-vs-free distinction
+                // Both ride kinds draw the route in mint; the navigate-vs-free distinction
                 // is carried non-chromatically by the line weight (a navigated route reads
                 // heavier than a casual free ride), not by hue.
                 RouteThumbnail(coordinates: coords,

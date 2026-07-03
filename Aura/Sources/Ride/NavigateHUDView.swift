@@ -7,7 +7,7 @@ import SwiftUI
 
 /// Navigate-mode HUD with real turn-by-turn guidance.
 ///
-/// - Full-bleed dark Mapbox map with `followPuck` viewport and a static lime
+/// - Full-bleed dark Mapbox map with `followPuck` viewport and a static mint
 ///   polyline drawn from `route.geometry`.
 /// - Turn card driven by a `GuidanceViewModel`, which consumes guidance events from a
 ///   `GuidanceSession` (Mapbox-backed in the app, scripted in tests). The HUD itself

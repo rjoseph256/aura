@@ -16,7 +16,7 @@ public struct TurnHapticEngine {
 
     /// - Parameter approachWithinMeters: the maneuver distance at/under which the
     ///   approach fires. Defaults to 150, matching `TurnCardPresenter.expandWithinMeters`
-    ///   so the buzz coincides with the turn card expanding to lime.
+    ///   so the buzz coincides with the turn card expanding to mint.
     public init(approachWithinMeters: Double = 150) {
         self.approachWithinMeters = approachWithinMeters
     }

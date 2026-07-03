@@ -4,7 +4,7 @@
 #   - valid JSON, style version 8, glyphs + sprite present
 #   - required vector (mapbox-streets-v8) + terrain-DEM (mapbox-terrain-dem-v1) sources, wired right
 #   - a hillshade layer that references the DEM source
-#   - signal-colour headroom: no reserved signal hue (lime/amber/pink) and no white/near-white in
+#   - signal-colour headroom: no reserved signal hue (mint/amber/pink) and no white/near-white in
 #     any layer *-color paint (protects the route line + the white "you" peer-dot; no white casings)
 #   - fully static: no animated / time-of-day / transition expressions anywhere
 set -euo pipefail
@@ -70,7 +70,7 @@ if animated:
     errs.append("style declares an animated/time-varying property (transition/sky/feature-state/etc.)")
 
 # --- signal-colour headroom: no reserved hue and no white/near-white in layer *-color paint ---
-RESERVED = {"#c8fa4b": "lime", "#f5c24b": "amber", "#ff4d9d": "pink"}
+RESERVED = {"#7cf0a8": "mint", "#f5c24b": "amber", "#ff4d9d": "pink"}
 def expand_hex(h):
     h = h.strip().lower()
     m = re.fullmatch(r"#([0-9a-f]{3,8})", h)
@@ -143,18 +143,18 @@ good = {
 def w(name, obj): json.dump(obj, open(os.path.join(tmp, name), "w"))
 w("good.json", good)
 w("not_a_style.json", {"not": "a style"})
-d = copy.deepcopy(good); d["layers"][1]["paint"]["background-color"] = "#C8FA4B"; w("reserved_lime.json", d)
+d = copy.deepcopy(good); d["layers"][1]["paint"]["background-color"] = "#7CF0A8"; w("reserved_mint.json", d)
 d = copy.deepcopy(good); d["layers"][1]["paint"]["background-color"] = "#FFFFFF"; w("white_casing.json", d)
 # a reserved hue hidden inside a zoom-interpolated expression must also be rejected
 d = copy.deepcopy(good)
-d["layers"][0]["paint"]["hillshade-highlight-color"] = ["interpolate", ["linear"], ["zoom"], 10, "#5A6470", 16, "#C8FA4B"]
-w("expr_lime.json", d)
+d["layers"][0]["paint"]["hillshade-highlight-color"] = ["interpolate", ["linear"], ["zoom"], 10, "#5A6470", 16, "#7CF0A8"]
+w("expr_mint.json", d)
 d = copy.deepcopy(good); d["layers"][1]["paint"]["background-color-transition"] = {"duration": 300}; w("animated_transition.json", d)
 d = copy.deepcopy(good); d["layers"].append({"id": "sky", "type": "sky"}); w("sky_layer.json", d)
 d = copy.deepcopy(good); d["sources"]["dem"]["type"] = "vector"; w("bad_dem.json", d)
 PY
   local bad
-  for bad in not_a_style reserved_lime white_casing expr_lime animated_transition sky_layer bad_dem; do
+  for bad in not_a_style reserved_mint white_casing expr_mint animated_transition sky_layer bad_dem; do
     if validate "$tmp/$bad.json" >/dev/null 2>&1; then
       echo "SELF-TEST FAIL: validator passed a bad style ($bad)"; rm -rf "$tmp"; exit 1
     fi

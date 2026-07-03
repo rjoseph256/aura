@@ -3,7 +3,7 @@ import AuraKit
 
 /// Weekly-distance goal ring — the home screen's signature glance.
 ///
-/// The arc encodes progress toward the rider's weekly goal as a solid lime accent
+/// The arc encodes progress toward the rider's weekly goal as a solid mint accent
 /// over a faint track. The center shows the distance ridden this week. The arc fills
 /// on appear (reduce-motion aware) — a single, meaningful state reveal, not decoration.
 struct WeeklyRing: View {
@@ -27,7 +27,7 @@ struct WeeklyRing: View {
             Circle()
                 .stroke(AuraTheme.border, lineWidth: stroke)
 
-            // Progress arc — solid lime accent, rounded caps, starting at 12 o'clock.
+            // Progress arc — solid mint accent, rounded caps, starting at 12 o'clock.
             Circle()
                 .trim(from: 0, to: animatedFraction)
                 .stroke(

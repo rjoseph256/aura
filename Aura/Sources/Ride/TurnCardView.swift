@@ -5,7 +5,7 @@ import AuraKit
 ///
 /// Two visual states keyed by `state.isExpanded`:
 /// - **Collapsed** (calm): compact dark card, small arrow + distance + street name.
-/// - **Expanded** (imminent): grows, shifts to solid lime fill, ink-on-lime text, glow.
+/// - **Expanded** (imminent): grows, shifts to solid mint fill, ink-on-mint text, glow.
 ///
 /// Motion is driven by a single `.smooth(duration: 0.38)` animation so the whole
 /// card morphs together — no overshoot, calm and decisive. `reduceMotion` gates
@@ -43,7 +43,7 @@ struct TurnCardView: View {
                 )
 
             VStack(alignment: .leading, spacing: state.isExpanded ? AuraTheme.Spacing.xs : 2) {
-                // Distance countdown — Saira cockpit numerals, lime; rolls digit-by-digit.
+                // Distance countdown — Saira cockpit numerals, mint; rolls digit-by-digit.
                 Text(state.distanceText)
                     .font(AuraTheme.Typography.metricCockpit(
                         state.isExpanded ? distExpanded : distCollapsed,
@@ -76,7 +76,7 @@ struct TurnCardView: View {
         .accessibilityLabel(state.accessibilityLabel)
         .padding(.horizontal, state.isExpanded ? AuraTheme.Spacing.xl : AuraTheme.Spacing.lg)
         .padding(.vertical, state.isExpanded ? AuraTheme.Spacing.lg : AuraTheme.Spacing.md)
-        // Background shifts from near-opaque dark → lime.
+        // Background shifts from near-opaque dark → mint.
         .background(
             state.isExpanded ? AuraTheme.accent : AuraTheme.surface.opacity(0.92),
             in: RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous)

@@ -13,11 +13,11 @@ enum AuraTheme {
     static let surface       = rgb(AuraPalette.panel)
     static let textPrimary   = Color(white: AuraPalette.textPrimaryWhite)
     static let textSecondary = Color(white: AuraPalette.textSecondaryWhite)
-    static let accent        = rgb(AuraPalette.lime)
-    static let routeLine     = rgb(AuraPalette.lime)
+    static let accent        = rgb(AuraPalette.mint)
+    static let routeLine     = rgb(AuraPalette.mint)
     static let destructive   = rgb(AuraPalette.pink)
     static let warning       = rgb(AuraPalette.amber)
-    static let onAccent      = rgb(AuraPalette.inkOnLime)
+    static let onAccent      = rgb(AuraPalette.inkOnMint)
     static let onDestructive = rgb(AuraPalette.inkOnPink)
     static let onWarning     = rgb(AuraPalette.inkOnAmber)
     static let border        = Color.white.opacity(AuraPalette.borderWhite)
@@ -53,10 +53,10 @@ enum AuraTheme {
 
     // MARK: - Mapbox bridge
     /// `routeLine` as a UIColor so Mapbox `StyleColor(_:)` accepts it; built from the same
-    /// lime token as `accent` (was a separate 200/250/75 literal; now consistent).
-    static let routeUIColor = UIColor(red: AuraPalette.lime.red,
-                                      green: AuraPalette.lime.green,
-                                      blue: AuraPalette.lime.blue, alpha: 1)
+    /// mint token as `accent`, so the route line and the accent never drift apart.
+    static let routeUIColor = UIColor(red: AuraPalette.mint.red,
+                                      green: AuraPalette.mint.green,
+                                      blue: AuraPalette.mint.blue, alpha: 1)
 
     // MARK: - Spacing scale (pt)
     enum Spacing {

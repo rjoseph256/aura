@@ -137,7 +137,7 @@ private struct RideRow: View {
 
     private var isNavigate: Bool { summary.kind == .navigate }
     private var symbol: String { isNavigate ? "location.north.line.fill" : "bicycle" }
-    // Mono-lime: both ride kinds share the accent. The free/navigate distinction is
+    // Single-accent: both ride kinds share the accent. The free/navigate distinction is
     // carried non-chromatically — by the differing SF Symbol and its weight, not hue.
     private var symbolWeight: Font.Weight { isNavigate ? .semibold : .medium }
     private var fmt: RideStatsFormatter { RideStatsFormatter(units: units) }
