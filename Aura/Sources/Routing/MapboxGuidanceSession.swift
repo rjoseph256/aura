@@ -176,19 +176,61 @@ public final class MapboxGuidanceSession: GuidanceSession {
     /// three cruising fields (distance-remaining, duration-remaining, current street) come
     /// from whole-route progress.
     private static func guidanceUpdate(from progress: RouteProgress) -> GuidanceUpdate {
-        let distanceToManeuver = progress.currentLegProgress.currentStepProgress.distanceRemaining
-        let instruction: String
-        if let upcoming = progress.currentLegProgress.upcomingStep {
-            instruction = upcoming.instructions
-        } else {
-            instruction = progress.currentLegProgress.currentStep.instructions
-        }
+        let leg = progress.currentLegProgress
+        let distanceToManeuver = leg.currentStepProgress.distanceRemaining
+        let upcoming = leg.upcomingStep
+        // `remainingSteps.first` IS the upcoming step (steps.suffix(from: stepIndex + 1)),
+        // so the maneuver *after* the upcoming one — the "then …" preview — is the next element.
+        let afterUpcoming = leg.remainingSteps.dropFirst().first
+        let instruction = upcoming?.instructions ?? leg.currentStep.instructions
         return GuidanceUpdate(
             distanceToManeuverMeters: distanceToManeuver,
             instruction: instruction,
             distanceRemainingMeters: progress.distanceRemaining,
             durationRemainingSeconds: progress.durationRemaining,
-            currentStreetName: progress.currentLegProgress.currentStep.names?.first
+            currentStreetName: leg.currentStep.names?.first,
+            maneuver: mapManeuver(upcoming),
+            // The then-chip only renders when this label is non-empty (TurnCardPresenter
+            // returns nil otherwise), so give it the next street name, then the instruction.
+            nextManeuver: mapManeuver(afterUpcoming,
+                                      label: afterUpcoming?.names?.first ?? afterUpcoming?.instructions)
         )
+    }
+
+    /// Maps a Mapbox `RouteStep` to the engine-independent `AuraCore.Maneuver`. A `default`
+    /// on each switch degrades unknown/new SDK cases to `.other` / `.none` (a generic arrow)
+    /// rather than failing the build — acceptable, not a blocker. Note Mapbox has no
+    /// `makeUTurn` maneuver *type*: a U-turn is a `.turn`/etc. with `maneuverDirection == .uTurn`,
+    /// which flows through the modifier below and picks the U-turn glyph.
+    private static func mapManeuver(_ step: RouteStep?, label: String? = nil) -> Maneuver? {
+        guard let step else { return nil }
+        let kind: Maneuver.Kind
+        switch step.maneuverType {
+        case .turn: kind = .turn
+        case .reachFork: kind = .fork
+        case .takeRoundabout, .turnAtRoundabout, .exitRoundabout: kind = .roundabout
+        case .takeRotary, .exitRotary: kind = .rotary
+        case .merge: kind = .merge
+        case .takeOnRamp: kind = .onRamp
+        case .takeOffRamp: kind = .offRamp
+        case .depart: kind = .depart
+        case .arrive: kind = .arrive
+        case .`continue`, .passNameChange: kind = .continueOn
+        case .reachEnd: kind = .endOfRoad
+        default: kind = .other // useLane, heedWarning, and any future case
+        }
+        let modifier: Maneuver.Modifier
+        switch step.maneuverDirection {
+        case .left: modifier = .left
+        case .right: modifier = .right
+        case .slightLeft: modifier = .slightLeft
+        case .slightRight: modifier = .slightRight
+        case .sharpLeft: modifier = .sharpLeft
+        case .sharpRight: modifier = .sharpRight
+        case .straightAhead: modifier = .straight
+        case .uTurn: modifier = .uTurn
+        default: modifier = .none // .undefined or nil
+        }
+        return Maneuver(kind: kind, modifier: modifier, label: label)
     }
 }
