@@ -1,7 +1,7 @@
 {
   "version": 8,
   "name": "Aura Terrain",
-  "metadata": { "aura:version": "4" },
+  "metadata": { "aura:version": "5" },
   "glyphs": "mapbox://fonts/mapbox/{fontstack}/{range}.pbf",
   "sprite": "mapbox://sprites/mapbox/dark-v11",
   "sources": {
@@ -10,18 +10,18 @@
   },
   "layers": [
     { "id": "background", "type": "background",
-      "paint": { "background-color": "#0E1013" } },
+      "paint": { "background-color": "#0A0C0F" } },
     { "id": "landuse-park", "type": "fill", "source": "composite", "source-layer": "landuse",
       "filter": ["match", ["get", "class"], ["park", "grass", "pitch"], true, false],
-      "paint": { "fill-color": "#12181A", "fill-opacity": 1.0 } },
+      "paint": { "fill-color": "#101315", "fill-opacity": 1.0 } },
     { "id": "water", "type": "fill", "source": "composite", "source-layer": "water",
       "paint": { "fill-color": "#0A1418", "fill-opacity": 1.0 } },
     { "id": "hillshade", "type": "hillshade", "source": "dem",
       "paint": {
-        "hillshade-exaggeration": 0.45,
+        "hillshade-exaggeration": 0.35,
         "hillshade-shadow-color": "#05080A",
-        "hillshade-highlight-color": "#5A6470",
-        "hillshade-accent-color": "#0E1013" } },
+        "hillshade-highlight-color": "#464E58",
+        "hillshade-accent-color": "#0A0C0F" } },
     { "id": "road-minor", "type": "line", "source": "composite", "source-layer": "road",
       "filter": ["match", ["get", "class"],
         ["street", "street_limited", "service", "track"], true, false],

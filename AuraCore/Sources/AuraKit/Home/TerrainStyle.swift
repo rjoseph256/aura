@@ -7,7 +7,7 @@ public enum TerrainStyle {
     public static let fallbackStyleURI = "mapbox://styles/mapbox/dark-v11"
 
     /// Bump when `AuraTerrainStyle.json`'s look changes, to invalidate cached snapshots.
-    public static let styleVersion = "4"
+    public static let styleVersion = "5"
 
     /// Resource base name of the bundled authored style (`Aura/Resources/AuraTerrainStyle.json`).
     public static let authoredStyleResource = "AuraTerrainStyle"
