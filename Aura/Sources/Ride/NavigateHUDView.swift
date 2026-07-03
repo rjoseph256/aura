@@ -130,6 +130,9 @@ struct NavigateHUDView: View {
                 if let update = guidance.lastUpdate,
                    let next = TurnCardPresenter.nextManeuver(for: update) {
                     ThenChip(next: next)
+                        .transition(reduceMotion
+                            ? .opacity
+                            : .move(edge: .top).combined(with: .opacity))
                 }
             }
             .padding(.top, 8) // sits in the safe area; no hardcoded status-bar inset

@@ -38,6 +38,9 @@ struct TurnCardView: View {
                     weight: .bold
                 ))
                 .foregroundStyle(state.isExpanded ? AuraTheme.onAccent : AuraTheme.accent)
+                // The glyph swaps with a symbol-replace transition as the maneuver changes
+                // (right → left as turns advance); a plain crossfade under Reduce Motion.
+                .contentTransition(reduceMotion ? .opacity : .symbolEffect(.replace))
                 // Scale instead of animating .font size (font size doesn't interpolate).
                 .scaleEffect(reduceMotion ? 1 : (state.isExpanded ? 1.0 : 0.72))
                 .animation(
@@ -106,5 +109,17 @@ struct TurnCardView: View {
         )
         // Horizontal inset from screen edges; safe area inset handled by caller.
         .padding(.horizontal, 12)
+        // Completion beat: one subtle scale settle on the whole band when the maneuver
+        // advances — celebrating a completed turn, NOT its imminence (Chunk 0 motion rule).
+        // Keyed on the instruction so a new step fires it even when two turns share a
+        // direction; fully suppressed under Reduce Motion.
+        .keyframeAnimator(initialValue: 1.0, trigger: state.primaryText) { content, scale in
+            content.scaleEffect(reduceMotion ? 1 : scale)
+        } keyframes: { _ in
+            KeyframeTrack {
+                SpringKeyframe(1.03, duration: 0.18)
+                SpringKeyframe(1.0, duration: 0.30)
+            }
+        }
     }
 }
