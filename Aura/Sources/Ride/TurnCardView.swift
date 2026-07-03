@@ -28,8 +28,9 @@ struct TurnCardView: View {
 
     var body: some View {
         HStack(spacing: state.isExpanded ? AuraTheme.Spacing.md : AuraTheme.Spacing.sm) {
-            // Maneuver arrow
-            Image(systemName: "arrow.turn.up.right")
+            // Maneuver arrow — the real directional glyph for the upcoming turn (generic
+            // arrow when the engine supplies no structured maneuver).
+            Image(systemName: ManeuverIcon.symbol(for: state.maneuver))
                 .font(.system(
                     size: state.isExpanded ? arrowExpanded : arrowCollapsed,
                     weight: .bold

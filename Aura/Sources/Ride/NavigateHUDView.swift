@@ -123,12 +123,18 @@ struct NavigateHUDView: View {
                     .padding(.top, 44)
             }
         }
-        // Turn card pinned below the status bar
+        // Turn card pinned below the status bar, with the next-turn preview beneath it.
         .overlay(alignment: .top) {
-            TurnCardView(state: guidance.turn, reduceMotion: reduceMotion)
-                .padding(.top, 8) // sits in the safe area; no hardcoded status-bar inset
-                .animation(reduceMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.38),
-                           value: guidance.turn)
+            VStack(spacing: AuraTheme.Spacing.sm) {
+                TurnCardView(state: guidance.turn, reduceMotion: reduceMotion)
+                if let update = guidance.lastUpdate,
+                   let next = TurnCardPresenter.nextManeuver(for: update) {
+                    ThenChip(next: next)
+                }
+            }
+            .padding(.top, 8) // sits in the safe area; no hardcoded status-bar inset
+            .animation(reduceMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.38),
+                       value: guidance.turn)
         }
         // GPS signal chip — top leading
         .overlay(alignment: .topLeading) {
