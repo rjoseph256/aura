@@ -50,6 +50,7 @@ struct SettingsView: View {
             Section("Map") {
                 row(icon: "map.fill", tint: AuraTheme.accent, title: "Map style") {
                     Picker("", selection: $settings.mapStyle) {
+                        Text("Terrain (Aura)").tag(MapStyle.auraTerrain)
                         Text("Dark").tag(MapStyle.dark)
                         Text("Standard").tag(MapStyle.standard)
                     }
