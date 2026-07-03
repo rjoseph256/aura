@@ -8,10 +8,10 @@ import AuraKit
 ///
 /// - **Free ride:** identity header, then a row of glanceable stats — elapsed, distance,
 ///   speed.
-/// - **Navigate:** the next turn as the hero (distance + instruction, lime when imminent),
+/// - **Navigate:** the next turn as the hero (distance + instruction, mint when imminent),
 ///   then a quiet row of elapsed + distance.
 ///
-/// Near-black surface; lime accents and high-contrast cockpit numerals stay legible over
+/// Near-black surface; mint accents and high-contrast cockpit numerals stay legible over
 /// the Lock Screen's variable backdrop.
 struct RideLockScreenView: View {
     let context: ActivityViewContext<RideActivityAttributes>
