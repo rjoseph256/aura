@@ -78,7 +78,9 @@ final class RideLiveActivityController {
             speedMetersPerSecond: currentSpeedMetersPerSecond,
             elevationGainMeters: stats.elevationGainMeters,
             turnInstruction: instruction,
-            turnDistanceMeters: maneuver?.distanceToManeuverMeters)
+            turnDistanceMeters: maneuver?.distanceToManeuverMeters,
+            // Resolve the directional glyph app-side so the widget stays logic-free.
+            turnGlyphSystemName: ManeuverIcon.symbol(for: maneuver?.maneuver))
         lastState = state
 
         let content = ActivityContent(state: state,

@@ -18,19 +18,6 @@ func rideActivityIsImminent(_ turnDistanceMeters: Double?) -> Bool {
     return d <= rideActivityImminentMeters
 }
 
-/// Best-effort maneuver glyph from the instruction text. A generic arrow would be safe
-/// (the HUD uses one) but a left/right/arrive cue reads far better at a glance; we fall
-/// back to a neutral "continue" arrow when the phrasing isn't recognized.
-func rideActivityManeuverSymbol(for instruction: String?) -> String {
-    guard let s = instruction?.lowercased() else { return "location.north.line.fill" }
-    if s.contains("arriv") || s.contains("destination") { return "mappin.and.ellipse" }
-    if s.contains("u-turn") || s.contains("uturn") { return "arrow.uturn.left" }
-    if s.contains("roundabout") || s.contains("rotary") { return "arrow.trianglehead.clockwise" }
-    if s.contains("left") { return "arrow.turn.up.left" }
-    if s.contains("right") { return "arrow.turn.up.right" }
-    return "arrow.up" // continue / head / straight
-}
-
 /// A glanceable stat: a big cockpit numeral over a small muted label. The numeral uses
 /// the Saira Condensed cockpit face, matching the cockpit's `StatPair(.cockpit)` voice.
 struct RideStatCell: View {

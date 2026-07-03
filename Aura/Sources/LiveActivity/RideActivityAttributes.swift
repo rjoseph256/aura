@@ -32,17 +32,23 @@ public struct RideActivityAttributes: ActivityAttributes {
         public var turnInstruction: String?
         /// Distance to the next maneuver, in meters. `nil` when there's no active turn.
         public var turnDistanceMeters: Double?
+        /// SF Symbol name for the upcoming maneuver's directional glyph, resolved app-side
+        /// via `ManeuverIcon` (so the widget needs no guidance logic). `nil` before a
+        /// maneuver / in free ride — the widget falls back to the generic arrow.
+        public var turnGlyphSystemName: String?
 
         public init(distanceMeters: Double = 0,
                     speedMetersPerSecond: Double = 0,
                     elevationGainMeters: Double = 0,
                     turnInstruction: String? = nil,
-                    turnDistanceMeters: Double? = nil) {
+                    turnDistanceMeters: Double? = nil,
+                    turnGlyphSystemName: String? = nil) {
             self.distanceMeters = distanceMeters
             self.speedMetersPerSecond = speedMetersPerSecond
             self.elevationGainMeters = elevationGainMeters
             self.turnInstruction = turnInstruction
             self.turnDistanceMeters = turnDistanceMeters
+            self.turnGlyphSystemName = turnGlyphSystemName
         }
     }
 
