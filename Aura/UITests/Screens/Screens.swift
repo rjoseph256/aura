@@ -3,9 +3,10 @@ import XCTest
 @MainActor
 struct HomeScreen {
     let app: XCUIApplication
-    var joinRideButton: XCUIElement { app.buttons["Join a ride"] }
+    var joinRideButton: XCUIElement { app.buttons["home.join"] }
     var whereTo: XCUIElement { app.buttons["home.whereTo"] }
-    var exploreButton: XCUIElement { app.buttons["Explore"] }
+    var exploreButton: XCUIElement { app.buttons["home.explore"] }
+    var savedButton: XCUIElement { app.buttons["home.saved"] }
     var glance: XCUIElement { app.staticTexts["home.glance"] }
     var searchField: XCUIElement { app.textFields["home.searchField"] }
     var searchCancel: XCUIElement { app.buttons["home.searchCancel"] }
