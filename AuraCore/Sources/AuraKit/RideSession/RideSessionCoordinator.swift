@@ -144,12 +144,15 @@ public final class RideSessionCoordinator {
         }
     }
 
-    /// Teardown for an abandoned (not finished) ride, called from `onDisappear`. Stops
-    /// streaming and releases the screen. Does not save, publish, or end the activity,
-    /// matching today's `onDisappear`.
+    /// Teardown for an abandoned (not finished) ride, called from `onDisappear` and from the
+    /// free-ride back-out discard. Stops streaming, releases the screen, and ends the Live
+    /// Activity — so an auto-started ride discarded before it is worth saving leaves no
+    /// orphaned Lock Screen activity. Does not save or publish a ride. `activity.end()` is
+    /// idempotent, so calling this after `finish()` (e.g. onDisappear after End) is a no-op.
     public func cancel() {
         stopStreaming()
         screen.setKeepAwake(false)
+        activity.end()
     }
 
     private func stopStreaming() {

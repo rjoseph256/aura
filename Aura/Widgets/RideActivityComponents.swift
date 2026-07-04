@@ -5,7 +5,7 @@ import AuraKit
 // Shared building blocks for the in-progress-ride Live Activity. They reuse AuraTheme
 // (shared into this target) so the Lock Screen and Dynamic Island read like a slice of
 // the migrated cockpit: near-black surface, solid mint identity mark, mint accents, and
-// the same Saira Condensed cockpit numerals the SpeedReadout and StatPair use.
+// the same Saira Condensed cockpit numerals the cockpit InstrumentChassis and StatPair use.
 
 /// Distance (m) within which the next maneuver is treated as imminent — the turn arrow
 /// and distance hold the mint accent (the active cue), echoing the navigate HUD's turn

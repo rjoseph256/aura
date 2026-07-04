@@ -211,6 +211,17 @@ struct RideSessionCoordinatorTests {
         #expect(c.finishedRide != nil)       // ride still published
         #expect(spy.written.count == 1)      // write runs after the save, unaffected
     }
+
+    @Test func cancelEndsActivityAndReleasesScreen() throws {
+        let screen = SpyScreenWake(); let activity = SpyRideActivity()
+        let c = makeCoordinator(screen: screen, activity: activity)
+        c.start(location: ScriptedLocationProvider([]), saving: try RideStore.inMemory(),
+                units: .metric, authorization: .authorized)
+        #expect(activity.ended == false)
+        c.cancel()
+        #expect(activity.ended == true)
+        #expect(screen.keepAwakeCalls == [true, false])
+    }
 }
 
 // MARK: - Doubles
