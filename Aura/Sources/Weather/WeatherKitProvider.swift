@@ -19,6 +19,8 @@ final class WeatherKitProvider: WeatherProviding {
             coordinate: coordinate)
     }
 
+    // Exhaustive WeatherKit→neutral map; cyclomatic complexity is the wrong metric for a flat switch.
+    // swiftlint:disable cyclomatic_complexity
     /// Total map from WeatherKit conditions to Aura's neutral set. `@unknown default` catches
     /// any case not listed (including future SDK additions) as `.unknown`.
     static func map(_ c: WeatherCondition) -> AuraWeatherCondition {
@@ -43,4 +45,5 @@ final class WeatherKitProvider: WeatherProviding {
         @unknown default: return .unknown
         }
     }
+    // swiftlint:enable cyclomatic_complexity
 }

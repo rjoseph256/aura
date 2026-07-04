@@ -5,6 +5,8 @@ import Foundation
 /// slop gate forbids uppercase "eyebrow" copy).
 public enum WeatherGreeting {
 
+    // Exhaustive enum→value maps below; cyclomatic complexity is the wrong metric for a flat switch.
+    // swiftlint:disable cyclomatic_complexity
     /// SF Symbol for each condition. Total over `AuraWeatherCondition` — every case returns
     /// a non-empty name so the greeting never renders a blank glyph.
     public static func symbolName(for c: AuraWeatherCondition) -> String {
@@ -49,6 +51,7 @@ public enum WeatherGreeting {
         case .unknown: ""
         }
     }
+    // swiftlint:enable cyclomatic_complexity
 
     /// Locale-based °F/°C, rounded to a whole degree. US locale → Fahrenheit, else Celsius.
     public static func temperatureText(_ measurement: Measurement<UnitTemperature>,
