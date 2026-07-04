@@ -13,6 +13,9 @@ import AuraCore
 private struct HomeDashboardSheet<PeekHeader: View, Body: View>: ViewModifier {
     @Binding var isPresented: Bool
     var selection: Binding<PresentationDetent>?
+    /// Bumped by the caller to request a scroll to the "saved" anchor (independent of the
+    /// detent value, so it also fires when the sheet is already at `.large`).
+    var revealSaved: Int = 0
     let peekHeight: CGFloat
     @ViewBuilder let peek: () -> PeekHeader
     @ViewBuilder let body: () -> Body
@@ -37,8 +40,8 @@ private struct HomeDashboardSheet<PeekHeader: View, Body: View>: ViewModifier {
                 .presentationDragIndicator(.visible)
                 .interactiveDismissDisabled()
                 .presentationBackground(AuraTheme.surface)
-                .onChange(of: selection?.wrappedValue) { _, new in
-                    if new == .large { withAnimation { proxy.scrollTo("saved", anchor: .top) } }
+                .onChange(of: revealSaved) {
+                    withAnimation { proxy.scrollTo("saved", anchor: .top) }
                 }
             }
         }
@@ -67,11 +70,13 @@ extension View {
     func homeDashboardSheet<PeekHeader: View, Body: View>(
         isPresented: Binding<Bool>,
         selection: Binding<PresentationDetent>? = nil,
+        revealSaved: Int = 0,
         peekHeight: CGFloat,
         @ViewBuilder peek: @escaping () -> PeekHeader,
         @ViewBuilder body: @escaping () -> Body
     ) -> some View {
         modifier(HomeDashboardSheet(isPresented: isPresented, selection: selection,
-                                    peekHeight: peekHeight, peek: peek, body: body))
+                                    revealSaved: revealSaved, peekHeight: peekHeight,
+                                    peek: peek, body: body))
     }
 }

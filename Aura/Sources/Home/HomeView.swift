@@ -27,6 +27,9 @@ struct HomeView: View {
     // Drives the dashboard sheet's detent so the Saved chip can raise it to `.large`. The
     // literal peek height matches `peekHeight`'s base at default Dynamic Type.
     @State private var selectedDetent: PresentationDetent = .height(250)
+    // Bumped on every Saved tap so the sheet re-scrolls to the Saved section even when it is
+    // already at `.large` (a detent-value change alone wouldn't fire).
+    @State private var revealSavedNonce = 0
     @ScaledMetric(relativeTo: .title) private var brandSize: CGFloat = 24
     @ScaledMetric(relativeTo: .body) private var peekHeight: CGFloat = 250
 
@@ -54,18 +57,19 @@ struct HomeView: View {
             }
         }
         .task { await loadRides() }
-        // Fetch weather for the greeting once a location fix is available (`current()` awaits
-        // one), and again if authorization changes. Silent-hides on failure or missing auth.
-        .task { await weather.refresh(near: location.current(), now: Date()) }
-        .onChange(of: location.authorization) {
-            Task { await weather.refresh(near: location.current(), now: Date()) }
-        }
+        // Fetch weather for the greeting, and again if authorization changes. Gated on real
+        // authorization so we never show weather for the location fallback when permission is
+        // absent (spec: no permission → weather hidden). Silent-hides on any failure.
+        .task { await refreshWeather() }
+        .onChange(of: location.authorization) { Task { await refreshWeather() } }
         // Refetch when CloudKit merges a remote ride, so the glance + last-ride stay live even
         // with the sheet at peek (the subscription is on the always-mounted container).
         .onChange(of: rideStore.syncRevision) { Task { await loadRides() } }
         .onChange(of: router.path) { syncSheet() }
         .onChange(of: searchExpanded) { syncSheet() }
-        .onAppear { syncSheet() }
+        // Align the selected detent with the sheet's *scaled* peek detent (the @State literal
+        // is only correct at default Dynamic Type); keeps the selection binding valid at all sizes.
+        .onAppear { syncSheet(); selectedDetent = .height(peekHeight) }
         .alert("Rename saved place", isPresented: Binding(
             get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } })) {
             TextField("Name", text: $renameText)
@@ -94,6 +98,7 @@ struct HomeView: View {
                         onSaved: {
                             if searchExpanded { searchExpanded = false }
                             selectedDetent = .large
+                            revealSavedNonce += 1
                         },
                         hasSaved: !savedPlaces.places.isEmpty)
                         .padding(.bottom, peekHeight + AuraTheme.Spacing.md) // sit above the peek sheet
@@ -107,7 +112,8 @@ struct HomeView: View {
                     onCollapse: { searchExpanded = false })
             }
         }
-        .homeDashboardSheet(isPresented: $sheetPresented, selection: $selectedDetent, peekHeight: peekHeight) {
+        .homeDashboardSheet(isPresented: $sheetPresented, selection: $selectedDetent,
+                            revealSaved: revealSavedNonce, peekHeight: peekHeight) {
             VStack(spacing: AuraTheme.Spacing.lg) {
                 WeeklyGlanceView(week: weekStats, goalMeters: settings.weeklyGoalMeters,
                                  lastRide: lastRide, units: settings.units)
@@ -126,6 +132,14 @@ struct HomeView: View {
     private func loadRides() async {
         summaries = (try? rideStore.summaries()) ?? []
         didLoad = true
+    }
+
+    /// Refreshes greeting weather only when location is actually authorized — otherwise
+    /// `location.current()` returns a city fallback and we'd show weather for a place the
+    /// rider isn't at. Failures inside `refresh` are already swallowed (weather hides).
+    private func refreshWeather() async {
+        guard location.authorization == .authorized else { return }
+        await weather.refresh(near: location.current(), now: Date())
     }
 
     private var header: some View {
@@ -166,6 +180,8 @@ struct HomeView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(WeatherGreeting.accessibilityText(
             greeting: greeting, snapshot: snap, locale: .current))
+        // Reads with the glance tier, before the chips (1) and utilities (-1).
+        .accessibilitySortPriority(2)
     }
 
     /// Maps-style utility cluster over the terrain — History + Settings, reached by pushing
