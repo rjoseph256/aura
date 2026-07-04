@@ -101,15 +101,19 @@ size, and a long condition ("heavy thunderstorm"), on the narrowest supported wi
   → `AuraWeatherCondition` via a total switch with `default: .unknown`. No WeatherKit
   reference types leak into the snapshot. (The WeatherKit→neutral switch lives in the
   **app target**, never in AuraCore.)
-- **State — app target ONLY** (`Aura/Sources/Weather/WeatherStore.swift`). It must not
-  live in AuraKit: WeatherKit is iOS-only and would break the macOS-CI package build.
+- **State — AuraKit** (`AuraCore/Sources/AuraKit/Weather/WeatherStore.swift`), beside
+  `SettingsStore`/`SavedPlacesStore`. It holds only a `WeatherProviding` (the seam) plus
+  AuraCore types, so it **never imports WeatherKit** and builds/tests on macOS CI.
+  **Invariant:** the store has NO default WeatherKit provider — the app composition root
+  injects `WeatherKitProvider`. (Only the provider, in the app target, imports WeatherKit.)
+  A guard test asserts AuraKit sources contain no `import WeatherKit`.
 
   ```swift
-  @MainActor @Observable final class WeatherStore {
-      private(set) var snapshot: WeatherSnapshot?
+  @MainActor @Observable public final class WeatherStore {
+      public private(set) var snapshot: WeatherSnapshot?
       private let provider: WeatherProviding
       private let now: () -> Date          // injected for deterministic tests
-      init(provider: WeatherProviding, now: @escaping () -> Date = Date.init) { … }
+      public init(provider: WeatherProviding, now: @escaping () -> Date = Date.init) { … }
 
       /// Display-eligible snapshot (nil past the 60-min staleness bound).
       var displaySnapshot: WeatherSnapshot? { … using now() … }
@@ -248,8 +252,8 @@ are **not touched**; other screens using `.hudControl` (the HUDs) are unaffected
 - `AuraCore/Sources/AuraCore/Weather/WeatherSnapshot.swift` (+ `AuraWeatherCondition`)
 - `AuraCore/Sources/AuraCore/Weather/WeatherGreeting.swift`
 - `AuraCore/Sources/AuraKit/Weather/WeatherProviding.swift` (seam)
-- `Aura/Sources/Weather/WeatherKitProvider.swift`
-- `Aura/Sources/Weather/WeatherStore.swift`
+- `AuraCore/Sources/AuraKit/Weather/WeatherStore.swift` (`@MainActor @Observable`, no WeatherKit import)
+- `Aura/Sources/Weather/WeatherKitProvider.swift` (the only WeatherKit importer)
 - `Aura/Sources/Home/HomeGlass.swift` (glass helper + `HomeChip`)
 - Tests: AuraCore weather tests; AuraKit/app `WeatherStore` tests with a mock provider.
 
@@ -311,8 +315,10 @@ local main workflow when approved.
 ## Adversarial spec review — reconciliation (2026-07-03)
 
 Three independent reviewers (correctness, product/UX/a11y, architecture) ran with a
-refuting mandate. Accepted and folded in above: WeatherStore app-target-only;
-`@MainActor @Observable` + injected clock; `WeatherProviding: Sendable` mapping raw
+refuting mandate. Accepted and folded in above: WeatherKit kept out of the package via
+the seam (the reviewers' "app-target-only store" is refined to **AuraKit store + app-target
+provider** — the store never imports WeatherKit, so its deterministic tests run in CI,
+guarded by a no-`import WeatherKit` assertion); `@MainActor @Observable` + injected clock; `WeatherProviding: Sendable` mapping raw
 values; no `MeasurementFormatter`; `Coordinate` + `Geo.distance`; neutral
 `AuraWeatherCondition` with `.unknown` fallback + total tested map + lowercase text;
 greeting single-line layout stability + explicit composed a11y; ScrollViewReader anchor
