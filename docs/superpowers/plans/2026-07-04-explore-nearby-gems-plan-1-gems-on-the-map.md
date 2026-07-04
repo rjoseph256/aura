@@ -25,6 +25,7 @@
 - Signature accent is `AuraPalette.mint` / `AuraTheme.accent`; dark surfaces from `AuraPalette`. No new colors.
 - `Gem.id` is a **stable, source-namespaced `String`** (`"curated:<slug>"`, later `"personal:<uuid>"`, `"osm:<id>"`).
 - Sentence case in any UI copy; no ALL CAPS labels beyond existing cockpit instrument style.
+- All `git`, `swift test`, and build commands run from the repo root (`/Users/rohunjoseph/projects/biking-app/`), never from inside `AuraCore/`.
 
 ---
 
@@ -146,17 +147,15 @@ git commit -m "feat(gems): Gem value types (tier, source, category, model)"
 ### Task 2: `GemDiscoveryEngine` — proximity + nearest-N cap (AuraCore)
 
 **Files:**
-- Create: `AuraCore/Sources/AuraCore/Gems/GemGeo.swift`
 - Create: `AuraCore/Sources/AuraCore/Gems/GemDiscoveryEngine.swift`
 - Test: `AuraCore/Tests/AuraCoreTests/GemDiscoveryEngineTests.swift`
 
 **Interfaces:**
-- Consumes: `Gem`, `Coordinate` (Task 1 / existing).
+- Consumes: `Gem`, `Coordinate`, and the existing `Geo.distance(_:_:)` (in `AuraCore/Sources/AuraCore/Geo/Coordinate.swift`).
 - Produces:
-  - `enum GemGeo { static func distanceMeters(_ a: Coordinate, _ b: Coordinate) -> Double }`
   - `struct GemDiscoveryEngine: Sendable { init(proximityRadiusMeters: Double = 1500, pinCap: Int = 10); func visiblePins(from candidates: [Gem], at location: Coordinate) -> [Gem] }`
 
-> Note: if AuraCore already exposes a great-circle distance (check `RideStats`/`RideRecorder` distance accumulation), reuse it in `GemGeo` instead of duplicating the haversine.
+> Note: AuraCore already exposes a great-circle distance as `Geo.distance(_ a: Coordinate, _ b: Coordinate)`. Reuse it — do **not** reimplement a haversine.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -196,27 +195,7 @@ Expected: FAIL — `cannot find 'GemDiscoveryEngine' in scope`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-`GemGeo.swift`:
-
-```swift
-import Foundation
-
-public enum GemGeo {
-    /// Great-circle distance in meters (haversine).
-    public static func distanceMeters(_ a: Coordinate, _ b: Coordinate) -> Double {
-        let r = 6_371_000.0
-        let dLat = (b.latitude - a.latitude) * .pi / 180
-        let dLng = (b.longitude - a.longitude) * .pi / 180
-        let lat1 = a.latitude * .pi / 180
-        let lat2 = b.latitude * .pi / 180
-        let h = sin(dLat / 2) * sin(dLat / 2)
-            + cos(lat1) * cos(lat2) * sin(dLng / 2) * sin(dLng / 2)
-        return 2 * r * asin(min(1, sqrt(h)))
-    }
-}
-```
-
-`GemDiscoveryEngine.swift`:
+`GemDiscoveryEngine.swift` (reuses `Geo.distance(_:_:)` — do not reimplement the haversine):
 
 ```swift
 import Foundation
@@ -235,7 +214,7 @@ public struct GemDiscoveryEngine: Sendable {
     /// Gems within `proximityRadiusMeters` of `location`, nearest first, capped to `pinCap`.
     public func visiblePins(from candidates: [Gem], at location: Coordinate) -> [Gem] {
         candidates
-            .map { ($0, GemGeo.distanceMeters($0.coordinate, location)) }
+            .map { ($0, Geo.distance($0.coordinate, location)) }
             .filter { $0.1 <= proximityRadiusMeters }
             .sorted { $0.1 < $1.1 }
             .prefix(pinCap)
@@ -252,7 +231,7 @@ Expected: PASS (2 tests).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add AuraCore/Sources/AuraCore/Gems/GemGeo.swift AuraCore/Sources/AuraCore/Gems/GemDiscoveryEngine.swift AuraCore/Tests/AuraCoreTests/GemDiscoveryEngineTests.swift
+git add AuraCore/Sources/AuraCore/Gems/GemDiscoveryEngine.swift AuraCore/Tests/AuraCoreTests/GemDiscoveryEngineTests.swift
 git commit -m "feat(gems): discovery engine proximity + nearest-N pin cap"
 ```
 
@@ -294,13 +273,20 @@ Create `AuraCore/Sources/AuraKit/Resources/gems.json`:
 ]
 ```
 
-In `AuraCore/Package.swift`, on the `AuraKit` target add:
+In `AuraCore/Package.swift`, the `AuraKit` target is currently:
 
 ```swift
-resources: [.process("Sources/AuraKit/Resources/gems.json")]
+.target(name: "AuraKit", dependencies: ["AuraCore"]),
 ```
 
-(If the target already has a `resources:` array, append the entry; keep the existing path style used by the target.)
+Add a `resources:` argument (resource paths are relative to the target's source dir `Sources/AuraKit`):
+
+```swift
+.target(name: "AuraKit", dependencies: ["AuraCore"],
+        resources: [.process("Resources/gems.json")]),
+```
+
+Note: the `.process(...)` entry is what makes SPM generate the `Bundle.module` accessor used below — without it, `Bundle.module` resource lookup returns nil at runtime (and lint won't catch it).
 
 - [ ] **Step 2: Write the failing test**
 
@@ -525,14 +511,15 @@ import AuraCore
         func rideDidUpdateLocation(_ point: TrackPoint) { coordinates.append(point.coordinate) }
     }
 
-    @Test func forwardsEachLocationFixToTheDiscoverySink() async {
+    @Test func forwardsEachLocationFixToTheDiscoverySink() async throws {
         let point = TrackPoint(coordinate: Coordinate(latitude: 40.44, longitude: -80.0),
                                elevation: nil, timestamp: Date())
-        let location = StubLocationStreaming(points: [point])   // existing test double
+        let location = ScriptedLocationProvider([point])
+        let saving = try RideStore.inMemory()
         let coordinator = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
-                                                 screen: NoopScreenWake(), activity: NoopRideActivity())
+                                                 screen: SpyScreenWake(), activity: SpyRideActivity())
         let sink = SpySink()
-        coordinator.start(location: location, saving: NoopRideSaving(), units: .metric,
+        coordinator.start(location: location, saving: saving, units: .metric,
                           authorization: .authorized, discoverySink: sink)
         await coordinator.streamTask?.value
         #expect(sink.coordinates == [point.coordinate])
@@ -540,7 +527,7 @@ import AuraCore
 }
 ```
 
-> Reuse whatever existing AuraKit test doubles the `RideSessionCoordinator` tests already use for `LocationStreaming`/`RideSaving`/`ScreenWakeControlling`/`RideActivityControlling` (see `AuraCore/Tests/AuraKitTests/` for the exact names; substitute them for the placeholder `Stub…`/`Noop…` names above).
+> These are the real doubles the existing `RideSessionCoordinatorTests` use (`AuraCore/Tests/AuraKitTests/RideSessionCoordinatorTests.swift`): `ScriptedLocationProvider` (LocationStreaming), `SpyScreenWake`, `SpyRideActivity`, and `RideStore.inMemory()` for saving. If any signature differs, match that file exactly.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -635,6 +622,9 @@ Inside `body`'s `Map(viewport:)` builder, after the `ForEvery(peers…)` block, 
 import SwiftUI
 import AuraCore
 
+// AuraTheme lives in the app target (Aura/Sources/Theme) — the same module as this
+// file — so AuraTheme.* below needs no extra import.
+
 /// A single ambient gem pin on the ride map. Tier styling, seen-state, and tap
 /// handling arrive in Plan 2; this slice is a plain category-glyph marker.
 struct GemPinView: View {
@@ -695,16 +685,17 @@ In `RideHUDView`, add the store as owned state:
     @State private var gems = GemDiscoveryStore(provider: CuratedGemProvider())
 ```
 
-Where the view calls `coordinator.start(...)` (the auto-start on appear, ~line 60), pass the store as the discovery sink:
+Where the view calls `coordinator.start(...)` (the auto-start on appear, `RideHUDView.swift:60-62`), append the store as the discovery sink:
 
 ```swift
         coordinator.start(location: location, saving: rideStore, units: settings.units,
-                          authorization: authorization, discoverySink: gems)
+                          authorization: location.authorization,
+                          saveToHealth: settings.saveToHealth, discoverySink: gems)
 ```
 
-(Keep every existing argument exactly as-is; only add `discoverySink: gems`.)
+(This is the existing call with `discoverySink: gems` appended — keep every other argument exactly as it currently reads in the file.)
 
-Load the curated set once, on the same appear path:
+Load the curated set once — add a **second** `.task {}` modifier (SwiftUI runs multiple `.task` modifiers concurrently on appear, so this coexists with the existing start-the-ride `.task`):
 
 ```swift
         .task { await gems.load() }
@@ -727,6 +718,7 @@ Expected: BUILD SUCCEEDED.
 
 Delegate to the builder agent: "Boot the iPhone 17 simulator, install and launch Aura, set the simulator location to 40.4419,-80.0089 (Point State Park, Pittsburgh), tap Explore to start a free ride, and report whether a gem pin renders on the map." (Curated seed gems are in Pittsburgh; without a Pittsburgh location none will be in range — set the sim location first.)
 Expected: at least one gem pin visible near the rider.
+If no pin appears, check in order: (1) the simulator location is actually set to Pittsburgh, (2) `gems.json` loaded (add a temporary `print(gems.count)` in `load()`), (3) the default `proximityRadiusMeters` (1500 m) covers the distance from the sim location to the nearest seed gem.
 
 - [ ] **Step 4: Commit**
 
@@ -737,47 +729,54 @@ git commit -m "feat(gems): free-ride HUD shows curated gem pins as you ride"
 
 ---
 
-### Task 8: Suppress discovery during group rides (app target)
+### Task 8: Record the solo-only invariant + final gate (app target)
+
+Group rides run through `NavigateHUDView` + `GroupRideSession`; the free-ride Explore
+cockpit (`RideHUDView`) never carries a group session, so gem discovery here is solo
+by construction and needs no runtime suppression. The store keeps its `isSuppressed`
+capability (unit-tested in Task 4) for a future group-explore surface. This task records
+that invariant and runs the slice's final gate.
 
 **Files:**
-- Modify: `Aura/Sources/Ride/RideHUDView.swift` (set `gems.isSuppressed` when a group session is present)
+- Modify: `Aura/Sources/Ride/RideHUDView.swift` (a documenting comment on the `gems` store)
 
-**Interfaces:**
-- Consumes: `GemDiscoveryStore.isSuppressed` (Task 4); the view's existing group-ride context (the same value that decides whether `groupSink` is passed to `start()`).
+- [ ] **Step 1: Record the invariant**
 
-- [ ] **Step 1: Suppress when the ride is a group ride**
-
-In `RideHUDView`, wherever the group session / group sink is known (the same condition that supplies `groupSink` to `coordinator.start`), set suppression before loading:
+Replace the bare `gems` declaration added in Task 7 with the same line plus a comment:
 
 ```swift
-        gems.isSuppressed = (groupSink != nil)
+        // Free rides are solo by construction — group rides use NavigateHUDView +
+        // GroupRideSession, never this HUD — so gem discovery is never suppressed here.
+        // (GemDiscoveryStore.isSuppressed exists for a future group-explore surface.)
+        @State private var gems = GemDiscoveryStore(provider: CuratedGemProvider())
 ```
 
-Place this on the appear path, immediately before `coordinator.start(...)`. If this HUD never carries a group session (group rides use a separate surface), add the line anyway guarding the invariant — it is a cheap, correct no-op for the solo path and documents the gate.
+- [ ] **Step 2: Full package tests**
 
-- [ ] **Step 2: Build the app**
+Run: `swift test --package-path AuraCore`
+Expected: PASS — all new suites (Gem, engine, provider, store, coordinator-discovery) plus no regressions.
+
+- [ ] **Step 3: Build the app**
 
 Delegate to the builder agent: "Build the Aura app scheme for the iPhone 17 simulator; report success or the first error."
 Expected: BUILD SUCCEEDED.
 
-- [ ] **Step 3: Full package test + lint gate**
+- [ ] **Step 4: Lint gate**
 
-Run: `swift test --package-path AuraCore`
-Expected: PASS (all suites).
 Delegate to the builder agent: "Run SwiftLint --strict on the repo and report any violations."
 Expected: no violations.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add Aura/Sources/Ride/RideHUDView.swift
-git commit -m "feat(gems): suppress gem discovery during group rides"
+git commit -m "docs(gems): note free-ride discovery is solo by construction"
 ```
 
 ---
 
 ## Self-review notes
 
-- **Spec coverage (this slice):** ambient pins (§ Rhythm/ambient), proximity + nearest-N cap (§ Pacing, § engine), curated provider + bundled seed (§ Data), group-ride gating (§ Group rides), coordinator sink integration (§ Discovery store), timestamp-driven pure engine (§ Global Constraints). Deferred to Plans 2–4 and explicitly out of this slice: tiers/cards/haptics, detail sheet, seen-memory + `SeenGemRecord`/V4, the detour/`GuidanceController`, personal markers + `resurface`, the live feed, priority arbitration, full accessibility, backgrounding pause. These are named in the sequenced-plans list so no requirement is silently dropped.
+- **Spec coverage (this slice):** ambient pins (§ Rhythm/ambient), proximity + nearest-N cap (§ Pacing, § engine), curated provider + bundled seed (§ Data), group-ride gating (§ Group rides — a no-op by construction here: free rides never carry a group session, so discovery is solo; the store keeps its suppress capability for a future group-explore surface), coordinator sink integration (§ Discovery store), timestamp-driven pure engine (§ Global Constraints). Deferred to Plans 2–4 and explicitly out of this slice: tiers/cards/haptics, detail sheet, seen-memory + `SeenGemRecord`/V4, the detour/`GuidanceController`, personal markers + `resurface`, the live feed, priority arbitration, full accessibility, backgrounding pause. These are named in the sequenced-plans list so no requirement is silently dropped.
 - **Type consistency:** `GemDiscoveryEngine.visiblePins(from:at:)`, `GemProviding.gems(near:)`, `GemDiscoveryStore.update(at:)` / `.load()` / `.isSuppressed`, `RideDiscoverySink.rideDidUpdateLocation(_:)`, and `RideMapView.gems` are used identically across the tasks that define and consume them.
 - **Placeholders:** none — every step carries real code or an exact command. The one deliberate substitution note (Task 5's existing test-double names) points the implementer at the real doubles rather than inventing new ones.
