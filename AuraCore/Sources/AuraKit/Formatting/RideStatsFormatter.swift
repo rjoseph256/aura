@@ -1,9 +1,9 @@
 import Foundation
 import AuraCore
 
-/// Centralizes the unit-aware number formatting the ride screens display, so
-/// `SpeedRail`, `RideSummaryView`, and `HistoryView` don't each reimplement the
-/// conversions (the source of the previously-triplicated, untested formatting logic).
+/// Centralizes the unit-aware number formatting the ride screens display, so the cockpit
+/// panels, `RideSummaryView`, and `HistoryView` don't each reimplement the conversions
+/// (the source of the previously-triplicated, untested formatting logic).
 ///
 /// Returns formatted value strings plus canonical short units; views keep their own
 /// label voice ("mi" vs "miles" vs "MI") by composing around `*Unit`.
