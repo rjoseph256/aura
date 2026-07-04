@@ -14,7 +14,7 @@ struct RideMapView: View {
     var selfProgress: Double = 0
 
     @Environment(SettingsStore.self) private var settings
-    @State private var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
+    @Binding var viewport: Viewport
     /// Each peer's previous fix, so a heading cone can be derived on-device between
     /// consecutive updates (the wire carries no bearing — see `PeerBearing`).
     @State private var previousPeerCoordinates: [UUID: Coordinate] = [:]
@@ -96,6 +96,7 @@ struct RideMapView: View {
 }
 
 #Preview {
+    @Previewable @State var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
     let peers: [RidePeer] = [
         RidePeer(userID: UUID(), displayName: "Mara",
                 coordinate: Coordinate(latitude: 37.7752, longitude: -122.4192),
@@ -115,6 +116,6 @@ struct RideMapView: View {
                   elevation: nil, timestamp: Date())
     }
     return RideMapView(track: track, peers: peers,
-                       nameMap: [:], selfProgress: 550)
+                       nameMap: [:], selfProgress: 550, viewport: $viewport)
         .environment(SettingsStore())
 }
