@@ -10,6 +10,7 @@ struct AuraApp: App {
     @State private var savedPlaces: SavedPlacesStore
     @State private var settings = SettingsStore(defaults: .standard, sync: UbiquitousKeyValueStore())
     @State private var location = LocationService()
+    @State private var weather = WeatherStore(provider: WeatherKitProvider())
 
     init() {
         AuraApp.configureMapbox()
@@ -26,6 +27,7 @@ struct AuraApp: App {
                 .environment(savedPlaces)
                 .environment(settings)
                 .environment(location)
+                .environment(weather)
                 .preferredColorScheme(.dark)
                 .onOpenURL { router.handle(url: $0) }
         }
