@@ -22,6 +22,54 @@
 - **Distance:** `Coordinate.distance(_ a: Coordinate, _ b: Coordinate) -> Double` returns meters.
 - **Commits:** one per task, `feat(...)`/`refactor(...)`, ending with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 
+## Plan reconciliation — adversarial plan review (2 lenses, verified against code)
+
+These corrections **override** the task bodies below where they conflict:
+
+1. **Distance is `Geo.distance(_ a:_ b:) -> Double` (meters)** — a `Geo` enum in
+   `AuraCore/Sources/AuraCore/Geo/Coordinate.swift`, NOT `Coordinate.distance`. Task 3's
+   store uses `Geo.distance(s.coordinate, coordinate) < 2_000`.
+2. **`LocationService` exposes `public func current() async -> Coordinate`** (non-optional;
+   awaits a fix up to ~3 s), with no synchronous coordinate property. Task 6's triggers:
+   ```swift
+   .task { await weather.refresh(near: location.current(), now: Date()) }
+   .onChange(of: location.authorization) {
+       Task { await weather.refresh(near: location.current(), now: Date()) }
+   }
+   ```
+   Because `current()` awaits a fix, this also covers the first-permission-grant case
+   (no extra retry needed).
+3. **Test double is `@MainActor final class StubWeatherProvider` (Sendable via MainActor)**,
+   not `@unchecked Sendable`. Keep `WeatherProviding: Sendable` (correct for the nonisolated
+   real provider). Add a set-then-fail test: success refresh sets snapshot;
+   `stub.result = .failure(StubError())`; refresh at `now+1000 s` → snapshot **unchanged**
+   (still 20°C). (`result` is already a mutable `var`.)
+4. **Green per commit.** Task 8: `HomeLaunchBand` adds `onSaved: @escaping () -> Void = {}`
+   and `hasSaved: Bool = false` **defaults** so the existing 3-arg `HomeView` call keeps
+   compiling. Task 9: `homeDashboardSheet` adds `selection: Binding<PresentationDetent>? = nil`
+   and applies `.presentationDetents([.height(peekHeight), .fraction(0.55), .large], selection: sel)`
+   only when non-nil (else the current `.presentationDetents([...])`). Task 10 passes the
+   real values.
+5. **UITests.** `Aura/UITests/Screens/Screens.swift` finds Explore/Join by label
+   (`app.buttons["Explore"]`, `["Join a ride"]`). In Task 10, switch them to the chip
+   identifiers `home.explore` / `home.join` and add `home.saved`.
+6. **Roots/imports.** Composition root is `Aura/Sources/AuraApp.swift` (Task 5). `AuraTheme`
+   and `WeatherKitProvider` are same-module (app target) — `HomeGlass.swift` needs only
+   `import SwiftUI`; no extra module import.
+7. **Task 4 switch:** give `.clear`, `.hot`, `.cold` their own arms (no ternary); keep
+   `@unknown default: .unknown`; verify case names at the build step and drop any the SDK
+   lacks.
+8. **After `git rm HomeRedesignView.swift`, run `cd Aura && xcodegen generate`** before the
+   Task 10 build so the project regenerates.
+9. **Verification (Task 11 / device):** greeting layout stability (the "Aura" wordmark must
+   not move; check `.minimumScaleFactor(0.85)` legibility at AX5), glass contrast on a bright
+   map + Increase Contrast, and the Explore/Join/Saved UITests passing on iOS 26 and a <26
+   fallback run.
+
+Dismissed after verification: `Locale.measurementSystem` "needs 16.1" (target is 17.0 —
+available); `presentationDetents(_,selection:)` / Glass "unavailable" doubts (17.0 target,
+glass already compiles against the 26.2 SDK).
+
 ---
 
 ### Task 1: Weather model — `AuraWeatherCondition` + `WeatherSnapshot` (AuraCore)
