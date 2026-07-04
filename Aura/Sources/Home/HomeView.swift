@@ -11,6 +11,7 @@ struct HomeView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(SavedPlacesStore.self) private var savedPlaces
     @Environment(LocationService.self) private var location
+    @Environment(WeatherStore.self) private var weather
 
     @State private var query = ""
     @State private var summaries: [RideSummary] = []
@@ -23,6 +24,9 @@ struct HomeView: View {
     /// sheet, and search never stacks with it. Using @State (not a derived binding) so the
     /// sheet reliably presents/dismisses when the nav path changes.
     @State private var sheetPresented = true
+    // Drives the dashboard sheet's detent so the Saved chip can raise it to `.large`. The
+    // literal peek height matches `peekHeight`'s base at default Dynamic Type.
+    @State private var selectedDetent: PresentationDetent = .height(250)
     @ScaledMetric(relativeTo: .title) private var brandSize: CGFloat = 24
     @ScaledMetric(relativeTo: .body) private var peekHeight: CGFloat = 250
 
@@ -50,6 +54,12 @@ struct HomeView: View {
             }
         }
         .task { await loadRides() }
+        // Fetch weather for the greeting once a location fix is available (`current()` awaits
+        // one), and again if authorization changes. Silent-hides on failure or missing auth.
+        .task { await weather.refresh(near: location.current(), now: Date()) }
+        .onChange(of: location.authorization) {
+            Task { await weather.refresh(near: location.current(), now: Date()) }
+        }
         // Refetch when CloudKit merges a remote ride, so the glance + last-ride stay live even
         // with the sheet at peek (the subscription is on the always-mounted container).
         .onChange(of: rideStore.syncRevision) { Task { await loadRides() } }
@@ -80,7 +90,12 @@ struct HomeView: View {
                     HomeLaunchBand(
                         onWhereTo: { searchExpanded = true },
                         onExplore: { router.push(.freeRide) },
-                        onJoin: { router.push(.joinRide) })
+                        onJoin: { router.push(.joinRide) },
+                        onSaved: {
+                            if searchExpanded { searchExpanded = false }
+                            selectedDetent = .large
+                        },
+                        hasSaved: !savedPlaces.places.isEmpty)
                         .padding(.bottom, peekHeight + AuraTheme.Spacing.md) // sit above the peek sheet
                 }
             }
@@ -92,7 +107,7 @@ struct HomeView: View {
                     onCollapse: { searchExpanded = false })
             }
         }
-        .homeDashboardSheet(isPresented: $sheetPresented, peekHeight: peekHeight) {
+        .homeDashboardSheet(isPresented: $sheetPresented, selection: $selectedDetent, peekHeight: peekHeight) {
             VStack(spacing: AuraTheme.Spacing.lg) {
                 WeeklyGlanceView(week: weekStats, goalMeters: settings.weeklyGoalMeters,
                                  lastRide: lastRide, units: settings.units)
@@ -116,7 +131,7 @@ struct HomeView: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(greeting).font(.footnote.weight(.medium)).foregroundStyle(AuraTheme.textSecondary)
+                greetingLine
                 Text("Aura").font(AuraTheme.Typography.metricBrand(brandSize)).foregroundStyle(AuraTheme.textPrimary)
             }
             Spacer()
@@ -125,28 +140,56 @@ struct HomeView: View {
         .padding(.horizontal, AuraTheme.Spacing.xxl)
     }
 
+    /// Greeting with the weather folded inline ("Good evening · ☀ 72° clear"). Weather shows
+    /// only when a display-eligible snapshot exists. Held to one line (`lineLimit(1)` +
+    /// `minimumScaleFactor`) so weather arriving/leaving never wraps and never pushes the
+    /// "Aura" wordmark down. Read as one composed VoiceOver element.
+    private var greetingLine: some View {
+        let snap = weather.displaySnapshot(now: Date())
+        return HStack(spacing: 4) {
+            Text(greeting)
+            if let snap {
+                Text("·").foregroundStyle(AuraTheme.textSecondary.opacity(0.6))
+                Image(systemName: WeatherGreeting.symbolName(for: snap.condition))
+                    .foregroundStyle(AuraTheme.accent)
+                    .accessibilityHidden(true)
+                Text(WeatherGreeting.temperatureText(snap.temperature, locale: .current))
+                    .foregroundStyle(AuraTheme.textPrimary)
+                let word = WeatherGreeting.text(for: snap.condition)
+                if !word.isEmpty { Text(word) }
+            }
+        }
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(AuraTheme.textSecondary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(WeatherGreeting.accessibilityText(
+            greeting: greeting, snapshot: snap, locale: .current))
+    }
+
     /// Maps-style utility cluster over the terrain — History + Settings, reached by pushing
     /// (which empties the dashboard sheet, so each opens full-screen with a back button). Uses
     /// the shipped cockpit control style, so Reduce Transparency / Motion / Contrast are handled.
     private var headerControls: some View {
-        HStack(spacing: AuraTheme.Spacing.sm) {
-            Button { router.push(.history) } label: {
-                Image(systemName: "clock.arrow.circlepath")
-            }
-            .buttonStyle(.hudControl)
-            .accessibilityLabel("History")
-            .accessibilityHint("Your past rides")
-            .accessibilityIdentifier("home.history")
+        GlassGroup(spacing: AuraTheme.Spacing.sm) {
+            HStack(spacing: AuraTheme.Spacing.sm) {
+                GlassCircleButton { router.push(.history) } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                .accessibilityLabel("History")
+                .accessibilityHint("Your past rides")
+                .accessibilityIdentifier("home.history")
 
-            Button { router.push(.settings) } label: {
-                Image(systemName: "gearshape.fill")
+                GlassCircleButton { router.push(.settings) } label: {
+                    Image(systemName: "gearshape.fill")
+                }
+                .accessibilityLabel("Settings")
+                .accessibilityHint("App settings and preferences")
+                .accessibilityIdentifier("home.settings")
             }
-            .buttonStyle(.hudControl)
-            .accessibilityLabel("Settings")
-            .accessibilityHint("App settings and preferences")
-            .accessibilityIdentifier("home.settings")
         }
-        // Utilities read after the primary "Where to?" (3), glance (2), and Explore/Join (1)
+        // Utilities read after the primary "Where to?" (3), glance (2), and the chips (1)
         // in VoiceOver — never before the dominant action, despite sitting at the top.
         .accessibilitySortPriority(-1)
     }
@@ -185,6 +228,7 @@ struct HomeView: View {
                 }
             }
         }
+        .id("saved")
     }
 
     private var recentsSection: some View {
