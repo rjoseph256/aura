@@ -357,7 +357,7 @@ git commit -m "refactor(cockpit): extract shared InstrumentChassis + CockpitInst
 
 ### Task 4: Make navigate `InstrumentPanel` a thin caller of the chassis
 
-Rewrite `InstrumentPanel` to render through `InstrumentChassis` with a to-go/ETA column, pixel- and VoiceOver-identical to today.
+Rewrite `InstrumentPanel` to render through `InstrumentChassis` with a to-go/ETA column. It renders the same pixels and reads as one composed VoiceOver element, as today — note the composed label moves from the TO-GO instrument to the column container, an equivalent single-element read, confirmed on device in Task 9.
 
 **Files:**
 - Modify: `Aura/Sources/Ride/InstrumentPanel.swift`
@@ -667,6 +667,8 @@ git commit -m "fix(ride): cancel() ends the Live Activity so a discarded ride do
 
 The core integration. `RideMapView` gains a `@Binding` viewport (so the HUD can recenter); `RideHUDView` is its only production caller, so both change together to keep the build green. `RideHUDView` is rebuilt: auto-start in `.task`, the `ExploreInstrumentPanel` + `ControlCluster` cockpit, an always-visible discard/end back button, and matched `swipeBackEnabled`.
 
+> **Depends on Task 7:** discard relies on `cancel()` ending the Live Activity. `.task` auto-start is safe against re-fire (e.g. after the permission sheet dismisses) because `coordinator.start()` is a no-op while already recording; the discard + `onDisappear` double-`cancel()` is safe because `activity.end()` and `stopStreaming()` are idempotent.
+
 **Files:**
 - Modify: `Aura/Sources/Ride/RideMapView.swift` (viewport binding + preview)
 - Modify: `Aura/Sources/Ride/RideHUDView.swift` (full rebuild)
@@ -674,6 +676,11 @@ The core integration. `RideMapView` gains a `@Binding` viewport (so the HUD can 
 **Interfaces:**
 - Consumes: `ExploreInstrumentPanel` (Task 5), `ExploreInstrumentState` (Task 1), `ControlCluster` (Task 6), `RideBackOutGate` (Task 2), `RideSessionCoordinator` (`.start`, `.cancel`, `.finish`, `.stats`, `.elapsed`, `.currentSpeedMetersPerSecond`, `.isRecording`, `.finishedRide`, `.saveFailed`), `MapboxMaps.Viewport` / `withViewportAnimation`.
 - Produces: an Explore cockpit that reads `RideMapView(track:viewport:)`.
+
+- [ ] **Step 0: Confirm `RideMapView` has no other production caller**
+
+Run: `grep -rn "RideMapView(" Aura/Sources --include="*.swift" | grep -v "struct RideMapView"`
+Expected: only `RideHUDView.swift` and the `RideMapView.swift` `#Preview`. If another production caller appears, it must also pass the new `viewport` binding — reconcile before proceeding.
 
 - [ ] **Step 1: Add the viewport binding to `RideMapView`**
 
@@ -716,7 +723,7 @@ with a binding:
 
 - [ ] **Step 2: Rebuild `RideHUDView`**
 
-Replace the entire contents of `Aura/Sources/Ride/RideHUDView.swift` with:
+Replace the entire contents of `Aura/Sources/Ride/RideHUDView.swift` with the following (note the added `import MapboxMaps`, needed for `Viewport` and `withViewportAnimation`; the cockpit chrome and actions live in a `private extension` so the main type body stays under SwiftLint's `type_body_length`):
 
 ```swift
 import SwiftUI
@@ -743,10 +750,6 @@ struct RideHUDView: View {
     @State private var showPermission = false
     @State private var showEndConfirm = false
     @State private var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
-
-    private var canDiscard: Bool {
-        RideBackOutGate.canDiscard(distanceMeters: coordinator.stats.distanceMeters)
-    }
 
     var body: some View {
         @Bindable var coordinator = coordinator
@@ -805,8 +808,17 @@ struct RideHUDView: View {
         // gesture can't drop a real ride.
         .swipeBackEnabled(canDiscard)
     }
+}
 
-    private var bottomCockpit: some View {
+/// Cockpit chrome + actions, in an extension so the main type body stays under SwiftLint's
+/// `type_body_length` (the pattern the navigate cockpit used). Same-file `private` members of
+/// `RideHUDView` remain reachable here.
+private extension RideHUDView {
+    var canDiscard: Bool {
+        RideBackOutGate.canDiscard(distanceMeters: coordinator.stats.distanceMeters)
+    }
+
+    var bottomCockpit: some View {
         VStack(spacing: AuraTheme.Spacing.sm) {
             HStack {
                 Spacer()
@@ -827,7 +839,7 @@ struct RideHUDView: View {
         }
     }
 
-    private var backButton: some View {
+    var backButton: some View {
         Button(action: backTapped) {
             Image(systemName: "chevron.left")
         }
@@ -835,7 +847,7 @@ struct RideHUDView: View {
         .accessibilityLabel(canDiscard ? "Discard ride" : "End ride")
     }
 
-    private func backTapped() {
+    func backTapped() {
         if canDiscard {
             coordinator.cancel()
             router.popToRoot()
@@ -846,7 +858,7 @@ struct RideHUDView: View {
 
     /// Re-engages puck-following after the rider has panned. Snaps under Reduce Motion,
     /// flies otherwise — the same behavior navigate uses.
-    private func recenter() {
+    func recenter() {
         if reduceMotion {
             viewport = .followPuck(zoom: 16, bearing: .heading)
         } else {
@@ -903,7 +915,7 @@ Expected: no output (no remaining callers). If either prints a caller, stop and 
 ```bash
 git rm Aura/Sources/Ride/SpeedRail.swift Aura/Sources/Theme/SpeedReadout.swift
 ```
-Then regenerate the XcodeGen project (files removed).
+Then fix the now-stale doc comment in `NavigateHUDView.swift:15` (it still reads "SpeedRail bottom-trailing with live speed and elapsed time"; navigate uses `InstrumentPanel` now) — reword it to mention the instrument panel. Then regenerate the XcodeGen project (files removed).
 
 - [ ] **Step 3: Full build + lint + package tests**
 
