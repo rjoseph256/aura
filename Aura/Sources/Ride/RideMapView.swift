@@ -12,6 +12,7 @@ struct RideMapView: View {
     var peers: [RidePeer] = []
     var nameMap: [UUID: String] = [:]
     var selfProgress: Double = 0
+    var gems: [Gem] = []
 
     @Environment(SettingsStore.self) private var settings
     @Binding var viewport: Viewport
@@ -49,6 +50,13 @@ struct RideMapView: View {
                     }
                     .allowOverlapWithPuck(true)
                 }
+            }
+            ForEvery(gems, id: \.id) { gem in
+                MapViewAnnotation(coordinate: CLLocationCoordinate2D(latitude: gem.coordinate.latitude,
+                                                                     longitude: gem.coordinate.longitude)) {
+                    GemPinView(gem: gem)
+                }
+                .allowOverlapWithPuck(true)
             }
         }
         .mapStyle(settings.mapStyle.mapboxStyle)
