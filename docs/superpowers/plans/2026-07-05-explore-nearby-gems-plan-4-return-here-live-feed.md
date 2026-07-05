@@ -415,7 +415,9 @@ In `SavedPlacesLogic.swift`:
             byID[item.id] = item
         }
         // Preserve resurface across a CloudKit merge: if any same-id copy was flagged, keep it.
-        for id in byID.keys where list.contains(where: { $0.id == id && $0.resurface }) {
+        // Snapshot the keys (Array(...)) — mutating byID while iterating its .keys view trips
+        // Swift's exclusive-access checks.
+        for id in Array(byID.keys) where list.contains(where: { $0.id == id && $0.resurface }) {
             byID[id]?.resurface = true
         }
 ```
@@ -447,7 +449,7 @@ git commit -m "feat(places): SavedPlace.resurface + reconcile-OR + setResurface 
 **Interfaces:**
 - Produces: `RideSchemaV5.SavedPlaceRecord` (V3 fields + `resurface: Bool = false`), and `public typealias SavedPlaceRecord = RideSchemaV5.SavedPlaceRecord`. `RideMigrationPlan` gains `migrateV4toV5` (lightweight). Consumed by B2 (store mapping), B3 (invariant test), and all `SavedPlaceRecord` users (unchanged via typealias).
 
-**Why redeclare (not mutate V3's class):** `RideSchemaV3.SavedPlaceRecord` is referenced by both V3 and V4 `models`. Mutating it to add `resurface` would retroactively change what V3/V4 mean, so the V4→V5 lightweight stage would see no delta. V5 declares its **own** `SavedPlaceRecord` (same entity name, +1 attribute) so the two schemas genuinely differ and the lightweight add is well-defined. V5 is the only schema in the live container, so there is no entity-name collision at runtime.
+**Why redeclare (not mutate V3's class):** `RideSchemaV3.SavedPlaceRecord` is referenced by both V3 and V4 `models`. Mutating it to add `resurface` would retroactively change what V3/V4 mean, so the V4→V5 lightweight stage would see no delta. V5 declares its **own** `SavedPlaceRecord` (same entity name, +1 attribute) so the two schemas genuinely differ and the lightweight add is well-defined. **Same-named `@Model` classes across `VersionedSchema`s is the canonical Apple migration pattern** (cf. the SampleTrips migration sample: `TripsSchemaV1.Trip` / `V2.Trip` / `V3.Trip` all named `Trip`, all listed in the plan's `schemas`, no collision) — each `Schema(versionedSchema:)` is built independently, and the live container is built from only the current (V5) models. The migration test below is the gate: if SwiftData somehow rejected this, the test fails loudly here, before any downstream task. Do **not** "fix" it by making V3 reference V5's class via the typealias — that would put `resurface` into the V3/V4 schemas and re-break the delta.
 
 - [ ] **Step 1: Write the failing test**
 ```swift
@@ -465,10 +467,13 @@ struct SchemaV5MigrationTests {
         defer { try? FileManager.default.removeItem(at: url) }
 
         // Open at V4, insert a place (no resurface column), close.
+        // cloudKitDatabase: .none — macOS CI has no CloudKit entitlement; a file-backed
+        // container that tried to mirror would fail there. File-backed (not in-memory) is
+        // required so the store persists across the reopen that triggers migration.
         do {
             let v4 = try ModelContainer(
                 for: RideSchemaV2.RideRecord.self, RideSchemaV3.SavedPlaceRecord.self, RideSchemaV4.SeenGemRecord.self,
-                configurations: ModelConfiguration(url: url))
+                configurations: ModelConfiguration(url: url, cloudKitDatabase: .none))
             let ctx = ModelContext(v4)
             ctx.insert(RideSchemaV3.SavedPlaceRecord(
                 SavedPlace(name: "Old", subtitle: nil,
@@ -481,7 +486,7 @@ struct SchemaV5MigrationTests {
         let v5 = try ModelContainer(
             for: RideSchemaV2.RideRecord.self, SavedPlaceRecord.self, RideSchemaV4.SeenGemRecord.self,
             migrationPlan: RideMigrationPlan.self,
-            configurations: ModelConfiguration(url: url))
+            configurations: ModelConfiguration(url: url, cloudKitDatabase: .none))
         let records = try ModelContext(v5).fetch(FetchDescriptor<SavedPlaceRecord>())
         #expect(records.count == 1)
         #expect(records.first?.resurface == false)
@@ -693,7 +698,26 @@ Expected: FAIL — `save(_:subtitle:resurface:)`, `setResurface`, `updateName` m
 - [ ] **Step 3: Implement**
 
 In `SavedPlacesStore.swift`:
-- Change `save` signature to `save(_ place: Place, subtitle: String?, resurface: Bool = false) -> SaveOutcome`. After the `.added(list)` persist, if `resurface`, apply `setResurface` on the just-saved id: capture `saved`, then `if resurface { persist(SavedPlacesLogic.setResurface(id: saved.id, true, in: places)) }` and re-lookup. (Simplest: after `persist(list)` and lookup `saved`, if `resurface && !saved.resurface { persist(SavedPlacesLogic.setResurface(id: saved.id, true, in: places)); return .saved(savedPlace(for: place) ?? saved) }`.)
+- Change `save` signature to `save(_ place: Place, subtitle: String?, resurface: Bool = false) -> SaveOutcome`, and flag the list **before** the single persist (no double-write):
+```swift
+    @discardableResult
+    public func save(_ place: Place, subtitle: String?, resurface: Bool = false) -> SaveOutcome {
+        switch SavedPlacesLogic.add(place, subtitle: subtitle, to: places, now: now()) {
+        case .full:
+            return .full
+        case var .added(list):
+            if resurface, let saved = SavedPlacesLogic.saved(matching: place, in: list) {
+                list = SavedPlacesLogic.setResurface(id: saved.id, true, in: list)
+            }
+            persist(list)
+            guard let saved = savedPlace(for: place) else {
+                assertionFailure("save persisted but lookup missed")
+                return .full
+            }
+            return .saved(saved)
+        }
+    }
+```
 - Add:
 ```swift
     public func setResurface(id: UUID, _ on: Bool) {
@@ -872,18 +896,19 @@ public struct PersonalGemProvider: GemProviding {
         }
     }
 
+    // `Place.Category` cases are exactly: brewery, trailhead, address, custom
+    // (verified in AuraCore/Sources/AuraCore/Models/Place.swift). Tier is forced to
+    // .cardHaptic below regardless — this only picks the pin glyph / arrival radius.
     private static func gemCategory(_ c: Place.Category) -> GemCategory {
         switch c {
-        case .park: return .park
-        case .cafe: return .cafe
-        default: return .landmark   // the rider's own pick — always Tier-3-worthy
+        case .trailhead: return .viewpoint
+        case .brewery: return .cafe
+        default: return .landmark   // address / custom / any future case
         }
     }
 }
 ```
-(If `Place.Category` has no `.park`/`.cafe` cases, map only what exists and default `.landmark`. The implementer verifies the enum's cases in `AuraCore/Sources/AuraCore/Models/Place.swift`.)
-
-Note: `await reading.resurfacePlaces()` hops to the main actor (the method is `@MainActor`); this is the single explicit hop the arch review required.
+Note: `await reading.resurfacePlaces()` hops to the main actor (the method is `@MainActor`); this is the single explicit hop the arch review required. `SavedPlacesStore` is `@MainActor`, hence implicitly `Sendable`, so storing `any ResurfacePlacesReading` in this `Sendable` struct compiles. If strict concurrency still objects at build time, the minimal fallback is `extension SavedPlacesStore: @preconcurrency Sendable {}` — do not restructure.
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -1019,7 +1044,10 @@ git commit -m "feat(gems): Overpass query builder + JSON decode (ROH-60)"
 - Consumes: `OSMOverpass` (C3), `OSMGemMapping` (A3).
 - Produces: `LiveGemProvider(session:radiusMeters:endpoint:)` conforming `GemProviding`. `gems(near:)` performs the Overpass POST, maps elements→gems (dropping unmapped), and returns `[]` on **any** error/non-200/decodefail. Consumed by C6 (composite).
 
-**Test transport:** a `URLProtocol` stub registered on an ephemeral `URLSession`.
+**Test transport:** a `URLProtocol` stub registered on an ephemeral `URLSession`. The
+stub keeps mutable static state, so the suite is **`.serialized`** (Swift Testing runs
+tests in parallel by default — serializing this suite prevents cross-test contamination
+of `status`/`body`, the Plan-3 flake lesson). Each test sets **both** fields at the top.
 
 - [ ] **Step 1: Write the failing test**
 ```swift
@@ -1031,6 +1059,7 @@ import AuraCore
 final class StubURLProtocol: URLProtocol {
     nonisolated(unsafe) static var body: Data = Data()
     nonisolated(unsafe) static var status: Int = 200
+    static func set(status: Int, body: Data) { Self.status = status; Self.body = body }
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -1042,7 +1071,7 @@ final class StubURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-@Suite("LiveGemProvider")
+@Suite("LiveGemProvider", .serialized)
 struct LiveGemProviderTests {
     private func session() -> URLSession {
         let cfg = URLSessionConfiguration.ephemeral
@@ -1051,7 +1080,7 @@ struct LiveGemProviderTests {
     }
 
     @Test func decodesLiveGemsCappedAtTier2() async {
-        StubURLProtocol.status = 200
+        StubURLProtocol.set(status: 200, body: Data())
         StubURLProtocol.body = """
         {"elements":[{"type":"node","id":7,"lat":40.44,"lon":-79.99,"tags":{"tourism":"viewpoint","name":"Grandview"}}]}
         """.data(using: .utf8)!
@@ -1270,7 +1299,10 @@ private struct FixedProvider: GemProviding {
 }
 private struct NeverProvider: GemProviding {
     func gems(near coordinate: Coordinate) async -> [Gem] {
-        await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in } // never resumes
+        // Cancellation-AWARE stall: Task.sleep throws on cancel, so the composite's
+        // group.cancelAll() unsticks it and the structured group can exit. A bare
+        // withCheckedContinuation would ignore cancellation and HANG the task group.
+        try? await Task.sleep(for: .seconds(3600))
         return []
     }
 }
@@ -1360,15 +1392,20 @@ public struct CompositeGemProvider: GemProviding {
             for await part in group { all += part }
             return all
         }
-        async let liveGems: [Gem] = {
-            await withTaskGroup(of: [Gem]?.self) { group in
-                group.addTask { await live.gems(near: coordinate) }
-                group.addTask { await timeout(); return nil }   // nil = timed out
-                for await first in group { group.cancelAll(); return first ?? [] }
-                return []
-            }
-        }()
+        async let liveGems: [Gem] = livePath(near: coordinate)
         return Self.dedupe(await localGems + liveGems, within: dedupeMeters)
+    }
+
+    /// Live provider raced against the timeout. On timeout, live contributes []. Relies on
+    /// the live provider being cancellation-aware (URLSession is) so `cancelAll()` unsticks
+    /// the loser and the structured group can exit — a never-cancellable child would hang here.
+    private func livePath(near coordinate: Coordinate) async -> [Gem] {
+        await withTaskGroup(of: [Gem]?.self) { group in
+            group.addTask { await live.gems(near: coordinate) }
+            group.addTask { await timeout(); return nil }   // nil = timed out
+            for await first in group { group.cancelAll(); return first ?? [] }
+            return []
+        }
     }
 
     /// Pass 1: exact id, higher priority wins. Pass 2: cluster within `meters`, higher priority wins.
@@ -1412,7 +1449,7 @@ git commit -m "feat(gems): CompositeGemProvider merge + two-pass dedupe + live t
 **Interfaces:**
 - Produces: `load()` no longer queries at (0,0); the store loads **once** on the first `update(at:now:)` with a real coordinate. `update` snapshots `detourActive()` once. No public signature change (the HUD keeps calling `update` via `RideDiscoverySink`).
 
-**Design:** add `private var didLoad = false`. `update(at:now:)` sets `riderCoordinate`, and if `!didLoad` triggers a `Task { await load() }` (or loads synchronously by fetching candidates lazily). Because `update` is sync and `load` is async, restructure: `update` records the coordinate + fires a one-time `Task { await self.load() }`; `load` uses `riderCoordinate` (now non-nil), fetches candidates, seeds seen, then re-runs the decision at the current coordinate/now. To keep the current-sample decision deterministic, thread the sample `now` into load via a stored `private var lastNow`.
+**Design:** add `private var didLoad = false` and a test-observable `public private(set) var loadTask: Task<Void, Never>?`. `update(at:now:)` snapshots `detourActive()` **at entry** (before firing anything), records the coordinate, and if `!didLoad` fires a **one-time** `loadTask = Task { await load(at: now) }` capturing the sample `now` at fire-time (not read later). `load(at:)` guards `riderCoordinate != nil`, fetches candidates, seeds seen, then re-evaluates at the captured coordinate/now. `evaluate` takes the `detouring` snapshot as a parameter — never re-calls `detourActive()` mid-update. Tests await `loadTask?.value` for a deterministic barrier (no wall-clock sleep).
 
 - [ ] **Step 1: Write the failing test**
 ```swift
@@ -1437,8 +1474,8 @@ struct GemDiscoveryStoreLoadTests {
         let log = CallLog()
         let store = GemDiscoveryStore(provider: RecordingProvider(log: log, gems: []),
                                       seen: NoSeen(), haptics: NoHaptic())
-        // No update() yet → load must not have queried Null Island.
-        try? await Task.sleep(for: .milliseconds(50))
+        // No update() yet → no load task fired, so nothing queried Null Island.
+        #expect(store.loadTask == nil)
         #expect(await log.coords.isEmpty)
     }
 
@@ -1449,14 +1486,13 @@ struct GemDiscoveryStoreLoadTests {
                                       seen: NoSeen(), haptics: NoHaptic())
         store.update(at: p, now: Date(timeIntervalSince1970: 1))
         store.update(at: p, now: Date(timeIntervalSince1970: 2))
-        try? await Task.sleep(for: .milliseconds(50))
+        await store.loadTask?.value            // deterministic barrier — no wall-clock sleep
         let coords = await log.coords
         #expect(coords.count == 1)                 // exactly one load
         #expect(coords.first?.latitude == 40.44)   // never (0,0)
     }
 }
 ```
-(Note: the 50 ms sleeps here await a *Task-triggered async load* settling — this is a settle-await, acceptable; the store logic itself stays timestamp-driven.)
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -1466,32 +1502,31 @@ Expected: FAIL — current `load()` queries (0,0) and isn't auto-triggered.
 - [ ] **Step 3: Implement** — rewrite the load/update region:
 ```swift
     private var didLoad = false
+    /// The one-time initial load, exposed so callers/tests can await it deterministically.
+    public private(set) var loadTask: Task<Void, Never>?
 
     /// Loads the candidate set for the current rider coordinate. A no-op until the first
     /// fix — coordinate-filtering providers (live/personal) must never be queried at (0,0).
-    /// Triggered once from `update(at:now:)`; safe to call again (guarded by `didLoad`).
-    public func load() async {
+    /// Fired once from `update(at:now:)`; `now` is captured at fire-time and threaded in.
+    public func load(at now: Date) async {
         guard let origin = riderCoordinate else { return }
         candidates = await provider.gems(near: origin)
         seenIDs = seen.seenGemIDs()
         state = DiscoveryState(seenBefore: seenIDs)
-        if let now = lastNow { evaluate(at: origin, now: now) }
+        evaluate(at: origin, now: now, detouring: detourActive())
     }
-
-    private var lastNow: Date?
 
     public func update(at coordinate: Coordinate, now: Date) {
         riderCoordinate = coordinate
-        lastNow = now
+        let detouring = detourActive()   // snapshot ONCE at entry — no mid-update re-entrancy flip
         if !didLoad {
             didLoad = true
-            Task { await load() }
+            loadTask = Task { [now] in await load(at: now) }   // capture now at fire-time
         }
-        evaluate(at: coordinate, now: now)
+        evaluate(at: coordinate, now: now, detouring: detouring)
     }
 
-    private func evaluate(at coordinate: Coordinate, now: Date) {
-        let detouring = detourActive()   // snapshot once — no mid-update re-entrancy flip
+    private func evaluate(at coordinate: Coordinate, now: Date, detouring: Bool) {
         guard !isSuppressed else { visiblePins = []; activeCard = nil; return }
         let decision = engine.decide(from: candidates, at: coordinate, now: now, state: &state)
         visiblePins = decision.visiblePins
@@ -1505,7 +1540,7 @@ Expected: FAIL — current `load()` queries (0,0) and isn't auto-triggered.
         }
     }
 ```
-Remove the old `load()` body and the old `update` body. Delete any existing external `load()` call sites that assumed pre-fix loading (search `\.load()` in the app target; the HUD should rely on the auto-trigger — if the HUD calls `store.load()` in `.task`, that call becomes a guarded no-op until the first fix, which is fine; leave it or remove it in Task E-wiring).
+Remove the old `load()` and `update` bodies. Note the first `evaluate` runs with empty `candidates` (load hasn't finished); pins populate one fix later — acceptable. Update the `RideDiscoverySink` extension only if needed (it still calls `update(at:now:)`). Search the app target for `store.load()` call sites: the old signature is gone — either delete the eager `.task { await store.load() }` in `RideHUDView` (the auto-trigger replaces it) or, if kept, it must call the new `load(at:)` — prefer deleting it (handled in Task E3 wiring).
 
 - [ ] **Step 4: Run to verify it passes** (+ existing store suite)
 
@@ -1573,9 +1608,13 @@ public final class SeenGemStore: SeenGemStoring {
 
     public func markSeen(_ gemID: String, at date: Date) {
         guard !cached.contains(gemID) else { return }
+        cached.insert(gemID)   // optimistic: keep the cache and the context in lockstep
         context.insert(SeenGemRecord(gemID: gemID, firstSeenAt: date))
-        do { try context.save(); cached.insert(gemID) }
-        catch { assertionFailure("SeenGemStore save failed for \(gemID): \(error)") }
+        do { try context.save() }
+        catch {
+            cached.remove(gemID)   // revert so a retry re-attempts instead of skipping
+            assertionFailure("SeenGemStore save failed for \(gemID): \(error)")
+        }
     }
 }
 ```
@@ -1665,7 +1704,7 @@ git commit -m "feat(ride): mark-spot confirmation toast with Undo (ROH-60)"
 - Produces: a "mark this spot" button in the cockpit that is **not adjacent to End Ride**, disabled until `riderCoordinate != nil`; tapping saves a resurface place + fires a soft haptic + shows `MarkSpotToast`.
 
 - [ ] **Step 1: Implement**
-  - `ControlCluster`: add an `onMarkSpot: (() -> Void)?` (nil-hideable) parameter and render a button (SF Symbol `mappin.and.ellipse`) **separated** from the End-Ride button — put mark-spot at the top of the cluster (recenter/mark grouped) with End Ride visually spaced below (extra spacing / divider), so a fat-finger for End never lands on mark. Disable when `onMarkSpot == nil`.
+  - `ControlCluster`: add an `onMarkSpot: (() -> Void)?` (nil-hideable) parameter and render a button (SF Symbol `mappin.and.ellipse`) **separated** from the End-Ride button — order the cluster recenter → mark-spot → (mute) → **≥16 pt gap** → End Ride, so the recenter/mark group and the destructive End sit in distinct tap zones and a fat-finger for End never lands on mark. Use `AuraTheme.Spacing` for the gap (nearest token ≥16 pt); the exact value is confirmed on device in G2. Disable (dim, non-tappable) when `onMarkSpot == nil`.
   - `RideHUDView`: build a `SavedPlacesStore` (env or lazily like the gem store); pass `onMarkSpot` that:
     1. guards `let coordinate = gemStore.riderCoordinate`.
     2. `let outcome = savedPlacesStore.save(Place(id: UUID(), name: "Marked spot", subtitle: nil, coordinate: coordinate, category: .custom), subtitle: nil, resurface: true)`.
@@ -1828,7 +1867,7 @@ git commit -m "fix(detour): cacheKey scales longitude by cos(lat) as documented 
 - Consumes: the existing `GuidanceController` offline/`headingOnly` path + `probeNetworkRecovery` fix-count throttle.
 - Produces: an e2e test: start guidance → routing fails (offline) → controller enters `headingOnly` → feed the throttle's worth of fixes with the routing seam now succeeding → controller upgrades to full guidance.
 
-- [ ] **Step 1: Read the detour suite** to learn the existing `GuidanceController` test doubles (`DetourRouting` stub, `HeadingProviding` stub, the `awaitState { }` helper from Plan 3). Reuse them — do **not** invent new sleep-based barriers.
+- [ ] **Step 1: Read the detour suite** — `grep -rl "GuidanceController" AuraCore/Tests/AuraKitTests/` to find the Plan-3 detour tests; reuse their `DetourRouting` stub, `HeadingProviding` stub, and the `awaitState { }` / `pendingRoutingTask` helper. Do **not** invent new sleep-based barriers.
 
 - [ ] **Step 2: Write the test** — model it on the existing offline test, but flip the routing stub from failing to succeeding after N fixes and assert the phase upgrades. Use the `awaitState`/`pendingRoutingTask` helper for synchronization, never wall-clock `Task.sleep` as a barrier.
 ```swift
