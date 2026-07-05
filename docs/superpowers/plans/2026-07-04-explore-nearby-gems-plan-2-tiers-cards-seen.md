@@ -249,7 +249,7 @@ git commit -m "feat(gems): engine active-surfacing decision (tier/approach/coold
   - `@MainActor protocol SeenGemStoring { func seenGemIDs() -> Set<String>; func markSeen(_ gemID: String, at date: Date) }`
   - `@MainActor final class SeenGemStore: SeenGemStoring { init(container: ModelContainer) }`
 
-> First **read** `RideSchemaV3.swift`, `RideMigrationPlan.swift`, and `RideStore.swift`. Follow the existing **V2→V3** pattern exactly: V3 added `SavedPlaceRecord` as a *lightweight* migration (`MigrationStage.lightweight`). V4 adds `SeenGemRecord` the same way. In `RideStore.swift`, whichever `Schema`/`VersionedSchema` the `ModelContainer` is currently built from must be updated to `RideSchemaV4` (and `RideMigrationPlan` already gets the new stage). Mirror `SavedPlacesStore.swift` for the store shape (it holds a `ModelContainer`, opens a `ModelContext`, fetches/inserts). Match the real APIs; if anything differs from this sketch, follow the file.
+> First **read** `RideSchemaV3.swift`, `RideMigrationPlan.swift`, and `RideStore.swift`. Follow the existing **V2→V3** pattern exactly: V3 added `SavedPlaceRecord` as a *lightweight* migration (`MigrationStage.lightweight`). V4 adds `SeenGemRecord` the same way. **`RideStore` does NOT use `Schema(versionedSchema:)`** — it builds `ModelContainer(for: RideRecord.self, SavedPlaceRecord.self, migrationPlan: RideMigrationPlan.self, …)` (verified). So the wiring is: (a) add `RideSchemaV4.self` + the `migrateV3toV4` stage to `RideMigrationPlan`, and (b) add `SeenGemRecord.self` to the `for:` model list in **both** `RideStore.persistent()` and `RideStore.inMemory()` — an in-memory container missing the model would fail any test that seeds a `SeenGemStore` from it. Mirror `SavedPlacesStore.swift` for the store shape (holds a container, opens a `ModelContext`, fetches/inserts). Match the real APIs; if anything differs, follow the file.
 
 - [ ] **Step 1: Create the schema, migration, and seam**
 
@@ -292,7 +292,7 @@ In `RideMigrationPlan.swift`: add `RideSchemaV4.self` to the `schemas` array, ap
         toVersion: RideSchemaV4.self)
 ```
 
-In `RideStore.swift`: change the `Schema(versionedSchema:)` / container construction that currently references `RideSchemaV3` to `RideSchemaV4` (keep `migrationPlan: RideMigrationPlan.self`).
+In `RideStore.swift`: add `SeenGemRecord.self` to the `ModelContainer(for: …)` model list in **both** `persistent()` and `inMemory()` (e.g. `ModelContainer(for: RideRecord.self, SavedPlaceRecord.self, SeenGemRecord.self, migrationPlan: RideMigrationPlan.self, …)`). There is no `Schema(versionedSchema:)` line to change — the migration plan supplies the versioning; the `for:` list defines the container's active models, so `SeenGemRecord` must be added there or it won't exist in the store.
 
 `SeenGemStoring.swift`:
 
@@ -571,7 +571,7 @@ extension GemDiscoveryStore: RideDiscoverySink {
 }
 ```
 
-Update the existing `GemDiscoveryStoreTests.swift`: pass the new deps and the `now:` arg. Add the same private `InMemorySeen`/`SpyHaptics` helpers (or a shared test helper file), construct with `seen: InMemorySeen(), haptics: SpyHaptics()`, and change `store.update(at: c)` calls to `store.update(at: c, now: Date(timeIntervalSince1970: 0))`. The Plan-1 assertions (`visiblePins`, suppression) stay valid.
+Update the existing `GemDiscoveryStoreTests.swift` (Plan-1) so it still compiles + passes: add the same private `InMemorySeen`/`SpyHaptics` stubs used in `GemDiscoveryStoreActiveTests` (copy them in, or extract a shared `GemStoreTestDoubles.swift` and use it from both suites — DRY), update **both** `GemDiscoveryStore(...)` call sites to pass `seen: InMemorySeen(), haptics: SpyHaptics()`, and change every `store.update(at: c)` to `store.update(at: c, now: Date(timeIntervalSince1970: 0))`. The Plan-1 assertions (`visiblePins`, suppression) stay valid.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -633,7 +633,7 @@ struct GemPeekCard: View {
             }
             .padding(12)
             .background(RoundedRectangle(cornerRadius: 18).fill(AuraTheme.surface))
-            .overlay(RoundedRectangle(cornerRadius: 18).stroke(AuraTheme.hairline(), lineWidth: 0.5))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(AuraTheme.hairline(.standard), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
@@ -823,58 +823,72 @@ final class GemHapticPlayer: GemHapticPlaying {
 
 - [ ] **Step 2: Wire the store + card + sheet in `RideHUDView`**
 
-Replace the Plan-1 `gems` store declaration (the commented `@State private var gems = GemDiscoveryStore(provider: CuratedGemProvider())`) with the new init, seeding the `SeenGemStore` from the app's `RideStore` container (read the file for how `rideStore`/its `container` is referenced):
+`GemDiscoveryStore` now needs env-derived deps (`SeenGemStore(container:)` from the injected `@Environment(RideStore.self) private var rideStore`), which a `@State` **initializer cannot read** — so build the store **lazily in the appear task** and hold it optionally. Read `RideHUDView.swift` first to match its real `@Environment`/`.task`/`coordinator.start` structure.
+
+Replace the Plan-1 `@State private var gems = GemDiscoveryStore(provider: CuratedGemProvider())` with an optional:
 
 ```swift
-        // Free rides are solo by construction — group rides use NavigateHUDView +
-        // GroupRideSession, never this HUD — so gem discovery is never suppressed here.
-        @State private var gems = GemDiscoveryStore(
-            provider: CuratedGemProvider(),
-            seen: SeenGemStore(container: RideStore.shared.container), // match the real RideStore accessor
-            haptics: GemHapticPlayer())
+        @State private var gems: GemDiscoveryStore?
 ```
 
-> `RideStore.shared.container` is a sketch — use the actual `ModelContainer` the app already builds (the same one `RideHUDView` passes to `coordinator.start(saving:)`). If `rideStore` is injected via `@Environment`, construct the `SeenGemStore` in `.task`/`onAppear` instead and hold it in `@State`. Match the file; do not introduce a second container.
-
-Pass seen + selection into the map (extend the Task-1-of-Plan-1 `RideMapView(...)` call):
+Fold the build into the existing appear `.task` (the one that calls `coordinator.start`) — do **not** add a third `.task`. Build the store from the environment, pass it as the discovery sink, then load:
 
 ```swift
-        RideMapView(track: coordinator.track, gems: gems.visiblePins,
-                    seenGemIDs: gems.seenIDs, onSelectGem: { gems.select($0) },
+        .task {
+            let store = gems ?? GemDiscoveryStore(
+                provider: CuratedGemProvider(),
+                seen: SeenGemStore(container: rideStore.container),
+                haptics: GemHapticPlayer())
+            gems = store
+            coordinator.start(location: location, saving: rideStore, units: settings.units,
+                              authorization: location.authorization,
+                              saveToHealth: settings.saveToHealth, discoverySink: store)
+            await store.load()
+        }
+```
+
+(Keep every existing `coordinator.start` argument; only `discoverySink:` changes from Plan-1's `gems` to the freshly-built `store`. If `rideStore` isn't already `@Environment(RideStore.self) private var rideStore` here, add it; if it's constructed differently, use whatever exposes the app's `ModelContainer` — do not introduce a second container.)
+
+Compute the distance string **in the view** (reuse `RideStatsFormatter` — do NOT add formatting to the store):
+
+```swift
+        private func gemDistanceText(_ gem: Gem) -> String {
+            guard let here = gems?.riderCoordinate else { return "" }
+            return RideStatsFormatter(units: settings.units).maneuverDistance(Geo.distance(gem.coordinate, here))
+        }
+```
+
+> Confirm the real formatter API: the reviewer found `RideStatsFormatter(units:).maneuverDistance(_ meters: Double) -> String` → "0.4 mi" / "650 m". If it differs, match it (grep `AuraCore/Sources/AuraKit` for the mi/km formatter). `Geo` + `RideStatsFormatter` are both in AuraCore/AuraKit, importable here.
+
+Pass pins + seen + selection to the map, guarding the optional store:
+
+```swift
+        RideMapView(track: coordinator.track,
+                    gems: gems?.visiblePins ?? [],
+                    seenGemIDs: gems?.seenIDs ?? [],
+                    onSelectGem: { gem in gems?.select(gem) },
                     viewport: $viewport)
 ```
 
-Overlay the peek card near the bottom (above the cockpit), driven by `gems.activeCard`:
+Overlay the peek card and present the detail sheet. Use a **manual `Binding`** for the sheet — `$gems.selectedGem` is invalid (`gems` is an optional `@State` of an `@Observable`; `$`-projection needs a non-optional `@Bindable`):
 
 ```swift
         .overlay(alignment: .bottom) {
-            if let gem = gems.activeCard {
-                GemPeekCard(gem: gem, distanceText: gems.distanceText(to: gem),
-                            onTap: { gems.select(gem); gems.dismissActiveCard() },
-                            onDismiss: { gems.dismissActiveCard() })
+            if let store = gems, let gem = store.activeCard {
+                GemPeekCard(gem: gem, distanceText: gemDistanceText(gem),
+                            onTap: { store.select(gem); store.dismissActiveCard() },
+                            onDismiss: { store.dismissActiveCard() })
                     .padding(.horizontal, 12).padding(.bottom, 120)
             }
         }
-        .animation(.snappy, value: gems.activeCard?.id)
-        .sheet(item: $gems.selectedGem) { gem in
-            GemDetailSheet(gem: gem, distanceText: gems.distanceText(to: gem))
+        .animation(.snappy, value: gems?.activeCard?.id)
+        .sheet(item: Binding(get: { gems?.selectedGem },
+                             set: { gems?.selectedGem = $0 })) { gem in
+            GemDetailSheet(gem: gem, distanceText: gemDistanceText(gem))
         }
 ```
 
-Add a small distance formatter to `GemDiscoveryStore` (AuraKit) so both the card and sheet share it — append to the store:
-
-```swift
-    /// Distance from the rider to a gem, formatted (e.g. "0.4 mi" / "650 m"). Empty if no fix yet.
-    public func distanceText(to gem: Gem) -> String {
-        guard let here = riderCoordinate else { return "" }
-        let meters = Geo.distance(gem.coordinate, here)
-        return MetersFormatter.short(meters) // reuse the app's existing distance formatter
-    }
-```
-
-> `MetersFormatter.short` is a sketch — reuse whatever distance formatter Aura already uses in the cockpit/summary (grep for the mi/km formatting; e.g. `RideStatsFormatter`). If it lives in the app target, compute the string in `RideHUDView` and pass it in instead of adding `distanceText` to the store. Match reality; add no new formatting logic if one exists.
-
-The `.freeRide` auto-start already forwards fixes to `gems` (Plan 1's `discoverySink: gems`), and the store now threads `point.timestamp` as `now` — so no change to `coordinator.start(...)` is needed.
+The `.freeRide` auto-start forwards each fix to the store (`discoverySink: store`), and the store threads `point.timestamp` as `now` — so no other `coordinator.start(...)` change is needed. **The store gains no `distanceText` method** (Task 3's store is unchanged by this task).
 
 - [ ] **Step 3: Build + on-device smoke (controller)**
 
@@ -883,7 +897,7 @@ Delegate to the builder agent: "Build the Aura scheme for iPhone 17; then boot t
 - [ ] **Step 4: Commit**
 
 ```bash
-git add Aura/Sources/Ride/RideHUDView.swift Aura/Sources/Ride/GemHapticPlayer.swift AuraCore/Sources/AuraKit/Gems/GemDiscoveryStore.swift
+git add Aura/Sources/Ride/RideHUDView.swift Aura/Sources/Ride/GemHapticPlayer.swift
 git commit -m "feat(gems): peek card + detail sheet + seen pins wired into the free-ride HUD"
 ```
 
@@ -895,3 +909,14 @@ git commit -m "feat(gems): peek card + detail sheet + seen pins wired into the f
 - **Type consistency:** `DiscoveryState`/`DiscoveryDecision`, `decide(from:at:now:state:)`, `SeenGemStoring.seenGemIDs()/markSeen(_:at:)`, `GemHapticPlaying.playGemSurfaced()`, `GemDiscoveryStore.init(provider:engine:seen:haptics:)` + `update(at:now:)` + `activeCard`/`selectedGem`/`seenIDs`/`riderCoordinate`/`dismissActiveCard()`/`select(_:)`, `GemPinView(gem:isSeen:onTap:)` + `static symbol(for:)`, `GemPeekCard(gem:distanceText:onTap:onDismiss:)`, `GemDetailSheet(gem:distanceText:)`, `RideMapView.seenGemIDs`/`onSelectGem` are used identically across the tasks that define and consume them.
 - **Persistence risk called out:** Task 2's V3→V4 container-schema update in `RideStore.swift` is the one integration edit that isn't fully code-shown (the file wasn't read while authoring) — the task instructs reading it and following the V2→V3 lightweight pattern verbatim. Flag for the adversarial plan review + the implementer.
 - **Known deferrable minors carried from Plan 1** (roll-up, address when touched): drop the unused `import Foundation` in the engine (Task 1 touches that file — drop it there); `.climb` glyph is generic; `arrivalRadiusMeters` values want a product look before Plan 3 wires arrival detection.
+
+## Plan review reconciliation
+
+Hardened after a 2-lens adversarial plan review (2026-07-04). Fixes folded in:
+1. **Task 2 — `RideStore` container.** It uses `ModelContainer(for: RideRecord.self, SavedPlaceRecord.self, migrationPlan:)`, not `Schema(versionedSchema:)`. Corrected: add `SeenGemRecord.self` to the `for:` list in **both** `persistent()` and `inMemory()` (an in-memory container missing the model breaks any test seeding a `SeenGemStore` from it) + the `migrateV3toV4` stage.
+2. **Task 7 — lazy store build.** `RideStore` is `@Environment`, unreadable at `@State` init; the store is now built in the appear `.task` from `rideStore.container` and held as `@State private var gems: GemDiscoveryStore?`.
+3. **Task 7 — `.sheet` binding.** `$gems.selectedGem` is invalid on an optional `@Observable`; replaced with a manual `Binding(get:set:)`.
+4. **Task 7 — distance formatting.** `MetersFormatter` doesn't exist; use `RideStatsFormatter(units:).maneuverDistance(_:)` computed **in the view** (`gemDistanceText`), not on the store. The store gains no `distanceText`.
+5. **Task 4 — `AuraTheme.hairline(.standard)`** (required `ColorSchemeContrast` arg).
+6. **Task 3 — existing tests.** Explicitly add the `InMemorySeen`/`SpyHaptics` stubs (shared file) + update both Plan-1 call sites + `update(at:now:)`.
+7. Minor: engine `DiscoveryDecision` memberwise init is fine as written; the "crash can't un-see it" claim softened to "written immediately, before the next fix." Confirmed sound: `AuraTheme` tokens, `Gem.id: String` for `.sheet(item:)`, `GemTier: Comparable`, `GemHapticPlaying`-in-AuraKit split, `RideSessionCoordinatorDiscoveryTests` unaffected.
