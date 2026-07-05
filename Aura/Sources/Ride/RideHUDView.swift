@@ -158,7 +158,9 @@ struct RideHUDView: View {
         // the explainer; the back button (at zero distance) discards cleanly.
         .task {
             let store = gems ?? GemDiscoveryStore(
-                provider: CuratedGemProvider(),
+                provider: CompositeGemProvider(
+                    local: [PersonalGemProvider(reading: savedPlaces), CuratedGemProvider()],
+                    live: LiveGemProvider()),
                 seen: SeenGemStore(container: rideStore.container),
                 haptics: GemHapticPlayer())
             // Arbiter (R7): a detour in flight suppresses the gem peek card + Tier-3 haptic
