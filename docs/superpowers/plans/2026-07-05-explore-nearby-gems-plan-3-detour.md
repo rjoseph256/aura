@@ -21,6 +21,8 @@
 
 Spec: `docs/superpowers/specs/2026-07-05-explore-gems-plan-3-detour-design.md` (incl. Review reconciliation R1–R16).
 
+**Plan-review reconciliation (2026-07-05, 2 lenses):** signatures verified against source and corrected — `ScriptedGuidanceSession(script:)` (not `events:`); `Route.init` requires `waypoints:` and `Profile` is `.mostPaths/.fastest/.flattest` (no `.cycling`); `TrackPoint.init(coordinate:elevation:timestamp:speedMetersPerSecond:)`; fonts are native SwiftUI (no `AuraTheme.Font`); `RideStatsFormatter(units:).maneuverDistance(_:)` is an instance method; `RideHapticCue.arrival` exists; Task 9's explicit `init` re-seeds ALL `@State` (`coordinator`/`showPermission`/`showEndConfirm`/`viewport`/`gems`); and the stale-completion test uses a `DelayedFakeRouting` so it actually exercises the generation guard.
+
 ---
 
 ## File structure
@@ -545,13 +547,16 @@ import AuraCore
     private let origin = Coordinate(latitude: 40.44, longitude: -79.99)
 
     private func route(to gem: Gem) -> Route {
-        Route(origin: origin, destination: gem.coordinate,
-              geometry: [origin, gem.coordinate], profile: .cycling,
+        // Real Route.init: (id:UUID=…, origin, destination, waypoints, geometry, profile,
+        // distanceMeters, estimatedDurationSeconds, elevationGainMeters, elevationProfile=[]).
+        // Profile cases are .mostPaths/.fastest/.flattest — there is no .cycling (verified).
+        Route(origin: origin, destination: gem.coordinate, waypoints: [],
+              geometry: [origin, gem.coordinate], profile: .mostPaths,
               distanceMeters: 1000, estimatedDurationSeconds: 300, elevationGainMeters: 0,
               elevationProfile: [0, 0])
     }
 
-    /// A DetourRouting fake whose result we control, recording call count.
+    /// A DetourRouting fake whose result we control, recording call count. Returns synchronously.
     final class FakeRouting: DetourRouting, @unchecked Sendable {
         var result: Result<Route, Error>
         private(set) var calls = 0
@@ -561,12 +566,22 @@ import AuraCore
             switch result { case .success(let r): return r; case .failure(let e): throw e }
         }
     }
+    /// Like FakeRouting but suspends first, so a `cancel()` issued before it resolves actually
+    /// exercises the stale-completion generation guard (a synchronous fake would resolve too fast).
+    final class DelayedFakeRouting: DetourRouting, @unchecked Sendable {
+        var result: Result<Route, Error>
+        init(_ result: Result<Route, Error>) { self.result = result }
+        func route(from origin: Coordinate, to destination: Coordinate) async throws -> Route {
+            try await Task.sleep(for: .milliseconds(10))
+            switch result { case .success(let r): return r; case .failure(let e): throw e }
+        }
+    }
     struct Offline: Error {}
     struct NoHeading: HeadingProviding { func headings() -> AsyncStream<Double> { AsyncStream { $0.finish() } } }
 
     private func controller(routing: any DetourRouting) -> GuidanceController {
         GuidanceController(
-            makeGuidance: { GuidanceViewModel(session: ScriptedGuidanceSession(events: [])) },
+            makeGuidance: { GuidanceViewModel(session: ScriptedGuidanceSession(script: [])) },
             routing: routing, heading: NoHeading())
     }
 
@@ -584,13 +599,14 @@ import AuraCore
 
     @Test func cancelBeforeRouteResolvesDiscardsStaleCompletion() async throws {
         let g = gem("a")
-        // Routing that resolves successfully but we cancel first → must NOT start guiding (R2).
-        let c = controller(routing: FakeRouting(.success(route(to: g))))
+        // DELAYED routing so the route is still pending when cancel runs — this actually
+        // exercises the generation guard (a synchronous fake would resolve before cancel, R2).
+        let c = controller(routing: DelayedFakeRouting(.success(route(to: g))))
         c.requestDetour(g, from: origin)
-        c.cancel()                                      // bumps generation
+        c.cancel()                                      // bumps generation while route pending
         #expect(c.phase == .inactive)
-        try await Task.sleep(for: .milliseconds(50))
-        #expect(c.phase == .inactive)                   // stale routeReady ignored
+        try await Task.sleep(for: .milliseconds(50))    // let the delayed route resolve late
+        #expect(c.phase == .inactive)                   // stale routeReady discarded by guard
         #expect(c.guidance == nil)
     }
 
@@ -619,7 +635,7 @@ import AuraCore
         // Scripted session that arrives immediately drives onArrive → detach + confirm.
         let g = gem("a")
         let c = GuidanceController(
-            makeGuidance: { GuidanceViewModel(session: ScriptedGuidanceSession(events: [.arrivedAtDestination])) },
+            makeGuidance: { GuidanceViewModel(session: ScriptedGuidanceSession(script: [.arrivedAtDestination])) },
             routing: FakeRouting(.success(route(to: g))), heading: NoHeading())
         c.requestDetour(g, from: origin)
         try await Task.sleep(for: .milliseconds(80))
@@ -746,13 +762,14 @@ Append to `GuidanceControllerTests.swift`:
     @Test func headingOnlyArrivesWithinRadius() async throws {
         let g = gem("a", lat: 40.4410, lng: -79.9959)   // park → 70 m radius
         let c = GuidanceController(
-            makeGuidance: { GuidanceViewModel(session: ScriptedGuidanceSession(events: [])) },
+            makeGuidance: { GuidanceViewModel(session: ScriptedGuidanceSession(script: [])) },
             routing: FakeRouting(.failure(Offline())), heading: FixedHeading(degrees: 0))
         c.requestDetour(g, from: Coordinate(latitude: 40.4406, longitude: -79.9959))
         try await Task.sleep(for: .milliseconds(50))
         #expect(c.phase == .headingOnly(g))
         // Feed a fix ~10 m from the gem → inside the 70 m arrival radius.
-        c.riderDidUpdate(TrackPoint(coordinate: g.coordinate, timestamp: .init(), speedMetersPerSecond: 3))
+        // Real TrackPoint.init: (coordinate:, elevation: Double?, timestamp:, speedMetersPerSecond: Double? = nil).
+        c.riderDidUpdate(TrackPoint(coordinate: g.coordinate, elevation: nil, timestamp: .init(), speedMetersPerSecond: 3))
         #expect(c.phase == .inactive)
         #expect(c.arrivalBanner?.id == "a")
     }
@@ -760,12 +777,12 @@ Append to `GuidanceControllerTests.swift`:
     @Test func headingOnlyPublishesArrowBeforeArrival() async throws {
         let g = gem("a", lat: 40.55, lng: -79.99)        // far away
         let c = GuidanceController(
-            makeGuidance: { GuidanceViewModel(session: ScriptedGuidanceSession(events: [])) },
+            makeGuidance: { GuidanceViewModel(session: ScriptedGuidanceSession(script: [])) },
             routing: FakeRouting(.failure(Offline())), heading: FixedHeading(degrees: 0))
         c.requestDetour(g, from: Coordinate(latitude: 40.44, longitude: -79.99))
         try await Task.sleep(for: .milliseconds(50))
         c.riderDidUpdate(TrackPoint(coordinate: Coordinate(latitude: 40.45, longitude: -79.99),
-                                    timestamp: .init(), speedMetersPerSecond: 3))
+                                    elevation: nil, timestamp: .init(), speedMetersPerSecond: 3))
         #expect(c.headingArrow != nil)
         #expect((c.headingArrow?.straightLineDistanceMeters ?? 0) > 100)
     }
@@ -1165,7 +1182,7 @@ In `GemDetailSheet.swift`, extend the inputs and add a button below the `why` bl
                 onTakeMeThere()
             } label: {
                 Label("Take me there", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
-                    .font(AuraTheme.Font.headline)
+                    .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
             }
@@ -1176,12 +1193,12 @@ In `GemDetailSheet.swift`, extend the inputs and add a button below the `why` bl
                                         : "Waiting for GPS")
             if !canRoute {
                 Text("Waiting for GPS…")
-                    .font(AuraTheme.Font.caption)
+                    .font(.caption)
                     .foregroundStyle(AuraTheme.textSecondary)
             }
 ```
 
-> Match the real `AuraTheme` token names by reading the theme file (e.g. `AuraTheme.Font.headline`, `AuraTheme.accent`, `AuraTheme.textSecondary` may differ — use the actual ones the file exports). Confirm the SF Symbol name via the SF Symbols availability approach noted in the roh44 memory if unsure; fall back to `"figure.outdoor.cycle"` or `"location.north.line.fill"` if the diamond glyph is unavailable on the deployment target.
+> Match the real `AuraTheme` token names by reading the theme file (e.g. `.headline`, `AuraTheme.accent`, `AuraTheme.textSecondary` may differ — use the actual ones the file exports). Confirm the SF Symbol name via the SF Symbols availability approach noted in the roh44 memory if unsure; fall back to `"figure.outdoor.cycle"` or `"location.north.line.fill"` if the diamond glyph is unavailable on the deployment target.
 
 - [ ] **Step 2: Build — verify it compiles**
 
@@ -1255,11 +1272,11 @@ struct DetourOverlay: View {
     private func destinationChip(_ gem: Gem, distance: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "flag.fill").foregroundStyle(AuraTheme.accent)
-            Text(gem.name).font(AuraTheme.Font.subheadline).lineLimit(1)
-            Text(distance).font(AuraTheme.Font.caption).foregroundStyle(AuraTheme.textSecondary)
+            Text(gem.name).font(.subheadline).lineLimit(1)
+            Text(distance).font(.caption).foregroundStyle(AuraTheme.textSecondary)
             Spacer(minLength: 8)
             Button("Stop", action: onStop)
-                .font(AuraTheme.Font.subheadline)
+                .font(.subheadline)
                 .buttonStyle(.bordered)                 // neutral — NOT .destructive
                 .accessibilityLabel("Stop detour")
         }
@@ -1276,7 +1293,7 @@ struct DetourOverlay: View {
                 .rotationEffect(.degrees(controller.headingArrow?.relativeBearingDegrees ?? 0))
                 .animation(reduceMotion ? nil : .easeInOut, value: controller.headingArrow?.relativeBearingDegrees)
             Text("Offline · approximate direction")
-                .font(AuraTheme.Font.caption2).foregroundStyle(AuraTheme.textSecondary)
+                .font(.caption2).foregroundStyle(AuraTheme.textSecondary)
         }
         .padding(12).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
@@ -1284,7 +1301,7 @@ struct DetourOverlay: View {
     private func routingChip(_ gem: Gem) -> some View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small)
-            Text("Routing to \(gem.name)…").font(AuraTheme.Font.subheadline)
+            Text("Routing to \(gem.name)…").font(.subheadline)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(.ultraThinMaterial, in: Capsule())
@@ -1293,7 +1310,7 @@ struct DetourOverlay: View {
     private func arrivalChip(_ gem: Gem) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill").foregroundStyle(AuraTheme.accent)
-            Text("Arrived — \(gem.name)").font(AuraTheme.Font.subheadline)
+            Text("Arrived — \(gem.name)").font(.subheadline)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(.ultraThinMaterial, in: Capsule())
@@ -1303,16 +1320,16 @@ struct DetourOverlay: View {
     private func vm_distance() -> String {
         // distance-remaining from the guidance update, formatted; fall back to blank.
         guard let meters = controller.guidance?.lastUpdate?.distanceRemainingMeters else { return "" }
-        return RideStatsFormatter.maneuverDistance(meters: meters, units: units)
+        return RideStatsFormatter(units: units).maneuverDistance(meters)
     }
     private func arrowDistanceText() -> String {
         guard let m = controller.headingArrow?.straightLineDistanceMeters else { return "" }
-        return RideStatsFormatter.maneuverDistance(meters: m, units: units)
+        return RideStatsFormatter(units: units).maneuverDistance(m)
     }
 }
 ```
 
-> Fix token/formatter names against the codebase: `AuraTheme.Font.*`, `AuraTheme.Spacing.sm`, `AuraTheme.accent`, `AuraTheme.textSecondary`, and `RideStatsFormatter.maneuverDistance(meters:units:)` (used the same way in `RideHUDView` per the Plan-2 memory). `TurnCardView` and `GuidanceUpdate.distanceRemainingMeters` are shipped. Resolve the `vm` reference in the `.guiding` case (bind `if let vm = controller.guidance` before using `vm_distance`); simplify if the compiler complains.
+> Verified signatures (plan review): fonts are **native SwiftUI** (`.headline`/`.subheadline`/`.caption`/`.caption2`) — there is NO `AuraTheme.Font` enum. `AuraTheme.Spacing.sm`, `AuraTheme.accent`, `AuraTheme.textSecondary`, `AuraTheme.routeUIColor`, `AuraTheme.routeLine` are real. The formatter is an **instance**: `RideStatsFormatter(units: units).maneuverDistance(_ meters:)` (exactly as `RideHUDView.gemDistanceText` uses it). `TurnCardView`, `GuidanceUpdate.distanceRemainingMeters`, `RideHapticCue.arrival` are shipped. Resolve the `vm` reference in the `.guiding` case (bind `if let vm = controller.guidance` before using `vm_distance`); simplify if the compiler complains.
 
 - [ ] **Step 2: RideMapView detour polyline + dim track**
 
@@ -1368,9 +1385,15 @@ git commit -m "feat(gems): slim detour overlay + detour polyline/dimmed track (R
 
 `RideSessionCoordinator` is created inline as `@State`. Change the initializer to build and pass a `GuidanceController`:
 
+RideHUDView today has NO explicit `init` — its `@State` are inline defaults. Converting to an explicit `init` means EVERY existing `@State` must be re-declared without a default and seeded in `init` (a property can't have both an inline default and be set in `init`). The current set (verified) is: `coordinator`, `showPermission = false`, `showEndConfirm = false`, `viewport = .followPuck(zoom: 16, bearing: .heading)`, `gems: GemDiscoveryStore? (nil)`. `@Environment` properties (`router`, `rideStore`, `settings`, `location`, `reduceMotion`) are unaffected — leave them exactly as-is.
+
 ```swift
     @State private var coordinator: RideSessionCoordinator
     @State private var guidance: GuidanceController
+    @State private var showPermission: Bool
+    @State private var showEndConfirm: Bool
+    @State private var viewport: Viewport
+    @State private var gems: GemDiscoveryStore?
 
     init() {
         let controller = GuidanceController(
@@ -1382,10 +1405,14 @@ git commit -m "feat(gems): slim detour overlay + detour polyline/dimmed track (R
             kind: .freeRide, destinationName: nil,
             screen: ScreenWakeController(), activity: RideLiveActivityController.shared,
             workout: WorkoutWriter.shared, guidance: controller))
+        _showPermission = State(initialValue: false)
+        _showEndConfirm = State(initialValue: false)
+        _viewport = State(initialValue: .followPuck(zoom: 16, bearing: .heading))
+        _gems = State(initialValue: nil)
     }
 ```
 
-> If `RideHUDView` currently has no explicit `init` (it used inline `@State` defaults), converting to an explicit `init` requires moving any other `@State` defaults into it. Keep every existing `@State` default; only add the two above. `units`/`turnHaptics` on the controller default acceptably; set `guidance.units`/`turnHaptics` from `settings` inside the existing `.task` if the settings env is needed (mirror how NavigateHUD sets `guidance.units`).
+> `reduceMotion` already exists as `@Environment(\.accessibilityReduceMotion)` on RideHUDView — do NOT re-add it. Set `guidance.units = settings.units` / `guidance` turn-haptic prefs inside the existing `.task` (mirroring how NavigateHUD sets `guidance.units`), since `settings` is an `@Environment` not available at `init`.
 
 - [ ] **Step 2: Wire the arbiter, CTA, overlay, and map**
 
@@ -1433,7 +1460,7 @@ Host the overlay (top) and feed the map:
                     viewport: $viewport)
 ```
 
-> `reduceMotion` — add `@Environment(\.accessibilityReduceMotion) private var reduceMotion` if not already present. The existing peek-card `.overlay(alignment: .top)` remains; because the store arbiter suppresses `activeCard` during a detour, the two top overlays won't both show. Verify z-order: the DetourOverlay overlay is declared AFTER the peek-card overlay so it wins if both ever coexist.
+> `reduceMotion` already exists on RideHUDView — reuse it. The existing peek-card `.overlay(alignment: .top)` remains; because the store arbiter suppresses `activeCard` during a detour, the two top overlays won't both show. Verify z-order: declare the DetourOverlay `.overlay(alignment: .top)` AFTER the peek-card overlay so it wins if they ever coexist.
 
 - [ ] **Step 3: Build — verify it compiles & the app runs**
 
