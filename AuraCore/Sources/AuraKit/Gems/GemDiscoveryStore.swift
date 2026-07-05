@@ -16,6 +16,10 @@ public final class GemDiscoveryStore {
     public var isSuppressed = false {
         didSet { if isSuppressed { visiblePins = []; activeCard = nil } }
     }
+    /// Consulted synchronously on the main actor each `update(at:)`. Wired by the HUD to
+    /// `{ coordinator.isDetouring }`. While true, the active peek card + Tier-3 gem haptic are
+    /// suppressed (turn cues own the cockpit) but pins still render and seen-state is recorded (R7).
+    public var detourActive: () -> Bool = { false }
 
     private let provider: any GemProviding
     private let engine: GemDiscoveryEngine
@@ -49,10 +53,12 @@ public final class GemDiscoveryStore {
         let decision = engine.decide(from: candidates, at: coordinate, now: now, state: &state)
         visiblePins = decision.visiblePins
         if let gem = decision.activeSurfacing {
-            activeCard = gem
             seenIDs.insert(gem.id)
             seen.markSeen(gem.id, at: now)
-            if gem.tier == .cardHaptic { haptics.playGemSurfaced() }
+            if !detourActive() {
+                activeCard = gem
+                if gem.tier == .cardHaptic { haptics.playGemSurfaced() }
+            }
         }
     }
 

@@ -49,6 +49,9 @@ public final class MapboxGuidanceSession: GuidanceSession {
         let nav = AuraNavigation.provider.mapboxNavigation
 
         // Start active turn-by-turn guidance.
+        // Defensive reset (R1): a prior detour leg's teardown (startFreeDrive) is queued on the
+        // next main-actor tick, so force a known state before starting active guidance again.
+        nav.tripSession().startFreeDrive()
         nav.tripSession().startActiveGuidance(with: navRoutes, startLegIndex: 0)
 
         // Self-healing teardown: whether the stream ends via `stop()` or the consumer

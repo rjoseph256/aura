@@ -15,6 +15,9 @@ struct RideMapView: View {
     var gems: [Gem] = []
     var seenGemIDs: Set<String> = []
     var onSelectGem: (Gem) -> Void = { _ in }
+    /// The active detour route geometry, if any. When non-empty, the recorded track dims
+    /// (see `routeRibbon`) so the bright detour polyline reads as the thing to follow.
+    var detourRoute: [Coordinate] = []
 
     @Environment(SettingsStore.self) private var settings
     @Binding var viewport: Viewport
@@ -35,10 +38,15 @@ struct RideMapView: View {
                                            longitude: $0.coordinate.longitude) }
     }
 
+    private var detourRouteCoordinates: [CLLocationCoordinate2D] {
+        detourRoute.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+    }
+
     var body: some View {
         Map(viewport: $viewport) {
             Puck2D(bearing: .heading)
             routeRibbon
+            detourPolyline
             ForEvery(peers.filter { $0.coordinate != nil }, id: \.userID) { peer in
                 if let coordinate = peer.coordinate {
                     MapViewAnnotation(coordinate: CLLocationCoordinate2D(latitude: coordinate.latitude,
@@ -74,13 +82,17 @@ struct RideMapView: View {
 
     /// The lit/dimmed route ribbon. When there are no peers to share progress against,
     /// this collapses to the original single bright polyline (unchanged solo behavior).
+    /// While a detour is active (`detourRoute` non-empty), the recorded track dims to a
+    /// quarter opacity so the bright `detourPolyline` reads as the thing to follow.
     @MapContentBuilder
     private var routeRibbon: some MapContent {
         if track.count > 1 {
             if peers.isEmpty {
                 PolylineAnnotationGroup {
                     PolylineAnnotation(lineCoordinates: trackCoordinates)
-                        .lineColor(StyleColor(AuraTheme.routeUIColor))
+                        .lineColor(StyleColor(detourRoute.isEmpty
+                            ? AuraTheme.routeUIColor
+                            : UIColor(AuraTheme.routeLine.opacity(0.25))))
                         .lineWidth(6)
                 }
             } else {
@@ -96,10 +108,25 @@ struct RideMapView: View {
                     }
                     if ahead.count > 1 {
                         PolylineAnnotation(lineCoordinates: ahead)
-                            .lineColor(StyleColor(AuraTheme.routeUIColor))
+                            .lineColor(StyleColor(detourRoute.isEmpty
+                                ? AuraTheme.routeUIColor
+                                : UIColor(AuraTheme.routeLine.opacity(0.25))))
                             .lineWidth(6)
                     }
                 }
+            }
+        }
+    }
+
+    /// The bright detour route line, drawn on top of the (now-dimmed) recorded track while
+    /// a gem detour is active. Same Mapbox v11 API as `routeRibbon`.
+    @MapContentBuilder
+    private var detourPolyline: some MapContent {
+        if detourRoute.count > 1 {
+            PolylineAnnotationGroup {
+                PolylineAnnotation(lineCoordinates: detourRouteCoordinates)
+                    .lineColor(StyleColor(AuraTheme.routeUIColor))
+                    .lineWidth(6)
             }
         }
     }
