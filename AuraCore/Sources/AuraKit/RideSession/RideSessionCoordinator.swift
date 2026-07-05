@@ -41,6 +41,7 @@ public final class RideSessionCoordinator {
     private var startedAt: Date?
     private var saveToHealth = false
     private var groupSink: (any GroupLocationSink)?
+    private var discoverySink: (any RideDiscoverySink)?
     // Internal so a test can await the stream draining; not part of the public surface.
     var streamTask: Task<Void, Never>?
     private var tickerTask: Task<Void, Never>?
@@ -68,7 +69,8 @@ public final class RideSessionCoordinator {
                       units: DistanceUnits,
                       authorization: LocationAuthorization,
                       saveToHealth: Bool = false,
-                      groupSink: (any GroupLocationSink)? = nil) -> StartOutcome {
+                      groupSink: (any GroupLocationSink)? = nil,
+                      discoverySink: (any RideDiscoverySink)? = nil) -> StartOutcome {
         guard !recorder.isRecording else { return .started }
         switch authorization {
         case .denied, .restricted:
@@ -83,6 +85,7 @@ public final class RideSessionCoordinator {
         self.saving = saving
         self.saveToHealth = saveToHealth
         self.groupSink = groupSink
+        self.discoverySink = discoverySink
         let now = Date()
         startedAt = now
         elapsed = 0
@@ -100,6 +103,7 @@ public final class RideSessionCoordinator {
                     progressMeters: self.recorder.stats.distanceMeters,
                     speed: point.speedMetersPerSecond ?? self.recorder.currentSpeedMetersPerSecond,
                     at: point.timestamp)
+                self.discoverySink?.rideDidUpdateLocation(point)
             }
         }
         tickerTask = Task { [weak self] in
@@ -160,5 +164,6 @@ public final class RideSessionCoordinator {
         tickerTask?.cancel(); tickerTask = nil
         location?.stop()
         groupSink = nil
+        discoverySink = nil
     }
 }

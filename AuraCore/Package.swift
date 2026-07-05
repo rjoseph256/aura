@@ -20,7 +20,8 @@ let package = Package(
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ]
         ),
-        .target(name: "AuraKit", dependencies: ["AuraCore"]),
+        .target(name: "AuraKit", dependencies: ["AuraCore"],
+                resources: [.process("Resources/gems.json")]),
         .testTarget(name: "AuraKitTests", dependencies: ["AuraKit"]),
     ],
     swiftLanguageModes: [.v6]

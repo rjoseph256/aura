@@ -22,11 +22,15 @@ struct RideHUDView: View {
     @State private var showPermission = false
     @State private var showEndConfirm = false
     @State private var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
+    // Free rides are solo by construction — group rides use NavigateHUDView +
+    // GroupRideSession, never this HUD — so gem discovery is never suppressed here.
+    // (GemDiscoveryStore.isSuppressed exists for a future group-explore surface.)
+    @State private var gems = GemDiscoveryStore(provider: CuratedGemProvider())
 
     var body: some View {
         @Bindable var coordinator = coordinator
         ZStack(alignment: .bottom) {
-            RideMapView(track: coordinator.track, viewport: $viewport)
+            RideMapView(track: coordinator.track, gems: gems.visiblePins, viewport: $viewport)
             bottomCockpit
         }
         // Always-visible back-out: discards a just-started ride (below the floor) or opens
@@ -59,9 +63,11 @@ struct RideHUDView: View {
         .task {
             let outcome = coordinator.start(
                 location: location, saving: rideStore, units: settings.units,
-                authorization: location.authorization, saveToHealth: settings.saveToHealth)
+                authorization: location.authorization, saveToHealth: settings.saveToHealth,
+                discoverySink: gems)
             if outcome == .permissionDenied { showPermission = true }
         }
+        .task { await gems.load() }
         .onChange(of: coordinator.isRecording) { _, recording in
             router.isRideActive = recording
         }
