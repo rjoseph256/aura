@@ -145,3 +145,7 @@ public final class SavedPlacesStore {
         }
     }
 }
+
+extension SavedPlacesStore: ResurfacePlacesReading {
+    public func resurfacePlaces() -> [SavedPlace] { places.filter(\.resurface) }
+}
