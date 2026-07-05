@@ -1,11 +1,14 @@
 import SwiftUI
 import AuraCore
 
-/// The expanded view for a gem, opened by tapping its pin or peek card. Info only in Plan 2;
-/// the "Take me there" CTA + the guided detour land in Plan 3.
+/// The expanded view for a gem, opened by tapping its pin or peek card. Info-only in Plan 2;
+/// Plan 3 adds the "Take me there" CTA below, which kicks off the guided detour (wired in
+/// Task 9). `canRoute` disables the CTA while a route can't yet be computed (e.g. no GPS fix).
 struct GemDetailSheet: View {
     let gem: Gem
     let distanceText: String
+    var canRoute: Bool = true
+    var onTakeMeThere: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -29,6 +32,29 @@ struct GemDetailSheet: View {
             if let why = gem.why {
                 Text(why).font(.body).foregroundStyle(AuraTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: AuraTheme.Spacing.sm) {
+                Button {
+                    onTakeMeThere()
+                } label: {
+                    Label("Take me there", systemImage: "location.north.line.fill")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, AuraTheme.Spacing.sm)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(AuraTheme.accent)
+                .foregroundStyle(AuraTheme.onAccent)
+                .disabled(!canRoute)
+                .accessibilityHint(canRoute
+                                    ? "Starts a guided detour to this gem"
+                                    : "Waiting for GPS")
+                if !canRoute {
+                    Text("Waiting for GPS…")
+                        .font(.caption)
+                        .foregroundStyle(AuraTheme.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
             }
             Spacer(minLength: 0)
         }
