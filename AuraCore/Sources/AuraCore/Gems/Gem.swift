@@ -5,7 +5,19 @@ public enum GemTier: Int, Codable, Sendable, Comparable {
     public static func < (lhs: GemTier, rhs: GemTier) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
-public enum GemSource: String, Codable, Sendable { case curated, personal, live }
+public enum GemSource: String, Codable, Sendable {
+    case curated, personal, live
+
+    /// Cross-source arbitration order: personal (your own) beats curated beats live.
+    /// Lower is higher priority. Used by the engine's surfacing pick and composite dedupe.
+    public var priorityRank: Int {
+        switch self {
+        case .personal: return 0
+        case .curated: return 1
+        case .live: return 2
+        }
+    }
+}
 
 public enum GemCategory: String, Codable, Sendable, CaseIterable {
     case viewpoint, water, park, cafe, mural, climb, historic, landmark
