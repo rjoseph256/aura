@@ -50,7 +50,14 @@ public struct CompositeGemProvider: GemProviding {
             byID[gem.id] = gem
         }
         var kept: [Gem] = []
-        for gem in byID.values.sorted(by: { $0.source.priorityRank < $1.source.priorityRank }) {
+        // Stable secondary key (id) so two gems of EQUAL priorityRank within `meters` of each
+        // other have a deterministic survivor (lower id) instead of dictionary value order.
+        for gem in byID.values.sorted(by: { lhs, rhs in
+            if lhs.source.priorityRank != rhs.source.priorityRank {
+                return lhs.source.priorityRank < rhs.source.priorityRank
+            }
+            return lhs.id < rhs.id
+        }) {
             if kept.contains(where: { Geo.distance($0.coordinate, gem.coordinate) <= meters }) { continue }
             kept.append(gem)
         }

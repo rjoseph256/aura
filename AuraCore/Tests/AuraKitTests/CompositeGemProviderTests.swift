@@ -56,6 +56,19 @@ struct CompositeGemProviderTests {
         #expect(gems.first?.source == .personal)
     }
 
+    /// Two gems of EQUAL source.priorityRank within 25 m must resolve to a deterministic
+    /// survivor — sorted by (priorityRank, id) before the greedy cluster-keep — not
+    /// dictionary value order, which can vary run to run.
+    @Test func dedupesSamePriorityNearbyDeterministically() async {
+        let composite = CompositeGemProvider(
+            local: [FixedProvider(gems: [g("curated:zzz", .curated, near(5)),
+                                          g("curated:aaa", .curated, p)])],
+            live: FixedProvider(gems: []))
+        let gems = await composite.gems(near: p)
+        #expect(gems.count == 1)
+        #expect(gems.first?.id == "curated:aaa")
+    }
+
     @Test func slowLiveTimesOutWithoutBlocking() async {
         let composite = CompositeGemProvider(
             local: [FixedProvider(gems: [g("curated:a", .curated, p)])],
