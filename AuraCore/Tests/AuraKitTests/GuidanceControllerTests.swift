@@ -136,6 +136,18 @@ import AuraCore
         #expect(c.arrivalBanner?.id == "a")
     }
 
+    @Test func retargetSwitchesToNewGem() async throws {
+        let g1 = gem("a")
+        let g2 = gem("b", lat: 40.60, lng: -79.98)
+        let c = controller(routing: FakeRouting(.success(route(to: g1))))
+        c.requestDetour(g1, from: origin)
+        await c.awaitState { c.isGuiding }
+        #expect(c.phase == .guiding(g1))
+        c.retarget(g2, from: origin)
+        await c.awaitState { c.phase == .guiding(g2) }
+        #expect(c.phase == .guiding(g2))
+    }
+
     @Test func headingOnlyPublishesArrowBeforeArrival() async throws {
         let g = gem("a", lat: 40.55, lng: -79.99)        // far away
         let c = GuidanceController(

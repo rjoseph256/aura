@@ -42,7 +42,8 @@ struct RideHUDView: View {
     init() {
         let controller = GuidanceController(
             makeGuidance: { GuidanceViewModel(session: MapboxGuidanceSession()) },
-            routing: MapboxDetourRouting(), heading: CompassHeadingProvider())
+            routing: MapboxDetourRouting(), heading: CompassHeadingProvider(),
+            haptics: HapticPlayer.shared)
         _guidance = State(initialValue: controller)
         _coordinator = State(initialValue: RideSessionCoordinator(
             kind: .freeRide, destinationName: nil,
@@ -121,7 +122,11 @@ struct RideHUDView: View {
                 onTakeMeThere: {
                     guard let origin = gems?.riderCoordinate else { return }
                     gems?.selectedGem = nil                    // dismiss the sheet
-                    guidance.requestDetour(gem, from: origin)  // R6
+                    if guidance.isDetouring {
+                        guidance.retarget(gem, from: origin)   // R13
+                    } else {
+                        guidance.requestDetour(gem, from: origin)  // R6
+                    }
                 })
         }
         // Auto-start recording on appear (parity with navigate). A denied permission surfaces

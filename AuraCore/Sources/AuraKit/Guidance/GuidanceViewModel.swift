@@ -103,9 +103,10 @@ public final class GuidanceViewModel {
             case .arrivedAtDestination:
                 let cue = hapticEngine.onArrival()
                 if hapticsEnabled, let cue { haptics?.play(cue) }
-                // `onArrive` ends the ride, which tears down this very session. Stop
-                // consuming by returning rather than letting teardown cancel the task
-                // from inside its own loop.
+                // `onArrive` is caller-defined: navigate's HUD ends the ride (tearing down
+                // this very session), while the detour's `onArrive` detaches and lets the
+                // ride continue. Either way, stop consuming by returning rather than
+                // letting teardown cancel the task from inside its own loop.
                 onArrive()
                 return
             }
