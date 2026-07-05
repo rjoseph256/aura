@@ -53,7 +53,7 @@ import AuraCore
         let c = controller(routing: FakeRouting(.success(route(to: g))))
         c.requestDetour(g, from: origin)
         #expect(c.phase == .routing(g))
-        try await Task.sleep(for: .milliseconds(50))   // let the fetch Task resolve
+        await c.awaitState { c.isGuiding }
         #expect(c.phase == .guiding(g))
         #expect(c.activeRoute != nil)
         #expect(c.isGuiding)
@@ -68,7 +68,7 @@ import AuraCore
         c.requestDetour(g, from: origin)
         c.cancel()                                      // bumps generation while route pending
         #expect(c.phase == .inactive)
-        try await Task.sleep(for: .milliseconds(50))    // let the delayed route resolve late
+        await c.awaitState { true }                      // await the delayed fetch's late completion
         #expect(c.phase == .inactive)                   // stale routeReady discarded by guard
         #expect(c.guidance == nil)
     }
@@ -77,7 +77,7 @@ import AuraCore
         let g = gem("a")
         let c = controller(routing: FakeRouting(.failure(Offline())))
         c.requestDetour(g, from: origin)
-        try await Task.sleep(for: .milliseconds(50))
+        await c.awaitState { if case .headingOnly = c.phase { return true } else { return false } }
         #expect(c.phase == .headingOnly(g))
     }
 
@@ -86,10 +86,10 @@ import AuraCore
         let fake = FakeRouting(.success(route(to: g)))
         let c = controller(routing: fake)
         c.requestDetour(g, from: origin)
-        try await Task.sleep(for: .milliseconds(50))
+        await c.awaitState { c.isGuiding }
         c.cancel()
         c.requestDetour(g, from: origin)                // same gem, same origin
-        try await Task.sleep(for: .milliseconds(50))
+        await c.awaitState { c.isGuiding }
         #expect(fake.calls == 1)                         // second request served from cache
         #expect(c.phase == .guiding(g))
     }
@@ -101,9 +101,58 @@ import AuraCore
             makeGuidance: { GuidanceViewModel(session: ScriptedGuidanceSession(script: [.arrivedAtDestination])) },
             routing: FakeRouting(.success(route(to: g))), heading: NoHeading())
         c.requestDetour(g, from: origin)
-        try await Task.sleep(for: .milliseconds(80))
+        await c.awaitState { c.phase == .inactive }
         #expect(c.phase == .inactive)                    // detached, ride not ended
         #expect(c.arrivalBanner?.id == "a")              // confirm chip set
         #expect(c.guidance == nil)
+    }
+
+    /// Heading provider that emits one fixed heading then stays open.
+    struct FixedHeading: HeadingProviding {
+        let degrees: Double
+        func headings() -> AsyncStream<Double> {
+            AsyncStream { cont in cont.yield(degrees); /* stays open */ }
+        }
+    }
+
+    @Test func headingOnlyArrivesWithinRadius() async throws {
+        let g = gem("a", lat: 40.4410, lng: -79.9959)   // park → 70 m radius
+        let c = GuidanceController(
+            makeGuidance: { GuidanceViewModel(session: ScriptedGuidanceSession(script: [])) },
+            routing: FakeRouting(.failure(Offline())), heading: FixedHeading(degrees: 0))
+        c.requestDetour(g, from: Coordinate(latitude: 40.4406, longitude: -79.9959))
+        await c.awaitState { if case .headingOnly = c.phase { return true } else { return false } }
+        #expect(c.phase == .headingOnly(g))
+        // Feed a fix ~10 m from the gem → inside the 70 m arrival radius.
+        // Real TrackPoint.init: (coordinate:, elevation: Double?, timestamp:, speedMetersPerSecond: Double? = nil).
+        c.riderDidUpdate(TrackPoint(coordinate: g.coordinate, elevation: nil, timestamp: .init(), speedMetersPerSecond: 3))
+        #expect(c.phase == .inactive)
+        #expect(c.arrivalBanner?.id == "a")
+    }
+
+    @Test func headingOnlyPublishesArrowBeforeArrival() async throws {
+        let g = gem("a", lat: 40.55, lng: -79.99)        // far away
+        let c = GuidanceController(
+            makeGuidance: { GuidanceViewModel(session: ScriptedGuidanceSession(script: [])) },
+            routing: FakeRouting(.failure(Offline())), heading: FixedHeading(degrees: 0))
+        c.requestDetour(g, from: Coordinate(latitude: 40.44, longitude: -79.99))
+        await c.awaitState { if case .headingOnly = c.phase { return true } else { return false } }
+        c.riderDidUpdate(TrackPoint(coordinate: Coordinate(latitude: 40.45, longitude: -79.99),
+                                    elevation: nil, timestamp: .init(), speedMetersPerSecond: 3))
+        #expect(c.headingArrow != nil)
+        #expect((c.headingArrow?.straightLineDistanceMeters ?? 0) > 100)
+    }
+}
+
+extension GuidanceController {
+    /// Test barrier: await the in-flight routing task, then cooperatively yield until
+    /// `predicate` holds (bounded). Deterministic — drains real async work instead of
+    /// racing a fixed sleep, so it is stable under parallel `swift test`.
+    func awaitState(_ predicate: @escaping () -> Bool) async {
+        await pendingRoutingTask?.value
+        for _ in 0..<100_000 {
+            if predicate() { return }
+            await Task.yield()
+        }
     }
 }

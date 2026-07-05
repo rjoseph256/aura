@@ -34,6 +34,9 @@ public final class GuidanceController: GuidanceControlling {
     @ObservationIgnored private var headingTask: Task<Void, Never>?   // Task 2b
     @ObservationIgnored private var latestHeading: Double?            // Task 2b
     @ObservationIgnored private var arrivalClearTask: Task<Void, Never>?
+    /// Test-observable handle on the in-flight route fetch (fetchRoute/probeNetworkRecovery).
+    /// Not read by production code — lets tests await real completion instead of a fixed sleep.
+    @ObservationIgnored private(set) var pendingRoutingTask: Task<Void, Never>?
 
     public init(makeGuidance: @escaping @MainActor () -> GuidanceViewModel,
                 routing: any DetourRouting,
@@ -117,7 +120,7 @@ public final class GuidanceController: GuidanceControlling {
             feedInternal(.routeReady, origin: origin)
             return
         }
-        Task { [weak self] in
+        pendingRoutingTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let route = try await self.routing.route(from: origin, to: gem.coordinate)
@@ -164,9 +167,70 @@ public final class GuidanceController: GuidanceControlling {
         }
     }
 
-    // MARK: - Heading (implemented in Task 2b)
+    // MARK: - Heading (offline pointer)
 
-    private func startHeadingOnly(to gem: Gem) { /* Task 2b */ }
-    private func stopHeading() { headingTask?.cancel(); headingTask = nil; headingArrow = nil }
-    public func riderDidUpdate(_ point: TrackPoint) { /* Task 2b */ }
+    private func startHeadingOnly(to gem: Gem) {
+        headingTask?.cancel()
+        latestHeading = nil
+        headingArrow = HeadingArrow(relativeBearingDegrees: 0,
+                                    straightLineDistanceMeters: 0)
+        let stream = heading.headings()
+        headingTask = Task { [weak self] in
+            for await deg in stream {
+                guard let self else { return }
+                self.latestHeading = deg
+                self.recomputeArrow()   // refresh arrow as the device turns
+            }
+        }
+    }
+
+    private func stopHeading() {
+        headingTask?.cancel()
+        headingTask = nil
+        headingArrow = nil
+        latestHeading = nil
+    }
+
+    /// Recompute the arrow from the last known rider coordinate (via `lastRiderCoordinate`) and heading.
+    @ObservationIgnored private var lastRiderCoordinate: Coordinate?
+    private func recomputeArrow() {
+        guard case .headingOnly(let gem) = phase, let rider = lastRiderCoordinate else { return }
+        let distance = Geo.distance(rider, gem.coordinate)
+        let bearingToGem = PeerBearing.heading(from: rider, to: gem.coordinate)
+        let relative = (bearingToGem - (latestHeading ?? 0)).truncatingRemainder(dividingBy: 360)
+        headingArrow = HeadingArrow(relativeBearingDegrees: relative,
+                                    straightLineDistanceMeters: distance)
+    }
+
+    @ObservationIgnored private var recoveryThrottle = 0
+
+    public func riderDidUpdate(_ point: TrackPoint) {
+        lastRiderCoordinate = point.coordinate
+        // Snapshot phase (TOCTOU guard, R3): a concurrent transition must not misroute this update.
+        switch phase {
+        case .headingOnly(let gem):
+            let distance = Geo.distance(point.coordinate, gem.coordinate)
+            recomputeArrow()
+            if distance <= gem.category.arrivalRadiusMeters {
+                feedInternal(.arrived, origin: nil)
+                return
+            }
+            // Throttled network-recovery probe: retry routing ~every 8th fix.
+            recoveryThrottle += 1
+            if recoveryThrottle % 8 == 0 { probeNetworkRecovery(from: point.coordinate, gem: gem) }
+        case .inactive, .routing, .guiding:
+            break   // Mapbox drives arrival while guiding; nothing to do otherwise.
+        }
+    }
+
+    private func probeNetworkRecovery(from origin: Coordinate, gem: Gem) {
+        let gen = requestGeneration
+        pendingRoutingTask = Task { [weak self] in
+            guard let self else { return }
+            guard (try? await self.routing.route(from: origin, to: gem.coordinate)) != nil else { return }
+            guard gen == self.requestGeneration,
+                  case .headingOnly(let current) = self.phase, current.id == gem.id else { return }
+            self.feedInternal(.networkRecovered, origin: origin)
+        }
+    }
 }
