@@ -1,0 +1,14 @@
+[
+  { "id": "curated:grandview-overlook", "name": "Grandview overlook",
+    "coordinate": { "latitude": 40.4392, "longitude": -80.0155 },
+    "category": "viewpoint", "tier": 3, "source": "curated",
+    "photoAsset": "gem-grandview", "why": "The classic skyline view from Mt. Washington." },
+  { "id": "curated:point-state-park", "name": "Point State Park",
+    "coordinate": { "latitude": 40.4419, "longitude": -80.0089 },
+    "category": "park", "tier": 2, "source": "curated",
+    "photoAsset": "gem-point-park", "why": "Where the three rivers meet." },
+  { "id": "curated:randyland", "name": "Randyland",
+    "coordinate": { "latitude": 40.4568, "longitude": -80.0074 },
+    "category": "mural", "tier": 3, "source": "curated",
+    "photoAsset": "gem-randyland", "why": "A courtyard of color in the Mexican War Streets." }
+]
