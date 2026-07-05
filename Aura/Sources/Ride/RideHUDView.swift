@@ -140,6 +140,7 @@ struct RideHUDView: View {
                 gem: gem,
                 distanceText: gemDistanceText(gem),
                 canRoute: gems?.riderCoordinate != nil,
+                isSavedToReturn: savedPlaces.isSaved(gemPlace(gem)),
                 onTakeMeThere: {
                     guard let origin = gems?.riderCoordinate else { return }
                     gems?.selectedGem = nil                    // dismiss the sheet
@@ -148,6 +149,9 @@ struct RideHUDView: View {
                     } else {
                         guidance.requestDetour(gem, from: origin)  // R6
                     }
+                },
+                onSaveToReturn: {
+                    saveGemToReturn(gem)
                 })
         }
         // Auto-start recording on appear (parity with navigate). A denied permission surfaces
@@ -201,6 +205,26 @@ private extension RideHUDView {
     func gemDistanceText(_ gem: Gem) -> String {
         guard let here = gems?.riderCoordinate else { return "" }
         return RideStatsFormatter(units: settings.units).maneuverDistance(Geo.distance(gem.coordinate, here))
+    }
+
+    /// The navigable `Place` a gem would become if saved — a fresh id each call, since
+    /// `SavedPlacesStore.isSaved`/`savedPlace(for:)` match by coordinate bucket
+    /// (`SavedPlaceKey`), not by id.
+    func gemPlace(_ gem: Gem) -> Place {
+        Place(id: UUID(), name: gem.name, subtitle: nil, coordinate: gem.coordinate, category: .custom)
+    }
+
+    /// "Save to return" (Task E4): saves the gem as a resurfacing place, same shape as
+    /// `markSpot()`'s save. Idempotent from the caller's side — `GemDetailSheet`'s
+    /// `isSavedToReturn` disables the button once `savedPlaces.isSaved` is true, so this only
+    /// ever fires from the not-yet-saved state.
+    func saveGemToReturn(_ gem: Gem) {
+        switch savedPlaces.save(gemPlace(gem), subtitle: nil, resurface: true) {
+        case .full:
+            showSavedPlacesFull = true
+        case .saved:
+            HapticPlayer.shared.play(.approach)
+        }
     }
 
     var bottomCockpit: some View {
