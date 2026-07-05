@@ -4,7 +4,10 @@ import SwiftData
 import AuraCore
 @testable import AuraKit
 
-@Suite("Schema V5 migration")
+// .serialized: this suite uses a file-backed ModelConfiguration(url:), and running it
+// concurrently with other SwiftData suites under full-suite parallel `swift test` causes
+// intermittent CoreData/temp-store contention crashes (passes in isolation/on re-run).
+@Suite("Schema V5 migration", .serialized)
 struct SchemaV5MigrationTests {
     @Test func existingPlaceMigratesWithResurfaceFalse() throws {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
