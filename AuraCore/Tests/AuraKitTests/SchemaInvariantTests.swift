@@ -9,7 +9,9 @@ import AuraCore
 @Suite("Schema invariants (CloudKit)")
 struct SchemaInvariantTests {
     private var entities: [Schema.Entity] {
-        Schema(versionedSchema: RideSchemaV3.self).entities
+        // Always guard the CURRENT schema so every persisted model — including
+        // SeenGemRecord (V4) — is machine-checked for CloudKit compatibility.
+        Schema(versionedSchema: RideSchemaV4.self).entities
     }
 
     @Test func everyAttributeIsOptionalOrDefaulted() {
@@ -32,8 +34,8 @@ struct SchemaInvariantTests {
         }
     }
 
-    @Test func v3ContainsBothModels() {
-        #expect(Set(entities.map(\.name)) == ["RideRecord", "SavedPlaceRecord"])
+    @Test func v4ContainsAllModels() {
+        #expect(Set(entities.map(\.name)) == ["RideRecord", "SavedPlaceRecord", "SeenGemRecord"])
     }
 
     @Test func recordRoundTripsValue() {

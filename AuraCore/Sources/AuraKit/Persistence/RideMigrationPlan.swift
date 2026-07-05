@@ -7,10 +7,10 @@ import AuraCore
 /// columns are computed from existing rows, which a lightweight stage cannot do.
 public enum RideMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [RideSchemaV1.self, RideSchemaV2.self, RideSchemaV3.self]
+        [RideSchemaV1.self, RideSchemaV2.self, RideSchemaV3.self, RideSchemaV4.self]
     }
 
-    public static var stages: [MigrationStage] { [migrateV1toV2, migrateV2toV3] }
+    public static var stages: [MigrationStage] { [migrateV1toV2, migrateV2toV3, migrateV3toV4] }
 
     public static let migrateV1toV2 = MigrationStage.custom(
         fromVersion: RideSchemaV1.self,
@@ -44,4 +44,9 @@ public enum RideMigrationPlan: SchemaMigrationPlan {
     public static let migrateV2toV3 = MigrationStage.lightweight(
         fromVersion: RideSchemaV2.self,
         toVersion: RideSchemaV3.self)
+
+    /// Adding a model type is lightweight — no data transform.
+    public static let migrateV3toV4 = MigrationStage.lightweight(
+        fromVersion: RideSchemaV3.self,
+        toVersion: RideSchemaV4.self)
 }

@@ -25,12 +25,18 @@ struct RideHUDView: View {
     // Free rides are solo by construction — group rides use NavigateHUDView +
     // GroupRideSession, never this HUD — so gem discovery is never suppressed here.
     // (GemDiscoveryStore.isSuppressed exists for a future group-explore surface.)
-    @State private var gems = GemDiscoveryStore(provider: CuratedGemProvider())
+    // Built lazily in the appear .task: it needs SeenGemStore(container:) from `rideStore`,
+    // which a @State initializer can't read.
+    @State private var gems: GemDiscoveryStore?
 
     var body: some View {
         @Bindable var coordinator = coordinator
         ZStack(alignment: .bottom) {
-            RideMapView(track: coordinator.track, gems: gems.visiblePins, viewport: $viewport)
+            RideMapView(track: coordinator.track,
+                        gems: gems?.visiblePins ?? [],
+                        seenGemIDs: gems?.seenIDs ?? [],
+                        onSelectGem: { gem in gems?.select(gem) },
+                        viewport: $viewport)
             bottomCockpit
         }
         // Always-visible back-out: discards a just-started ride (below the floor) or opens
@@ -46,6 +52,17 @@ struct RideHUDView: View {
             GPSSignalChip(signal: location.signal)
                 .padding(.top, 8).padding(.trailing, 16)
         }
+        // The active layer: at most one self-dismissing peek card for a newly surfaced gem.
+        // Sits up top, just below the back button, so it never covers the speedometer cluster.
+        .overlay(alignment: .top) {
+            if let store = gems, let gem = store.activeCard {
+                GemPeekCard(gem: gem, distanceText: gemDistanceText(gem),
+                            onTap: { store.select(gem); store.dismissActiveCard() },
+                            onDismiss: { store.dismissActiveCard() })
+                    .padding(.horizontal, 12).padding(.top, 60)
+            }
+        }
+        .animation(.snappy, value: gems?.activeCard?.id)
         .background(AuraTheme.background)
         .alert("End ride?", isPresented: $showEndConfirm) {
             Button("End ride", role: .destructive) { coordinator.finish() }
@@ -58,16 +75,25 @@ struct RideHUDView: View {
         .sheet(isPresented: $showPermission) {
             LocationPermissionView(onOpenSettings: RideSettingsLink.open)
         }
+        .sheet(item: Binding(get: { gems?.selectedGem },
+                             set: { gems?.selectedGem = $0 })) { gem in
+            GemDetailSheet(gem: gem, distanceText: gemDistanceText(gem))
+        }
         // Auto-start recording on appear (parity with navigate). A denied permission surfaces
         // the explainer; the back button (at zero distance) discards cleanly.
         .task {
+            let store = gems ?? GemDiscoveryStore(
+                provider: CuratedGemProvider(),
+                seen: SeenGemStore(container: rideStore.container),
+                haptics: GemHapticPlayer())
+            gems = store
             let outcome = coordinator.start(
                 location: location, saving: rideStore, units: settings.units,
                 authorization: location.authorization, saveToHealth: settings.saveToHealth,
-                discoverySink: gems)
+                discoverySink: store)
             if outcome == .permissionDenied { showPermission = true }
+            await store.load()
         }
-        .task { await gems.load() }
         .onChange(of: coordinator.isRecording) { _, recording in
             router.isRideActive = recording
         }
@@ -94,6 +120,13 @@ struct RideHUDView: View {
 private extension RideHUDView {
     var canDiscard: Bool {
         RideBackOutGate.canDiscard(distanceMeters: coordinator.stats.distanceMeters)
+    }
+
+    /// Distance from the rider to `gem`, formatted in the rider's chosen units. Computed here
+    /// (not on the store) so `GemDiscoveryStore` stays formatting-free.
+    func gemDistanceText(_ gem: Gem) -> String {
+        guard let here = gems?.riderCoordinate else { return "" }
+        return RideStatsFormatter(units: settings.units).maneuverDistance(Geo.distance(gem.coordinate, here))
     }
 
     var bottomCockpit: some View {
