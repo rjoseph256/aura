@@ -26,7 +26,7 @@ struct GemDiscoveryIntegrationTests {
 
         let provider = CompositeGemProvider(
             local: [PersonalGemProvider(reading: StubResurfaceReading(places: [resurfacePlace])),
-                    CuratedGemProvider(bundle: .module)],
+                    CuratedGemProvider()],   // default bundle = AuraKit's .module (real gems.json), not the test target's
             live: LiveGemProvider(session: emptySession()))
 
         let store = GemDiscoveryStore(
