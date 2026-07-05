@@ -13,6 +13,7 @@ struct RideHUDView: View {
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
     @Environment(LocationService.self) private var location
+    @Environment(SavedPlacesStore.self) private var savedPlaces
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var coordinator: RideSessionCoordinator
@@ -30,6 +31,10 @@ struct RideHUDView: View {
     // Built lazily in the appear .task: it needs SeenGemStore(container:) from `rideStore`,
     // which a @State initializer can't read.
     @State private var gems: GemDiscoveryStore?
+    /// The mark-this-spot confirmation toast; non-nil while it's on screen. Carries the just
+    /// -saved place's id so `onUndo` can delete exactly that record.
+    @State private var markToast: SavedPlace?
+    @State private var showSavedPlacesFull = false
 
     /// Builds the detour `GuidanceController` from app concretes and injects it into a fresh
     /// coordinator. `settings.units` isn't reachable here (SwiftUI environment values aren't
@@ -90,6 +95,18 @@ struct RideHUDView: View {
             }
         }
         .animation(.snappy, value: gems?.activeCard?.id)
+        // Mark-this-spot confirmation: sits just below the back button/GPS chip row, above
+        // the detour chrome (which is rarer and more urgent when both are true).
+        .overlay(alignment: .top) {
+            if let place = markToast {
+                MarkSpotToast(
+                    message: "Marked spot saved",
+                    onUndo: { savedPlaces.delete(id: place.id); markToast = nil },
+                    onDismiss: { markToast = nil })
+                    .padding(.horizontal, 12).padding(.top, 60)
+            }
+        }
+        .animation(.snappy, value: markToast?.id)
         // The detour chrome (turn card / heading pointer / routing / arrival chip). Declared
         // AFTER the peek-card overlay above so it wins z-order if the two ever coexist — in
         // practice they don't, because the store arbiter (below) suppresses the peek card
@@ -105,6 +122,10 @@ struct RideHUDView: View {
         .alert("End ride?", isPresented: $showEndConfirm) {
             Button("End ride", role: .destructive) { coordinator.finish() }
             Button("Keep riding", role: .cancel) { }
+        }
+        .alert("Saved places is full. Remove one to save another.",
+               isPresented: $showSavedPlacesFull) {
+            Button("OK", role: .cancel) {}
         }
         // Returning from the summary drops to the home dashboard, mirroring NavigateHUDView.
         .sheet(item: $coordinator.finishedRide, onDismiss: { router.popToRoot() }, content: { ride in
@@ -146,7 +167,6 @@ struct RideHUDView: View {
                 authorization: location.authorization, saveToHealth: settings.saveToHealth,
                 discoverySink: store)
             if outcome == .permissionDenied { showPermission = true }
-            await store.load()
         }
         .onChange(of: coordinator.isRecording) { _, recording in
             router.isRideActive = recording
@@ -190,6 +210,7 @@ private extension RideHUDView {
                 ControlCluster(
                     isFollowing: viewport.followPuck != nil,
                     onRecenter: { recenter() },
+                    onMarkSpot: gems?.riderCoordinate != nil ? { markSpot() } : nil,
                     onEndRide: { showEndConfirm = true })
             }
             .padding(.horizontal, AuraTheme.Spacing.lg)
@@ -229,6 +250,29 @@ private extension RideHUDView {
         } else {
             withViewportAnimation(.easeOut(duration: 0.4)) {
                 viewport = .followPuck(zoom: 16, bearing: .heading)
+            }
+        }
+    }
+
+    /// One-tap "mark this spot": saves a resurfacing place at the rider's current fix, then
+    /// best-effort backfills a real name via reverse-geocode once it's back (the toast/list
+    /// show the provisional "Marked spot" name until then). Guarded no-op before the first fix
+    /// — `ControlCluster` also disables the button in that state, so this is a belt-and-braces
+    /// check against a stale closure firing after `gems?.riderCoordinate` goes nil again.
+    func markSpot() {
+        guard let coordinate = gems?.riderCoordinate else { return }
+        let place = Place(id: UUID(), name: "Marked spot", subtitle: nil,
+                           coordinate: coordinate, category: .custom)
+        switch savedPlaces.save(place, subtitle: nil, resurface: true) {
+        case .full:
+            showSavedPlacesFull = true
+        case let .saved(saved):
+            HapticPlayer.shared.play(.approach)
+            markToast = saved
+            Task {
+                if let name = await ReverseGeocoder.name(for: coordinate) {
+                    savedPlaces.updateName(id: saved.id, to: name, ifCurrentlyNamed: "Marked spot")
+                }
             }
         }
     }
