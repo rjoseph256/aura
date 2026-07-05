@@ -39,6 +39,7 @@ public final class RideStore {
     public static func inMemory() throws -> RideStore {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         return RideStore(container: try ModelContainer(for: RideRecord.self, SavedPlaceRecord.self,
+                                                       SeenGemRecord.self,
                                                        configurations: config),
                          isEphemeral: true)
     }
@@ -49,6 +50,7 @@ public final class RideStore {
     public static func persistent() throws -> RideStore {
         let config = ModelConfiguration(cloudKitDatabase: .private("iCloud.com.rohunjoseph.aura"))
         let container = try ModelContainer(for: RideRecord.self, SavedPlaceRecord.self,
+                                           SeenGemRecord.self,
                                            migrationPlan: RideMigrationPlan.self,
                                            configurations: config)
         return RideStore(container: container)
