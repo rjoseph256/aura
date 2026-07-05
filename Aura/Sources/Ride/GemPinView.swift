@@ -19,7 +19,7 @@ struct GemPinView: View {
             .accessibilityLabel(Text(gem.name))
     }
 
-    private static func symbol(for category: GemCategory) -> String {
+    static func symbol(for category: GemCategory) -> String {
         switch category {
         case .viewpoint: return "mountain.2.fill"
         case .water: return "drop.fill"
