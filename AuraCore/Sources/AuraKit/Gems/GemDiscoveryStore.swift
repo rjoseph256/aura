@@ -34,3 +34,7 @@ public final class GemDiscoveryStore {
         visiblePins = engine.visiblePins(from: candidates, at: coordinate)
     }
 }
+
+extension GemDiscoveryStore: RideDiscoverySink {
+    public func rideDidUpdateLocation(_ point: TrackPoint) { update(at: point.coordinate) }
+}
