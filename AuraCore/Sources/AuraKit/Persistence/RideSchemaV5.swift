@@ -2,14 +2,13 @@ import Foundation
 import SwiftData
 import AuraCore
 
-/// V3 adds `SavedPlaceRecord` beside the (unchanged) V2 `RideRecord` —
-/// adding a model type is a lightweight migration. CloudKit rules hold:
-/// defaults on every attribute, no `.unique`, no relationships. The Date
-/// default is the fixed sentinel, not `.now` (see the V2 comment).
-public enum RideSchemaV3: VersionedSchema {
-    public static let versionIdentifier = Schema.Version(3, 0, 0)
+/// V5 adds `resurface` to `SavedPlaceRecord`. Redeclared here (not mutated in V3) so the
+/// V4→V5 delta is a real, well-defined single-attribute add. CloudKit rules hold: default
+/// on every attribute, no `.unique`, no relationships. Date default is the fixed sentinel.
+public enum RideSchemaV5: VersionedSchema {
+    public static let versionIdentifier = Schema.Version(5, 0, 0)
     public static var models: [any PersistentModel.Type] {
-        [RideSchemaV2.RideRecord.self, SavedPlaceRecord.self]
+        [RideSchemaV2.RideRecord.self, SavedPlaceRecord.self, RideSchemaV4.SeenGemRecord.self]
     }
 
     @Model
@@ -22,6 +21,7 @@ public enum RideSchemaV3: VersionedSchema {
         public var categoryRaw: String = "custom"
         public var kindRaw: String = "favorite"
         public var savedAt: Date = Date(timeIntervalSince1970: 0)
+        public var resurface: Bool = false
 
         public init(_ value: SavedPlace) {
             id = value.id
@@ -32,6 +32,7 @@ public enum RideSchemaV3: VersionedSchema {
             categoryRaw = value.category.rawValue
             kindRaw = value.kind.rawValue
             savedAt = value.savedAt
+            resurface = value.resurface
         }
 
         /// nil when raws come from a newer app version this build can't read.
@@ -40,7 +41,9 @@ public enum RideSchemaV3: VersionedSchema {
                   let kind = SavedPlace.Kind(rawValue: kindRaw) else { return nil }
             return SavedPlace(id: id, name: name, subtitle: subtitle,
                               coordinate: Coordinate(latitude: latitude, longitude: longitude),
-                              category: category, kind: kind, savedAt: savedAt)
+                              category: category, kind: kind, savedAt: savedAt, resurface: resurface)
         }
     }
 }
+
+public typealias SavedPlaceRecord = RideSchemaV5.SavedPlaceRecord

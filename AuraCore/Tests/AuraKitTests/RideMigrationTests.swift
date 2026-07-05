@@ -53,10 +53,11 @@ struct RideMigrationTests {
         // 1. Write two V1-shaped rows, then release the container.
         try writeV1Rows(navId: navId, freeId: freeId, track: track, stats: stats, url: url)
 
-        // 2. Reopen the same file through the migration plan on V3 (both models, so the
-        // migration destination resolves to V3 and the V2→V3 lightweight stage runs).
+        // 2. Reopen the same file through the migration plan on the current schema (all
+        // live model types, so the destination resolves unambiguously and every lightweight
+        // stage after V2→V3 runs too).
         let cfg = ModelConfiguration(url: url)
-        let v2 = try ModelContainer(for: RideRecord.self, SavedPlaceRecord.self,
+        let v2 = try ModelContainer(for: RideRecord.self, SavedPlaceRecord.self, RideSchemaV4.SeenGemRecord.self,
                                     migrationPlan: RideMigrationPlan.self,
                                     configurations: cfg)
         let records = try v2.mainContext.fetch(
@@ -95,7 +96,7 @@ struct RideMigrationTests {
     /// plan should start cleanly on V2 and round-trip a saved ride.
     @Test func freshStoreThroughMigrationPlanWorks() throws {
         let container = try ModelContainer(
-            for: RideRecord.self, SavedPlaceRecord.self,
+            for: RideRecord.self, SavedPlaceRecord.self, RideSchemaV4.SeenGemRecord.self,
             migrationPlan: RideMigrationPlan.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         let store = RideStore(container: container)
