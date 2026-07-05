@@ -27,6 +27,10 @@ public final class RideSessionCoordinator {
 
     /// Navigate keeps this synced to its latest maneuver; free ride leaves it nil.
     public var maneuver: GuidanceUpdate?
+    /// True whenever a detour overlay is in flight (drives the gem card/haptic arbiter).
+    public var isDetouring: Bool { guidance?.isDetouring ?? false }
+    /// True only while turn-by-turn guiding.
+    public var isGuiding: Bool { guidance?.isGuiding ?? false }
 
     private let kind: Ride.Kind
     private let recorder: RideRecorder
@@ -34,6 +38,7 @@ public final class RideSessionCoordinator {
     private let screen: any ScreenWakeControlling
     private let activity: any RideActivityControlling
     private let workout: (any WorkoutWriting)?
+    @ObservationIgnored private let guidance: (any GuidanceControlling)?
 
     // Stashed at start() for the rest of the ride.
     private var location: (any LocationStreaming)?
@@ -50,13 +55,15 @@ public final class RideSessionCoordinator {
                 destinationName: String?,
                 screen: any ScreenWakeControlling,
                 activity: any RideActivityControlling,
-                workout: (any WorkoutWriting)? = nil) {
+                workout: (any WorkoutWriting)? = nil,
+                guidance: (any GuidanceControlling)? = nil) {
         self.kind = kind
         self.recorder = RideRecorder(kind: kind)
         self.destinationName = destinationName
         self.screen = screen
         self.activity = activity
         self.workout = workout
+        self.guidance = guidance
     }
 
     public enum StartOutcome: Sendable { case started, permissionDenied }
@@ -104,6 +111,7 @@ public final class RideSessionCoordinator {
                     speed: point.speedMetersPerSecond ?? self.recorder.currentSpeedMetersPerSecond,
                     at: point.timestamp)
                 self.discoverySink?.rideDidUpdateLocation(point)
+                self.guidance?.riderDidUpdate(point)
             }
         }
         tickerTask = Task { [weak self] in
@@ -132,6 +140,7 @@ public final class RideSessionCoordinator {
     /// publishes the ride (even on a save failure, so the summary still shows).
     public func finish() {
         guard recorder.isRecording else { return }
+        guidance?.detach()
         stopStreaming()
         screen.setKeepAwake(false)
         activity.end()
@@ -154,6 +163,7 @@ public final class RideSessionCoordinator {
     /// orphaned Lock Screen activity. Does not save or publish a ride. `activity.end()` is
     /// idempotent, so calling this after `finish()` (e.g. onDisappear after End) is a no-op.
     public func cancel() {
+        guidance?.detach()
         stopStreaming()
         screen.setKeepAwake(false)
         activity.end()
