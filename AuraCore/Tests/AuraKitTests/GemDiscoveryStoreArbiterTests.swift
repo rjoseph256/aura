@@ -20,7 +20,8 @@ import AuraCore
         let store = GemDiscoveryStore(provider: StubProvider(gems: [near("v", meters: 80, tier: .cardHaptic)]),
                                       seen: InMemorySeen(), haptics: haptics)
         store.detourActive = { true }
-        await store.load()
+        store.update(at: here, now: Date(timeIntervalSince1970: 100))
+        await store.loadTask?.value
         store.update(at: here, now: Date(timeIntervalSince1970: 100))
         #expect(store.activeCard == nil)
         #expect(haptics.count == 0)

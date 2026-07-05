@@ -18,7 +18,8 @@ import AuraCore
         let store = GemDiscoveryStore(provider: StubProvider(gems: [gem("a", 40.4411), gem("b", 40.60)]),
                                       engine: GemDiscoveryEngine(proximityRadiusMeters: 1000, pinCap: 10),
                                       seen: InMemorySeen(), haptics: SpyHaptics())
-        await store.load()
+        store.update(at: Coordinate(latitude: 40.4406, longitude: -79.9959), now: Date(timeIntervalSince1970: 0))
+        await store.loadTask?.value
         store.update(at: Coordinate(latitude: 40.4406, longitude: -79.9959), now: Date(timeIntervalSince1970: 0))
         #expect(store.visiblePins.map(\.id) == ["a"])
     }
@@ -26,7 +27,8 @@ import AuraCore
     @Test func suppressedStorePublishesNoPins() async {
         let store = GemDiscoveryStore(provider: StubProvider(gems: [gem("a", 40.4406)]),
                                       seen: InMemorySeen(), haptics: SpyHaptics())
-        await store.load()
+        store.update(at: Coordinate(latitude: 40.4406, longitude: -79.9959), now: Date(timeIntervalSince1970: 0))
+        await store.loadTask?.value
         store.isSuppressed = true
         store.update(at: Coordinate(latitude: 40.4406, longitude: -79.9959), now: Date(timeIntervalSince1970: 0))
         #expect(store.visiblePins.isEmpty)
