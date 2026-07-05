@@ -25,9 +25,13 @@ jobs:
       - name: Show Swift version
         run: swift --version
       # Pure-logic package, now under Swift 6 language mode. No simulator, no Mapbox token.
+      # --no-parallel: several suites create SwiftData ModelContainers; Swift Testing's
+      # default parallel execution intermittently SIGABRTs inside CoreData
+      # NSManagedObjectContext.performAndWait when SwiftData-backed suites run concurrently.
+      # Serial execution is fast here (~0.5s for the whole suite) and deterministic.
       - name: Run AuraCore + AuraKit tests
         working-directory: AuraCore
-        run: swift test
+        run: swift test --no-parallel
 
   app-build:
     name: App build (xcodebuild)
