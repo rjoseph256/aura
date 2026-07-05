@@ -13,6 +13,8 @@ struct RideMapView: View {
     var nameMap: [UUID: String] = [:]
     var selfProgress: Double = 0
     var gems: [Gem] = []
+    var seenGemIDs: Set<String> = []
+    var onSelectGem: (Gem) -> Void = { _ in }
 
     @Environment(SettingsStore.self) private var settings
     @Binding var viewport: Viewport
@@ -54,7 +56,7 @@ struct RideMapView: View {
             ForEvery(gems, id: \.id) { gem in
                 MapViewAnnotation(coordinate: CLLocationCoordinate2D(latitude: gem.coordinate.latitude,
                                                                      longitude: gem.coordinate.longitude)) {
-                    GemPinView(gem: gem)
+                    GemPinView(gem: gem, isSeen: seenGemIDs.contains(gem.id)) { onSelectGem(gem) }
                 }
                 .allowOverlapWithPuck(true)
             }
