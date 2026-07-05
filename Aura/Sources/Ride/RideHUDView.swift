@@ -22,6 +22,9 @@ struct RideHUDView: View {
     @State private var showPermission = false
     @State private var showEndConfirm = false
     @State private var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
+    // Free rides are solo by construction — group rides use NavigateHUDView +
+    // GroupRideSession, never this HUD — so gem discovery is never suppressed here.
+    // (GemDiscoveryStore.isSuppressed exists for a future group-explore surface.)
     @State private var gems = GemDiscoveryStore(provider: CuratedGemProvider())
 
     var body: some View {
