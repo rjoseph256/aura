@@ -3,7 +3,7 @@ import Foundation
 import AuraCore
 @testable import AuraKit
 
-final class StubURLProtocol: URLProtocol {
+class StubURLProtocol: URLProtocol {
     nonisolated(unsafe) static var body: Data = Data()
     nonisolated(unsafe) static var status: Int = 200
     nonisolated(unsafe) static var requestCount: Int = 0
@@ -31,9 +31,9 @@ struct LiveGemProviderTests {
 
     @Test func decodesLiveGemsCappedAtTier2() async {
         StubURLProtocol.set(status: 200, body: Data())
-        StubURLProtocol.body = """
+        StubURLProtocol.body = Data("""
         {"elements":[{"type":"node","id":7,"lat":40.44,"lon":-79.99,"tags":{"tourism":"viewpoint","name":"Grandview"}}]}
-        """.data(using: .utf8)!
+        """.utf8)
         let provider = LiveGemProvider(session: session())
         let gems = await provider.gems(near: Coordinate(latitude: 40.44, longitude: -79.99))
         #expect(gems.count == 1)
@@ -51,9 +51,9 @@ struct LiveGemProviderTests {
 
     @Test func unmappedElementsDropped() async {
         StubURLProtocol.set(status: 200, body: Data())
-        StubURLProtocol.body = """
+        StubURLProtocol.body = Data("""
         {"elements":[{"type":"node","id":8,"lat":40.44,"lon":-79.99,"tags":{"shop":"bakery"}}]}
-        """.data(using: .utf8)!
+        """.utf8)
         let provider = LiveGemProvider(session: session())
         #expect(await provider.gems(near: Coordinate(latitude: 40.44, longitude: -79.99)).isEmpty)
     }
@@ -64,9 +64,9 @@ struct LiveGemProviderTests {
     @Test func secondCallNearSameCoordinateReusesCache() async {
         StubURLProtocol.resetCount()
         StubURLProtocol.set(status: 200, body: Data())
-        StubURLProtocol.body = """
+        StubURLProtocol.body = Data("""
         {"elements":[{"type":"node","id":7,"lat":40.44,"lon":-79.99,"tags":{"tourism":"viewpoint","name":"Grandview"}}]}
-        """.data(using: .utf8)!
+        """.utf8)
         final class Clock: @unchecked Sendable { var tick = Date(timeIntervalSince1970: 0) }
         let clock = Clock()
         let provider = LiveGemProvider(session: session(), cache: GemRegionCache(), now: { clock.tick })

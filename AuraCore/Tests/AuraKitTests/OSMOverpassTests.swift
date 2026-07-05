@@ -13,13 +13,13 @@ struct OSMOverpassTests {
     }
 
     @Test func decodesNodesWithTags() {
-        let json = """
+        let json = Data("""
         {"elements":[
           {"type":"node","id":42,"lat":40.44,"lon":-79.99,"tags":{"tourism":"viewpoint","name":"Grandview"}},
           {"type":"node","id":43,"lat":40.45,"lon":-79.98,"tags":{"amenity":"cafe"}},
           {"type":"way","id":99,"tags":{"leisure":"park"}}
         ]}
-        """.data(using: .utf8)!
+        """.utf8)
         let els = OSMOverpass.elements(from: json)
         #expect(els.count == 2)   // way dropped (no lat/lon)
         #expect(els[0].id == "osm:node/42")

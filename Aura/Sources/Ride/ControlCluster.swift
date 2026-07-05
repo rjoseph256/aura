@@ -15,7 +15,7 @@ struct ControlCluster: View {
     var onRecenter: () -> Void
     /// When nil, the mark-this-spot button is disabled (dimmed, non-tappable) rather than hidden,
     /// so the cluster's layout doesn't shift as GPS acquires.
-    var onMarkSpot: (() -> Void)? = nil
+    var onMarkSpot: (() -> Void)?
     /// When nil, the mute button is omitted.
     var onToggleMute: (() -> Void)?
     var onEndRide: () -> Void
@@ -67,7 +67,7 @@ struct ControlCluster: View {
         ControlCluster(isFollowing: true, isMuted: false,
                        onRecenter: {}, onMarkSpot: {}, onToggleMute: {}, onEndRide: {})
         // Explore: no mute, mark-spot still disabled (no fix yet).
-        ControlCluster(isFollowing: false, onRecenter: {}, onEndRide: {})
+        ControlCluster(isFollowing: false, onRecenter: {}, onMarkSpot: nil, onToggleMute: nil, onEndRide: {})
     }
     .padding()
     .background(AuraTheme.background)

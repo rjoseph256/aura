@@ -25,15 +25,26 @@ public enum OSMOverpass {
         return req
     }
 
-    public static func elements(from data: Data) -> [(id: String, name: String?, coordinate: Coordinate, tags: [String: String])] {
+    public static func elements(from data: Data) -> [OSMElement] {
         struct Response: Decodable { let elements: [Element] }
         struct Element: Decodable { let type: String; let id: Int; let lat: Double?; let lon: Double?; let tags: [String: String]? }
         guard let resp = try? JSONDecoder().decode(Response.self, from: data) else { return [] }
         return resp.elements.compactMap { e in
             guard let lat = e.lat, let lon = e.lon else { return nil }   // nodes only (ways lack lat/lon here)
             let tags = e.tags ?? [:]
-            return (id: "osm:\(e.type)/\(e.id)", name: tags["name"],
-                    coordinate: Coordinate(latitude: lat, longitude: lon), tags: tags)
+            return OSMElement(id: "osm:\(e.type)/\(e.id)", name: tags["name"],
+                               coordinate: Coordinate(latitude: lat, longitude: lon), tags: tags)
         }
+    }
+}
+
+/// A decoded Overpass node: its identity, optional display name, location, and raw OSM tags.
+public struct OSMElement: Sendable {
+    public let id: String
+    public let name: String?
+    public let coordinate: Coordinate
+    public let tags: [String: String]
+    public init(id: String, name: String?, coordinate: Coordinate, tags: [String: String]) {
+        self.id = id; self.name = name; self.coordinate = coordinate; self.tags = tags
     }
 }

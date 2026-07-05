@@ -55,13 +55,13 @@ struct GemDiscoveryIntegrationTests {
 
 /// Always answers 200 with an empty Overpass element set — stands in for "live" in the
 /// production assembly without touching the network.
-private final class EmptyResponseURLProtocol: URLProtocol {
+private class EmptyResponseURLProtocol: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let resp = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: #"{"elements":[]}"#.data(using: .utf8)!)
+        client?.urlProtocol(self, didLoad: Data(#"{"elements":[]}"#.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
