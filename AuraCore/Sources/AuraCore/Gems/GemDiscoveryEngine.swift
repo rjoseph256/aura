@@ -42,9 +42,14 @@ public struct GemDiscoveryEngine: Sendable {
             .map { ($0, Geo.distance($0.coordinate, location)) }
             .filter { $0.1 <= approachRadiusMeters }
 
-        // Highest tier wins; nearest breaks the tie.
-        let picked = eligible.sorted {
-            $0.0.tier != $1.0.tier ? $0.0.tier > $1.0.tier : $0.1 < $1.1
+        // Cross-source arbitration: personal > curated > live (source rank),
+        // then highest tier, then nearest. Makes a personal-T3 beat a curated-T3
+        // deterministically instead of falling through to distance.
+        let picked = eligible.sorted { lhs, rhs in
+            let lr = lhs.0.source.priorityRank, rr = rhs.0.source.priorityRank
+            if lr != rr { return lr < rr }
+            if lhs.0.tier != rhs.0.tier { return lhs.0.tier > rhs.0.tier }
+            return lhs.1 < rhs.1
         }.first?.0
 
         if let gem = picked {
