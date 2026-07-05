@@ -74,6 +74,16 @@ public enum SavedPlacesLogic {
         }
     }
 
+    /// Flips the resurface flag for one place by id; leaves the rest untouched.
+    public static func setResurface(id: UUID, _ on: Bool, in list: [SavedPlace]) -> [SavedPlace] {
+        list.map { item in
+            guard item.id == id else { return item }
+            var next = item
+            next.resurface = on
+            return next
+        }
+    }
+
     /// Read-side pass that absorbs CloudKit merge artifacts: id doubles
     /// (backup-restore), key doubles (two devices saving one spot), and a
     /// two-Home merge. Keeps the newest of each; never writes back — the next
@@ -83,6 +93,12 @@ public enum SavedPlacesLogic {
         var byID: [UUID: SavedPlace] = [:]
         for item in list where (byID[item.id].map { $0.savedAt <= item.savedAt } ?? true) {
             byID[item.id] = item
+        }
+        // Preserve resurface across a CloudKit merge: if any same-id copy was flagged, keep it.
+        // Snapshot the keys (Array(...)) — mutating byID while iterating its .keys view trips
+        // Swift's exclusive-access checks.
+        for id in Array(byID.keys) where list.contains(where: { $0.id == id && $0.resurface }) {
+            byID[id]?.resurface = true
         }
         var byKey: [SavedPlaceKey: SavedPlace] = [:]
         for item in byID.values {

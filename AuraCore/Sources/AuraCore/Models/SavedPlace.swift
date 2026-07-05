@@ -15,23 +15,24 @@ public struct SavedPlace: Identifiable, Codable, Equatable, Sendable {
     public var category: Place.Category
     public var kind: Kind
     public var savedAt: Date
+    public var resurface: Bool
 
     public init(id: UUID = UUID(), name: String, subtitle: String?,
                 coordinate: Coordinate, category: Place.Category,
-                kind: Kind, savedAt: Date) {
+                kind: Kind, savedAt: Date, resurface: Bool = false) {
         self.id = id; self.name = name; self.subtitle = subtitle
         self.coordinate = coordinate; self.category = category
-        self.kind = kind; self.savedAt = savedAt
+        self.kind = kind; self.savedAt = savedAt; self.resurface = resurface
     }
 
     /// Save a picked place. Keeps the place's id so a row pushed back into
     /// navigation matches by id, not just coordinate.
     public init(place: Place, subtitle: String? = nil,
-                kind: Kind = .favorite, savedAt: Date) {
+                kind: Kind = .favorite, savedAt: Date, resurface: Bool = false) {
         self.init(id: place.id, name: place.name,
                   subtitle: subtitle ?? place.subtitle,
                   coordinate: place.coordinate, category: place.category,
-                  kind: kind, savedAt: savedAt)
+                  kind: kind, savedAt: savedAt, resurface: resurface)
     }
 
     /// The navigable place, flagged saved.
