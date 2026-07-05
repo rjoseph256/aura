@@ -53,12 +53,13 @@ struct RideHUDView: View {
                 .padding(.top, 8).padding(.trailing, 16)
         }
         // The active layer: at most one self-dismissing peek card for a newly surfaced gem.
-        .overlay(alignment: .bottom) {
+        // Sits up top, just below the back button, so it never covers the speedometer cluster.
+        .overlay(alignment: .top) {
             if let store = gems, let gem = store.activeCard {
                 GemPeekCard(gem: gem, distanceText: gemDistanceText(gem),
                             onTap: { store.select(gem); store.dismissActiveCard() },
                             onDismiss: { store.dismissActiveCard() })
-                    .padding(.horizontal, 12).padding(.bottom, 120)
+                    .padding(.horizontal, 12).padding(.top, 60)
             }
         }
         .animation(.snappy, value: gems?.activeCard?.id)
