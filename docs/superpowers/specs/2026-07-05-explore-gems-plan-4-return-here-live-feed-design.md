@@ -127,10 +127,15 @@ next `load()` includes it as a Tier-3 personal gem.
 
 ## Persistence & migration
 
-- **Schema V5** (`RideSchemaV5`): add `resurface: Bool = false` to the live
-  `SavedPlaceRecord` class. `models` lists the same set as V4 (`RideRecord`,
-  `SavedPlaceRecord`, `SeenGemRecord`). Register V5 in `RideMigrationPlan.schemas`
-  and add a **lightweight** `migrateV4toV5` stage.
+- **Schema V5** (`RideSchemaV5`): **redeclare** its own `SavedPlaceRecord` class
+  (a copy of V3's + `resurface: Bool = false`) rather than mutating the class
+  declared in `RideSchemaV3` (which V3/V4 still reference — mutating it in place
+  would retroactively change what V3/V4 mean and break migration identity). V5's
+  `models` lists `RideRecord`, `RideSchemaV5.SavedPlaceRecord`, `SeenGemRecord`.
+  Register V5 in `RideMigrationPlan.schemas` + a **lightweight** `migrateV4toV5`
+  stage. The `ModelContainer` current schema, and `SavedPlacesStore`'s
+  `init(_:)`/`.value` mapping, repoint to `RideSchemaV5.SavedPlaceRecord`.
+  (See Review reconciliation §V5 for the exact mechanics.)
 - **ROH-13 CloudKit invariants** hold: `resurface` has a default, is not
   `.unique`, adds no relationship. `SchemaInvariantTests` is extended to assert
   against **V5** (every attribute optional-or-defaulted; no unique/relationships;
@@ -217,3 +222,111 @@ audit; the three Plan-3 minors; device-verify of the Plan-3 tails + new surfaces
 
 **Deferred:** live-feed photos, arrival chime, heading-aware surfacing, gems in
 group rides, a gem line in the Live Activity (all unchanged from the parent spec).
+
+## Review reconciliation (Plan 4 adversarial pass, 2026-07-05)
+
+Hardened after a 3-lens adversarial spec review (correctness / rider-UX /
+architecture-concurrency). Material changes below are authoritative; the plan
+must implement them.
+
+**§Arbitration (correctness-CRITICAL).** The shipped `GemDiscoveryEngine.decide`
+sorts by `(tier↓, distance↑)` only — so a curated-T3 and a personal-T3 tie
+resolves to *nearest*, which can hand the surface to curated when the spec wants
+personal. Fix: sort eligible gems by an explicit tuple **`(sourceOrder↑, tier↓,
+distance↑)`** where `sourceOrder = personal(0) < curated(1) < live(2)`. Since
+personal is always T3 and live always ≤ T2, tier already encodes most ordering;
+`sourceOrder` as the primary key makes personal-T3-beats-curated-T3 deterministic.
+Add a regression test asserting a *farther* personal-T3 beats a *nearer*
+curated-T3, and that existing tier/distance/cooldown/seen tests still pass.
+
+**§CompositeGemProvider dedupe (correctness-HIGH).** Id-only dedupe misses the
+real collision: a personal "return here" café (`personal:<uuid>`) that is *also*
+an OSM POI (`osm:<id>`) has two different ids → it double-surfaces (two pins, two
+detail sheets, same physical spot). Two-pass dedupe: (1) exact `Gem.id`, higher
+`sourceOrder`-priority wins; (2) **coordinate-proximity cluster** — gems within
+**~25 m** (`Geo.distance`) collapse to the single highest-priority
+(personal>curated>live) member. 25 m matches the region-cache grain and the
+`cacheKey` quantization. Test: personal+live at the same coord → one personal pin.
+
+**§CompositeGemProvider concurrency (architecture-HIGH).** A slow/offline Overpass
+must never block the map. `personal` and `curated` resolve immediately (local);
+`live` runs under a **~2 s timeout** — on timeout/error/empty it contributes `[]`
+and the composite returns curated+personal without waiting further. Fan-out via
+`async let` (three concurrent), `[Gem]` is `Sendable`. No `Task.sleep` as a test
+barrier — drive the timeout path with an injected stub provider that never
+returns, plus an injected clock, not wall-clock.
+
+**§load() deferral + timestamp clock (correctness/architecture-HIGH).** The store
+currently calls `provider.gems(near: riderCoordinate ?? Coordinate(0,0))` and then
+`update(at:, now: Date(timeIntervalSince1970: 0))` — both a Null-Island query risk
+and a wall-clock/epoch violation of the timestamp-driven contract. Fix the exact
+sequence: `init` does **not** `load()`; `update(at:now:)` is fed the **location
+sample's timestamp** as `now` (threaded from the ride stream, never `Date()`); on
+the **first** `update` with a non-nil coordinate the store triggers a **one-time**
+`load()` (guard a `didLoad` flag so it fires once, not per-sample, and never at
+(0,0)). Curated stays first-fix-independent; personal/live are only ever queried
+at a real coordinate. Test: no `gems(near:)` call before the first fix; exactly
+one `load()` across many updates.
+
+**§V5 schema mechanics (correctness/architecture-MEDIUM).** `SavedPlaceRecord` is
+declared in `RideSchemaV3` and *referenced* by V4 — mutating that class to add
+`resurface` would retroactively change V3/V4 and corrupt migration identity.
+Correct pattern: `RideSchemaV5` **declares its own** `SavedPlaceRecord` (V3's
+fields + `resurface: Bool = false`, same init/`.value` shape). `RideSchemaV3`'s
+class is left untouched. `RideMigrationPlan.schemas` appends V5; `migrateV4toV5`
+is a **lightweight** stage. `RideStore.persistent()`/`.inMemory()` `ModelContainer`
+and `SavedPlacesStore`'s `init(_:)`/`.value` mapping switch to
+`RideSchemaV5.SavedPlaceRecord`. `SchemaInvariantTests` targets **V5** and adds
+`resurface` to the optional-or-defaulted assertion (default `false`). Migration
+test: a V4 store with an existing place opens under V5 with `resurface == false`.
+
+**§CLGeocoder backfill without clobbering user edits (UX/architecture-HIGH).**
+Reverse-geocode is **app-target only** (CoreLocation is iOS-only; AuraKit stays
+pure `URLSession`+SwiftData). Flow: on mark/save, persist immediately with a
+**provisional** name (`"Marked spot"`); the app fires `CLGeocoder`
+asynchronously; on success it calls a `SavedPlacesStore.updateName(id:to:)` seam
+**only if the stored name still equals the provisional string** (so a user rename
+made in the interim is never overwritten). Failure/offline → the provisional name
+stays; the name is always user-editable. No second schema field needed. The
+Saved Places row shows the real name when present and a relative-time subtitle
+("marked 2h ago"); the async backfill updates the row in place.
+
+**§Mark-this-spot safety (UX-CRITICAL).** The one-tap control must **not** sit
+adjacent to the destructive End-Ride button in the cockpit cluster (fat-finger →
+silent unwanted save). Separate it visually (its own position / spacing away from
+End Ride), and the confirmation toast carries an **Undo** affordance that deletes
+the just-saved place (in-ride, no home-dashboard round-trip). The control is
+**disabled until a first fix** exists (can't mark Null Island). At the 50-place
+cap it surfaces the existing "saved places full" path.
+
+**§Curated-vs-live differentiation (UX-HIGH).** Live (OSM) pins/cards must be
+visually distinct from hand-curated gems so the curation signal isn't diluted:
+curated/personal render full-strength; **live** renders quieter (dimmer/hollow
+pin, and the peek card carries a small OSM source label). The OSM label doubles as
+the **ODbL attribution** OpenStreetMap requires. Pin styling keys on `Gem.source`,
+not just `tier`/`isSeen`; add a styling test.
+
+**§Resurface discoverability (UX-MEDIUM).** Beyond the swipe action, `SavedPlaceRow`
+gets an explicit **menu item** ("Stop returning here") when `resurface == true`,
+and a subtle indicator + hint ("Resurfaces when you ride past"). VoiceOver users
+reach the toggle via the menu, not a hidden swipe.
+
+**§Minor hardening.** (a) `GemDiscoveryStore.update` snapshots `detourActive()`
+**once** at the top (avoid a mid-update re-entrancy flip). (b) `SeenGemStore`
+caches its id set in memory (seed at init) instead of re-fetching per surfacing,
+and logs (not `try?`-swallows) a save failure. (c) `PersonalGemProvider` returns
+**all** resurface places unsorted — proximity is the engine's job. (d) Enumerate
+`#if os(iOS)` needs: none in the new AuraKit providers (pure); CLGeocoder + the
+mark-spot haptic live in the app target.
+
+**Judgment calls (PO veto welcome).** (1) **U5 personal-nag:** kept the parent
+spec's "personal exempt from cross-ride seen-quiet" (that *is* "return here"); the
+per-ride cooldown/don't-repeat caps it at once-per-ride. A cross-ride resurface
+throttle (`lastResurfacedAt`) is **deferred** to post-v1 pending device feedback,
+to hold this final slice to the single additive field `resurface`. (2) **Dedupe
+radius = 25 m**, matching the cache grid + `cacheKey` quantization.
+
+**Non-issues after code read.** The three providers, `resurface` field, and
+arbitration "not existing yet" (flagged CRITICAL by the architecture lens) are the
+*intended implementation work* of this slice, not spec defects — captured as plan
+tasks, not spec changes.
