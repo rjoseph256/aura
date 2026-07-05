@@ -26,7 +26,10 @@ import AuraCore
         init(_ result: Result<Route, Error>) { self.result = result }
         func route(from origin: Coordinate, to destination: Coordinate) async throws -> Route {
             calls += 1
-            switch result { case .success(let r): return r; case .failure(let e): throw e }
+            switch result {
+            case .success(let r): return r
+            case .failure(let e): throw e
+            }
         }
     }
     /// Like FakeRouting but suspends first, so a `cancel()` issued before it resolves actually
@@ -36,7 +39,10 @@ import AuraCore
         init(_ result: Result<Route, Error>) { self.result = result }
         func route(from origin: Coordinate, to destination: Coordinate) async throws -> Route {
             try await Task.sleep(for: .milliseconds(10))
-            switch result { case .success(let r): return r; case .failure(let e): throw e }
+            switch result {
+            case .success(let r): return r
+            case .failure(let e): throw e
+            }
         }
     }
     struct Offline: Error {}
