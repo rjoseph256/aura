@@ -134,6 +134,7 @@ struct RideHUDView: View {
             // Arbiter (R7): a detour in flight suppresses the gem peek card + Tier-3 haptic
             // (turn cues own the cockpit) but pins/seen-state are unaffected.
             store.detourActive = { [coordinator] in coordinator.isDetouring }
+            guidance.units = settings.units
             gems = store
             let outcome = coordinator.start(
                 location: location, saving: rideStore, units: settings.units,

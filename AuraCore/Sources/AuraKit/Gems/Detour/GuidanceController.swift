@@ -22,7 +22,7 @@ public final class GuidanceController: GuidanceControlling {
     @ObservationIgnored private let routing: any DetourRouting
     @ObservationIgnored private let heading: any HeadingProviding
     @ObservationIgnored private let haptics: (any HapticPlaying)?
-    @ObservationIgnored private let units: DistanceUnits
+    @ObservationIgnored public var units: DistanceUnits
     @ObservationIgnored private let turnHaptics: Bool
 
     /// Monotonic guard: bumped on every request/retarget/cancel so a late route completion
