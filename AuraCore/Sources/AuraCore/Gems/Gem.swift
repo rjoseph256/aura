@@ -21,7 +21,8 @@ public enum GemCategory: String, Codable, Sendable, CaseIterable {
     /// How close (meters) counts as "arrived" for this kind of place.
     public var arrivalRadiusMeters: Double {
         switch self {
-        case .cafe, .mural, .landmark: return 30
+        case .mural, .landmark: return 30
+        case .cafe: return 40
         case .water, .historic: return 45
         case .park, .viewpoint, .climb: return 70
         }

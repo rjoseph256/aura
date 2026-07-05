@@ -14,6 +14,11 @@ import Foundation
         #expect(GemCategory.viewpoint.arrivalRadiusMeters > GemCategory.cafe.arrivalRadiusMeters)
     }
 
+    @Test func cafeArrivalRadiusIsForgivingForBikes() {
+        #expect(GemCategory.cafe.arrivalRadiusMeters == 40)
+        #expect(GemCategory.viewpoint.arrivalRadiusMeters == 70)   // unchanged
+    }
+
     @Test func gemRoundTripsThroughCodable() throws {
         let gem = Gem(id: "curated:grandview-overlook", name: "Grandview overlook",
                       coordinate: Coordinate(latitude: 40.43, longitude: -80.0),
