@@ -23,6 +23,10 @@ public final class GemDiscoveryStore {
     }
 
     public func load() async {
+        // The (0,0) fallback origin is only safe because the curated provider ignores
+        // `near:` and returns its whole set. A coordinate-filtering provider (the future
+        // live feed) must NOT be loaded at (0,0): defer `load()` until the first fix has
+        // set `lastCoordinate`, or fetch per-fix, or this queries gems near Null Island.
         let origin = lastCoordinate ?? Coordinate(latitude: 0, longitude: 0)
         candidates = await provider.gems(near: origin)
         if let coordinate = lastCoordinate { update(at: coordinate) }
