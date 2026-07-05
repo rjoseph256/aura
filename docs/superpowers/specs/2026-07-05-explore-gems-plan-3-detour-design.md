@@ -26,9 +26,15 @@ These are load-bearing facts confirmed by reading the shipped code:
    `AuraKit/Guidance/GuidanceViewModel.swift`: on the `.arrivedAtDestination`
    event it calls `onArrive()` then returns. `NavigateHUDView` sets
    `guidance.onArrive = { endRide() }`. **The detour sets it to a *detach* closure
-   instead.** No change is needed to `MapboxGuidanceSession`, `GuidanceEvent`, or the
-   arrival plumbing: the gem is the detour route's sole (final) destination, so
-   Mapbox fires `ToFinalDestination` → `.arrivedAtDestination` exactly as wanted.
+   instead.** No change is needed to `GuidanceEvent` or the arrival semantics: the gem
+   is the detour route's sole (final) destination, so Mapbox fires `ToFinalDestination`
+   → `.arrivedAtDestination` exactly as wanted (verified in `MapboxGuidanceSession.swift`
+   arrival sink). **One defensive change *is* needed** — see the re-entrancy hardening in
+   Review reconciliation §R1: `MapboxGuidanceSession.stop()` queues its teardown
+   (`startFreeDrive`) on the *next* main-actor tick, so a rapid re-target that calls
+   `start()` again could invoke `startActiveGuidance` on a trip session still in the
+   old active-guidance state. The controller creates a **fresh guidance session per
+   leg** and `start()` **defensively resets to free-drive** before `startActiveGuidance`.
 2. **`RideSessionCoordinator` injects app-target concretes at init**
    (`screen`, `activity`, `workout`) and forwards every `TrackPoint` from its stream
    loop to `groupSink` and `discoverySink`. `finish()` and `cancel()` are the *only*
@@ -141,8 +147,10 @@ API:
   - `startHeadingOnly(g)`: begin consuming `HeadingProviding`; seed `headingArrow`.
   - `stopHeading`: stop consuming heading.
   - `confirmArrival(g)`: set `arrivalBanner = g`, fire one soft haptic, schedule clear.
-  - Route cache: `[Gem.ID: Route]`, so toggling/re-targeting a recently-routed gem
-    does not refetch.
+  - Route cache: keyed `(Gem.ID, quantizedOrigin)` where `quantizedOrigin` rounds the
+    request origin to ~25 m; a cached route is reused only if the current origin is
+    within ~25 m of the cached one, else refetched. This makes rapid same-spot
+    re-toggles free without ever serving a stale route from a since-moved origin (§R5).
 - **Networkrecovery** while `headingOnly`: on `riderDidUpdate` (throttled), retry
   `routing.route(...)`; on success feed `networkRecovered` (→ re-route → guiding).
 
@@ -273,3 +281,113 @@ upgrade, arrival-radius product pass.
 
 **Out (Plan 4):** personal "return here"/`resurface`, minimal live feed, cross-source
 priority arbitration, full a11y audit.
+
+## Review reconciliation (2026-07-05 adversarial pass)
+
+Hardened after a 3-lens adversarial spec review (correctness/skeptic, rider-UX/safety,
+architecture/edge-case), each with a refuting mandate. Material changes folded in:
+
+**R1 — Mapbox re-entrancy on re-target (was: "no change needed").** `MapboxGuidanceSession.stop()`
+finishes the stream and defers teardown (`startFreeDrive`) to the next main-actor tick,
+so a rapid stop→start (re-target) could call `startActiveGuidance` on a trip session
+still in the prior active-guidance state (shared process singleton `AuraNavigation.provider`).
+Mitigation: (a) `GuidanceController` owns a `makeGuidanceViewModel: () -> GuidanceViewModel`
+**factory** and builds a *fresh* view-model + session per leg (`startGuidance`), dropping
+the old one on `stopGuidance`; and (b) `MapboxGuidanceSession.start()` **defensively calls
+`startFreeDrive()` immediately before `startActiveGuidance`** to force a known state
+regardless of pending teardown. Both the factory seam and the defensive reset are in scope.
+Test: re-target twice in quick succession starts guidance for the *second* gem only.
+
+**R2 — Stale async route completion after cancel/re-target.** `requestDetour`/`retarget`
+await `DetourRouting.route(...)`; the phase can change during the await (Stop, or a newer
+re-target). The controller MUST, before feeding `routeReady`, verify the phase is still
+`routing(g)` **with the same gem id and the same request generation**; otherwise discard
+the resolved route as stale. `(inactive, routeReady)` and `(inactive, routeFailedOffline)`
+are documented no-ops (reachable only via stale completions). Implement with a monotonic
+`requestGeneration` counter bumped on every `request`/`retarget`/`cancel`. Test:
+cancel-mid-routing then late route success starts no guidance.
+
+**R3 — `riderDidUpdate` TOCTOU.** Snapshot `(phase, destinationGem, requestGeneration)`
+at method entry and use the snapshot throughout, so a concurrent transition can't make it
+compute a `headingArrow` for, or emit `arrived` against, a gem that is no longer the target.
+
+**R4 — Effect idempotency.** All `DetourEffect` executions are idempotent: `stopGuidance`
+with no live session is a no-op, `stopHeading` with no live consumer is a no-op, a second
+`detached` is harmless. The `(any, cancel)` row may fire redundant stops; that is safe by
+construction. Stated so implementers don't add guards that hide bugs.
+
+**R5 — Route cache keyed by origin, not gem alone.** See body: `(Gem.ID, quantizedOrigin~25 m)`.
+
+**R6 — `riderCoordinate` threading + nil policy.** `GemDetailSheet` has no store ref, so
+the `onTakeMeThere` closure is built in `RideHUDView` (which owns both `coordinator` and
+`gems`) and reads `gems.riderCoordinate` at tap time: `onTakeMeThere: { gem in
+guard let c = gems?.riderCoordinate else { return }; coordinator.guidance?.requestDetour(gem, from: c) }`.
+If `riderCoordinate` is nil (no fix yet), the **"Take me there" button is disabled** with a
+subtle "waiting for GPS" state — never route from `Coordinate.zero` (Null Island).
+
+**R7 — `detourActive` predicate isolation.** The predicate is a `@MainActor`-isolated
+`() -> Bool` invoked synchronously inside `GemDiscoveryStore.update(at:now:)` (already
+`@MainActor`); it must do no async work and only read the coordinator's `isDetouring`
+computed property. Documented to avoid a strict-concurrency capture error.
+
+**R8 — `HeadingProviding` lifecycle (pick one).** `HeadingProviding` vends
+`func headings() -> AsyncStream<Double>` (degrees, true north). `startHeadingOnly` spawns a
+consuming `Task` stored on the controller; `stopHeading` **cancels it** (no leak). App
+concrete `CompassHeadingProvider` wraps `CLLocationManager` heading updates, `#if os(iOS)`;
+a non-iOS stub yields nothing. The protocol + controller stay CoreLocation-free (macOS CI).
+
+**R9 — Ride-end sequencing.** In `finish()`/`cancel()`, call `guidance?.detach()`
+**before** `stopStreaming()`. `detach()` feeds `cancel` (not `arrived`) → no arrival
+confirmation on ride end. `onArrive`'s `handleArrived` feeds the `arrived` event to the
+machine (drives `confirmArrival` + `detached`); it is only reachable while a leg is live.
+
+**R10 — Sendable / platform.** `DetourPhase`, `DetourEvent`, `DetourEffect`, `HeadingArrow`,
+`Gem`, `TurnCardState` are all `Sendable`. Platform guards live only in the app concrete
+`CompassHeadingProvider`; the AuraKit protocol/controller are platform-agnostic.
+
+**R11 — Arrival test determinism.** `headingOnly` arrival uses `Geo.distance ≤ radius`;
+tests place the arrival sample well inside the radius (≥50% margin) to avoid float-boundary
+flake. No schema change (no V5) — the detour and its route are ephemeral, never persisted;
+`Ride.track` continues to record every point (detour and wander alike) as one continuous track.
+
+**R12 — Stop ≠ End Ride (safety).** The detour **Stop** control lives on the top
+destination chip (not the bottom `ControlCluster`), uses a **neutral/secondary** treatment
+(never the pink `.destructive` role of End Ride), and is wired to `guidance?.cancel()`.
+VoiceOver label "Stop detour" (distinct from "End ride"). This keeps the ephemeral action
+positionally and visually unmistakable from the terminal one.
+
+**R13 — Concrete overlay slot.** Because peek cards are suppressed during a detour (arbiter),
+the only top occupants are the corner back button (topLeading) and GPS chip (topTrailing);
+the **turn banner sits top-center in the safe area (~8 pt), mirroring `NavigateHUDView`'s
+turn card**, with the destination chip directly below it. No collision with the speedometer
+(bottom cockpit) or the corner chips. Tapping a visible pin during a detour opens the detail
+sheet above the banner → deliberate 2-tap re-target (chosen over 1-tap pin-swap to prevent
+accidental route changes while moving).
+
+**R14 — Offline `headingOnly` honesty (safety).** The offline branch is a **direction-and-
+distance pointer, explicitly NOT turn-by-turn**: it shows a compass arrow + straight-line
+distance + a persistent "Offline · approximate direction" affordance, so a rider never
+mistakes crow-flies for street guidance. It upgrades to real guidance on network recovery.
+Kept in v1 scope (PO-requested) with this honest framing; it is a primary device-verify item.
+
+**R15 — Deliberate exits only (no auto-abandon).** The detour ends on **arrival, Stop, or
+ride end** — there is intentionally no distance/time auto-cancel. Rationale: a rider legitimately
+loops a block or backtracks; an auto-give-up would false-positive and annoy. The always-present
+one-tap **Stop** is the escape hatch. (A future distance-based "you rode away" nudge is a
+possible Plan 4 refinement, explicitly deferred.)
+
+**R16 — Two location consumers (device-verify, not blocker).** During a detour the app's
+`LocationService` (its own `CLLocationManager`/`liveUpdates`) keeps feeding the recorder while
+Mapbox runs its trip session on *its own* location provider. iOS supports independent
+`CLLocationManager` consumers — each owns its accuracy/mode, so there is no shared-instance
+clobbering and no second location prompt; the real cost is extra GPS duty-cycle/battery for
+the (bounded) detour, which is acceptable. This remains the **top device-verify checkpoint**:
+confirm continuous recording, no stats break, and no duplicate-permission UI on a real ride.
+
+### Test list additions (from the pass)
+- Stale route after `cancel`/`retarget` → no guidance for the abandoned gem (R2).
+- Re-target twice rapidly → guidance targets only the final gem; fresh session per leg (R1).
+- `onArrive` detaches and never calls a ride-terminal path; ride keeps recording (R9).
+- `finish()`/`cancel()` mid-detour → `detach()` before `stopStreaming()`, no arrival chip (R9).
+- `headingOnly` arrival deterministic within radius; `networkRecovered` upgrades to guiding (R11).
+- Arbiter: while detouring, `update` suppresses card + T3 haptic but still marks seen + pins (unchanged).
