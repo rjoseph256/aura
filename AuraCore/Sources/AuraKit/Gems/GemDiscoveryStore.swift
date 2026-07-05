@@ -27,6 +27,9 @@ public final class GemDiscoveryStore {
     private let haptics: any GemHapticPlaying
     private var candidates: [Gem] = []
     private var state = DiscoveryState()
+    private var didLoad = false
+    /// The one-time initial load, exposed so callers/tests can await it deterministically.
+    public private(set) var loadTask: Task<Void, Never>?
 
     public init(provider: any GemProviding, engine: GemDiscoveryEngine = .init(),
                 seen: any SeenGemStoring, haptics: any GemHapticPlaying) {
@@ -36,26 +39,35 @@ public final class GemDiscoveryStore {
         self.haptics = haptics
     }
 
-    public func load() async {
-        // The (0,0) fallback origin is only safe because the curated provider ignores `near:`.
-        // A coordinate-filtering provider (the future live feed) must defer load() until the
-        // first fix has set `riderCoordinate`, or this queries gems near Null Island.
-        let origin = riderCoordinate ?? Coordinate(latitude: 0, longitude: 0)
+    /// Loads the candidate set for the current rider coordinate. A no-op until the first
+    /// fix — coordinate-filtering providers (live/personal) must never be queried at (0,0).
+    /// Fired once from `update(at:now:)`; `now` is captured at fire-time and threaded in.
+    public func load(at now: Date) async {
+        guard let origin = riderCoordinate else { return }
         candidates = await provider.gems(near: origin)
         seenIDs = seen.seenGemIDs()
         state = DiscoveryState(seenBefore: seenIDs)
-        if let coordinate = riderCoordinate { update(at: coordinate, now: Date(timeIntervalSince1970: 0)) }
+        evaluate(at: origin, now: now, detouring: detourActive())
     }
 
     public func update(at coordinate: Coordinate, now: Date) {
         riderCoordinate = coordinate
+        let detouring = detourActive()   // snapshot ONCE at entry — no mid-update re-entrancy flip
+        if !didLoad {
+            didLoad = true
+            loadTask = Task { [now] in await load(at: now) }   // capture now at fire-time
+        }
+        evaluate(at: coordinate, now: now, detouring: detouring)
+    }
+
+    private func evaluate(at coordinate: Coordinate, now: Date, detouring: Bool) {
         guard !isSuppressed else { visiblePins = []; activeCard = nil; return }
         let decision = engine.decide(from: candidates, at: coordinate, now: now, state: &state)
         visiblePins = decision.visiblePins
         if let gem = decision.activeSurfacing {
             seenIDs.insert(gem.id)
             seen.markSeen(gem.id, at: now)
-            if !detourActive() {
+            if !detouring {
                 activeCard = gem
                 if gem.tier == .cardHaptic { haptics.playGemSurfaced() }
             }

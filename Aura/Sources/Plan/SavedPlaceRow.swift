@@ -10,6 +10,7 @@ struct SavedPlaceRow: View {
     let onRename: () -> Void
     let onSetHome: () -> Void
     let onRemoveHome: () -> Void
+    let onSetResurface: (Bool) -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -32,6 +33,14 @@ struct SavedPlaceRow: View {
                                 .foregroundStyle(AuraTheme.textSecondary)
                                 .lineLimit(1)
                         }
+                        // Resurface is a quiet, secondary hint — it never competes with the
+                        // subtitle line above (which carries the address/category signal).
+                        if saved.resurface {
+                            Label("Resurfaces when you ride past", systemImage: "sparkles")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(AuraTheme.accent.opacity(0.8))
+                                .lineLimit(1)
+                        }
                     }
                     Spacer()
                 }
@@ -49,6 +58,9 @@ struct SavedPlaceRow: View {
             .accessibilityAction(named: saved.kind == .home ? "Remove Home" : "Set as Home") {
                 if saved.kind == .home { onRemoveHome() } else { onSetHome() }
             }
+            .accessibilityAction(named: saved.resurface ? "Stop returning here" : "Return here") {
+                onSetResurface(!saved.resurface)
+            }
             .accessibilityAction(named: "Delete", onDelete)
 
             Menu {
@@ -63,6 +75,9 @@ struct SavedPlaceRow: View {
             .accessibilityLabel("Actions for \(title)")
         }
         .contextMenu { menuItems }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            resurfaceSwipeButton
+        }
     }
 
     @ViewBuilder private var menuItems: some View {
@@ -72,7 +87,26 @@ struct SavedPlaceRow: View {
         } else {
             Button("Set as Home", systemImage: "house", action: onSetHome)
         }
+        if saved.resurface {
+            Button("Stop returning here", systemImage: "mappin.slash") { onSetResurface(false) }
+        } else {
+            Button("Return here", systemImage: "mappin.and.ellipse") { onSetResurface(true) }
+        }
         Button("Delete", systemImage: "trash", role: .destructive, action: onDelete)
+    }
+
+    @ViewBuilder private var resurfaceSwipeButton: some View {
+        if saved.resurface {
+            Button { onSetResurface(false) } label: {
+                Label("Stop returning here", systemImage: "mappin.slash")
+            }
+            .tint(AuraTheme.textSecondary)
+        } else {
+            Button { onSetResurface(true) } label: {
+                Label("Return here", systemImage: "mappin.and.ellipse")
+            }
+            .tint(AuraTheme.accent)
+        }
     }
 
     /// Home renders as the concept, with the actual place demoted to context.

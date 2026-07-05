@@ -58,11 +58,14 @@ public final class SavedPlacesStore {
     }
 
     @discardableResult
-    public func save(_ place: Place, subtitle: String?) -> SaveOutcome {
+    public func save(_ place: Place, subtitle: String?, resurface: Bool = false) -> SaveOutcome {
         switch SavedPlacesLogic.add(place, subtitle: subtitle, to: places, now: now()) {
         case .full:
             return .full
-        case let .added(list):
+        case var .added(list):
+            if resurface, let saved = SavedPlacesLogic.saved(matching: place, in: list) {
+                list = SavedPlacesLogic.setResurface(id: saved.id, true, in: list)
+            }
             persist(list)
             guard let saved = savedPlace(for: place) else {
                 assertionFailure("save persisted but lookup missed")
@@ -83,6 +86,17 @@ public final class SavedPlacesStore {
 
     public func rename(id: UUID, to name: String) {
         persist(SavedPlacesLogic.rename(id: id, to: name, in: places))
+    }
+
+    public func setResurface(id: UUID, _ on: Bool) {
+        persist(SavedPlacesLogic.setResurface(id: id, on, in: places))
+    }
+
+    /// Backfills a name (reverse-geocode result) only if the stored name is still the
+    /// provisional string — so a user rename made before the geocode returns is never lost.
+    public func updateName(id: UUID, to name: String, ifCurrentlyNamed current: String) {
+        guard places.first(where: { $0.id == id })?.name == current else { return }
+        rename(id: id, to: name)
     }
 
     /// Returns true when a previous Home was demoted (drives confirmation copy).
@@ -114,6 +128,7 @@ public final class SavedPlacesStore {
                     record.categoryRaw = value.category.rawValue
                     record.kindRaw = value.kind.rawValue
                     record.savedAt = value.savedAt
+                    record.resurface = value.resurface
                 } else {
                     context.insert(SavedPlaceRecord(value))
                 }
@@ -129,4 +144,8 @@ public final class SavedPlacesStore {
             refetch()
         }
     }
+}
+
+extension SavedPlacesStore: ResurfacePlacesReading {
+    public func resurfacePlaces() -> [SavedPlace] { places.filter(\.resurface) }
 }

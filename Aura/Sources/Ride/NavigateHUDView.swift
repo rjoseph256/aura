@@ -375,6 +375,7 @@ private extension NavigateHUDView {
                     isFollowing: viewport.followPuck != nil,
                     isMuted: isMuted,
                     onRecenter: { recenter() },
+                    onMarkSpot: nil,
                     onToggleMute: { toggleMute() },
                     onEndRide: { onEndTapped() })
             }

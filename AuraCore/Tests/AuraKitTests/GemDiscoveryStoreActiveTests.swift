@@ -19,7 +19,8 @@ import AuraCore
         let haptics = SpyHaptics()
         let store = GemDiscoveryStore(provider: StubProvider(gems: [near("v", meters: 80, tier: .cardHaptic)]),
                                       seen: InMemorySeen(), haptics: haptics)
-        await store.load()
+        store.update(at: here, now: Date(timeIntervalSince1970: 100))
+        await store.loadTask?.value
         store.update(at: here, now: Date(timeIntervalSince1970: 100))
         #expect(store.activeCard?.id == "v")
         #expect(haptics.count == 1)
@@ -29,7 +30,8 @@ import AuraCore
         let haptics = SpyHaptics()
         let store = GemDiscoveryStore(provider: StubProvider(gems: [near("p", meters: 80, tier: .card)]),
                                       seen: InMemorySeen(), haptics: haptics)
-        await store.load()
+        store.update(at: here, now: Date(timeIntervalSince1970: 100))
+        await store.loadTask?.value
         store.update(at: here, now: Date(timeIntervalSince1970: 100))
         #expect(store.activeCard?.id == "p")
         #expect(haptics.count == 0)
@@ -39,7 +41,8 @@ import AuraCore
         let seen = InMemorySeen()
         let store = GemDiscoveryStore(provider: StubProvider(gems: [near("v", meters: 80, tier: .cardHaptic)]),
                                       seen: seen, haptics: SpyHaptics())
-        await store.load()
+        store.update(at: here, now: Date(timeIntervalSince1970: 100))
+        await store.loadTask?.value
         store.update(at: here, now: Date(timeIntervalSince1970: 100))
         #expect(seen.ids.contains("v"))
     }
@@ -48,7 +51,8 @@ import AuraCore
         let seen = InMemorySeen(); seen.ids = ["v"]
         let store = GemDiscoveryStore(provider: StubProvider(gems: [near("v", meters: 80, tier: .cardHaptic)]),
                                       seen: seen, haptics: SpyHaptics())
-        await store.load()
+        store.update(at: here, now: Date(timeIntervalSince1970: 100))
+        await store.loadTask?.value
         store.update(at: here, now: Date(timeIntervalSince1970: 100))
         #expect(store.activeCard == nil)
     }

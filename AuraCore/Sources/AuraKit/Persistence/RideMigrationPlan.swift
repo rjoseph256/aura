@@ -7,10 +7,12 @@ import AuraCore
 /// columns are computed from existing rows, which a lightweight stage cannot do.
 public enum RideMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [RideSchemaV1.self, RideSchemaV2.self, RideSchemaV3.self, RideSchemaV4.self]
+        [RideSchemaV1.self, RideSchemaV2.self, RideSchemaV3.self, RideSchemaV4.self, RideSchemaV5.self]
     }
 
-    public static var stages: [MigrationStage] { [migrateV1toV2, migrateV2toV3, migrateV3toV4] }
+    public static var stages: [MigrationStage] {
+        [migrateV1toV2, migrateV2toV3, migrateV3toV4, migrateV4toV5]
+    }
 
     public static let migrateV1toV2 = MigrationStage.custom(
         fromVersion: RideSchemaV1.self,
@@ -49,4 +51,9 @@ public enum RideMigrationPlan: SchemaMigrationPlan {
     public static let migrateV3toV4 = MigrationStage.lightweight(
         fromVersion: RideSchemaV3.self,
         toVersion: RideSchemaV4.self)
+
+    /// Adding one defaulted attribute to SavedPlaceRecord is lightweight — no data transform.
+    public static let migrateV4toV5 = MigrationStage.lightweight(
+        fromVersion: RideSchemaV4.self,
+        toVersion: RideSchemaV5.self)
 }

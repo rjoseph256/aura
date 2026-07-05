@@ -105,10 +105,13 @@ public final class GuidanceController: GuidanceControlling {
 
     // MARK: - Routing
 
-    private func cacheKey(_ gemID: String, _ origin: Coordinate) -> String {
-        // ~25 m quantization: ~0.00025° lat, longitude scaled by cos(lat).
-        let lat = (origin.latitude / 0.00025).rounded()
-        let lng = (origin.longitude / 0.00025).rounded()
+    func cacheKey(_ gemID: String, _ origin: Coordinate) -> String {
+        // ~25 m quantization: ~0.00025° lat; longitude scaled by cos(lat) so the cell
+        // stays ~square east–west at higher latitudes.
+        let latQuantum = 0.00025
+        let lat = (origin.latitude / latQuantum).rounded()
+        let lonScale = max(cos(origin.latitude * .pi / 180), 0.01)
+        let lng = (origin.longitude * lonScale / latQuantum).rounded()
         return "\(gemID)@\(Int(lat)),\(Int(lng))"
     }
 

@@ -8,7 +8,9 @@ struct GemDetailSheet: View {
     let gem: Gem
     let distanceText: String
     var canRoute: Bool = true
+    var isSavedToReturn: Bool = false
     var onTakeMeThere: () -> Void = {}
+    var onSaveToReturn: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -33,6 +35,21 @@ struct GemDetailSheet: View {
                 Text(why).font(.body).foregroundStyle(AuraTheme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            Button {
+                onSaveToReturn()
+            } label: {
+                Label(isSavedToReturn ? "Saved to return" : "Save to return",
+                      systemImage: isSavedToReturn ? "checkmark.circle.fill" : "arrow.uturn.backward.circle")
+                    .font(.subheadline.weight(.medium))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, AuraTheme.Spacing.xs)
+            }
+            .buttonStyle(.bordered)
+            .tint(isSavedToReturn ? AuraTheme.textSecondary : AuraTheme.accent)
+            .disabled(isSavedToReturn)
+            .accessibilityHint(isSavedToReturn
+                                ? "Already saved to your places for later"
+                                : "Saves this gem to your places so you can come back to it")
             VStack(alignment: .leading, spacing: AuraTheme.Spacing.sm) {
                 Button {
                     onTakeMeThere()

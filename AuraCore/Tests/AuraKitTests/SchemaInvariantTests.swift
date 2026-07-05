@@ -10,8 +10,8 @@ import AuraCore
 struct SchemaInvariantTests {
     private var entities: [Schema.Entity] {
         // Always guard the CURRENT schema so every persisted model — including
-        // SeenGemRecord (V4) — is machine-checked for CloudKit compatibility.
-        Schema(versionedSchema: RideSchemaV4.self).entities
+        // SavedPlaceRecord.resurface (V5) — is machine-checked for CloudKit compatibility.
+        Schema(versionedSchema: RideSchemaV5.self).entities
     }
 
     @Test func everyAttributeIsOptionalOrDefaulted() {
@@ -34,8 +34,15 @@ struct SchemaInvariantTests {
         }
     }
 
-    @Test func v4ContainsAllModels() {
+    @Test func v5ContainsAllModels() {
         #expect(Set(entities.map(\.name)) == ["RideRecord", "SavedPlaceRecord", "SeenGemRecord"])
+    }
+
+    @Test func resurfaceDefaultsFalse() {
+        let saved = entities.first { $0.name == "SavedPlaceRecord" }
+        let attr = saved?.attributes.first { $0.name == "resurface" }
+        #expect(attr != nil)
+        #expect(attr?.isOptional == true || attr?.defaultValue != nil)
     }
 
     @Test func recordRoundTripsValue() {

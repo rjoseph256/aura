@@ -239,6 +239,7 @@ struct HomeView: View {
                                   onRename: { renameText = saved.name; renameTarget = saved },
                                   onSetHome: { savedPlaces.setHome(id: saved.id) },
                                   onRemoveHome: { savedPlaces.removeHome(id: saved.id) },
+                                  onSetResurface: { savedPlaces.setResurface(id: saved.id, $0) },
                                   onDelete: { savedPlaces.delete(id: saved.id) })
                     if saved.id != savedPlaces.places.last?.id { rowDivider }
                 }
