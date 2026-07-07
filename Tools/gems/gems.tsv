@@ -1,4 +1,148 @@
 slug	name	category	tier	why	photo	attribution	lat	lon	query
-grandview-overlook	Grandview overlook	viewpoint	3	The skyline lines up over the Mon from the top of the incline.			40.4392	-80.0155	Grandview Overlook, Mount Washington, Pittsburgh
-point-state-park	Point State Park	water	2	Where the three rivers meet.			40.4419	-80.0089	Point State Park, Pittsburgh
-randyland	Randyland	mural	3	A courtyard painted end to end in the Mexican War Streets.			40.4579	-80.0097	Randyland, Pittsburgh
+grandview-overlook	Grandview Overlook	viewpoint	3	The skyline lines up over the Mon from the top of the incline.			40.4392	-80.0155	Grandview Avenue Overlook, Mount Washington, Pittsburgh, PA
+west-end-overlook	West End Overlook	viewpoint	3	The three rivers and the whole downtown wedge sit right below you.			40.446185	-80.033937	West End Overlook, Pittsburgh, PA
+point-state-park	Point State Park	water	2	Where the three rivers meet, marked by the big fountain.			40.4419	-80.0089	Point State Park, Pittsburgh, PA
+randyland	Randyland	mural	3	A courtyard painted end to end in the Mexican War Streets.			40.4579	-80.0097	Randyland, Pittsburgh, PA
+canton-avenue	Canton Avenue	climb	3	The steepest public street in the country, a 37 percent wall.			40.410075	-80.030102	Canton Avenue, Beechview, Pittsburgh, PA
+cathedral-of-learning	Cathedral of Learning	landmark	3	A 42-story Gothic tower with hand-built Nationality Rooms at its base.			40.444295	-79.953191	Cathedral of Learning, Oakland, Pittsburgh, PA
+carrie-blast-furnaces	Carrie Blast Furnaces	historic	3	Two surviving 1907 furnaces from the mill that built the city.			40.4092	-79.9010	Carrie Furnaces, Swissvale, PA
+st-anthony-chapel	Saint Anthony's Chapel	historic	3	Thousands of relics fill a small chapel on Troy Hill.			40.464933	-79.983773	Saint Anthony Chapel, Troy Hill, Pittsburgh, PA
+allegheny-cemetery	Allegheny Cemetery	historic	3	Winding lanes through Victorian monuments, quiet and rideable.			40.472093	-79.949236	Allegheny Cemetery, Pittsburgh, PA
+frick-park	Frick Park	park	3	The city's largest park, with wooded trails down the hollows.			40.430357	-79.906899	Frick Park, Pittsburgh, PA
+highland-park	Highland Park	park	3	A loop around the reservoir with a fountain and the old entry gates.			40.47231	-79.919498	Highland Park, Pittsburgh, PA
+riverview-park	Riverview Park	park	3	Hilly woods around the 1912 Allegheny Observatory.			40.483113	-80.02172	Riverview Park, Pittsburgh, PA
+hot-metal-bridge	Hot Metal Bridge	historic	3	A converted mill bridge that now carries bikes over the Mon.			40.428522	-79.960272	Hot Metal Bridge, Pittsburgh, PA
+duquesne-incline	Duquesne Incline	historic	2	An 1877 cable car still climbing Mount Washington.			40.438774	-80.018445	Duquesne Incline, Pittsburgh, PA
+monongahela-incline	Monongahela Incline	historic	2	The oldest incline still running in the country, from Station Square.			40.431505	-80.005758	Monongahela Incline, Pittsburgh, PA
+mattress-factory	Mattress Factory	historic	2	Room-sized installation art in a former Northside warehouse.			40.456929	-80.012274	Mattress Factory, Pittsburgh, PA
+national-aviary	National Aviary	landmark	2	Free-flight rooms of birds on the Northside.			40.453412	-80.009954	National Aviary, Pittsburgh, PA
+phipps-conservatory	Phipps Conservatory	landmark	2	Glass Victorian greenhouses at the edge of Schenley Park.			40.438891	-79.948711	Phipps Conservatory, Pittsburgh, PA
+schenley-park	Schenley Park	park	2	Oakland's big park, with a golf course, trails, and the ice rink.			40.434985	-79.941518	Schenley Park, Pittsburgh, PA
+bicycle-heaven	Bicycle Heaven	landmark	2	The world's largest bike museum and shop, packed floor to ceiling.			40.456312	-80.032413	Bicycle Heaven, Pittsburgh, PA
+andy-warhol-museum	Andy Warhol Museum	landmark	2	Seven floors on the Pittsburgh-born artist, near the North Shore.			40.448372	-80.002502	Andy Warhol Museum, Pittsburgh, PA
+mexican-war-streets	Mexican War Streets	historic	2	Blocks of restored 1800s row houses on the Northside.			40.456913	-80.011539	Mexican War Streets, Pittsburgh, PA
+carnegie-museums-oakland	Carnegie Museums	landmark	2	Natural history dinosaurs and an art museum under one roof.			40.443061	-79.949942	Carnegie Museum of Natural History, Oakland, Pittsburgh, PA
+carnegie-library-main	Carnegie Library of Pittsburgh	historic	2	The 1895 main library beside the museums in Oakland.			40.442796	-79.950516	Carnegie Library of Pittsburgh Main, Oakland, PA
+heinz-hall	Heinz Hall	landmark	2	A restored 1920s movie palace, now the symphony's home.			40.442569	-80.00172	Heinz Hall, Pittsburgh, PA
+benedum-center	Benedum Center	landmark	2	A gilded former vaudeville house in the Cultural District.			40.443091	-79.999628	Benedum Center, Pittsburgh, PA
+allegheny-observatory	Allegheny Observatory	historic	2	A working research observatory tucked in Riverview Park.			40.482583	-80.020697	Allegheny Observatory, Pittsburgh, PA
+mellon-park	Mellon Park	park	2	A walled garden and open lawns on the Shadyside line.			40.453527	-79.916806	Mellon Park, Pittsburgh, PA
+frick-pittsburgh	The Frick Pittsburgh	historic	2	Henry Clay Frick's mansion and car museum in Point Breeze.			40.447595	-79.901631	The Frick Pittsburgh, Point Breeze, PA
+schenley-plaza	Schenley Plaza	park	2	A lawn and carousel between the library and the Cathedral.			40.442492	-79.952498	Schenley Plaza, Oakland, Pittsburgh, PA
+flagstaff-hill	Flagstaff Hill	viewpoint	2	The Schenley Park slope where the city watches summer films.			40.440058	-79.944101	Flagstaff Hill, Pittsburgh, PA
+panther-hollow-lake	Panther Hollow Lake	water	2	A small lake at the bottom of a Schenley Park ravine.			40.436862	-79.948228	Panther Hollow Lake, Pittsburgh, PA
+westinghouse-memorial	Westinghouse Memorial	historic	1	A bronze and pond tribute to the inventor in Schenley Park.			40.4362	-79.9483	George Westinghouse Memorial, Pittsburgh, PA
+eliza-furnace-trail	Eliza Furnace Trail	park	2	A flat riverside bike path along the Mon, known as the Jail Trail.			40.434321	-79.995297	Eliza Furnace Trail, Pittsburgh, PA
+three-rivers-heritage-trail	Three Rivers Heritage Trail	park	2	Miles of riverfront path linking the city's shores.			40.434449	-80.002279	Three Rivers Heritage Trail, Pittsburgh, PA
+south-side-riverfront-park	South Side Riverfront Park	park	2	A trail and boat launch below the South Side flats.			40.4283	-79.9722	South Side Riverfront Park, Pittsburgh, PA
+washingtons-landing	Washington's Landing	park	2	A river island with a trail, rowing club, and marina.			40.465062	-79.976818	Washington's Landing, Pittsburgh, PA
+north-shore-riverfront-park	North Shore Riverfront Park	park	2	A riverside walk past the two stadiums.			40.445443	-80.00953	North Shore Riverfront Park, Pittsburgh, PA
+allegheny-landing	Allegheny Landing	park	2	A riverside sculpture park under the Sixth Street bridge.			40.44709	-80.002945	Allegheny Landing, Pittsburgh, PA
+roberto-clemente-bridge	Roberto Clemente Bridge	landmark	2	A yellow suspension bridge closed to cars on game days.			40.445585	-80.003325	Roberto Clemente Bridge, Pittsburgh, PA
+andy-warhol-bridge	Andy Warhol Bridge	landmark	1	The middle of the three matching Sister bridges downtown.			40.446474	-80.001537	Andy Warhol Bridge, Pittsburgh, PA
+rachel-carson-bridge	Rachel Carson Bridge	landmark	1	The third Sister bridge, named for the Springdale-born writer.			40.446561	-79.999704	Rachel Carson Bridge, Pittsburgh, PA
+smithfield-street-bridge	Smithfield Street Bridge	historic	2	An 1883 lens-shaped truss, one of the oldest river crossings.			40.434674	-80.002269	Smithfield Street Bridge, Pittsburgh, PA
+fort-pitt-block-house	Fort Pitt Block House	historic	2	A 1764 redoubt, the oldest building in the city, at the Point.			40.441188	-80.009823	Fort Pitt Block House, Pittsburgh, PA
+fort-pitt-museum	Fort Pitt Museum	historic	2	The frontier story of the forks of the Ohio, inside the park.			40.440693	-80.009676	Fort Pitt Museum, Pittsburgh, PA
+market-square	Market Square	landmark	2	A brick pedestrian square ringed by lunch spots downtown.			40.440733	-80.002558	Market Square, Pittsburgh, PA
+mellon-square	Mellon Square	park	2	A modernist rooftop plaza with fountains above a garage.			40.44097	-79.997443	Mellon Square, Pittsburgh, PA
+ppg-place-plaza	PPG Place	landmark	2	A glass castle of a tower with a winter ice rink out front.			40.44001	-80.003761	PPG Place, Pittsburgh, PA
+union-trust-building	Union Trust Building	historic	2	A Flemish-Gothic downtown block with a stained-glass rotunda.			40.43995	-79.997011	Union Trust Building, Pittsburgh, PA
+strip-district	The Strip District	landmark	2	A market street of grocers, roasters, and produce stalls.			40.453958	-79.984219	Strip District, Pittsburgh, PA
+st-stanislaus-kostka	Saint Stanislaus Kostka	historic	2	A twin-towered Polish church anchoring the Strip.			40.4520	-79.9878	Saint Stanislaus Kostka Church, Pittsburgh, PA
+senator-heinz-history-center	Heinz History Center	historic	2	A former ice house holding the region's history, Smithsonian-tied.			40.44656	-79.99224	Senator John Heinz History Center, Pittsburgh, PA
+society-for-contemporary-craft	Contemporary Craft	mural	1	A craft gallery with rotating shows in the Strip.			40.485193	-79.94677	Contemporary Craft, Pittsburgh, PA
+immaculate-heart-of-mary	Immaculate Heart of Mary	historic	2	A hilltop Polish Hill church visible across the valley.			40.456363	-79.967942	Immaculate Heart of Mary Church, Polish Hill, Pittsburgh, PA
+west-penn-park	West Penn Park	park	1	A neighborhood park and pool below Polish Hill.			40.454647	-79.97165	West Penn Park, Pittsburgh, PA
+arsenal-park	Arsenal Park	historic	2	A Lawrenceville park on the site of a Civil War arsenal.			40.466631	-79.961136	Arsenal Park, Pittsburgh, PA
+doughboy-square	Doughboy Square	historic	1	A WWI soldier statue marking lower Lawrenceville.			40.4657	-79.9648	Doughboy Square, Pittsburgh, PA
+butler-street-murals	Butler Street Murals	mural	2	Painted walls scattered along Lawrenceville's main drag.			40.471815	-79.959536	Butler Street, Lawrenceville, Pittsburgh, PA
+penn-avenue-arts-corridor	Penn Avenue Arts Corridor	mural	2	Galleries and painted facades between Garfield and Friendship.			40.463581	-79.930916	Penn Avenue, Garfield, Pittsburgh, PA
+bloomfield-bridge	Bloomfield Bridge	viewpoint	2	A span over the busway with a view down the valley.			40.461007	-79.955327	Bloomfield Bridge, Pittsburgh, PA
+friendship-park	Friendship Park	park	2	A leafy pocket park between Bloomfield and Friendship.			40.462575	-79.946189	Friendship Park, Pittsburgh, PA
+east-liberty-presbyterian	East Liberty Presbyterian Church	historic	2	A soaring stone church that towers over East Liberty.			40.461015	-79.925496	East Liberty Presbyterian Church, Pittsburgh, PA
+bakery-square	Bakery Square	landmark	2	A former Nabisco factory turned tech offices and shops.			40.457104	-79.915783	Bakery Square, Pittsburgh, PA
+highland-park-reservoir	Highland Park Reservoir	water	2	A walking loop around the open water above the city.			40.480425	-79.918255	Highland Park Reservoir, Pittsburgh, PA
+pittsburgh-zoo	Pittsburgh Zoo	landmark	2	Animals and an aquarium along the Highland Park bluffs.			40.483545	-79.919182	Pittsburgh Zoo, Pittsburgh, PA
+lake-elizabeth	Lake Elizabeth	water	2	A small boating lake in West Park on the Northside.			40.453387	-80.011892	Lake Elizabeth, Pittsburgh, PA
+allegheny-commons-park	Allegheny Commons	park	2	The city's oldest park, ringing the Northside.			40.452	-80.001786	Allegheny Commons Park, Pittsburgh, PA
+childrens-museum-pittsburgh	Children's Museum	landmark	2	Hands-on exhibits in the old Allegheny post office.			40.452765	-80.006696	Children's Museum of Pittsburgh, Pittsburgh, PA
+city-of-asylum	City of Asylum	mural	2	Painted houses on Sampsonia Way sheltering exiled writers.			40.455532	-80.007508	City of Asylum, Pittsburgh, PA
+photo-antiquities-museum	Photo Antiquities Museum	historic	1	A small museum of early photography on the Northside.			40.4527	-80.0090	Photo Antiquities Museum, Pittsburgh, PA
+troy-hill-overlook	Troy Hill Overlook	viewpoint	2	A bluff-edge look down at the Allegheny and the Strip.			40.468958	-79.978664	Troy Hill, Pittsburgh, PA
+rialto-street	Rialto Street	climb	2	A brutally steep cobbled pitch up from the Strip, called Pig Hill.			40.466597	-79.982378	Rialto Street, Troy Hill, Pittsburgh, PA
+eberhardt-ober	Eberhardt and Ober Brewery	historic	1	A restored 1800s Deutschtown brewery building.			40.4562	-79.9945	Eberhardt and Ober Brewery, Pittsburgh, PA
+west-end-bridge	West End Bridge	landmark	1	A steel arch closing the triangle at the rivers' mouth.			40.449377	-80.02531	West End Bridge, Pittsburgh, PA
+emerald-view-park	Emerald View Park	park	2	Trails and overlooks wrapping the face of Mount Washington.			40.426587	-79.995695	Emerald View Park, Pittsburgh, PA
+point-of-view-statue	Point of View	historic	2	A bronze of Washington and Guyasuta facing the Point.			40.439275	-80.021269	Point of View, Pittsburgh, PA
+station-square	Station Square	landmark	2	A former rail terminal turned riverfront shops and dock.			40.431568	-80.003127	Station Square, Pittsburgh, PA
+mckinley-park	McKinley Park	park	2	A hillside park with a long sledding slope in Beltzhoover.			40.412616	-80.001382	McKinley Park, Pittsburgh, PA
+south-side-slopes-steps	South Side Slopes Steps	climb	2	Public stairways stitching the houses up the Slopes.			40.424514	-79.976163	South Side Slopes, Pittsburgh, PA
+eighteenth-street-steps	18th Street City Steps	climb	1	A stair climb from the flats up onto the Slopes.			40.418855	-79.986525	South 18th Street, Pittsburgh, PA
+st-john-the-baptist-ukrainian	Saint John the Baptist Ukrainian Church	historic	2	A gold-domed church on the South Side Slopes skyline.			40.428478	-79.991913	Saint John the Baptist Ukrainian Catholic Church, South Side, Pittsburgh, PA
+east-carson-street	East Carson Street	historic	2	A long Victorian commercial strip on the South Side flats.			40.428986	-79.995756	East Carson Street, South Side, Pittsburgh, PA
+south-side-works	SouthSide Works	landmark	2	Riverfront shops on the old LTV steel site.			40.427384	-79.96495	SouthSide Works, Pittsburgh, PA
+south-side-park	South Side Park	park	2	Steep meadow and woods above the Slopes.			40.420884	-79.977106	South Side Park, Pittsburgh, PA
+birmingham-bridge	Birmingham Bridge	landmark	2	A high span linking the South Side to Oakland.			40.433122	-79.973566	Birmingham Bridge, Pittsburgh, PA
+bandi-schaum-garden	Bandi Schaum Community Garden	park	1	A terraced garden built into the Slopes hillside.			40.424445	-79.980696	Pius Street, Pittsburgh, PA
+frick-environmental-center	Frick Environmental Center	landmark	2	A net-zero nature center at the Frick Park gate.			40.436479	-79.907589	Frick Environmental Center, Pittsburgh, PA
+blue-slide-playground	Blue Slide Playground	park	2	The Frick Park playground with the long blue hillside slide.			40.429871	-79.914716	Blue Slide Playground, Pittsburgh, PA
+nine-mile-run	Nine Mile Run Trail	park	2	A restored stream valley trail out to the Mon.			40.417775	-79.915919	Nine Mile Run Trail, Pittsburgh, PA
+duck-hollow	Duck Hollow	water	1	A quiet riverbank dead-end below Frick Park.			40.416694	-79.915181	Duck Hollow, Pittsburgh, PA
+homewood-cemetery	Homewood Cemetery	historic	2	Rolling Victorian burial grounds beside Frick Park.			40.442394	-79.90762	Homewood Cemetery, Pittsburgh, PA
+mary-schenley-fountain	Mary Schenley Memorial Fountain	historic	2	A bronze fountain called A Song to Nature at the Oakland gate.			40.441994	-79.951897	Mary Schenley Memorial Fountain, Pittsburgh, PA
+soldiers-sailors-memorial	Soldiers and Sailors Memorial Hall	historic	2	A domed veterans' hall and museum in Oakland.			40.445013	-79.956378	Soldiers and Sailors Memorial Hall, Oakland, Pittsburgh, PA
+stephen-foster-memorial	Stephen Foster Memorial	historic	1	A Gothic theater and archive beside the Cathedral.			40.443831	-79.952741	Stephen Foster Memorial, Oakland, Pittsburgh, PA
+university-of-pittsburgh	University of Pittsburgh	landmark	2	The campus spread around the Cathedral of Learning.			40.444153	-79.962461	University of Pittsburgh, Pittsburgh, PA
+carnegie-mellon-campus	Carnegie Mellon University	landmark	2	Lawns and cut-stone halls next to Schenley Park.			40.443919	-79.942827	Carnegie Mellon University, Pittsburgh, PA
+panther-hollow-bridge	Panther Hollow Bridge	viewpoint	1	A railed span over the wooded Schenley ravine.			40.437078	-79.946736	Panther Hollow Bridge, Pittsburgh, PA
+beacon-street-overlook	Beacon Street Overlook	viewpoint	1	A ridge look toward the Mon valley from Squirrel Hill.			40.433883	-79.929515	Beacon Street, Squirrel Hill, Pittsburgh, PA
+fern-hollow-trail	Fern Hollow Trail	park	1	A wooded singletrack loop in Frick Park.			40.434295	-79.899136	Fern Hollow, Pittsburgh, PA
+chatham-arboretum	Chatham University Arboretum	park	1	Wooded campus grounds tied into Squirrel Hill trails.			40.447621	-79.923995	Chatham University, Pittsburgh, PA
+temple-sinai	Temple Sinai	historic	1	A midcentury synagogue on the Squirrel Hill ridge.			40.438035	-79.929853	Temple Sinai, Squirrel Hill, Pittsburgh, PA
+murray-avenue	Murray Avenue	landmark	1	Squirrel Hill's shopping street of delis and bakeries.			40.440909	-79.923265	Murray Avenue, Squirrel Hill, Pittsburgh, PA
+schenley-oval	Schenley Oval	park	1	A track and sports oval down in Schenley Park.			40.432877	-79.942451	Schenley Oval, Pittsburgh, PA
+neill-log-house	Neill Log House	historic	2	A 1700s log cabin, one of the oldest structures, in Schenley.			40.435854	-79.935605	Neill Log House, Pittsburgh, PA
+hazelwood-green	Hazelwood Green	landmark	1	A former coke works being rebuilt along the river.			40.418047	-79.949555	Hazelwood Green, Pittsburgh, PA
+kennard-playground	Kennard Playground	park	1	A Hill District pool and playground with a city view.			40.4436	-79.9810	Kennard Field, Pittsburgh, PA
+freedom-corner	Freedom Corner	mural	2	A granite memorial to the Hill District's civil rights history.			40.440977	-79.985681	Freedom Corner, Pittsburgh, PA
+august-wilson-house	August Wilson House	historic	2	The playwright's boyhood Hill District home, now a center.			40.445419	-79.985653	August Wilson House, Pittsburgh, PA
+cliffside-park-overlook	Cliffside Park Overlook	viewpoint	1	A Hill District ledge looking down on the Strip.			40.44651	-79.985787	Cliffside Park, Pittsburgh, PA
+construction-junction	Construction Junction	landmark	1	A vast reuse warehouse of salvaged building parts.			40.449668	-79.897936	Construction Junction, Pittsburgh, PA
+westinghouse-park	Westinghouse Park	park	1	A Point Breeze green on the inventor's former estate.			40.452965	-79.902767	Westinghouse Park, Pittsburgh, PA
+mellon-institute	Mellon Institute	landmark	1	A columned research temple next to CMU.			40.446088	-79.951057	Mellon Institute, Pittsburgh, PA
+mcardle-roadway	P.J. McArdle Roadway	viewpoint	2	A climbing road with pull-offs facing the skyline.			40.429067	-79.999119	McArdle Roadway, Pittsburgh, PA
+sycamore-street	Sycamore Street	climb	2	The paved race climb up the face of Mount Washington.			40.431636	-80.009036	Sycamore Street, Mount Washington, Pittsburgh, PA
+boustead-street	Boustead Street	climb	1	A steep Beechview block near Canton Avenue.			40.404986	-80.031497	Boustead Street, Beechview, Pittsburgh, PA
+seldom-seen-greenway	Seldom Seen Greenway	park	2	A hidden stream trail under old railroad arches.			40.415669	-80.017563	Seldom Seen Greenway, Pittsburgh, PA
+mount-washington-trailhead	Mount Washington Trailhead	park	2	Wooded switchbacks up the slope from Saw Mill Run.			40.433216	-80.009668	Grandview Avenue, Pittsburgh, PA
+olympia-park	Olympia Park	park	1	A hilltop Mount Washington park with a city overlook.			40.43043	-80.018573	Olympia Park, Pittsburgh, PA
+chatham-village	Chatham Village	historic	2	A 1930s garden-city housing enclave on the hill.			40.429832	-80.016682	Chatham Village, Pittsburgh, PA
+fortieth-street-bridge	40th Street Bridge	landmark	1	The Washington Crossing span to Millvale.			40.471865	-79.967085	40th Street Bridge, Pittsburgh, PA
+millvale-riverfront-park	Millvale Riverfront Park	park	2	A trail hub across the river from Lawrenceville.			40.472085	-79.971934	Millvale Riverfront Park, Millvale, PA
+mr-rogers-memorial	Fred Rogers Memorial	landmark	2	A seated bronze of Mister Rogers on the North Shore.			40.4463	-80.0157	Fred Rogers Memorial, Pittsburgh, PA
+voegtly-cemetery	Voegtly Cemetery	historic	1	An old German burial ground on the Northside slope.			40.4576	-79.9986	Voegtly Cemetery, Pittsburgh, PA
+penn-brewery	Penn Brewery	historic	2	The city's oldest brewery in a Troy Hill landmark building.			40.457173	-79.991531	Penn Brewery, Pittsburgh, PA
+pamelas-diner-strip	Pamela's Diner	cafe	1	A Strip District griddle known for crepe-thin hotcakes.			40.451966	-79.983626	Pamela's Diner, Strip District, Pittsburgh, PA
+la-prima-espresso	La Prima Espresso	cafe	1	A Strip District espresso bar where the old men argue.			40.445572	-79.99384	La Prima Espresso, Strip District, Pittsburgh, PA
+allegheny-riverfront-park	Allegheny Riverfront Park	park	1	A thin downtown river terrace below the ramps.			40.4445	-79.9967	Allegheny Riverfront Park, Pittsburgh, PA
+washington-boulevard-trail	Washington Boulevard Trail	park	2	A creekside path linking Highland Park to the river.			40.474584	-79.908321	Washington Boulevard, Pittsburgh, PA
+davis-avenue-bridge	Davis Avenue Pedestrian Bridge	historic	1	A rebuilt footbridge over a Riverview Park ravine.			40.480809	-80.037967	Davis Avenue, Pittsburgh, PA
+observatory-hill-overlook	Observatory Hill Overlook	viewpoint	1	A northern height near the observatory dome.			40.485902	-80.022832	Observatory Hill, Pittsburgh, PA
+homewood-avenue-murals	Homewood Avenue Murals	mural	1	Community portraits along the Homewood business strip.			40.453763	-79.898119	Homewood Avenue, Pittsburgh, PA
+east-liberty-murals	East Liberty Murals	mural	1	Large painted walls around the Penn Circle blocks.			40.462069	-79.923952	East Liberty, Pittsburgh, PA
+garfield-murals	Garfield Murals	mural	2	Hillside walls painted during the Unblurred art nights.			40.467112	-79.939823	Garfield, Pittsburgh, PA
+forbes-avenue-murals	Forbes Avenue Murals	mural	1	Student-painted walls near the Oakland campuses.			40.44022	-79.958845	Forbes Avenue, Oakland, Pittsburgh, PA
+polish-hill-mural	Polish Hill Mural	mural	1	A painted tribute wall on the hill's main corner.			40.458037	-79.963942	Polish Hill, Pittsburgh, PA
+troy-hill-art-houses	Troy Hill Art Houses	mural	1	Whole houses turned into walk-through art pieces.			40.457375	-79.989835	Troy Hill Road, Pittsburgh, PA
+old-allegheny-gardens	Old Allegheny Gardens	park	1	Tended alley gardens near the Mexican War Streets.			40.458548	-80.009745	Arch Street, Pittsburgh, PA
+mon-wharf-landing	Mon Wharf Landing	water	1	A riverfront path below the downtown parking wharf.			40.43752	-80.004456	Mon Wharf, Pittsburgh, PA
+gateway-clipper-dock	Gateway Clipper Dock	water	1	The riverboat landing at Station Square.			40.435721	-80.006551	Gateway Clipper Fleet, Pittsburgh, PA
+south-tenth-street-bridge	South 10th Street Bridge	landmark	1	A suspension span from the flats toward the Bluff.			40.432214	-79.989128	South 10th Street Bridge, Pittsburgh, PA
+panther-hollow-trail	Panther Hollow Trail	park	2	A shaded ravine trail down to the lake.			40.440389	-79.950321	Panther Hollow, Pittsburgh, PA
+junction-hollow-trail	Junction Hollow Trail	park	2	A rail-grade bike path between Oakland and the Mon.			40.432719	-79.950359	Junction Hollow Trail, Pittsburgh, PA
+frick-clay-courts	Frick Park Clay Courts	landmark	1	Historic clay tennis courts inside the park.			40.437367	-79.897484	Frick Park Clay Courts, Pittsburgh, PA
+kane-woods-nature-area	Kane Woods Nature Area	park	1	A quiet wooded preserve on the southern edge.			40.378135	-80.085691	Kane Woods Nature Area, Scott Township, PA
+saw-mill-run	Saw Mill Run	water	1	A creek corridor along the southern valley floor.			40.406679	-80.004887	Saw Mill Run, Pittsburgh, PA
+larimer-overlook	Larimer Overlook	viewpoint	1	An East End height above the Washington Boulevard valley.			40.462569	-79.908384	Larimer, Pittsburgh, PA
+schenley-golf-course	Bob O'Connor Golf Course	park	1	A rolling public course in the heart of Schenley Park.			40.437486	-79.937436	Bob O'Connor Golf Course, Pittsburgh, PA

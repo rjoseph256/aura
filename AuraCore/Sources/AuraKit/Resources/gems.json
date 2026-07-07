@@ -6,12 +6,26 @@
       "longitude": -80.0155
     },
     "id": "curated:grandview-overlook",
-    "name": "Grandview overlook",
+    "name": "Grandview Overlook",
     "photoAsset": null,
     "photoAttribution": null,
     "source": "curated",
     "tier": 3,
     "why": "The skyline lines up over the Mon from the top of the incline."
+  },
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.446185,
+      "longitude": -80.033937
+    },
+    "id": "curated:west-end-overlook",
+    "name": "West End Overlook",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 3,
+    "why": "The three rivers and the whole downtown wedge sit right below you."
   },
   {
     "category": "water",
@@ -25,7 +39,7 @@
     "photoAttribution": null,
     "source": "curated",
     "tier": 2,
-    "why": "Where the three rivers meet."
+    "why": "Where the three rivers meet, marked by the big fountain."
   },
   {
     "category": "mural",
@@ -40,5 +54,2007 @@
     "source": "curated",
     "tier": 3,
     "why": "A courtyard painted end to end in the Mexican War Streets."
+  },
+  {
+    "category": "climb",
+    "coordinate": {
+      "latitude": 40.410075,
+      "longitude": -80.030102
+    },
+    "id": "curated:canton-avenue",
+    "name": "Canton Avenue",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 3,
+    "why": "The steepest public street in the country, a 37 percent wall."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.444295,
+      "longitude": -79.953191
+    },
+    "id": "curated:cathedral-of-learning",
+    "name": "Cathedral of Learning",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 3,
+    "why": "A 42-story Gothic tower with hand-built Nationality Rooms at its base."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.4092,
+      "longitude": -79.901
+    },
+    "id": "curated:carrie-blast-furnaces",
+    "name": "Carrie Blast Furnaces",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 3,
+    "why": "Two surviving 1907 furnaces from the mill that built the city."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.464933,
+      "longitude": -79.983773
+    },
+    "id": "curated:st-anthony-chapel",
+    "name": "Saint Anthony's Chapel",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 3,
+    "why": "Thousands of relics fill a small chapel on Troy Hill."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.472093,
+      "longitude": -79.949236
+    },
+    "id": "curated:allegheny-cemetery",
+    "name": "Allegheny Cemetery",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 3,
+    "why": "Winding lanes through Victorian monuments, quiet and rideable."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.430357,
+      "longitude": -79.906899
+    },
+    "id": "curated:frick-park",
+    "name": "Frick Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 3,
+    "why": "The city's largest park, with wooded trails down the hollows."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.47231,
+      "longitude": -79.919498
+    },
+    "id": "curated:highland-park",
+    "name": "Highland Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 3,
+    "why": "A loop around the reservoir with a fountain and the old entry gates."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.483113,
+      "longitude": -80.02172
+    },
+    "id": "curated:riverview-park",
+    "name": "Riverview Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 3,
+    "why": "Hilly woods around the 1912 Allegheny Observatory."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.428522,
+      "longitude": -79.960272
+    },
+    "id": "curated:hot-metal-bridge",
+    "name": "Hot Metal Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 3,
+    "why": "A converted mill bridge that now carries bikes over the Mon."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.438774,
+      "longitude": -80.018445
+    },
+    "id": "curated:duquesne-incline",
+    "name": "Duquesne Incline",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "An 1877 cable car still climbing Mount Washington."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.431505,
+      "longitude": -80.005758
+    },
+    "id": "curated:monongahela-incline",
+    "name": "Monongahela Incline",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The oldest incline still running in the country, from Station Square."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.456929,
+      "longitude": -80.012274
+    },
+    "id": "curated:mattress-factory",
+    "name": "Mattress Factory",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Room-sized installation art in a former Northside warehouse."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.453412,
+      "longitude": -80.009954
+    },
+    "id": "curated:national-aviary",
+    "name": "National Aviary",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Free-flight rooms of birds on the Northside."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.438891,
+      "longitude": -79.948711
+    },
+    "id": "curated:phipps-conservatory",
+    "name": "Phipps Conservatory",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Glass Victorian greenhouses at the edge of Schenley Park."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.434985,
+      "longitude": -79.941518
+    },
+    "id": "curated:schenley-park",
+    "name": "Schenley Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Oakland's big park, with a golf course, trails, and the ice rink."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.456312,
+      "longitude": -80.032413
+    },
+    "id": "curated:bicycle-heaven",
+    "name": "Bicycle Heaven",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The world's largest bike museum and shop, packed floor to ceiling."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.448372,
+      "longitude": -80.002502
+    },
+    "id": "curated:andy-warhol-museum",
+    "name": "Andy Warhol Museum",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Seven floors on the Pittsburgh-born artist, near the North Shore."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.456913,
+      "longitude": -80.011539
+    },
+    "id": "curated:mexican-war-streets",
+    "name": "Mexican War Streets",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Blocks of restored 1800s row houses on the Northside."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.443061,
+      "longitude": -79.949942
+    },
+    "id": "curated:carnegie-museums-oakland",
+    "name": "Carnegie Museums",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Natural history dinosaurs and an art museum under one roof."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.442796,
+      "longitude": -79.950516
+    },
+    "id": "curated:carnegie-library-main",
+    "name": "Carnegie Library of Pittsburgh",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The 1895 main library beside the museums in Oakland."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.442569,
+      "longitude": -80.00172
+    },
+    "id": "curated:heinz-hall",
+    "name": "Heinz Hall",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A restored 1920s movie palace, now the symphony's home."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.443091,
+      "longitude": -79.999628
+    },
+    "id": "curated:benedum-center",
+    "name": "Benedum Center",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A gilded former vaudeville house in the Cultural District."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.482583,
+      "longitude": -80.020697
+    },
+    "id": "curated:allegheny-observatory",
+    "name": "Allegheny Observatory",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A working research observatory tucked in Riverview Park."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.453527,
+      "longitude": -79.916806
+    },
+    "id": "curated:mellon-park",
+    "name": "Mellon Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A walled garden and open lawns on the Shadyside line."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.447595,
+      "longitude": -79.901631
+    },
+    "id": "curated:frick-pittsburgh",
+    "name": "The Frick Pittsburgh",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Henry Clay Frick's mansion and car museum in Point Breeze."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.442492,
+      "longitude": -79.952498
+    },
+    "id": "curated:schenley-plaza",
+    "name": "Schenley Plaza",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A lawn and carousel between the library and the Cathedral."
+  },
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.440058,
+      "longitude": -79.944101
+    },
+    "id": "curated:flagstaff-hill",
+    "name": "Flagstaff Hill",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The Schenley Park slope where the city watches summer films."
+  },
+  {
+    "category": "water",
+    "coordinate": {
+      "latitude": 40.436862,
+      "longitude": -79.948228
+    },
+    "id": "curated:panther-hollow-lake",
+    "name": "Panther Hollow Lake",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A small lake at the bottom of a Schenley Park ravine."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.4362,
+      "longitude": -79.9483
+    },
+    "id": "curated:westinghouse-memorial",
+    "name": "Westinghouse Memorial",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A bronze and pond tribute to the inventor in Schenley Park."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.434321,
+      "longitude": -79.995297
+    },
+    "id": "curated:eliza-furnace-trail",
+    "name": "Eliza Furnace Trail",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A flat riverside bike path along the Mon, known as the Jail Trail."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.434449,
+      "longitude": -80.002279
+    },
+    "id": "curated:three-rivers-heritage-trail",
+    "name": "Three Rivers Heritage Trail",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Miles of riverfront path linking the city's shores."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.4283,
+      "longitude": -79.9722
+    },
+    "id": "curated:south-side-riverfront-park",
+    "name": "South Side Riverfront Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A trail and boat launch below the South Side flats."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.465062,
+      "longitude": -79.976818
+    },
+    "id": "curated:washingtons-landing",
+    "name": "Washington's Landing",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A river island with a trail, rowing club, and marina."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.445443,
+      "longitude": -80.00953
+    },
+    "id": "curated:north-shore-riverfront-park",
+    "name": "North Shore Riverfront Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A riverside walk past the two stadiums."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.44709,
+      "longitude": -80.002945
+    },
+    "id": "curated:allegheny-landing",
+    "name": "Allegheny Landing",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A riverside sculpture park under the Sixth Street bridge."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.445585,
+      "longitude": -80.003325
+    },
+    "id": "curated:roberto-clemente-bridge",
+    "name": "Roberto Clemente Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A yellow suspension bridge closed to cars on game days."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.446474,
+      "longitude": -80.001537
+    },
+    "id": "curated:andy-warhol-bridge",
+    "name": "Andy Warhol Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "The middle of the three matching Sister bridges downtown."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.446561,
+      "longitude": -79.999704
+    },
+    "id": "curated:rachel-carson-bridge",
+    "name": "Rachel Carson Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "The third Sister bridge, named for the Springdale-born writer."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.434674,
+      "longitude": -80.002269
+    },
+    "id": "curated:smithfield-street-bridge",
+    "name": "Smithfield Street Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "An 1883 lens-shaped truss, one of the oldest river crossings."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.441188,
+      "longitude": -80.009823
+    },
+    "id": "curated:fort-pitt-block-house",
+    "name": "Fort Pitt Block House",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A 1764 redoubt, the oldest building in the city, at the Point."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.440693,
+      "longitude": -80.009676
+    },
+    "id": "curated:fort-pitt-museum",
+    "name": "Fort Pitt Museum",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The frontier story of the forks of the Ohio, inside the park."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.440733,
+      "longitude": -80.002558
+    },
+    "id": "curated:market-square",
+    "name": "Market Square",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A brick pedestrian square ringed by lunch spots downtown."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.44097,
+      "longitude": -79.997443
+    },
+    "id": "curated:mellon-square",
+    "name": "Mellon Square",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A modernist rooftop plaza with fountains above a garage."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.44001,
+      "longitude": -80.003761
+    },
+    "id": "curated:ppg-place-plaza",
+    "name": "PPG Place",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A glass castle of a tower with a winter ice rink out front."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.43995,
+      "longitude": -79.997011
+    },
+    "id": "curated:union-trust-building",
+    "name": "Union Trust Building",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A Flemish-Gothic downtown block with a stained-glass rotunda."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.453958,
+      "longitude": -79.984219
+    },
+    "id": "curated:strip-district",
+    "name": "The Strip District",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A market street of grocers, roasters, and produce stalls."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.452,
+      "longitude": -79.9878
+    },
+    "id": "curated:st-stanislaus-kostka",
+    "name": "Saint Stanislaus Kostka",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A twin-towered Polish church anchoring the Strip."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.44656,
+      "longitude": -79.99224
+    },
+    "id": "curated:senator-heinz-history-center",
+    "name": "Heinz History Center",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A former ice house holding the region's history, Smithsonian-tied."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.485193,
+      "longitude": -79.94677
+    },
+    "id": "curated:society-for-contemporary-craft",
+    "name": "Contemporary Craft",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A craft gallery with rotating shows in the Strip."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.456363,
+      "longitude": -79.967942
+    },
+    "id": "curated:immaculate-heart-of-mary",
+    "name": "Immaculate Heart of Mary",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A hilltop Polish Hill church visible across the valley."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.454647,
+      "longitude": -79.97165
+    },
+    "id": "curated:west-penn-park",
+    "name": "West Penn Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A neighborhood park and pool below Polish Hill."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.466631,
+      "longitude": -79.961136
+    },
+    "id": "curated:arsenal-park",
+    "name": "Arsenal Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A Lawrenceville park on the site of a Civil War arsenal."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.4657,
+      "longitude": -79.9648
+    },
+    "id": "curated:doughboy-square",
+    "name": "Doughboy Square",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A WWI soldier statue marking lower Lawrenceville."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.471815,
+      "longitude": -79.959536
+    },
+    "id": "curated:butler-street-murals",
+    "name": "Butler Street Murals",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Painted walls scattered along Lawrenceville's main drag."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.463581,
+      "longitude": -79.930916
+    },
+    "id": "curated:penn-avenue-arts-corridor",
+    "name": "Penn Avenue Arts Corridor",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Galleries and painted facades between Garfield and Friendship."
+  },
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.461007,
+      "longitude": -79.955327
+    },
+    "id": "curated:bloomfield-bridge",
+    "name": "Bloomfield Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A span over the busway with a view down the valley."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.462575,
+      "longitude": -79.946189
+    },
+    "id": "curated:friendship-park",
+    "name": "Friendship Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A leafy pocket park between Bloomfield and Friendship."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.461015,
+      "longitude": -79.925496
+    },
+    "id": "curated:east-liberty-presbyterian",
+    "name": "East Liberty Presbyterian Church",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A soaring stone church that towers over East Liberty."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.457104,
+      "longitude": -79.915783
+    },
+    "id": "curated:bakery-square",
+    "name": "Bakery Square",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A former Nabisco factory turned tech offices and shops."
+  },
+  {
+    "category": "water",
+    "coordinate": {
+      "latitude": 40.480425,
+      "longitude": -79.918255
+    },
+    "id": "curated:highland-park-reservoir",
+    "name": "Highland Park Reservoir",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A walking loop around the open water above the city."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.483545,
+      "longitude": -79.919182
+    },
+    "id": "curated:pittsburgh-zoo",
+    "name": "Pittsburgh Zoo",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Animals and an aquarium along the Highland Park bluffs."
+  },
+  {
+    "category": "water",
+    "coordinate": {
+      "latitude": 40.453387,
+      "longitude": -80.011892
+    },
+    "id": "curated:lake-elizabeth",
+    "name": "Lake Elizabeth",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A small boating lake in West Park on the Northside."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.452,
+      "longitude": -80.001786
+    },
+    "id": "curated:allegheny-commons-park",
+    "name": "Allegheny Commons",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The city's oldest park, ringing the Northside."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.452765,
+      "longitude": -80.006696
+    },
+    "id": "curated:childrens-museum-pittsburgh",
+    "name": "Children's Museum",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Hands-on exhibits in the old Allegheny post office."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.455532,
+      "longitude": -80.007508
+    },
+    "id": "curated:city-of-asylum",
+    "name": "City of Asylum",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Painted houses on Sampsonia Way sheltering exiled writers."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.4527,
+      "longitude": -80.009
+    },
+    "id": "curated:photo-antiquities-museum",
+    "name": "Photo Antiquities Museum",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A small museum of early photography on the Northside."
+  },
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.468958,
+      "longitude": -79.978664
+    },
+    "id": "curated:troy-hill-overlook",
+    "name": "Troy Hill Overlook",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A bluff-edge look down at the Allegheny and the Strip."
+  },
+  {
+    "category": "climb",
+    "coordinate": {
+      "latitude": 40.466597,
+      "longitude": -79.982378
+    },
+    "id": "curated:rialto-street",
+    "name": "Rialto Street",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A brutally steep cobbled pitch up from the Strip, called Pig Hill."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.4562,
+      "longitude": -79.9945
+    },
+    "id": "curated:eberhardt-ober",
+    "name": "Eberhardt and Ober Brewery",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A restored 1800s Deutschtown brewery building."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.449377,
+      "longitude": -80.02531
+    },
+    "id": "curated:west-end-bridge",
+    "name": "West End Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A steel arch closing the triangle at the rivers' mouth."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.426587,
+      "longitude": -79.995695
+    },
+    "id": "curated:emerald-view-park",
+    "name": "Emerald View Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Trails and overlooks wrapping the face of Mount Washington."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.439275,
+      "longitude": -80.021269
+    },
+    "id": "curated:point-of-view-statue",
+    "name": "Point of View",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A bronze of Washington and Guyasuta facing the Point."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.431568,
+      "longitude": -80.003127
+    },
+    "id": "curated:station-square",
+    "name": "Station Square",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A former rail terminal turned riverfront shops and dock."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.412616,
+      "longitude": -80.001382
+    },
+    "id": "curated:mckinley-park",
+    "name": "McKinley Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A hillside park with a long sledding slope in Beltzhoover."
+  },
+  {
+    "category": "climb",
+    "coordinate": {
+      "latitude": 40.424514,
+      "longitude": -79.976163
+    },
+    "id": "curated:south-side-slopes-steps",
+    "name": "South Side Slopes Steps",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Public stairways stitching the houses up the Slopes."
+  },
+  {
+    "category": "climb",
+    "coordinate": {
+      "latitude": 40.418855,
+      "longitude": -79.986525
+    },
+    "id": "curated:eighteenth-street-steps",
+    "name": "18th Street City Steps",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A stair climb from the flats up onto the Slopes."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.428478,
+      "longitude": -79.991913
+    },
+    "id": "curated:st-john-the-baptist-ukrainian",
+    "name": "Saint John the Baptist Ukrainian Church",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A gold-domed church on the South Side Slopes skyline."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.428986,
+      "longitude": -79.995756
+    },
+    "id": "curated:east-carson-street",
+    "name": "East Carson Street",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A long Victorian commercial strip on the South Side flats."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.427384,
+      "longitude": -79.96495
+    },
+    "id": "curated:south-side-works",
+    "name": "SouthSide Works",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Riverfront shops on the old LTV steel site."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.420884,
+      "longitude": -79.977106
+    },
+    "id": "curated:south-side-park",
+    "name": "South Side Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Steep meadow and woods above the Slopes."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.433122,
+      "longitude": -79.973566
+    },
+    "id": "curated:birmingham-bridge",
+    "name": "Birmingham Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A high span linking the South Side to Oakland."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.424445,
+      "longitude": -79.980696
+    },
+    "id": "curated:bandi-schaum-garden",
+    "name": "Bandi Schaum Community Garden",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A terraced garden built into the Slopes hillside."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.436479,
+      "longitude": -79.907589
+    },
+    "id": "curated:frick-environmental-center",
+    "name": "Frick Environmental Center",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A net-zero nature center at the Frick Park gate."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.429871,
+      "longitude": -79.914716
+    },
+    "id": "curated:blue-slide-playground",
+    "name": "Blue Slide Playground",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The Frick Park playground with the long blue hillside slide."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.417775,
+      "longitude": -79.915919
+    },
+    "id": "curated:nine-mile-run",
+    "name": "Nine Mile Run Trail",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A restored stream valley trail out to the Mon."
+  },
+  {
+    "category": "water",
+    "coordinate": {
+      "latitude": 40.416694,
+      "longitude": -79.915181
+    },
+    "id": "curated:duck-hollow",
+    "name": "Duck Hollow",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A quiet riverbank dead-end below Frick Park."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.442394,
+      "longitude": -79.90762
+    },
+    "id": "curated:homewood-cemetery",
+    "name": "Homewood Cemetery",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Rolling Victorian burial grounds beside Frick Park."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.441994,
+      "longitude": -79.951897
+    },
+    "id": "curated:mary-schenley-fountain",
+    "name": "Mary Schenley Memorial Fountain",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A bronze fountain called A Song to Nature at the Oakland gate."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.445013,
+      "longitude": -79.956378
+    },
+    "id": "curated:soldiers-sailors-memorial",
+    "name": "Soldiers and Sailors Memorial Hall",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A domed veterans' hall and museum in Oakland."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.443831,
+      "longitude": -79.952741
+    },
+    "id": "curated:stephen-foster-memorial",
+    "name": "Stephen Foster Memorial",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A Gothic theater and archive beside the Cathedral."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.444153,
+      "longitude": -79.962461
+    },
+    "id": "curated:university-of-pittsburgh",
+    "name": "University of Pittsburgh",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The campus spread around the Cathedral of Learning."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.443919,
+      "longitude": -79.942827
+    },
+    "id": "curated:carnegie-mellon-campus",
+    "name": "Carnegie Mellon University",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Lawns and cut-stone halls next to Schenley Park."
+  },
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.437078,
+      "longitude": -79.946736
+    },
+    "id": "curated:panther-hollow-bridge",
+    "name": "Panther Hollow Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A railed span over the wooded Schenley ravine."
+  },
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.433883,
+      "longitude": -79.929515
+    },
+    "id": "curated:beacon-street-overlook",
+    "name": "Beacon Street Overlook",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A ridge look toward the Mon valley from Squirrel Hill."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.434295,
+      "longitude": -79.899136
+    },
+    "id": "curated:fern-hollow-trail",
+    "name": "Fern Hollow Trail",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A wooded singletrack loop in Frick Park."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.447621,
+      "longitude": -79.923995
+    },
+    "id": "curated:chatham-arboretum",
+    "name": "Chatham University Arboretum",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "Wooded campus grounds tied into Squirrel Hill trails."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.438035,
+      "longitude": -79.929853
+    },
+    "id": "curated:temple-sinai",
+    "name": "Temple Sinai",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A midcentury synagogue on the Squirrel Hill ridge."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.440909,
+      "longitude": -79.923265
+    },
+    "id": "curated:murray-avenue",
+    "name": "Murray Avenue",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "Squirrel Hill's shopping street of delis and bakeries."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.432877,
+      "longitude": -79.942451
+    },
+    "id": "curated:schenley-oval",
+    "name": "Schenley Oval",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A track and sports oval down in Schenley Park."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.435854,
+      "longitude": -79.935605
+    },
+    "id": "curated:neill-log-house",
+    "name": "Neill Log House",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A 1700s log cabin, one of the oldest structures, in Schenley."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.418047,
+      "longitude": -79.949555
+    },
+    "id": "curated:hazelwood-green",
+    "name": "Hazelwood Green",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A former coke works being rebuilt along the river."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.4436,
+      "longitude": -79.981
+    },
+    "id": "curated:kennard-playground",
+    "name": "Kennard Playground",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A Hill District pool and playground with a city view."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.440977,
+      "longitude": -79.985681
+    },
+    "id": "curated:freedom-corner",
+    "name": "Freedom Corner",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A granite memorial to the Hill District's civil rights history."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.445419,
+      "longitude": -79.985653
+    },
+    "id": "curated:august-wilson-house",
+    "name": "August Wilson House",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The playwright's boyhood Hill District home, now a center."
+  },
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.44651,
+      "longitude": -79.985787
+    },
+    "id": "curated:cliffside-park-overlook",
+    "name": "Cliffside Park Overlook",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A Hill District ledge looking down on the Strip."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.449668,
+      "longitude": -79.897936
+    },
+    "id": "curated:construction-junction",
+    "name": "Construction Junction",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A vast reuse warehouse of salvaged building parts."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.452965,
+      "longitude": -79.902767
+    },
+    "id": "curated:westinghouse-park",
+    "name": "Westinghouse Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A Point Breeze green on the inventor's former estate."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.446088,
+      "longitude": -79.951057
+    },
+    "id": "curated:mellon-institute",
+    "name": "Mellon Institute",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A columned research temple next to CMU."
+  },
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.429067,
+      "longitude": -79.999119
+    },
+    "id": "curated:mcardle-roadway",
+    "name": "P.J. McArdle Roadway",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A climbing road with pull-offs facing the skyline."
+  },
+  {
+    "category": "climb",
+    "coordinate": {
+      "latitude": 40.431636,
+      "longitude": -80.009036
+    },
+    "id": "curated:sycamore-street",
+    "name": "Sycamore Street",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The paved race climb up the face of Mount Washington."
+  },
+  {
+    "category": "climb",
+    "coordinate": {
+      "latitude": 40.404986,
+      "longitude": -80.031497
+    },
+    "id": "curated:boustead-street",
+    "name": "Boustead Street",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A steep Beechview block near Canton Avenue."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.415669,
+      "longitude": -80.017563
+    },
+    "id": "curated:seldom-seen-greenway",
+    "name": "Seldom Seen Greenway",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A hidden stream trail under old railroad arches."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.433216,
+      "longitude": -80.009668
+    },
+    "id": "curated:mount-washington-trailhead",
+    "name": "Mount Washington Trailhead",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Wooded switchbacks up the slope from Saw Mill Run."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.43043,
+      "longitude": -80.018573
+    },
+    "id": "curated:olympia-park",
+    "name": "Olympia Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A hilltop Mount Washington park with a city overlook."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.429832,
+      "longitude": -80.016682
+    },
+    "id": "curated:chatham-village",
+    "name": "Chatham Village",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A 1930s garden-city housing enclave on the hill."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.471865,
+      "longitude": -79.967085
+    },
+    "id": "curated:fortieth-street-bridge",
+    "name": "40th Street Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "The Washington Crossing span to Millvale."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.472085,
+      "longitude": -79.971934
+    },
+    "id": "curated:millvale-riverfront-park",
+    "name": "Millvale Riverfront Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A trail hub across the river from Lawrenceville."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.4463,
+      "longitude": -80.0157
+    },
+    "id": "curated:mr-rogers-memorial",
+    "name": "Fred Rogers Memorial",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A seated bronze of Mister Rogers on the North Shore."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.4576,
+      "longitude": -79.9986
+    },
+    "id": "curated:voegtly-cemetery",
+    "name": "Voegtly Cemetery",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "An old German burial ground on the Northside slope."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.457173,
+      "longitude": -79.991531
+    },
+    "id": "curated:penn-brewery",
+    "name": "Penn Brewery",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The city's oldest brewery in a Troy Hill landmark building."
+  },
+  {
+    "category": "cafe",
+    "coordinate": {
+      "latitude": 40.451966,
+      "longitude": -79.983626
+    },
+    "id": "curated:pamelas-diner-strip",
+    "name": "Pamela's Diner",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A Strip District griddle known for crepe-thin hotcakes."
+  },
+  {
+    "category": "cafe",
+    "coordinate": {
+      "latitude": 40.445572,
+      "longitude": -79.99384
+    },
+    "id": "curated:la-prima-espresso",
+    "name": "La Prima Espresso",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A Strip District espresso bar where the old men argue."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.4445,
+      "longitude": -79.9967
+    },
+    "id": "curated:allegheny-riverfront-park",
+    "name": "Allegheny Riverfront Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A thin downtown river terrace below the ramps."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.474584,
+      "longitude": -79.908321
+    },
+    "id": "curated:washington-boulevard-trail",
+    "name": "Washington Boulevard Trail",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A creekside path linking Highland Park to the river."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.480809,
+      "longitude": -80.037967
+    },
+    "id": "curated:davis-avenue-bridge",
+    "name": "Davis Avenue Pedestrian Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A rebuilt footbridge over a Riverview Park ravine."
+  },
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.485902,
+      "longitude": -80.022832
+    },
+    "id": "curated:observatory-hill-overlook",
+    "name": "Observatory Hill Overlook",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A northern height near the observatory dome."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.453763,
+      "longitude": -79.898119
+    },
+    "id": "curated:homewood-avenue-murals",
+    "name": "Homewood Avenue Murals",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "Community portraits along the Homewood business strip."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.462069,
+      "longitude": -79.923952
+    },
+    "id": "curated:east-liberty-murals",
+    "name": "East Liberty Murals",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "Large painted walls around the Penn Circle blocks."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.467112,
+      "longitude": -79.939823
+    },
+    "id": "curated:garfield-murals",
+    "name": "Garfield Murals",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Hillside walls painted during the Unblurred art nights."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.44022,
+      "longitude": -79.958845
+    },
+    "id": "curated:forbes-avenue-murals",
+    "name": "Forbes Avenue Murals",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "Student-painted walls near the Oakland campuses."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.458037,
+      "longitude": -79.963942
+    },
+    "id": "curated:polish-hill-mural",
+    "name": "Polish Hill Mural",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A painted tribute wall on the hill's main corner."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.457375,
+      "longitude": -79.989835
+    },
+    "id": "curated:troy-hill-art-houses",
+    "name": "Troy Hill Art Houses",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "Whole houses turned into walk-through art pieces."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.458548,
+      "longitude": -80.009745
+    },
+    "id": "curated:old-allegheny-gardens",
+    "name": "Old Allegheny Gardens",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "Tended alley gardens near the Mexican War Streets."
+  },
+  {
+    "category": "water",
+    "coordinate": {
+      "latitude": 40.43752,
+      "longitude": -80.004456
+    },
+    "id": "curated:mon-wharf-landing",
+    "name": "Mon Wharf Landing",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A riverfront path below the downtown parking wharf."
+  },
+  {
+    "category": "water",
+    "coordinate": {
+      "latitude": 40.435721,
+      "longitude": -80.006551
+    },
+    "id": "curated:gateway-clipper-dock",
+    "name": "Gateway Clipper Dock",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "The riverboat landing at Station Square."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.432214,
+      "longitude": -79.989128
+    },
+    "id": "curated:south-tenth-street-bridge",
+    "name": "South 10th Street Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A suspension span from the flats toward the Bluff."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.440389,
+      "longitude": -79.950321
+    },
+    "id": "curated:panther-hollow-trail",
+    "name": "Panther Hollow Trail",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A shaded ravine trail down to the lake."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.432719,
+      "longitude": -79.950359
+    },
+    "id": "curated:junction-hollow-trail",
+    "name": "Junction Hollow Trail",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A rail-grade bike path between Oakland and the Mon."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.437367,
+      "longitude": -79.897484
+    },
+    "id": "curated:frick-clay-courts",
+    "name": "Frick Park Clay Courts",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "Historic clay tennis courts inside the park."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.378135,
+      "longitude": -80.085691
+    },
+    "id": "curated:kane-woods-nature-area",
+    "name": "Kane Woods Nature Area",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A quiet wooded preserve on the southern edge."
+  },
+  {
+    "category": "water",
+    "coordinate": {
+      "latitude": 40.406679,
+      "longitude": -80.004887
+    },
+    "id": "curated:saw-mill-run",
+    "name": "Saw Mill Run",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A creek corridor along the southern valley floor."
+  },
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.462569,
+      "longitude": -79.908384
+    },
+    "id": "curated:larimer-overlook",
+    "name": "Larimer Overlook",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "An East End height above the Washington Boulevard valley."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.437486,
+      "longitude": -79.937436
+    },
+    "id": "curated:schenley-golf-course",
+    "name": "Bob O'Connor Golf Course",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A rolling public course in the heart of Schenley Park."
   }
 ]
