@@ -78,8 +78,8 @@ grammatical template.
 
 Photos come from freely-licensed Wikimedia Commons images for the signature Tier-3 gems.
 Record each image's source URL and license in `PHOTO_LICENSES.md`. Set `photo=gem-<slug>`
-and `attribution=<Author>, <License>` (or `PD` for public-domain/CC0, which renders no
-credit line).
+and `attribution=<Author> / <License> via Wikimedia Commons` (or `PD` for public-domain/CC0,
+which renders no credit line). `fetch_photos.py` writes this format automatically.
 
 **Photo assets MUST belong to the Aura app target** (`Aura/Resources/GemPhotos.xcassets`),
 named exactly `gem-<slug>` — never AuraCore/AuraKit. `GemDetailSheet` calls `UIImage(named:)`

@@ -132,11 +132,13 @@ def main():
     lines = TSV.read_text().rstrip("\n").split("\n")
     F = lines[0].split("\t"); out = [lines[0]]
     for l in lines[1:]:
-        d = dict(zip(F, l.split("\t")))
+        vals = l.split("\t")
+        vals += [""] * (len(F) - len(vals))   # tolerate a short row (dropped trailing empty col)
+        d = dict(zip(F, vals))
         if d["slug"] in results:
             d["photo"] = f"gem-{d['slug']}"
             d["attribution"] = results[d["slug"]]
-        out.append("\t".join(d[f] for f in F))
+        out.append("\t".join(d.get(f, "") for f in F))
     TSV.write_text("\n".join(out) + "\n")
 
     # Audit file.
