@@ -50,12 +50,15 @@ public struct Gem: Identifiable, Codable, Equatable, Sendable {
     public let source: GemSource
     public let photoAsset: String?
     public let why: String?
+    public let photoAttribution: String?
 
     public init(id: String, name: String, coordinate: Coordinate,
                 category: GemCategory, tier: GemTier, source: GemSource,
-                photoAsset: String? = nil, why: String? = nil) {
+                photoAsset: String? = nil, why: String? = nil,
+                photoAttribution: String? = nil) {
         self.id = id; self.name = name; self.coordinate = coordinate
         self.category = category; self.tier = tier; self.source = source
         self.photoAsset = photoAsset; self.why = why
+        self.photoAttribution = photoAttribution
     }
 }

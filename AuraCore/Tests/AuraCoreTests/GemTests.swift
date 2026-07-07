@@ -28,4 +28,19 @@ import Foundation
         let decoded = try JSONDecoder().decode(Gem.self, from: data)
         #expect(decoded == gem)
     }
+
+    @Test func photoAttributionDefaultsToNilAndRoundTrips() throws {
+        // Absent in JSON decodes to nil (backward-compat with existing gems.json).
+        let json = #"{"id":"curated:x","name":"X","coordinate":{"latitude":40.44,"longitude":-80.0},"category":"park","tier":2,"source":"curated"}"#
+        let decoded = try JSONDecoder().decode(Gem.self, from: Data(json.utf8))
+        #expect(decoded.photoAttribution == nil)
+
+        // Present round-trips.
+        let gem = Gem(id: "curated:y", name: "Y",
+                      coordinate: Coordinate(latitude: 40.44, longitude: -80.0),
+                      category: .mural, tier: .cardHaptic, source: .curated,
+                      photoAsset: "gem-y", why: "A wall.", photoAttribution: "Jane Doe, CC BY-SA 4.0")
+        let data = try JSONEncoder().encode(gem)
+        #expect(try JSONDecoder().decode(Gem.self, from: data).photoAttribution == "Jane Doe, CC BY-SA 4.0")
+    }
 }
