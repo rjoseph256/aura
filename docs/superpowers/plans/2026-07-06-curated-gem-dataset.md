@@ -182,6 +182,10 @@ git commit -m "feat(gems): show photo attribution credit under gem detail photo"
 **Interfaces:**
 - Consumes / Produces: `GemCategory.arrivalRadiusMeters` — mural/landmark becomes `38`; everything else unchanged (viewpoint stays 70).
 
+> **NOTE (walked back by adversarial spec review, findings A1/P4):** viewpoint 70→80 m was
+> proposed and **rejected** — the existing test locks 70 with a `// unchanged` intent and 80 m is
+> unvalidated until on-device arrival-detection exists. Only mural/landmark 30→38 proceeds here.
+
 - [ ] **Step 1: Write the failing test** — append to `GemTests.swift`:
 
 ```swift
@@ -322,6 +326,12 @@ class ToGemTests(unittest.TestCase):
     def test_credited_photo_keeps_attribution(self):
         g = to_gem(row(slug="a-b", photo="gem-a-b", attribution="Jane, CC BY 4.0"))
         self.assertEqual(g["photoAttribution"], "Jane, CC BY 4.0")
+
+    def test_strings_are_nfc_normalized_for_determinism(self):
+        # Decomposed "e" + combining acute (NFD) must serialize as composed "é" (NFC).
+        g = to_gem(row(name="Café", why="A café stop."))
+        self.assertEqual(g["name"], "Café")
+        self.assertEqual(g["why"], "A café stop.")
 
 class HaversineTests(unittest.TestCase):
     def test_known_distance(self):
@@ -627,7 +637,10 @@ git commit -m "feat(gems): add Nominatim geocoding helper for authoring"
 
 This task is content-led; its "tests" are the generator's validation gate plus Swift assertions on the emitted dataset.
 
-- [ ] **Step 1: Author the TSV rows.** Append rows to `gems.tsv` following the Global Constraints (voice, tiering, curated-vs-live rule) and the spec's category coverage checklist. Work neighborhood by neighborhood (Downtown, Strip, Lawrenceville, Bloomfield/Friendship, Shadyside, Oakland, Squirrel Hill, South Side + Slopes, Mt. Washington, North Side, Polish/Troy Hill, East Liberty/Highland Park, West End, riverfront/GAP/Eliza Furnace trails). Leave `lat`/`lon` blank; fill `query` with `"<name>, <neighborhood>, Pittsburgh"`. Target ~150 rows; Tier-3 ≤ 20, none within 1.5 km of another Tier-3.
+- [ ] **Step 1: Author the TSV rows.** Append rows to `gems.tsv` following the Global Constraints (voice, tiering, curated-vs-live rule) and the spec's category coverage checklist. Work neighborhood by neighborhood (Downtown, Strip, Lawrenceville, Bloomfield/Friendship, Shadyside, Oakland, Squirrel Hill, South Side + Slopes, Mt. Washington, North Side, Polish/Troy Hill, East Liberty/Highland Park, West End, riverfront/GAP/Eliza Furnace trails). Leave `lat`/`lon` blank; fill `query` with `"<name>, <neighborhood>, Pittsburgh"`. Target ~150 rows (140–180); Tier-3 12–20, none within 1.5 km of another Tier-3.
+  - **Must include the coverage anchors** asserted by `coverageChecklistAnchorsArePresent` (slugs must match exactly): `grandview-overlook`, `west-end-overlook`, `point-state-park`, `schenley-park`, `frick-park`, `riverview-park`, `randyland`, `canton-avenue`, `duquesne-incline`, `mattress-factory`, `cathedral-of-learning`, `national-aviary` — plus the rest of the spec's §3 checklist (Highland Park, Emerald View, Monongahela Incline, the Three Sisters bridges, notable stairways).
+
+- [ ] **Step 1b (gate): Apply the curated-vs-live rule and record it.** Before geocoding, review every row against the rule (spec §3 P2): curated is the *narrative* layer — keep a place only when its *why*/story is value OSM's live layer can't convey. Drop generic cafes (max 0–2 signature), pocket parks, and places that are merely a named OSM tag with no story. This is a human-judgment gate with no validator; record the outcome in the Step 8 commit body (e.g. "dropped N generic cafes / M pocket parks per P2"). Also self-check the `why` variety rule (no repeated opening word / template across any 20 consecutive rows).
 
 - [ ] **Step 2: Resolve coordinates**
 
@@ -639,7 +652,7 @@ Expected: `Resolved N rows; K unresolved: [...]`. For each unresolved slug, fix 
 Run: `cd Tools/gems && python3 build_gems.py`
 Expected: `Wrote ~150 gems (≤20 Tier-3) -> …/gems.json`, zero fatal errors. Resolve every reported error (bbox, spacing, duplicate slug). Review each `WARN:` 25 m-proximity pair and nudge one apart or accept knowingly.
 
-- [ ] **Step 4: Write the failing dataset assertions** — replace the body of `CuratedGemProviderTests.loadsAndDecodesTheBundledSeed` and add a distribution test:
+- [ ] **Step 4: Write the failing dataset assertions.** In `CuratedGemProviderTests.swift`, **delete** the old `loadsAndDecodesTheBundledSeed` test entirely (it asserted the placeholder seed) and **replace** it with the four tests below. Keep `dropsMalformedEntriesRatherThanThrowing` unchanged. (No two tests may share a name; the old function must be removed, not left alongside these.)
 
 ```swift
     @Test func loadsAndDecodesTheRealDataset() async {
@@ -653,18 +666,44 @@ Expected: `Wrote ~150 gems (≤20 Tier-3) -> …/gems.json`, zero fatal errors. 
     @Test func tierThreeIsRareAndEarned() async {
         let gems = await CuratedGemProvider().gems(near: Coordinate(latitude: 40.44, longitude: -80.0))
         let t3 = gems.filter { $0.tier == .cardHaptic }
-        #expect(t3.count <= 20)
+        #expect(t3.count >= 12 && t3.count <= 20)   // rare but present
         // No two Tier-3 within 1.5km (haptic clustering guard, mirrors build_gems.py).
         for i in t3.indices { for j in t3.indices where j > i {
             #expect(Geo.distance(t3[i].coordinate, t3[j].coordinate) >= 1500)
         } }
     }
+
+    @Test func tierDistributionMatchesRubric() async {
+        let gems = await CuratedGemProvider().gems(near: Coordinate(latitude: 40.44, longitude: -80.0))
+        let total = Double(gems.count)
+        let t2 = Double(gems.filter { $0.tier == .card }.count)
+        let t1 = Double(gems.filter { $0.tier == .pin }.count)
+        #expect(t2 / total >= 0.50)                 // Tier-2 is the majority
+        #expect(t1 / total <= 0.35)                 // Tier-1 is quiet filler, not the bulk
+        #expect(Set(gems.map(\.category)).count == GemCategory.allCases.count)  // all 8 categories present
+    }
+
+    // Coverage checklist (spec §3 P6) — anchored to stable slugs the author must include.
+    @Test func coverageChecklistAnchorsArePresent() async {
+        let gems = await CuratedGemProvider().gems(near: Coordinate(latitude: 40.44, longitude: -80.0))
+        let ids = Set(gems.map(\.id))
+        let required = [
+            "curated:grandview-overlook", "curated:west-end-overlook",   // viewpoints
+            "curated:point-state-park",                                  // water
+            "curated:schenley-park", "curated:frick-park", "curated:riverview-park", // parks
+            "curated:randyland",                                         // mural
+            "curated:canton-avenue",                                     // climb (world's steepest)
+            "curated:duquesne-incline", "curated:mattress-factory",      // historic
+            "curated:cathedral-of-learning", "curated:national-aviary",  // landmarks
+        ]
+        for id in required { #expect(ids.contains(id), "missing required gem \(id)") }
+    }
 ```
 
-- [ ] **Step 5: Run to verify (fails if the dataset is too small / violates rules)**
+- [ ] **Step 5: Run to verify (fails if the dataset is too small / violates rules / misses an anchor)**
 
 Builder agent: `swift test --package-path AuraCore --filter CuratedGemProviderTests`
-Expected: PASS once Task 6 content is complete (the `dropsMalformedEntriesRatherThanThrowing` test is unaffected). If the old `loadsAndDecodesTheBundledSeed` name remains referenced elsewhere, remove it.
+Expected: PASS once Task 6 content is complete (`dropsMalformedEntriesRatherThanThrowing` is unaffected). These four tests are the machine-checked content gate: count, Tier-3 rarity + spacing, tier distribution, all-8-categories, and the coverage anchors.
 
 - [ ] **Step 6: Update the provider header note** — in `CuratedGemProvider.swift`, replace the "placeholder starter content … Tracked on the board as ROH-58" paragraph with:
 
@@ -676,16 +715,26 @@ Expected: PASS once Task 6 content is complete (the `dropsMalformedEntriesRather
 /// (see `Tools/gems/README.md`). Do not hand-edit the JSON — edit the TSV and regenerate.
 ```
 
-- [ ] **Step 7: Write the README** — create `Tools/gems/README.md` documenting: the TSV columns; `python3 geocode.py` then `python3 build_gems.py`; the bbox/slug/tier/spacing/photo rules; the `why` style guide (banned list + variety rule); the curated-vs-live inclusion rule; and the **hard requirement that photo assets live in the Aura app target** named `gem-<slug>`.
+- [ ] **Step 7: Write the README** — create `Tools/gems/README.md` documenting: the TSV columns; `python3 geocode.py` then `python3 build_gems.py`; the bbox/slug/tier/spacing/photo rules; the `why` style guide (banned list + variety rule); the curated-vs-live inclusion rule; and the **hard requirement** below, verbatim:
 
-- [ ] **Step 8: Commit**
+  > **Photo assets MUST belong to the Aura app target** (`Aura/Resources/GemPhotos.xcassets`), named
+  > exactly `gem-<slug>` — never AuraCore/AuraKit. `GemDetailSheet` calls `UIImage(named:)` with no
+  > bundle arg, which searches `Bundle.main` only; an asset in a package target resolves to `nil` and
+  > the photo **silently** won't render. Verify: Xcode → Aura target → Build Phases → Copy Bundle Resources.
+
+- [ ] **Step 8: Commit** (record the human-judgment gates in the body for the audit trail)
 
 ```bash
 git add Tools/gems/gems.tsv Tools/gems/geocode_cache.json Tools/gems/README.md \
   AuraCore/Sources/AuraKit/Resources/gems.json \
   AuraCore/Sources/AuraKit/Gems/CuratedGemProvider.swift \
   AuraCore/Tests/AuraKitTests/CuratedGemProviderTests.swift
-git commit -m "feat(gems): author real ~150-gem Pittsburgh curated dataset"
+git commit -m "feat(gems): author real ~150-gem Pittsburgh curated dataset
+
+- All 8 categories; tier split ~10% T3 / ~55-60% T2 / ~25-30% T1 (per reconciled P8)
+- Curated-vs-live gate applied (P2): dropped <N> generic cafes / <M> pocket parks
+- Coordinates geocoded via Nominatim, all within Pittsburgh bbox
+- why copy follows style guide (no marketing adjectives; variety across 20-row windows)"
 ```
 
 ---
@@ -694,16 +743,32 @@ git commit -m "feat(gems): author real ~150-gem Pittsburgh curated dataset"
 
 **Files:**
 - Create: `Aura/Resources/GemPhotos.xcassets/` (asset catalog + per-photo imagesets)
-- Modify: `project.yml` (xcodegen — ensure the catalog is a resource of the Aura target) and regenerate the project
+- Create: `Tools/gems/PHOTO_LICENSES.md` (per-image source URL + license, the audit record)
 - Modify: `Tools/gems/gems.tsv` (set `photo`/`attribution` on gems that got an image) and regenerate `gems.json`
+
+**Note on the project manifest:** `Aura/project.yml` already includes `Resources` via a `- path: Resources`
+glob for the Aura app target, so a new `Aura/Resources/GemPhotos.xcassets` is auto-discovered — **no
+`project.yml` edit is needed.** Just regenerate the project so the catalog is picked up.
 
 **Interfaces:**
 - Consumes: the Tier-3 gems from Task 6; `gemPhotoCredit` (Task 2).
 - Produces: `gem-<slug>` images resolvable via `UIImage(named:)` from `Bundle.main`.
 
-- [ ] **Step 1: Source images.** For each Tier-3 gem, find a freely-licensed Wikimedia Commons image (prefer PD/CC0; CC-BY/CC-BY-SA acceptable). Record the author + license for the `attribution` column (use `PD` for public-domain/CC0). Skip any gem with no acceptable-license image — the sheet degrades gracefully. Download to a scratch dir; downscale to ≤ 1600px long edge.
+Photos are **best-effort**: a Tier-3 gem with no acceptable-license image ships photoless (the sheet
+degrades gracefully). Never ship an image whose license you could not verify.
 
-- [ ] **Step 2: Build the asset catalog.** Create `Aura/Resources/GemPhotos.xcassets` with one imageset per photo named exactly `gem-<slug>`. Confirm in `project.yml` that `Aura/Resources` (or the catalog) is in the **Aura app target's** sources/resources, not AuraKit. Regenerate: `xcodegen generate` (per repo convention — the project is gitignored/regenerated).
+- [ ] **Step 1: Source images + verify licenses (the compliance gate).** For each Tier-3 gem, find a
+  freely-licensed Wikimedia Commons image (prefer PD/CC0; CC-BY/CC-BY-SA acceptable — never CC-*-NC/ND).
+  For **each** image, open the Commons file page and record in `Tools/gems/PHOTO_LICENSES.md`: the gem
+  slug, the file URL, the exact license (e.g. `CC BY-SA 4.0`), and the author. If the license can't be
+  positively confirmed, **skip the image**. The `attribution` column value comes from this record
+  (`<Author>, <License>`, or `PD` for public-domain/CC0). Download to a scratch dir; downscale to
+  ≤ 1600 px long edge.
+
+- [ ] **Step 2: Build the asset catalog.** Create `Aura/Resources/GemPhotos.xcassets` with one imageset
+  per photo named exactly `gem-<slug>`. Regenerate the Xcode project: `cd Aura && xcodegen generate`
+  (per repo convention — the project is gitignored/regenerated). The catalog lands in the **Aura app
+  target** via the existing `Resources` glob (see note above), never AuraKit/AuraCore.
 
 - [ ] **Step 3: Wire attribution into the TSV and regenerate**
 
@@ -716,8 +781,8 @@ Expected: regenerates `gems.json` with `photoAsset`/`photoAttribution` populated
 - [ ] **Step 5: Commit**
 
 ```bash
-git add Aura/Resources/GemPhotos.xcassets project.yml Tools/gems/gems.tsv AuraCore/Sources/AuraKit/Resources/gems.json
-git commit -m "feat(gems): add Wikimedia photos + attribution for Tier-3 gems"
+git add Aura/Resources/GemPhotos.xcassets Tools/gems/PHOTO_LICENSES.md Tools/gems/gems.tsv AuraCore/Sources/AuraKit/Resources/gems.json
+git commit -m "feat(gems): add Wikimedia photos + verified attribution for Tier-3 gems"
 ```
 
 ---
@@ -738,10 +803,11 @@ Expected: all PASS.
 
 - [ ] **Step 3: App build + simulator smoke.** Build and launch the Aura app on the iPhone simulator (builder agent for build; `ios-simulator-mcp` to launch/inspect). Start a ride near downtown Pittsburgh (sim location ~40.44, −80.00). Confirm: gems appear as pins/cards on the map; opening a Tier-3 gem's detail sheet shows its photo with a `Photo: …` credit line; a Tier-1 pin's sheet renders without a photo. Capture the accessibility tree (preferred over screenshot) to confirm gem names surface.
 
-- [ ] **Step 4: Regeneration determinism check**
+- [ ] **Step 4: Regeneration determinism check** (proves `build_gems.py` is deterministic given the
+  checked-in TSV — this does **not** re-run `geocode.py`, which would re-hit the network)
 
-Run: `cd Tools/gems && python3 build_gems.py && git diff --exit-code AuraCore/Sources/AuraKit/Resources/gems.json`
-Expected: exit 0 (no diff) — proves the build is deterministic.
+Run: `cd Tools/gems && python3 build_gems.py && git diff --exit-code AuraCore/Sources/AuraKit/Resources/gems.json Tools/gems/geocode_cache.json`
+Expected: exit 0 (no diff) on both — the generated JSON and the frozen geocode cache are byte-stable.
 
 - [ ] **Step 5: Commit any final fixes** (if the smoke test surfaced issues).
 
@@ -761,3 +827,25 @@ Expected: exit 0 (no diff) — proves the build is deterministic.
 **Placeholder scan:** No TBD/TODO; every code step shows complete code. ✓
 
 **Type consistency:** `gemPhotoCredit(_:)`, `Gem.photoAttribution`, `build_gems.validate/to_gem/haversine_m`, `geocode.merge_coords/needs_geocode/geocode_query` are named identically where produced and consumed. `to_gem` emits keys matching the `Gem` Codable shape (`coordinate.latitude/longitude`, `photoAsset`, `photoAttribution`). ✓
+
+## Reconciliation — adversarial plan review
+
+Two independent refuting reviewers (execution-correctness + spec-completeness). Pre-verified against
+the code: `Geo` is `public` (accessible from AuraKitTests), `gemPhotoCredit`/`AuraTheme.textSecondary`
+resolve, named-arg call sites survive the trailing param, and `Aura/project.yml` already globs `Resources/`.
+
+**Accepted & folded in:** removed the test-name collision — Task 6 Step 4 now explicitly deletes
+`loadsAndDecodesTheBundledSeed` (exec E1); added machine-checked content gates — `tierDistributionMatchesRubric`,
+all-8-categories, and `coverageChecklistAnchorsArePresent` with a fixed required-slug list surfaced into
+Task 6 Step 1 (compl C2/C4); added the `curated-vs-live` human gate as Task 6 Step 1b with a commit-body
+record (compl C1); added the photo **license-verification gate** + `PHOTO_LICENSES.md` audit file and a
+"best-effort, never ship unverified" rule (compl C3); corrected Task 7 — no `project.yml` edit, catalog
+auto-discovered via the existing `Resources` glob, `xcodegen generate` run from `Aura/` (exec E11); made
+the README target-membership requirement verbatim + a Build-Phases verification (compl C5); added an NFC
+determinism test (compl C7); added the walked-back-viewpoint rationale note to Task 3 (compl C6); clarified
+the Task 8 determinism check covers `build_gems.py` given the frozen TSV/cache, not a re-geocode (exec E12).
+
+**Verified as non-issues (no action):** most of the exec reviewer's "CRITICAL" compile suspicions
+(`Geo.distance` scope, `gemPhotoCredit` visibility, `AuraTheme.textSecondary`, init param order) self-refuted
+on inspection; the Task 4 3-gem seed keeps the *old* `count>=3`/grandview/all-curated test green, so there's
+no red interval between Task 4 and Task 6; `to_gem`/`validate` blank-field and PD handling are correct.
