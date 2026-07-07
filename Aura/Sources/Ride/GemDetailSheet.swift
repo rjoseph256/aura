@@ -13,51 +13,60 @@ struct GemDetailSheet: View {
     var onSaveToReturn: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                Image(systemName: GemPinView.symbol(for: gem.category))
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(AuraTheme.onAccent)
-                    .frame(width: 40, height: 40)
-                    .background(Circle().fill(AuraTheme.accent))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(gem.name).font(.title3.weight(.semibold)).foregroundStyle(AuraTheme.textPrimary)
-                    Text("\(gem.category.rawValue.capitalized) · \(distanceText)")
-                        .font(.subheadline).foregroundStyle(AuraTheme.textSecondary)
-                }
-            }
-            if let asset = gem.photoAsset, UIImage(named: asset) != nil {
-                VStack(alignment: .leading, spacing: 4) {
-                    Image(asset).resizable().scaledToFill()
-                        .frame(maxWidth: .infinity).frame(height: 180)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                    if let credit = gemPhotoCredit(gem.photoAttribution) {
-                        Text(credit)
-                            .font(.caption2)
-                            .foregroundStyle(AuraTheme.textSecondary)
+        // Info scrolls, actions stay pinned. Without the ScrollView, a gem with a photo
+        // is taller than the .medium detent and the header clips under the grabber.
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 12) {
+                        Image(systemName: GemPinView.symbol(for: gem.category))
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(AuraTheme.onAccent)
+                            .frame(width: 40, height: 40)
+                            .background(Circle().fill(AuraTheme.accent))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(gem.name).font(.title3.weight(.semibold)).foregroundStyle(AuraTheme.textPrimary)
+                            Text("\(gem.category.rawValue.capitalized) · \(distanceText)")
+                                .font(.subheadline).foregroundStyle(AuraTheme.textSecondary)
+                        }
+                    }
+                    if let asset = gem.photoAsset, UIImage(named: asset) != nil {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Image(asset).resizable().scaledToFill()
+                                .frame(maxWidth: .infinity).frame(height: 180)
+                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                            if let credit = gemPhotoCredit(gem.photoAttribution) {
+                                Text(credit)
+                                    .font(.caption2)
+                                    .foregroundStyle(AuraTheme.textSecondary)
+                            }
+                        }
+                    }
+                    if let why = gem.why {
+                        Text(why).font(.body).foregroundStyle(AuraTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
             }
-            if let why = gem.why {
-                Text(why).font(.body).foregroundStyle(AuraTheme.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Button {
-                onSaveToReturn()
-            } label: {
-                Label(isSavedToReturn ? "Saved to return" : "Save to return",
-                      systemImage: isSavedToReturn ? "checkmark.circle.fill" : "arrow.uturn.backward.circle")
-                    .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, AuraTheme.Spacing.xs)
-            }
-            .buttonStyle(.bordered)
-            .tint(isSavedToReturn ? AuraTheme.textSecondary : AuraTheme.accent)
-            .disabled(isSavedToReturn)
-            .accessibilityHint(isSavedToReturn
-                                ? "Already saved to your places for later"
-                                : "Saves this gem to your places so you can come back to it")
             VStack(alignment: .leading, spacing: AuraTheme.Spacing.sm) {
+                Button {
+                    onSaveToReturn()
+                } label: {
+                    Label(isSavedToReturn ? "Saved to return" : "Save to return",
+                          systemImage: isSavedToReturn ? "checkmark.circle.fill" : "arrow.uturn.backward.circle")
+                        .font(.subheadline.weight(.medium))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, AuraTheme.Spacing.xs)
+                }
+                .buttonStyle(.bordered)
+                .tint(isSavedToReturn ? AuraTheme.textSecondary : AuraTheme.accent)
+                .disabled(isSavedToReturn)
+                .accessibilityHint(isSavedToReturn
+                                    ? "Already saved to your places for later"
+                                    : "Saves this gem to your places so you can come back to it")
                 Button {
                     onTakeMeThere()
                 } label: {
@@ -80,10 +89,11 @@ struct GemDetailSheet: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
-            Spacer(minLength: 0)
+            .padding(.horizontal, 20)
+            .padding(.top, AuraTheme.Spacing.sm)
+            .padding(.bottom, 20)
         }
-        .padding(20)
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 }
