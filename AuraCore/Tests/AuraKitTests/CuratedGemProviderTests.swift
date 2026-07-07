@@ -43,7 +43,7 @@ import AuraCore
             "curated:randyland",                                         // mural
             "curated:canton-avenue",                                     // climb (world's steepest)
             "curated:duquesne-incline", "curated:mattress-factory",      // historic
-            "curated:cathedral-of-learning", "curated:national-aviary",  // landmarks
+            "curated:cathedral-of-learning", "curated:national-aviary"   // landmarks
         ]
         for id in required { #expect(ids.contains(id), "missing required gem \(id)") }
     }

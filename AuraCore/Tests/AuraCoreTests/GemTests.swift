@@ -31,7 +31,8 @@ import Foundation
 
     @Test func photoAttributionDefaultsToNilAndRoundTrips() throws {
         // Absent in JSON decodes to nil (backward-compat with existing gems.json).
-        let json = #"{"id":"curated:x","name":"X","coordinate":{"latitude":40.44,"longitude":-80.0},"category":"park","tier":2,"source":"curated"}"#
+        let json = #"{"id":"curated:x","name":"X","coordinate":{"latitude":40.44,"longitude":-80.0},"#
+            + #""category":"park","tier":2,"source":"curated"}"#
         let decoded = try JSONDecoder().decode(Gem.self, from: Data(json.utf8))
         #expect(decoded.photoAttribution == nil)
 
