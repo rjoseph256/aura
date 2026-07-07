@@ -27,9 +27,16 @@ struct GemDetailSheet: View {
                 }
             }
             if let asset = gem.photoAsset, UIImage(named: asset) != nil {
-                Image(asset).resizable().scaledToFill()
-                    .frame(maxWidth: .infinity).frame(height: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                VStack(alignment: .leading, spacing: 4) {
+                    Image(asset).resizable().scaledToFill()
+                        .frame(maxWidth: .infinity).frame(height: 180)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                    if let credit = gemPhotoCredit(gem.photoAttribution) {
+                        Text(credit)
+                            .font(.caption2)
+                            .foregroundStyle(AuraTheme.textSecondary)
+                    }
+                }
             }
             if let why = gem.why {
                 Text(why).font(.body).foregroundStyle(AuraTheme.textSecondary)
