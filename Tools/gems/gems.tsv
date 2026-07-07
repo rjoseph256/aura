@@ -1,17 +1,17 @@
 slug	name	category	tier	why	photo	attribution	lat	lon	query
-grandview-overlook	Grandview Overlook	viewpoint	3	The skyline lines up over the Mon from the top of the incline.			40.4392	-80.0155	Grandview Avenue Overlook, Mount Washington, Pittsburgh, PA
-west-end-overlook	West End Overlook	viewpoint	3	Three rivers and the whole downtown wedge sit right below you.			40.446185	-80.033937	West End Overlook, Pittsburgh, PA
+grandview-overlook	Grandview Overlook	viewpoint	3	The skyline lines up over the Mon from the top of the incline.	gem-grandview-overlook	Dllu / CC BY-SA 4.0 via Wikimedia Commons	40.4392	-80.0155	Grandview Avenue Overlook, Mount Washington, Pittsburgh, PA
+west-end-overlook	West End Overlook	viewpoint	3	Three rivers and the whole downtown wedge sit right below you.	gem-west-end-overlook	PD	40.446185	-80.033937	West End Overlook, Pittsburgh, PA
 point-state-park	Point State Park	water	2	Where the three rivers meet, marked by the big fountain.			40.4419	-80.0089	Point State Park, Pittsburgh, PA
-randyland	Randyland	mural	3	Every wall of this Mexican War Streets courtyard is painted end to end.			40.4579	-80.0097	Randyland, Pittsburgh, PA
-canton-avenue	Canton Avenue	climb	3	At 37 percent, this is the steepest public street in the country.			40.410075	-80.030102	Canton Avenue, Beechview, Pittsburgh, PA
-cathedral-of-learning	Cathedral of Learning	landmark	3	Forty-two Gothic stories rise over Oakland, with Nationality Rooms at the base.			40.444295	-79.953191	Cathedral of Learning, Oakland, Pittsburgh, PA
-carrie-blast-furnaces	Carrie Blast Furnaces	historic	3	Two 1907 furnaces still stand from the mill that built the city.			40.4092	-79.9010	Carrie Furnaces, Swissvale, PA
-st-anthony-chapel	Saint Anthony's Chapel	historic	3	Thousands of relics fill one small chapel on Troy Hill.			40.464933	-79.983773	Saint Anthony Chapel, Troy Hill, Pittsburgh, PA
-allegheny-cemetery	Allegheny Cemetery	historic	3	Winding lanes thread Victorian monuments, quiet and rideable.			40.472093	-79.949236	Allegheny Cemetery, Pittsburgh, PA
-frick-park	Frick Park	park	3	Wooded trails drop through the hollows of the city's largest park.			40.430357	-79.906899	Frick Park, Pittsburgh, PA
-highland-park	Highland Park	park	3	Loop the reservoir past the fountain and the old entry gates.			40.47231	-79.919498	Highland Park, Pittsburgh, PA
-riverview-park	Riverview Park	park	3	Steep woods surround the 1912 Allegheny Observatory.			40.483113	-80.02172	Riverview Park, Pittsburgh, PA
-hot-metal-bridge	Hot Metal Bridge	historic	3	Once it carried molten iron; now it carries bikes over the Mon.			40.428522	-79.960272	Hot Metal Bridge, Pittsburgh, PA
+randyland	Randyland	mural	3	Every wall of this Mexican War Streets courtyard is painted end to end.	gem-randyland	Popscreenshot / CC BY-SA 4.0 via Wikimedia Commons	40.4579	-80.0097	Randyland, Pittsburgh, PA
+canton-avenue	Canton Avenue	climb	3	At 37 percent, this is the steepest public street in the country.	gem-canton-avenue	Mr. Matté / CC BY-SA 4.0 via Wikimedia Commons	40.410075	-80.030102	Canton Avenue, Beechview, Pittsburgh, PA
+cathedral-of-learning	Cathedral of Learning	landmark	3	Forty-two Gothic stories rise over Oakland, with Nationality Rooms at the base.	gem-cathedral-of-learning	Notyourbroom / CC BY 3.0 via Wikimedia Commons	40.444295	-79.953191	Cathedral of Learning, Oakland, Pittsburgh, PA
+carrie-blast-furnaces	Carrie Blast Furnaces	historic	3	Two 1907 furnaces still stand from the mill that built the city.	gem-carrie-blast-furnaces	PD	40.4092	-79.9010	Carrie Furnaces, Swissvale, PA
+st-anthony-chapel	Saint Anthony's Chapel	historic	3	Thousands of relics fill one small chapel on Troy Hill.	gem-st-anthony-chapel	Giovanni Guida / CC BY 3.0 via Wikimedia Commons	40.464933	-79.983773	Saint Anthony Chapel, Troy Hill, Pittsburgh, PA
+allegheny-cemetery	Allegheny Cemetery	historic	3	Winding lanes thread Victorian monuments, quiet and rideable.	gem-allegheny-cemetery	PD	40.472093	-79.949236	Allegheny Cemetery, Pittsburgh, PA
+frick-park	Frick Park	park	3	Wooded trails drop through the hollows of the city's largest park.	gem-frick-park	PD	40.430357	-79.906899	Frick Park, Pittsburgh, PA
+highland-park	Highland Park	park	3	Loop the reservoir past the fountain and the old entry gates.	gem-highland-park	PD	40.47231	-79.919498	Highland Park, Pittsburgh, PA
+riverview-park	Riverview Park	park	3	Steep woods surround the 1912 Allegheny Observatory.	gem-riverview-park	PD	40.483113	-80.02172	Riverview Park, Pittsburgh, PA
+hot-metal-bridge	Hot Metal Bridge	historic	3	Once it carried molten iron; now it carries bikes over the Mon.	gem-hot-metal-bridge	Dllu / CC BY-SA 4.0 via Wikimedia Commons	40.428522	-79.960272	Hot Metal Bridge, Pittsburgh, PA
 duquesne-incline	Duquesne Incline	historic	2	Since 1877 this cable car has climbed Mount Washington.			40.438774	-80.018445	Duquesne Incline, Pittsburgh, PA
 monongahela-incline	Monongahela Incline	historic	2	Ride the oldest working incline in the country up from Station Square.			40.431505	-80.005758	Monongahela Incline, Pittsburgh, PA
 mattress-factory	Mattress Factory	historic	2	Room-sized installation art fills a former Northside warehouse.			40.456929	-80.012274	Mattress Factory, Pittsburgh, PA
