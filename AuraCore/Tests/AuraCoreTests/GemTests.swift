@@ -43,4 +43,11 @@ import Foundation
         let data = try JSONEncoder().encode(gem)
         #expect(try JSONDecoder().decode(Gem.self, from: data).photoAttribution == "Jane Doe, CC BY-SA 4.0")
     }
+
+    @Test func muralAndLandmarkArrivalRadiusSurvivesOneMissedFix() {
+        // At ~7 m/s a sub-25m radius can be blown past between GPS fixes; 38m is the floor.
+        #expect(GemCategory.mural.arrivalRadiusMeters == 38)
+        #expect(GemCategory.landmark.arrivalRadiusMeters == 38)
+        #expect(GemCategory.viewpoint.arrivalRadiusMeters == 70)   // deliberately unchanged this pass
+    }
 }

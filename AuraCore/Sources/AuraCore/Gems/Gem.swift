@@ -31,9 +31,13 @@ public enum GemCategory: String, Codable, Sendable, CaseIterable {
     }
 
     /// How close (meters) counts as "arrived" for this kind of place.
+    /// At typical cycling speed (~7 m/s / 15 mph) GPS fixes are ~1–2 s apart, so a sub-25m
+    /// radius can be blown past between fixes. Pinpoint spots use 38m as the floor; diffuse
+    /// spots (parks, overlooks) stay wide. Viewpoint is left at 70m until on-device
+    /// arrival-detection can validate widening it.
     public var arrivalRadiusMeters: Double {
         switch self {
-        case .mural, .landmark: return 30
+        case .mural, .landmark: return 38
         case .cafe: return 40
         case .water, .historic: return 45
         case .park, .viewpoint, .climb: return 70
