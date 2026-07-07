@@ -1,42 +1,44 @@
 [
-  { "id": "curated:grandview-overlook", "name": "Grandview overlook",
-    "coordinate": { "latitude": 40.4392, "longitude": -80.0155 },
-    "category": "viewpoint", "tier": 3, "source": "curated",
-    "photoAsset": "gem-grandview", "why": "The classic skyline view from Mt. Washington.",
-    "placeholder": true },
-  { "id": "curated:point-state-park", "name": "Point State Park",
-    "coordinate": { "latitude": 40.4419, "longitude": -80.0089 },
-    "category": "park", "tier": 2, "source": "curated",
-    "photoAsset": "gem-point-park", "why": "Where the three rivers meet.",
-    "placeholder": true },
-  { "id": "curated:randyland", "name": "Randyland",
-    "coordinate": { "latitude": 40.4568, "longitude": -80.0074 },
-    "category": "mural", "tier": 3, "source": "curated",
-    "photoAsset": "gem-randyland", "why": "A courtyard of color in the Mexican War Streets.",
-    "placeholder": true },
-  { "id": "curated:mattress-factory", "name": "Mattress Factory",
-    "coordinate": { "latitude": 40.4576, "longitude": -80.0106 },
-    "category": "historic", "tier": 3, "source": "curated",
-    "photoAsset": null, "why": "Room-sized installation art in the Mexican War Streets.",
-    "placeholder": true },
-  { "id": "curated:national-aviary", "name": "National Aviary",
-    "coordinate": { "latitude": 40.4536, "longitude": -80.0144 },
-    "category": "landmark", "tier": 3, "source": "curated",
-    "photoAsset": null, "why": "America's largest aviary — walk among free-flying birds.",
-    "placeholder": true },
-  { "id": "curated:city-of-asylum", "name": "City of Asylum",
-    "coordinate": { "latitude": 40.4557, "longitude": -80.0092 },
-    "category": "historic", "tier": 2, "source": "curated",
-    "photoAsset": null, "why": "A sanctuary for exiled writers, with public art on Sampsonia Way.",
-    "placeholder": true },
-  { "id": "curated:allegheny-commons", "name": "Allegheny Commons",
-    "coordinate": { "latitude": 40.4529, "longitude": -80.0116 },
-    "category": "park", "tier": 2, "source": "curated",
-    "photoAsset": null, "why": "Pittsburgh's oldest public park, ringing the Northside.",
-    "placeholder": true },
-  { "id": "curated:childrens-museum", "name": "Children's Museum",
-    "coordinate": { "latitude": 40.4487, "longitude": -80.0089 },
-    "category": "landmark", "tier": 2, "source": "curated",
-    "photoAsset": null, "why": "Hands-on exhibits in Allegheny Square.",
-    "placeholder": true }
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.4392,
+      "longitude": -80.0155
+    },
+    "id": "curated:grandview-overlook",
+    "name": "Grandview overlook",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 3,
+    "why": "The skyline lines up over the Mon from the top of the incline."
+  },
+  {
+    "category": "water",
+    "coordinate": {
+      "latitude": 40.4419,
+      "longitude": -80.0089
+    },
+    "id": "curated:point-state-park",
+    "name": "Point State Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Where the three rivers meet."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.4579,
+      "longitude": -80.0097
+    },
+    "id": "curated:randyland",
+    "name": "Randyland",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 3,
+    "why": "A courtyard painted end to end in the Mexican War Streets."
+  }
 ]
