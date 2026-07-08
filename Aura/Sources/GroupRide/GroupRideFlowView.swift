@@ -33,10 +33,14 @@ struct GroupRideFlowView: View {
                 .background(AuraTheme.background.ignoresSafeArea())
 
         case .needsDisplayName:
-            NavigationStack {
-                DisplayNameEditor(store: displayNameStore) {
-                    Task { await invokeEntry() }
-                }
+            // No wrapping NavigationStack here: this whole view is already a pushed
+            // destination inside the app's root NavigationStack, and nesting a second
+            // NavigationStack inside a pushed column makes SwiftUI's path reconciliation
+            // (NavigationColumnState.boundPathChange) throw swift_unexpectedError and
+            // crash the app. DisplayNameEditor only needs *a* navigation context for its
+            // `.navigationTitle`, which the root stack already provides.
+            DisplayNameEditor(store: displayNameStore) {
+                Task { await invokeEntry() }
             }
 
         case .lobby:
