@@ -975,3 +975,108 @@ Not a code task — the acceptance gate. Requires the Supabase Apple provider + 
 **Placeholder scan:** No TBD/TODO. Two honest verification caveats remain (the in-memory fake's internal field name in T2; the exact `emitLocalSessionAsInitialSession` label in T9) — both instruct the implementer to confirm against the resolved source, with the fallback stated.
 
 **Type consistency:** `AppleCredential`/`AppleAuthError`/`AppleAuthenticating` (T1) used verbatim in T3–5. `AuthChange`/`cachedUserID`/`authEvents`/`signOut` (T2) used in T3. `AuthStore.Status`/`userID`/`isSignedIn`/`signInWithApple`/`signOut`/`deleteAccount`/`lastUserIDKey` consistent across T3–5, T8, T10. `startGroupRide`/`pendingSignIn`/`resumePendingGroupRide`/`cancelPendingGroupRide` consistent T7–8. `DisplayNameStore.crewDisplayNameKey` used, never the literal.
+
+---
+
+## Plan review reconciliation (adversarial plan review, 2026-07-07)
+
+Two independent refuting reviewers (API-correctness vs. resolved supabase-swift 2.50.0, and plan-integrity/build-order) ran against the plan. These corrections are binding and supersede the task bodies where they conflict.
+
+### C1 — Build order: no signature-threading, no broken commits (Findings 1, 2)
+
+Do **not** change `AppRouter.handle(url:)`'s signature or thread `isSignedIn` through call sites (that would land a non-building commit and invert the 8/9 dependency). Instead, inject a closure into `AppRouter`:
+
+```swift
+// AppRouter (Task 7): read auth via an injected closure, set once at app init.
+var checkSignedIn: () -> Bool = { false }
+private(set) var pendingSignIn: GroupRideEntry?
+
+func startGroupRide(_ entry: GroupRideEntry) {
+    if checkSignedIn() { push(.groupRide(entry)) }
+    else if pendingSignIn == nil { pendingSignIn = entry }
+}
+func resumePendingGroupRide() { guard let e = pendingSignIn else { return }; pendingSignIn = nil; push(.groupRide(e)) }
+func cancelPendingGroupRide() { pendingSignIn = nil }
+```
+`handle(url:)` keeps its signature and routes a `.join(code)` link via `startGroupRide(.join(code))`. Corrected task order: **Task 7 (AppRouter gate, closure-based — builds green, methods unused yet) → Task 9 (construct AuthStore, set `router.checkSignedIn = { [weak auth] in auth?.isSignedIn ?? false }`, inject env) → Task 8 (wire RoutePreview/JoinView to `router.startGroupRide(entry)` + RootView sign-in driver)**. Call sites take no `isSignedIn` argument, so every commit builds.
+
+### C2 — RootView sign-in driver: use onChange, not `.task(id:)` (Finding 6)
+
+`.task(id: router.pendingSignIn)` re-fires on the nil→X→nil transitions and can race across attempts. Drive it once per stash with the reentrancy guard already preventing overwrites:
+
+```swift
+.onChange(of: router.pendingSignIn) { _, entry in
+    guard entry != nil else { return }              // fires only on nil -> entry (guard blocks overwrite)
+    Task {
+        await auth.signInWithApple()
+        if auth.isSignedIn { router.resumePendingGroupRide() } else { router.cancelPendingGroupRide() }
+    }
+}
+```
+
+### C3 — Move `DisplayNameStore` into AuraKit (Finding 3 / Defect 4)
+
+`DisplayNameStore` lives in the **app target** (`Aura/Sources/GroupRide/`), so `AuraKitTests` cannot import it — Task 6's test is impossible as written. It imports only `Observation`/`AuraCore`/`AuraKit` (no UIKit/Supabase/AuthenticationServices), so **move the file to `AuraCore/Sources/AuraKit/GroupRide/DisplayNameStore.swift`** (add a leading step to Task 6; remove it from the app target's sources — xcodegen picks up AuraKit as a package product). Then the Task 6 test compiles as written. Update any app-target `import` if needed (it already `import AuraKit`).
+
+### C4 — `InMemoryGroupRideBackend` is an `actor`; store the id + continuations in `Store` (Findings 4, 5 / Defect 5)
+
+The fake is `public final actor` with a `nonisolated let store: Store` (`@unchecked Sendable`) and an actor-isolated `private var currentUser: UUID?`. A `nonisolated var cachedUserID` **cannot** read `currentUser`. Move the signed-in id (and the auth continuations) into `Store`:
+
+```swift
+final class Store: @unchecked Sendable {
+    // ...existing...
+    let lock = NSLock()
+    var currentUserID: UUID?
+    var authContinuations: [UUID: AsyncStream<AuthChange>.Continuation] = [:]
+}
+public nonisolated var cachedUserID: UUID? { store.lock.withLock { store.currentUserID } }
+public nonisolated func authEvents() -> AsyncStream<AuthChange> {
+    AsyncStream { cont in
+        let key = UUID()
+        store.lock.withLock { store.authContinuations[key] = cont }
+        cont.onTermination = { [store] _ in store.lock.withLock { store.authContinuations[key] = nil } }
+    }
+}
+public func signOut() async throws {
+    store.lock.withLock { store.currentUserID = nil }
+    emit(.signedOut)
+}
+private nonisolated func emit(_ c: AuthChange) {
+    let conts = store.lock.withLock { Array(store.authContinuations.values) }
+    for k in conts { k.yield(c) }
+}
+```
+The existing `signIn(...)` sets `store.currentUserID = <id>` and calls `emit(.signedIn(id))`; `deleteAccount()` clears `store.currentUserID`. (Wire `currentUserID` to whatever id the fake already mints on sign-in — the field the current `currentUser` used.)
+
+### C5 — `AuthStore.eventTask` must be `@MainActor` (Defect 7)
+
+Mark the task so the `userID` mutations are on the main actor:
+```swift
+eventTask = Task { @MainActor [weak self] in
+    guard let events = self?.backend.authEvents() else { return }
+    for await change in events {
+        guard let self else { return }
+        switch change { case .signedIn(let id): self.userID = id; case .signedOut: self.userID = nil }
+    }
+}
+```
+
+### C6 — Drop the `SupabaseClientOptions` change in Task 9 (Defect 2)
+
+`SupabaseClientOptions.AuthOptions(emitLocalSessionAsInitialSession:)` also requires a `storage:` argument and risks a non-compiling commit. It is unnecessary: `AuthStore.init` already reads `backend.cachedUserID` (→ `client.auth.currentSession`) synchronously, which is correct on an offline cold launch. **Remove Task 9 Step 2 entirely** (leave `SupabaseClientProvider` unchanged); the async `authEvents` stream only needs to deliver *subsequent* changes.
+
+### C7 — Settings sign-in button: styled Button, not the overlay hack (Defect 6)
+
+The app owns the Apple token flow (`AppleSignInController`), so a native `SignInWithAppleButton` would fire its own competing request. Render a themed button (Apple mark + "Sign in with Apple", per HIG sizing/contrast) that calls `auth.signInWithApple()` directly — no invisible overlay:
+```swift
+Button { Task { await auth.signInWithApple() } } label: {
+    Label("Sign in with Apple", systemImage: "apple.logo")
+        .frame(maxWidth: .infinity).frame(height: 44)
+}
+.buttonStyle(.borderedProminent).tint(.white).foregroundStyle(.black)
+```
+
+### C8 — Minor (Findings 9, 10)
+
+- `.createFailed` new copy reuses `.routeUnavailable`'s icon — give `.createFailed` a distinct symbol (e.g. `person.2.slash`) so the two error surfaces aren't visually identical.
+- Task 10 wording: **remove** the Crew name link from the "Ride" section and **add** it to the Account section (signed-in branch); construct `displayNameStore` inside that branch so it isn't built for signed-out users.
