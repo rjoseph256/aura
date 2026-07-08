@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import AuraCore
 
 @Observable
 @MainActor
@@ -36,4 +37,34 @@ public final class AuthStore {
     }
 
     deinit { eventTask?.cancel() }
+
+    public func signInWithApple() async {
+        status = .signingIn
+        do {
+            let cred = try await apple.signIn()
+            // Authenticate (auth only — name push is best-effort below so a name
+            // failure never fails sign-in).
+            try await backend.signIn(idToken: cred.idToken, nonce: cred.rawNonce, displayName: nil)
+            let uid = try await backend.currentUserID()
+
+            // Account switch: don't let a prior user's local crew name bleed into a
+            // different Apple ID. If we can't seed a fresh name from Apple, clear it so
+            // the (now working) name screen prompts instead.
+            let previous = defaults.string(forKey: Self.lastUserIDKey)
+            if previous != uid.uuidString, cred.fullName == nil {
+                defaults.removeObject(forKey: DisplayNameStore.crewDisplayNameKey)
+            }
+            if let name = cred.fullName, let normalized = DisplayName.normalized(name) {
+                try? await backend.renameDisplayName(normalized)             // best-effort
+                defaults.set(normalized, forKey: DisplayNameStore.crewDisplayNameKey)
+            }
+            defaults.set(uid.uuidString, forKey: Self.lastUserIDKey)
+            userID = uid
+            status = .idle
+        } catch AppleAuthError.canceled {
+            status = .idle
+        } catch {
+            status = .error("Couldn't sign in — check your connection and try again.")
+        }
+    }
 }
