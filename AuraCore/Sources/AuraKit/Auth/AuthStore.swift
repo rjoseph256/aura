@@ -67,4 +67,22 @@ public final class AuthStore {
             status = .error("Couldn't sign in — check your connection and try again.")
         }
     }
+
+    public func signOut() async {
+        try? await backend.signOut()
+        userID = nil                       // authEvents will also confirm this
+    }
+
+    public func deleteAccount() async {
+        do {
+            try await backend.deleteAccount()
+            try? await backend.signOut()
+            defaults.removeObject(forKey: DisplayNameStore.crewDisplayNameKey)
+            defaults.removeObject(forKey: Self.lastUserIDKey)
+            userID = nil
+            status = .idle
+        } catch {
+            status = .error("Couldn't delete your account — try again.")
+        }
+    }
 }
