@@ -40,9 +40,10 @@ public final class DisplayNameStore {
     /// Whether `name` is currently valid to save (non-blank, within the grapheme cap).
     public var isValid: Bool { DisplayName.normalized(name) != nil }
 
-    /// Normalizes and persists `name` locally, then pushes it to the backend so the
-    /// rest of the crew sees the update. No-ops (throws) if the current text doesn't
-    /// normalize to a valid name — callers should gate the save action on `isValid`.
+    /// Normalizes `name`, pushes it to the backend first, and mirrors it locally only on
+    /// success — so a failed backend save can't leave a phantom local name. No-ops (throws)
+    /// if the current text doesn't normalize to a valid name — callers should gate the save
+    /// action on `isValid`.
     public func save() async throws {
         guard let normalized = DisplayName.normalized(name) else {
             throw DisplayNameError.invalid
