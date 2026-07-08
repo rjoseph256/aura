@@ -13,7 +13,7 @@ struct GroupRideFlowView: View {
     @Environment(AppRouter.self) private var router
 
     @State private var session: GroupRideSession
-    @State private var displayNameStore = DisplayNameStore()
+    @State private var displayNameStore = DisplayNameStore(backend: SupabaseGroupRideBackend())
 
     init(entry: GroupRideEntry) {
         self.entry = entry

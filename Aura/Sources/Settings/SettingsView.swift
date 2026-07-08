@@ -4,7 +4,7 @@ import AuraKit
 struct SettingsView: View {
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
-    @State private var displayNameStore = DisplayNameStore()
+    @State private var displayNameStore = DisplayNameStore(backend: SupabaseGroupRideBackend())
 
     var body: some View {
         // Bind controls straight to the observable store — each change persists via the

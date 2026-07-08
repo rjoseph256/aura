@@ -1,11 +1,10 @@
 import Foundation
 import Observation
 import AuraCore
-import AuraKit
 
 /// Owns the rider's crew-facing display name: the name shown to other riders in a
 /// group ride's roster. Seeded from the Apple credential's full name at first
-/// sign-in (see `AppleSignInController.Result.fullName`), editable afterward from
+/// sign-in (see `AppleCredential.fullName`), editable afterward from
 /// Settings. `save()` normalizes via `DisplayName`, persists locally, and pushes the
 /// change through the `GroupRideBackend` seam's `renameDisplayName` — the same
 /// `upsert_display_name` RPC that `SupabaseGroupRideBackend.signIn(idToken:nonce:displayName:)`
@@ -25,7 +24,7 @@ public final class DisplayNameStore {
     ///   - appleFullName: The full name captured on first Apple sign-in, used only to
     ///     seed the store the first time it's created (before any local value exists).
     public init(defaults: UserDefaults = .standard,
-                backend: any GroupRideBackend = SupabaseGroupRideBackend(),
+                backend: any GroupRideBackend,
                 seedingFrom appleFullName: String? = nil) {
         self.defaults = defaults
         self.backend = backend
@@ -48,9 +47,9 @@ public final class DisplayNameStore {
         guard let normalized = DisplayName.normalized(name) else {
             throw DisplayNameError.invalid
         }
+        try await backend.renameDisplayName(normalized)
         name = normalized
         defaults.set(normalized, forKey: DisplayNameStore.crewDisplayNameKey)
-        try await backend.renameDisplayName(normalized)
     }
 
     /// The `UserDefaults` key under which the crew display name is mirrored locally.
@@ -58,7 +57,7 @@ public final class DisplayNameStore {
     /// the live session's `displayNameProvider` — kept as a single source of truth so
     /// the string literal exists exactly once. `nonisolated` so it can be read from the
     /// non-isolated `displayNameProvider` closure without hopping to the main actor.
-    nonisolated static let crewDisplayNameKey = "crewDisplayName"
+    public nonisolated static let crewDisplayNameKey = "crewDisplayName"
 }
 
 public enum DisplayNameError: Error, Equatable, Sendable {

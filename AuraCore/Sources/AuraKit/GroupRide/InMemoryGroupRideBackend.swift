@@ -10,6 +10,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var names: [UUID: String] = [:]      // userID -> display name
         var leaveCalled = false              // test spy
         var forceCreateError: GroupRideError?    // test spy
+        var forceRenameError: GroupRideError?    // test spy
 
         // Auth-state seam (added Task 2). The signed-in id and its observers live
         // here (not on the actor) so `cachedUserID` can be `nonisolated` while
@@ -33,6 +34,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
     }
     public func renameDisplayName(_ name: String) async throws {
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
+        if let forced = store.forceRenameError { throw forced }
         store.names[uid] = name
     }
     public func currentUserID() async throws -> UUID {
