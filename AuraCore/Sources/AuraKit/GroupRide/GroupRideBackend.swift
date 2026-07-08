@@ -9,6 +9,9 @@ public enum GroupRideError: Error, Equatable, Sendable {
     case routeTooLarge
 }
 
+/// A change in the backend's authenticated session, observed by `AuthStore`.
+public enum AuthChange: Sendable, Equatable { case signedIn(UUID), signedOut }
+
 /// The result of joining a ride: the ride record plus the host's route bytes,
 /// so the guest can render the shared course without a second round trip.
 public struct JoinedRide: Sendable {
@@ -48,4 +51,12 @@ public protocol GroupRideBackend: Sendable {
     func endRide(rideID: UUID) async throws
     func leaveRide(rideID: UUID) async throws
     func deleteAccount() async throws
+
+    /// Synchronous read of the current session's user id (Keychain-backed on the live
+    /// conformer), for correct auth state on a cold launch without a network round trip.
+    nonisolated var cachedUserID: UUID? { get }
+    /// A stream of session changes for the store's lifetime.
+    func authEvents() -> AsyncStream<AuthChange>
+    /// Clears the authenticated session.
+    func signOut() async throws
 }

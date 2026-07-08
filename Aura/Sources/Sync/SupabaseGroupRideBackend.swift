@@ -73,7 +73,33 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
     }
     public nonisolated func deleteAccount() async throws {
         _ = try await client.rpc("delete_account").execute()
+        _ = try await client.functions.invoke("delete-account")
     }
+
+    // MARK: - Auth-state seam (added Task 2)
+
+    public nonisolated var cachedUserID: UUID? { client.auth.currentSession?.user.id }
+
+    public nonisolated func authEvents() -> AsyncStream<AuthChange> {
+        AsyncStream { continuation in
+            let task = Task {
+                for await (event, session) in client.auth.authStateChanges {
+                    switch event {
+                    case .signedIn, .tokenRefreshed, .initialSession:
+                        if let id = session?.user.id { continuation.yield(.signedIn(id)) }
+                        else { continuation.yield(.signedOut) }
+                    case .signedOut, .userDeleted:
+                        continuation.yield(.signedOut)
+                    default: break
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    public nonisolated func signOut() async throws { try await client.auth.signOut() }
 }
 
 /// Wire row returned by create_ride / join_ride. CodingKeys map snake_case JSON
