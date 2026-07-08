@@ -5,7 +5,8 @@ import MapboxMaps
 
 @main
 struct AuraApp: App {
-    @State private var router = AppRouter()
+    @State private var router: AppRouter
+    @State private var auth: AuthStore
     @State private var rideStore: RideStore
     @State private var savedPlaces: SavedPlacesStore
     @State private var settings = SettingsStore(defaults: .standard, sync: UbiquitousKeyValueStore())
@@ -17,12 +18,19 @@ struct AuraApp: App {
         let store = AuraApp.makeRideStore()
         _rideStore = State(initialValue: store)
         _savedPlaces = State(initialValue: SavedPlacesStore(container: store.container))
+
+        let authStore = AuthStore(backend: SupabaseGroupRideBackend(), apple: AppleSignInController())
+        let appRouter = AppRouter()
+        appRouter.checkSignedIn = { [weak authStore] in authStore?.isSignedIn ?? false }
+        _auth = State(initialValue: authStore)
+        _router = State(initialValue: appRouter)
     }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(router)
+                .environment(auth)
                 .environment(rideStore)
                 .environment(savedPlaces)
                 .environment(settings)
