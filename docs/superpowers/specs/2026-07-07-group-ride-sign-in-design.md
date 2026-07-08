@@ -140,3 +140,99 @@ A new **Account** section in `SettingsView`:
 - `DisplayNameStore.save()` ordering test (local mirror only after backend success).
 - End-to-end device verification of the real Apple + Supabase path once the provider
   config is in.
+
+## Review reconciliation (adversarial spec review, 2026-07-07)
+
+Three independent refuting reviewers (correctness, iOS/Apple, UX/edge) ran against
+the approved design. These resolutions supersede any ambiguity above and are binding
+on the plan.
+
+### Presentation & the gate (was under-specified)
+
+- **`AppleSignInController.presentationAnchor(for:)` must not return a bare
+  `ASPresentationAnchor()`** — that is an unattached window and fails on a real device
+  (the simulator masks it). Return the active foreground window scene's key window:
+  resolve `UIApplication.shared.connectedScenes`, pick the foreground-active
+  `UIWindowScene`, return its key window; fall back safely if none. This is a fix to
+  existing code, covered by the plan.
+- **The gate presents no competing SwiftUI `.sheet`.** `ASAuthorizationController`
+  owns the system Sign-in sheet. Tapping a group action while signed out calls
+  `authStore.signInWithApple()` directly; the Apple system UI presents over the key
+  window; on success the gate continues. (The Settings button likewise triggers the
+  controller directly.)
+- **Gate host is `AppRouter`** (not view-local state), so the pending intent survives
+  view teardown and the deep-link round-trip. Concretely: `AppRouter` gains
+  `startGroupRide(_ entry:)` and holds `pendingGroupEntry: GroupRideEntry?`.
+  - Signed in → push `.groupRide(entry)`.
+  - Signed out → store `pendingGroupEntry = entry`, trigger sign-in; on success push
+    the stored entry and clear it; on cancel/failure clear it and stay put.
+  - **Reentrancy guard:** a second `startGroupRide` while one is pending is ignored
+    (no double sign-in, no double push).
+  - `handle(url:)` routes `.groupRide(.join(code))` through `startGroupRide`, so a
+    deep-link join code is captured in `pendingGroupEntry` and survives sign-in.
+  - `RoutePreviewView` "Ride together" and `GroupRideJoinView` join call
+    `startGroupRide` instead of `router.push(.groupRide(...))` directly.
+
+### AuthStore lifecycle (was under-specified)
+
+- **Cold-launch correctness:** read `client.auth.currentSession` **synchronously** at
+  init (it reads the Keychain, no network) to set `isSignedIn`/`userID` immediately —
+  do not depend on the async stream's first emission, which can be delayed or (offline)
+  emit nil. This also makes the app correct on an offline cold launch.
+- **Subscription lifetime:** own a retained `Task` running
+  `for await (event, session) in client.auth.authStateChanges { … }` for the store's
+  lifetime (stored property, cancelled on deinit). The store is a single long-lived
+  `@State` in `AuraApp`, injected into the environment like the other stores.
+- **Single client:** AuthStore reads auth off `SupabaseClientProvider.shared` — the
+  same client `SupabaseGroupRideBackend` uses — so there is exactly one session.
+- **Best-effort name seeding:** a successful `signInWithIdToken` means signed-in.
+  Seeding the crew name (the `upsert_display_name` push) is best-effort — if only the
+  name push fails, the user is still signed in and falls through to the (now working)
+  name screen. A name-push failure must not present as an auth failure.
+
+### Crew-name correctness (account switch + save ordering)
+
+- **Account switch must not leak a name.** The local `crewDisplayName` key is not
+  user-scoped, so a prior user's name can bleed into a different Apple ID. Resolution:
+  on sign-in, the signed-in user's **server profile display_name is the source of
+  truth** — AuthStore seeds local from Apple's `fullName` only when the server profile
+  has none; and it detects a user switch (persist `lastSignedInUserID`) and clears the
+  stale local name on switch. Delete-account also clears the local crew name.
+- **`DisplayNameStore.save()` ordering (confirmed still local-first in code):** push to
+  the backend first, then mirror to UserDefaults only on success.
+
+### Sign-out / delete-account during a live ride
+
+- Settings is unreachable during an active ride (the full-screen ride HUD hides
+  navigation and sets `isRideActive`), so mid-ride sign-out/delete is largely moot.
+  Defensive guard anyway: `signOut()`/`deleteAccount()` are disabled/blocked while
+  `router.isRideActive` is true, with a one-line "end your ride first" note.
+
+### Error classification
+
+- With the gate ensuring auth **before** navigation, an unauthenticated user no longer
+  reaches `create()`/`join()`, so the auth-failure-as-"route too detailed" mislabel is
+  no longer on the happy path. Minor in-scope tidy: `.createFailed` copy is made generic
+  ("Couldn't start the group ride — try again") rather than implying the route is the
+  cause. Deeper per-error classification stays out of scope.
+
+### External dependencies (additions)
+
+- **Apple Developer portal:** the `com.apple.developer.applesignin` capability must be
+  enabled for App ID `com.rohunjoseph.aura`, or automatic signing produces a profile
+  without the entitlement and sign-in fails at runtime. (Entitlements file already
+  declares it; the portal capability is the missing half.)
+- **Verify** the deployed `delete-account` edge function actually removes the
+  `auth.users` row (App Store account-deletion requirement), not just the profile.
+
+### UI / compliance
+
+- The Settings "Sign in with Apple" affordance uses the native `SignInWithAppleButton`
+  (AuthenticationServices) for HIG compliance rather than a hand-rolled button.
+
+### Testing (addition)
+
+- Sign in with Apple is **device-only** for verification — the simulator's lenient
+  window handling can mask the presentation-anchor bug. Unit tests cover the seams
+  (fake `AppleAuthenticating` + in-memory backend); the real Apple + Supabase path is
+  verified on the physical device after the portal + provider config is in.
