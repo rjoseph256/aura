@@ -4,7 +4,10 @@ import AuraKit
 struct SettingsView: View {
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
+    @Environment(AuthStore.self) private var auth
+    @Environment(AppRouter.self) private var router
     @State private var displayNameStore = DisplayNameStore(backend: SupabaseGroupRideBackend())
+    @State private var confirmingDelete = false
 
     var body: some View {
         // Bind controls straight to the observable store — each change persists via the
@@ -12,12 +15,44 @@ struct SettingsView: View {
         @Bindable var settings = settings
 
         return List {
-            Section("Ride") {
-                NavigationLink {
-                    DisplayNameEditor(store: displayNameStore)
-                } label: {
-                    linkLabel(icon: "person.crop.circle.fill", tint: AuraTheme.accent, title: "Crew name")
+            Section("Account") {
+                if auth.isSignedIn {
+                    NavigationLink {
+                        DisplayNameEditor(store: displayNameStore)
+                    } label: {
+                        linkLabel(icon: "person.crop.circle.fill", tint: AuraTheme.accent, title: "Crew name")
+                    }
+                    Button("Sign out") { Task { await auth.signOut() } }
+                        .disabled(router.isRideActive)
+                    Button("Delete account", role: .destructive) { confirmingDelete = true }
+                        .disabled(router.isRideActive)
+                } else {
+                    // The app owns the Apple token flow (AppleSignInController), so a native
+                    // SignInWithAppleButton would fire its OWN competing request. Render a
+                    // themed button that calls auth.signInWithApple() directly instead.
+                    Button {
+                        Task { await auth.signInWithApple() }
+                    } label: {
+                        Label("Sign in with Apple", systemImage: "apple.logo")
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white)
+                    .foregroundStyle(.black)
+                    Text("Sign in to ride with your crew.")
+                        .font(.footnote).foregroundStyle(AuraTheme.textSecondary)
                 }
+            }
+            .listRowBackground(AuraTheme.surface)
+            .alert("Delete account?", isPresented: $confirmingDelete) {
+                Button("Delete", role: .destructive) { Task { await auth.deleteAccount() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes your crew profile and any group-ride data on the server. Your ride history on this device is not affected.")
+            }
+
+            Section("Ride") {
                 row(icon: "ruler", tint: AuraTheme.accent, title: "Distance units") {
                     Picker("", selection: $settings.units) {
                         Text("Miles").tag(DistanceUnits.imperial)
