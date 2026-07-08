@@ -71,8 +71,8 @@ struct GroupRideFlowView: View {
 
         case .createFailed:
             dismissMessage(
-                title: "This route is too detailed to share as a group ride.",
-                systemImage: "point.topleft.down.curvedto.point.bottomright.up"
+                title: "Couldn't start the group ride — try again.",
+                systemImage: "person.2.slash"
             )
 
         case .routeUnavailable:

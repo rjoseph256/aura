@@ -156,7 +156,7 @@ struct GroupRideJoinView: View {
         guard let joinCode else { return }
         isFocused = false
         dismiss()
-        router.push(.groupRide(.join(joinCode)))
+        router.startGroupRide(.join(joinCode))
     }
 }
 

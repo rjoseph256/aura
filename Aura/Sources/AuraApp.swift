@@ -77,6 +77,7 @@ struct AuraApp: App {
 /// and rebuild the Mapbox map.
 private struct RootView: View {
     @Environment(AppRouter.self) private var router
+    @Environment(AuthStore.self) private var auth
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
     @Environment(\.scenePhase) private var scenePhase
@@ -129,6 +130,14 @@ private struct RootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+        }
+        .onChange(of: router.pendingSignIn) { _, entry in
+            guard entry != nil else { return }          // fires only on nil -> entry (gate's reentrancy guard blocks overwrite)
+            Task {
+                await auth.signInWithApple()
+                if auth.isSignedIn { router.resumePendingGroupRide() }
+                else { router.cancelPendingGroupRide() } // cancel or failure: drop the intent, stay put
+            }
         }
     }
 }

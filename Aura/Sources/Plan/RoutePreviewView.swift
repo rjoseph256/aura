@@ -278,7 +278,7 @@ struct RoutePreviewView: View {
 
             Button("Ride together") {
                 if let selected {
-                    router.push(.groupRide(.create(selected)))
+                    router.startGroupRide(.create(selected))
                 }
             }
             .buttonStyle(.ctaSecondary)
