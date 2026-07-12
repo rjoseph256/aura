@@ -355,22 +355,23 @@ struct NavigateHUDView: View {
 }
 
 private extension NavigateHUDView {
-    /// The bottom cockpit: crew roster (when hosting a live group ride) docked just above the
-    /// map controls, which float above the quarter-screen instrument panel (hero speed +
-    /// to-go + ETA). Stacked here — not as a bottom-padded overlay — so the roster stays clear
-    /// of the panel; its expanded height is capped at ~40% of the HUD so a full crew can't
-    /// push the controls off a short screen. (D9 hides it once the host ends the ride; the
-    /// solo path never renders it.)
+    /// The bottom cockpit: a crew-roster + map-controls row floating above the quarter-screen
+    /// instrument panel (hero speed + to-go + ETA). The roster (only in a live group ride)
+    /// shares that row with the controls as a pill to their left, its bottom edge aligned
+    /// with the End (stop) button — bottom alignment keeps the collapsed one-line pill beside
+    /// the stop button, and expanding it grows upward, capped at ~40% of the HUD so a full
+    /// crew can't push the controls off a short screen. Solo rides keep the controls
+    /// right-aligned via the Spacer fallback. (D9 hides the roster once the host ends the
+    /// ride; the solo path never renders it.)
     @ViewBuilder var bottomCockpit: some View {
         VStack(spacing: AuraTheme.Spacing.sm) {
-            if showsGroupChrome, let groupSession {
-                GroupRosterSheet(rows: rosterRows(for: groupSession))
-                    .padding(.horizontal, AuraTheme.Spacing.md)
-                    .frame(maxHeight: hudHeight > 0 ? hudHeight * 0.4 : 320, alignment: .bottom)
-            }
-
-            HStack {
-                Spacer()
+            HStack(alignment: .bottom, spacing: AuraTheme.Spacing.md) {
+                if showsGroupChrome, let groupSession {
+                    GroupRosterSheet(rows: rosterRows(for: groupSession))
+                        .frame(maxHeight: hudHeight > 0 ? hudHeight * 0.4 : 320, alignment: .bottom)
+                } else {
+                    Spacer(minLength: 0)
+                }
                 ControlCluster(
                     isFollowing: viewport.followPuck != nil,
                     isMuted: isMuted,
