@@ -5,7 +5,8 @@ import MapboxMaps
 
 @main
 struct AuraApp: App {
-    @State private var router = AppRouter()
+    @State private var router: AppRouter
+    @State private var auth: AuthStore
     @State private var rideStore: RideStore
     @State private var savedPlaces: SavedPlacesStore
     @State private var settings = SettingsStore(defaults: .standard, sync: UbiquitousKeyValueStore())
@@ -17,12 +18,19 @@ struct AuraApp: App {
         let store = AuraApp.makeRideStore()
         _rideStore = State(initialValue: store)
         _savedPlaces = State(initialValue: SavedPlacesStore(container: store.container))
+
+        let authStore = AuthStore(backend: SupabaseGroupRideBackend(), apple: AppleSignInController())
+        let appRouter = AppRouter()
+        appRouter.checkSignedIn = { [weak authStore] in authStore?.isSignedIn ?? false }
+        _auth = State(initialValue: authStore)
+        _router = State(initialValue: appRouter)
     }
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(router)
+                .environment(auth)
                 .environment(rideStore)
                 .environment(savedPlaces)
                 .environment(settings)
@@ -69,6 +77,7 @@ struct AuraApp: App {
 /// and rebuild the Mapbox map.
 private struct RootView: View {
     @Environment(AppRouter.self) private var router
+    @Environment(AuthStore.self) private var auth
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
     @Environment(\.scenePhase) private var scenePhase
@@ -121,6 +130,14 @@ private struct RootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+        }
+        .onChange(of: router.pendingSignIn) { _, entry in
+            guard entry != nil else { return }          // fires only on nil -> entry (gate's reentrancy guard blocks overwrite)
+            Task {
+                await auth.signInWithApple()
+                if auth.isSignedIn { router.resumePendingGroupRide() }
+                else { router.cancelPendingGroupRide() } // cancel or failure: drop the intent, stay put
+            }
         }
     }
 }

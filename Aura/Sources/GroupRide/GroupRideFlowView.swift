@@ -13,7 +13,7 @@ struct GroupRideFlowView: View {
     @Environment(AppRouter.self) private var router
 
     @State private var session: GroupRideSession
-    @State private var displayNameStore = DisplayNameStore()
+    @State private var displayNameStore = DisplayNameStore(backend: SupabaseGroupRideBackend())
 
     init(entry: GroupRideEntry) {
         self.entry = entry
@@ -33,10 +33,14 @@ struct GroupRideFlowView: View {
                 .background(AuraTheme.background.ignoresSafeArea())
 
         case .needsDisplayName:
-            NavigationStack {
-                DisplayNameEditor(store: displayNameStore) {
-                    Task { await invokeEntry() }
-                }
+            // No wrapping NavigationStack here: this whole view is already a pushed
+            // destination inside the app's root NavigationStack, and nesting a second
+            // NavigationStack inside a pushed column makes SwiftUI's path reconciliation
+            // (NavigationColumnState.boundPathChange) throw swift_unexpectedError and
+            // crash the app. DisplayNameEditor only needs *a* navigation context for its
+            // `.navigationTitle`, which the root stack already provides.
+            DisplayNameEditor(store: displayNameStore) {
+                Task { await invokeEntry() }
             }
 
         case .lobby:
@@ -67,8 +71,8 @@ struct GroupRideFlowView: View {
 
         case .createFailed:
             dismissMessage(
-                title: "This route is too detailed to share as a group ride.",
-                systemImage: "point.topleft.down.curvedto.point.bottomright.up"
+                title: "Couldn't start the group ride — try again.",
+                systemImage: "person.2.slash"
             )
 
         case .routeUnavailable:
