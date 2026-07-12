@@ -45,7 +45,16 @@ public final class DisplayNameStore {
     /// if the current text doesn't normalize to a valid name — callers should gate the save
     /// action on `isValid`.
     public func save() async throws {
-        guard let normalized = DisplayName.normalized(name) else {
+        try await save(name)
+    }
+
+    /// Saves a candidate string without first assigning it to `name`, so `name` (the
+    /// committed value the Settings row previews) changes only on a successful backend
+    /// push. The editor edits a transient draft and calls this — backing out without
+    /// saving therefore never dirties the previewed name. Throws on an invalid candidate
+    /// or a backend failure, leaving `name` untouched in both cases.
+    public func save(_ candidate: String) async throws {
+        guard let normalized = DisplayName.normalized(candidate) else {
             throw DisplayNameError.invalid
         }
         try await backend.renameDisplayName(normalized)

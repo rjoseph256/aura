@@ -18,9 +18,10 @@ struct SettingsView: View {
             Section("Account") {
                 if auth.isSignedIn {
                     NavigationLink {
-                        DisplayNameEditor(store: displayNameStore)
+                        DisplayNameEditor(store: displayNameStore, dismissesOnSave: true)
                     } label: {
-                        linkLabel(icon: "person.crop.circle.fill", tint: AuraTheme.accent, title: "Crew name")
+                        linkLabel(icon: "person.crop.circle.fill", tint: AuraTheme.accent,
+                                  title: "Crew name", value: displayNameStore.name)
                     }
                     Button("Sign out") { Task { await auth.signOut() } }
                         .disabled(router.isRideActive)
@@ -130,10 +131,18 @@ struct SettingsView: View {
         }
     }
 
-    private func linkLabel(icon name: String, tint: Color, title: String) -> some View {
+    private func linkLabel(icon name: String, tint: Color, title: String,
+                           value: String? = nil) -> some View {
         HStack(spacing: AuraTheme.Spacing.md) {
             iconView(name, tint)
             Text(title).foregroundStyle(AuraTheme.textPrimary)
+            if let value, !value.isEmpty {
+                Spacer(minLength: AuraTheme.Spacing.sm)
+                Text(value)
+                    .foregroundStyle(AuraTheme.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
         }
     }
 

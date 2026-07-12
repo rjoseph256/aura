@@ -12,13 +12,24 @@ struct DisplayNameEditor: View {
     /// (which just wants persistence) is unaffected; the group-ride "needs a name"
     /// gate (Task 16) uses this to re-invoke the create/join it deferred.
     var onSaved: () -> Void = {}
+    /// When true, a successful save pops this pushed editor back to the caller (Settings),
+    /// where the crew-name row's inline value — now updated — is the save confirmation.
+    /// The group-ride name gate leaves this false: it advances via `onSaved` instead.
+    var dismissesOnSave: Bool = false
 
+    @Environment(\.dismiss) private var dismiss
+
+    /// The name is edited in a transient draft and only committed to `store` on a
+    /// successful save, so backing out without saving never dirties the value the
+    /// Settings row previews. Seeded from the committed name when the editor appears.
+    @State private var draft: String = ""
+    @State private var didSeedDraft = false
     @State private var isSaving = false
     @State private var saveError: String?
     @FocusState private var isFocused: Bool
 
-    private var remaining: Int { DisplayName.maxGraphemes - store.name.count }
-    private var isValid: Bool { store.isValid }
+    private var remaining: Int { DisplayName.maxGraphemes - draft.count }
+    private var isValid: Bool { DisplayName.normalized(draft) != nil }
     private var hintColor: Color {
         remaining < 0 ? AuraTheme.destructive : AuraTheme.textSecondary
     }
@@ -48,6 +59,12 @@ struct DisplayNameEditor: View {
         .padding(AuraTheme.Spacing.lg)
         .background(AuraTheme.background.ignoresSafeArea())
         .navigationTitle("Crew name")
+        .onAppear {
+            if !didSeedDraft {
+                draft = store.name
+                didSeedDraft = true
+            }
+        }
     }
 
     private var fieldCard: some View {
@@ -56,7 +73,7 @@ struct DisplayNameEditor: View {
                 .foregroundStyle(AuraTheme.textSecondary)
                 .font(.body.weight(.medium))
 
-            TextField("", text: $store.name, prompt:
+            TextField("", text: $draft, prompt:
                 Text("Your name")
                     .foregroundColor(AuraTheme.textPrimary.opacity(0.65))
             )
@@ -68,9 +85,9 @@ struct DisplayNameEditor: View {
             .submitLabel(.done)
             .onSubmit(save)
 
-            if !store.name.isEmpty {
+            if !draft.isEmpty {
                 Button {
-                    store.name = ""
+                    draft = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(AuraTheme.textSecondary)
@@ -114,8 +131,9 @@ struct DisplayNameEditor: View {
         Task {
             defer { isSaving = false }
             do {
-                try await store.save()
+                try await store.save(draft)
                 onSaved()
+                if dismissesOnSave { dismiss() }
             } catch {
                 saveError = "Couldn't save — check your connection and try again."
             }
