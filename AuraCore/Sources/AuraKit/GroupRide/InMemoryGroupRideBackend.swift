@@ -11,6 +11,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var leaveCalled = false              // test spy
         var forceCreateError: GroupRideError?    // test spy
         var forceRenameError: GroupRideError?    // test spy
+        var forceDeleteError: GroupRideError?    // test spy
 
         // Auth-state seam (added Task 2). The signed-in id and its observers live
         // here (not on the actor) so `cachedUserID` can be `nonisolated` while
@@ -86,6 +87,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         store.leaveCalled = true
     }
     public func deleteAccount() async throws {
+        if let forced = store.forceDeleteError { throw forced }
         store.lock.withLock { store.currentUserID = nil }
     }
 

@@ -23,10 +23,15 @@ struct SettingsView: View {
                         linkLabel(icon: "person.crop.circle.fill", tint: AuraTheme.accent,
                                   title: "Crew name", value: displayNameStore.name)
                     }
-                    Button("Sign out") { Task { await auth.signOut() } }
-                        .disabled(router.isRideActive)
-                    Button("Delete account", role: .destructive) { confirmingDelete = true }
-                        .disabled(router.isRideActive)
+                    Button { Task { await auth.signOut() } } label: {
+                        actionLabel(icon: "rectangle.portrait.and.arrow.right",
+                                    tint: AuraTheme.textSecondary, title: "Sign out")
+                    }
+                    .disabled(router.isRideActive)
+                    Button(role: .destructive) { confirmingDelete = true } label: {
+                        actionLabel(icon: "trash", tint: AuraTheme.destructive, title: "Delete account")
+                    }
+                    .disabled(router.isRideActive)
                 } else {
                     // The app owns the Apple token flow (AppleSignInController), so a native
                     // SignInWithAppleButton would fire its OWN competing request. Render a
@@ -143,6 +148,15 @@ struct SettingsView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
+        }
+    }
+
+    // A tappable row's label: colored icon badge + title, with the title left to inherit
+    // the button's own color (accent, or destructive red) rather than being forced primary.
+    private func actionLabel(icon name: String, tint: Color, title: String) -> some View {
+        HStack(spacing: AuraTheme.Spacing.md) {
+            iconView(name, tint)
+            Text(title)
         }
     }
 
