@@ -86,8 +86,7 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
                 for await (event, session) in client.auth.authStateChanges {
                     switch event {
                     case .signedIn, .tokenRefreshed, .initialSession:
-                        if let id = session?.user.id { continuation.yield(.signedIn(id)) }
-                        else { continuation.yield(.signedOut) }
+                        if let id = session?.user.id { continuation.yield(.signedIn(id)) } else { continuation.yield(.signedOut) }
                     case .signedOut, .userDeleted:
                         continuation.yield(.signedOut)
                     default: break

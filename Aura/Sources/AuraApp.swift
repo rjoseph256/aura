@@ -135,8 +135,8 @@ private struct RootView: View {
             guard entry != nil else { return }          // fires only on nil -> entry (gate's reentrancy guard blocks overwrite)
             Task {
                 await auth.signInWithApple()
-                if auth.isSignedIn { router.resumePendingGroupRide() }
-                else { router.cancelPendingGroupRide() } // cancel or failure: drop the intent, stay put
+                // cancel or failure: drop the intent, stay put
+                if auth.isSignedIn { router.resumePendingGroupRide() } else { router.cancelPendingGroupRide() }
             }
         }
     }

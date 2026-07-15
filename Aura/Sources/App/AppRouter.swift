@@ -45,8 +45,7 @@ final class AppRouter {
     /// stashes the intent and lets RootView drive sign-in. Reentrant-safe: a second call while
     /// one is pending is ignored.
     func startGroupRide(_ entry: GroupRideEntry) {
-        if checkSignedIn() { push(.groupRide(entry)) }
-        else if pendingSignIn == nil { pendingSignIn = entry }
+        if checkSignedIn() { push(.groupRide(entry)) } else if pendingSignIn == nil { pendingSignIn = entry }
     }
     /// Called by RootView after a successful sign-in.
     func resumePendingGroupRide() {
