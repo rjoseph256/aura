@@ -55,7 +55,8 @@ struct SettingsView: View {
                 Button("Delete", role: .destructive) { Task { await auth.deleteAccount() } }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This removes your crew profile and any group-ride data on the server. Your ride history on this device is not affected.")
+                Text("This removes your crew profile and any group-ride data on the server. " +
+                     "Your ride history on this device is not affected.")
             }
 
             Section("Ride") {
