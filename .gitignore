@@ -23,3 +23,7 @@ build-sim.log
 # Python bytecode (gem authoring tools)
 __pycache__/
 *.pyc
+
+# Ride data pulled off a device for debugging (raw SwiftData store + decoded
+# tracks). Local, disposable, and contains real GPS traces — never commit.
+ride-data-export/
