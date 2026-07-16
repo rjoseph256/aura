@@ -5,7 +5,7 @@ import AuraCore
 @testable import AuraKit
 
 @MainActor
-@Suite("Resurface reading seam")
+@Suite("Resurface reading seam", .swiftDataSerialized)
 struct ResurfacePlacesReadingTests {
     @Test func returnsOnlyFlaggedPlaces() throws {
         let c = try ModelContainer(for: RideRecord.self, SavedPlaceRecord.self, SeenGemRecord.self,

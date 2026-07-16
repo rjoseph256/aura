@@ -5,7 +5,7 @@ import AuraCore
 @testable import AuraKit
 
 @MainActor
-@Suite("SavedPlacesStore resurface")
+@Suite("SavedPlacesStore resurface", .swiftDataSerialized)
 struct SavedPlacesStoreResurfaceTests {
     private func store() throws -> SavedPlacesStore {
         let c = try ModelContainer(for: RideRecord.self, SavedPlaceRecord.self, SeenGemRecord.self,

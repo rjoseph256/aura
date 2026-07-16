@@ -6,7 +6,7 @@ import CoreData
 import AuraCore
 
 @MainActor
-@Suite("SavedPlacesStore")
+@Suite("SavedPlacesStore", .swiftDataSerialized)
 struct SavedPlacesStoreTests {
     private func makeStore(now: Date = Date(timeIntervalSince1970: 1_000)) throws -> SavedPlacesStore {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)

@@ -4,6 +4,7 @@ import AuraCore
 @testable import AuraKit
 
 @MainActor
+@Suite(.swiftDataSerialized)
 struct RideSessionCoordinatorTests {
     private func ride(_ t: TimeInterval) -> Ride {
         Ride(kind: .freeRide, startedAt: Date(timeIntervalSince1970: t),

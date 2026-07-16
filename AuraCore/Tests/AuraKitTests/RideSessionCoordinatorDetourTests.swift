@@ -4,7 +4,7 @@ import AuraCore
 @testable import AuraKit
 
 @MainActor
-@Suite struct RideSessionCoordinatorDetourTests {
+@Suite(.swiftDataSerialized) struct RideSessionCoordinatorDetourTests {
     final class SpyGuidance: GuidanceControlling {
         var detourFlag = false
         private(set) var detachCount = 0

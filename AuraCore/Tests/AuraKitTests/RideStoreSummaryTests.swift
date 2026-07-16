@@ -4,6 +4,7 @@ import AuraCore
 @testable import AuraKit
 
 @MainActor
+@Suite(.swiftDataSerialized)
 struct RideStoreSummaryTests {
     private func ride(_ t: TimeInterval, distance: Double) -> Ride {
         Ride(kind: .navigate, startedAt: Date(timeIntervalSince1970: t),

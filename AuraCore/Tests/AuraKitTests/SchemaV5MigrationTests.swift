@@ -4,10 +4,13 @@ import SwiftData
 import AuraCore
 @testable import AuraKit
 
-// .serialized: this suite uses a file-backed ModelConfiguration(url:), and running it
-// concurrently with other SwiftData suites under full-suite parallel `swift test` causes
-// intermittent CoreData/temp-store contention crashes (passes in isolation/on re-run).
-@Suite("Schema V5 migration", .serialized)
+// This suite loads a pre-`resurface` (V3-class) SavedPlaceRecord container alongside a V5
+// one. `.serialized` keeps its own tests in order; `.swiftDataSerialized` is the real flake
+// fix — it serializes this suite against every other SavedPlaceRecord-container suite so the
+// process-global CoreData entity cache can't serve a stale V3 model to the V5 container mid
+// migration (an `NSUnknownKeyException` on `resurface` that aborts the run). See ROH-65 and
+// SwiftDataSerialGate.swift.
+@Suite("Schema V5 migration", .serialized, .swiftDataSerialized)
 struct SchemaV5MigrationTests {
     @Test func existingPlaceMigratesWithResurfaceFalse() throws {
         let url = URL(fileURLWithPath: NSTemporaryDirectory())
