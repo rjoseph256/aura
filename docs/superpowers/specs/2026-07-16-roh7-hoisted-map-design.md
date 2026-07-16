@@ -1,6 +1,11 @@
 # ROH-7 — Single hoisted Mapbox map across the navigation flow
 
-Status: approved (PO, 2026-07-16). Approach and scope confirmed before spec.
+> **STATUS: REJECTED at the adversarial spec-review gate (2026-07-16).**
+> The design below was PO-approved in outline, then failed a three-reviewer
+> adversarial review before any code was written. It is retained as the record of
+> why ROH-7 should not be built in this architecture. **Do not implement it.**
+> The verdict and the errors in this spec are catalogued in the section at the
+> bottom; read that first.
 
 ## Goal
 
@@ -164,3 +169,140 @@ On the iPhone 17 / iOS 26 simulator, driving a real flow:
   ordering across a transition; the surface stack must be explicit (a push sets
   the new surface; a pop restores the prior one) rather than relying on
   disappear-clears-state. Pinned by the transition-table tests.
+
+---
+
+# Review verdict (2026-07-16): REJECTED — do not implement
+
+Three independent reviewers (skeptic / architecture / rider-experience lenses,
+each given a refuting mandate) reviewed this spec against the code before any
+implementation. They converged. Summary of why ROH-7 should not be built as
+designed — and why no sound variant exists in the current architecture.
+
+## Fatal: the topology cannot receive touches
+
+`NavigationStack` is backed by `UINavigationController`. Its container hierarchy
+(`UILayoutContainerView` → `UINavigationTransitionView` →
+`UIViewControllerWrapperView` → the destination's hosting view) is plain UIKit.
+`UIView.hitTest(_:with:)` returns `self` for any in-bounds point unless a subview
+claims it — **fill transparency is irrelevant; only `isHidden`, `alpha`, and
+`isUserInteractionEnabled` matter.** `.allowsHitTesting(false)` is a SwiftUI
+modifier scoped inside the destination's hosting view; it has no reach over the
+nav container. A map mounted outside the `NavigationStack` therefore **cannot
+receive pan/pinch** — the gestures die in the navigation container.
+
+Making this work would require subclassing or swizzling the nav container's
+`hitTest`. `Aura/Sources/App/SwipeBackGesture.swift:13-14` already documents that
+this codebase holds exactly one piece of UIKit navigation introspection, by
+deliberate constraint.
+
+The alternative topology (one UIKit `MapView` shared via `UIViewRepresentable`
+inside each destination) fails differently: a `UIView` has one superview, so
+across a push — where both destinations are briefly mounted — the shared map
+detaches and flickers. **Both topologies fail. That is the core result.**
+
+## Fatal: purity and behavioural fidelity are mutually exclusive
+
+Both HUDs read the **live** `Viewport` to drive the recenter control —
+`RideHUDView.swift:238` and `NavigateHUDView.swift:377`:
+`ControlCluster(isFollowing: viewport.followPuck != nil, …)`. Mapbox *mutates*
+that binding to `.idle` when the rider pans; that is how recenter lights up.
+
+A write-only `MapCameraIntent` set by the chrome has no channel for "the user
+panned," so `isFollowing` would be permanently true after a recenter: the button
+stays dark and its VoiceOver value reports "Following" while the map sits parked
+elsewhere. Fixing it requires the model to hold `MapboxMaps.Viewport` — but
+`AuraCore` declares no Mapbox dependency, has zero SwiftUI/UIKit imports, and
+targets macOS for CI. So the model cannot live in the package, which deletes the
+entire Testing section that justified the design.
+
+## Self-defeating: the perf argument inverts
+
+The map is mounted once and never unmounted, so at `.idle` — Home, History,
+Settings, i.e. most of the app's runtime — a full-screen Mapbox GL renderer runs
+**permanently behind Home's opaque snapshot backdrop**
+(`HomeBackdrop.swift:22-52`), invisible and unusable. Today Home runs **zero**
+live maps; `MapboxTerrainSnapshotter.swift:7-8` exists precisely to keep it that
+way. `interactive: Bool` gates gestures, not rendering.
+
+Avoiding that regression means detaching the renderer at idle — which
+reintroduces the create/destroy cost the hoist exists to remove. And free-ride
+and navigate never transition into each other (`RideHUDView.swift:28-30`: free
+rides are solo by construction), so with preview unfixable (below) the hoist
+buys almost nothing.
+
+## Scope premise was factually wrong
+
+`RoutePreviewView` is **not** full-bleed. `RoutePreviewView.swift:47-56` is a
+`VStack` of a ~55% `mapPane` over an opaque `bottomPanel`
+(`.background(AuraTheme.background)`, `:142`) that cannot be transparent — route
+rows need a readable surface. Its overview fit (`:311-329`) computes
+`geometryPadding` against the **pane's** bounds; against a full-screen map the
+route re-centers and its lower half renders behind the opaque panel. Preserving
+today's framing needs a chrome-inset channel this design lacks — and making
+preview full-bleed *is* the visual redesign the spec lists as a non-goal.
+
+## Other confirmed defects
+
+- **Push animation regresses.** Outside the stack, the map cannot participate in
+  the push transition: it appears by un-occlusion (static, already at the new
+  camera) while only chrome slides. Every ride-flow transition visibly changes.
+- **`popToRoot()` strands the map.** `NavigateHUDView.swift:165-166` and
+  `RideHUDView.swift:131` take `path` from depth 2 to 0 in one transaction; the
+  "pop restores the previous surface" model assumes single-level pops and would
+  leave the map at `.preview` with a stale polyline while the rider is at Home.
+  `AppRouter.handle(url:)` (`:34`) replaces `path` wholesale — neither push nor pop.
+- **The group path has no push/pop.** `GroupRideFlowView.swift:28-89` is a
+  `@ViewBuilder` switch on `session.phase` inside one stack entry; lobby→riding
+  fires no navigation event, so the transition model has nothing to hang on.
+- **Camera "continuity" is a regression, not a payoff.** Every camera path is
+  Reduce-Motion gated today (`NavigateHUDView.swift:285-293`,
+  `RideHUDView.swift:273-281`, `RoutePreviewView.swift:61-65`); `MapCameraIntent`
+  carries no animate flag. An overview→follow-puck fly at ride start is precisely
+  the motion Reduce Motion suppresses, and it lands at the worst moment (rider
+  moving into traffic). The camera **reset** is load-bearing: without it, a new
+  preview shows the *previous* ride's camera under the "Finding bike routes…"
+  skeleton.
+- **One `routeLine` field cannot express three different lines** — recorded track
+  (`RideMapView.swift:89-118`, width 6), planned/rerouted route
+  (`NavigateHUDView.swift:237-248`, width 6), candidate route
+  (`RoutePreviewView.swift:77-88`, width **5**).
+- **Hoisting deletes implicit per-mount resets.** `previousPeerCoordinates`
+  (`RideMapView.swift:26`, `NavigateHUDView.swift:65`) dies with the map today; on
+  an app-lifetime map, ride 2's first peer dots derive `PeerBearing` cones against
+  ride 1's last fix.
+- **Accessibility unaddressed.** Gem pins are real `Button`s (`GemPinView.swift:25`);
+  hoisted outside the stack they are VoiceOver-reachable from Home, and chrome/map
+  traversal order across the ZStack boundary is undefined.
+- **The transition-table tests are tautological.** They assert the model's own API
+  in an order the test author chooses; the hazard is that *SwiftUI* chooses the
+  order, which is unobservable from a package test on macOS.
+
+## Errors in this spec, for the record
+
+- Claimed `AuraApp.swift:76-77`'s comment was aspirational. It is not: it says
+  pushing retains **the screen beneath**, which is true today. The spec's
+  motivation rested partly on a misreading.
+- "Home → preview → navigate mounts up to three separate maps" — it mounts **two**;
+  Home mounts zero.
+- "Four live `Map`s each declared inside a `.navigationDestination` closure" —
+  false for `StaticRouteMap`, which is in a `.sheet`; the spec contradicts itself
+  20 lines later.
+- Verification listed an "8-`ViewAnnotation` budget"; the real cap is `pinCap = 10`
+  (`AuraCore/Sources/AuraCore/Gems/GemDiscoveryEngine.swift:11`).
+
+## Recommendation
+
+**Close ROH-7 as won't-do.** There is no demonstrated rider-visible problem — no
+flash, jank, dropped frames, battery measurement, or bug report motivates it, and
+the surviving benefit (one style load per deliberate ride push, behind a push
+animation) does not justify re-plumbing every live map surface, the a11y tree, and
+group/gem state through a shared app-lifetime model.
+
+If a rider-visible symptom is ever observed, reopen with that evidence and
+re-scope from it. The one latent hazard worth noting independently: a
+permanently-mounted map would re-read the terrain style JSON from disk on every
+navigation event (`AuraTerrainStyleLoader.swift:7-12` does `String(contentsOf:)`
+per call, re-invoked because `RootView.body` re-evaluates on every `path` change);
+today that is saved only by `MapStyle` being `Equatable` and the JSON comparing
+equal. That is a latent flash bug in any future hoist attempt.
