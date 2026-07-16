@@ -7,7 +7,7 @@ import AuraCore
 // .serialized: this suite includes a file-backed ModelConfiguration(url:) migration test, and
 // running it concurrently with other SwiftData suites under full-suite parallel `swift test`
 // causes intermittent CoreData/temp-store contention crashes (passes in isolation/on re-run).
-@Suite("Ride migration", .serialized)
+@Suite("Ride migration", .serialized, .swiftDataSerialized)
 @MainActor
 struct RideMigrationTests {
     /// A unique on-disk store URL per run; cleaned up after.

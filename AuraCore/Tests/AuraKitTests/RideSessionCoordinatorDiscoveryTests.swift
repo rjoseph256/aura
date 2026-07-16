@@ -4,7 +4,7 @@ import AuraCore
 @testable import AuraKit
 
 @MainActor
-@Suite struct RideSessionCoordinatorDiscoveryTests {
+@Suite(.swiftDataSerialized) struct RideSessionCoordinatorDiscoveryTests {
     final class SpySink: RideDiscoverySink {
         var coordinates: [Coordinate] = []
         func rideDidUpdateLocation(_ point: TrackPoint) { coordinates.append(point.coordinate) }

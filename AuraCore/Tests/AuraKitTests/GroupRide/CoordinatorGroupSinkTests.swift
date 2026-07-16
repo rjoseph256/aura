@@ -18,6 +18,7 @@ final class SpyGroupSink: GroupLocationSink {
 }
 
 @MainActor
+@Suite(.swiftDataSerialized)
 struct CoordinatorGroupSinkTests {
     @Test func coordinatorForwardsRecordedPointsToTheGroupSink() async throws {
         let sink = SpyGroupSink()
