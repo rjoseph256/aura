@@ -610,9 +610,25 @@ via ShareLink. See docs/superpowers/specs/2026-07-01-share-card-design.md. (A ri
 elevation profile shipped 2026-07-02, commit 7392547, sharing the gain-gate with the share
 card so the label and number can't disagree.)
 
-Summary and map polish: a custom Mapbox Studio map style and the single hoisted Mapbox map
-across the navigation flow (both fast-follows from Wave 1). The ride-summary elevation profile
+Summary and map polish: a custom Mapbox Studio map style (a fast-follow from Wave 1; shipped
+2026-07-03 as the authored terrain style, ROH-6/ROH-46). The ride-summary elevation profile
 once listed here shipped 2026-07-02 (commit 7392547).
+
+The single hoisted Mapbox map across the navigation flow — the other Wave 1 fast-follow — is
+**cancelled (ROH-7, 2026-07-16)**, killed at a three-reviewer adversarial spec review before
+any code was written. The short version: a SwiftUI `Map` cannot live outside the
+`NavigationStack` and still receive gestures (the stack is a `UINavigationController`, and
+`UIView.hitTest` ignores fill transparency, so the nav container swallows pan/pinch), while
+the alternative — one UIKit `MapView` shared across destinations — detaches and flickers
+across a push. Both topologies fail. Independently, the recenter control reads the *live*
+`Viewport` that Mapbox mutates on a pan, which a write-only camera model cannot observe, and
+owning `Viewport` requires a Mapbox type `AuraCore` cannot import. An always-mounted map would
+also run a permanent invisible GL renderer behind Home's opaque snapshot backdrop, so the perf
+argument inverts; detaching it at idle reintroduces the very cost the hoist exists to remove.
+No rider-visible symptom (flash, jank, or bug report) ever motivated the work. Full verdict:
+`docs/superpowers/specs/2026-07-16-roh7-hoisted-map-design.md`. Reopen only with evidence.
+Note the comment at `AuraApp.swift:76-77` is accurate as written — pushing retains the screen
+*beneath* it — and should not be read as a claim that this fast-follow shipped.
 
 Group-ride tail: QR-code join (needs a camera scanner surface), a group-aware Live
 Activity and Dynamic Island, peer-focus (tap a rider to frame them), host leave with a
