@@ -10,6 +10,9 @@ import AuraKit
 struct RideMapView: View {
     let track: [TrackPoint]
     var peers: [RidePeer] = []
+    /// The rider's own id, so they aren't drawn as a peer dot on top of the location puck.
+    /// nil on the solo path, which passes no peers at all.
+    var selfUserID: UUID?
     var nameMap: [UUID: String] = [:]
     var selfProgress: Double = 0
     var gems: [Gem] = []
@@ -47,7 +50,8 @@ struct RideMapView: View {
             Puck2D(bearing: .heading)
             routeRibbon
             detourPolyline
-            ForEvery(peers.filter { $0.coordinate != nil }, id: \.userID) { peer in
+            ForEvery(GroupMapDots.visiblePeers(peers: peers, selfUserID: selfUserID),
+                     id: \.userID) { peer in
                 if let coordinate = peer.coordinate {
                     MapViewAnnotation(coordinate: CLLocationCoordinate2D(latitude: coordinate.latitude,
                                                                          longitude: coordinate.longitude)) {
