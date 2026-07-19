@@ -87,7 +87,7 @@ private struct GroupNavigateContainerPreviewHost: View {
                                   distanceMeters: 8_000, estimatedDurationSeconds: 1_800,
                                   elevationGainMeters: 60)
                 await session.create(route: route)
-                session.startRiding()
+                await session.startRiding()
                 await session.beginLiveSession()
 
                 let peerID = UUID()

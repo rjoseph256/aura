@@ -32,6 +32,11 @@ public final class GroupRideSession {
     public private(set) var nameMap: [UUID: String] = [:]
     /// Append-only membership notifications; the UI drains this.
     public private(set) var toasts: [GroupToastEvent] = []
+    /// Set when the most recent `startRiding()` call failed server-side; cleared at the
+    /// start of the next attempt. The lobby view surfaces this as a retry affordance.
+    public private(set) var startFailed = false
+    /// Set when the most recent `end()` call failed server-side (Task 8 wires retry).
+    public private(set) var endFailed = false
 
     /// The seam the ride's `RideSessionCoordinator` publishes the rider's own position
     /// through, so peers see this rider's dot on the map. `rideSession` (the private inner
@@ -53,7 +58,18 @@ public final class GroupRideSession {
     /// `.task` both call it, and it must subscribe exactly once. Reset on teardown.
     private var didBeginLive = false
     private var isRefreshingRoster = false
-    private var hostID: UUID?
+    public private(set) var hostID: UUID?
+
+    /// Projects the observable `Phase` onto the three phases reconciliation reasons about;
+    /// `nil` for the non-live phases (`.idle`, `.createFailed`, etc.) that don't participate.
+    private var lifecyclePhase: RideLifecyclePhase? {
+        switch phase {
+        case .lobby: return .lobby
+        case .riding: return .riding
+        case .ended: return .ended
+        default: return nil
+        }
+    }
 
     public init(backend: any GroupRideBackend, transport: any RideSessionTransport,
                 displayNameProvider: @escaping @Sendable () -> String, cadence: LiveShareCadence = .init()) {
@@ -113,11 +129,26 @@ public final class GroupRideSession {
         isHost = (joined.ride.hostID == resolvedSelfUserID)
         rideSession = RideSession(rideID: joined.ride.id, selfUserID: resolvedSelfUserID,
                                   transport: transport, cadence: cadence)
-        phase = .riding
+        let status = RideLifecycleStatus(hostID: joined.ride.hostID,
+                                         startedAt: joined.ride.startedAt, endedAt: joined.ride.endedAt)
+        switch authoritativePhase(status, current: .lobby) {
+        case .riding: phase = .riding
+        default:      phase = .lobby
+        }
     }
 
-    public func startRiding() {
-        phase = .riding
+    /// Host-only: asks the backend to mark the ride started (stamps `started_at` durably),
+    /// then advances to `.riding` only once the server confirms. On failure sets
+    /// `startFailed` and stays in `.lobby` — the lobby view's Retry re-invokes this.
+    public func startRiding() async {
+        guard let rideID else { return }
+        startFailed = false
+        do {
+            try await backend.startRide(rideID: rideID)
+            phase = .riding
+        } catch {
+            startFailed = true
+        }
     }
 
     /// Called by the production call sites (the lobby `.task` and the `.riding` `.task`)

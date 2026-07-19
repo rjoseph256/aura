@@ -36,7 +36,7 @@ struct GroupRideSessionLiveBridgeTests {
         let host = GroupRideSession(backend: backend, transport: transport,
                                     displayNameProvider: { "Mike" })
         await host.create(route: route())
-        host.startRiding()
+        await host.startRiding()
 
         await host.beginLiveSession()   // opens the subscription + owns the loop (before Sara joins)
 

@@ -16,7 +16,7 @@ struct GroupRideSessionToastTests {
             destination: .init(latitude: 1, longitude: 1), waypoints: [],
             geometry: [.init(latitude: 0, longitude: 0), .init(latitude: 1, longitude: 1)],
             profile: .fastest, distanceMeters: 100, estimatedDurationSeconds: 60, elevationGainMeters: 0))
-        host.startRiding()
+        await host.startRiding()
         let guestBackend = InMemoryGroupRideBackend(sharing: backend)
         try await guestBackend.signIn(idToken: "t2", nonce: "n2", displayName: guestName)
         let guestID = try await guestBackend.currentUserID()
@@ -69,7 +69,7 @@ struct GroupRideSessionToastTests {
             destination: .init(latitude: 1, longitude: 1), waypoints: [],
             geometry: [.init(latitude: 0, longitude: 0), .init(latitude: 1, longitude: 1)],
             profile: .fastest, distanceMeters: 100, estimatedDurationSeconds: 60, elevationGainMeters: 0))
-        host.startRiding()
+        await host.startRiding()
         let hostID = try await backend.currentUserID()
 
         let guestBackend = InMemoryGroupRideBackend(sharing: backend)

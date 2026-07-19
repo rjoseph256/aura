@@ -171,7 +171,7 @@ struct GroupLobbyView: View {
 
     private var startButton: some View {
         Button("Start riding") {
-            session.startRiding()
+            Task { await session.startRiding() }
         }
         .buttonStyle(.ctaPrimary)
     }
