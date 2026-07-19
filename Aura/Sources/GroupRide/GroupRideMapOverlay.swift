@@ -44,11 +44,14 @@ struct PeerDotView: View {
             }
             .frame(width: Self.discDiameter + Self.coneLength, height: Self.discDiameter + Self.coneLength)
         }
+        // The pulse animation is attached to the ring itself, NOT wrapped around the state
+        // change in a `withAnimation`. `withAnimation` applies to the whole transaction, so a
+        // `repeatForever` there leaks into every other animatable change in the same update
+        // and oscillates unrelated layout forever — it made the cockpit speed readout, the
+        // roster sheet and the map controls wave at this dot's 2.2s pulse period.
         .onAppear {
             guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
-                isPulsing = true
-            }
+            isPulsing = true
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("\(displayName), \(statusAccessibilityLabel)"))
@@ -75,6 +78,8 @@ struct PeerDotView: View {
                 .stroke(discColor.opacity(isPulsing ? 0 : 0.5), lineWidth: 2)
                 .frame(width: Self.discDiameter + (isPulsing ? 18 : 6),
                        height: Self.discDiameter + (isPulsing ? 18 : 6))
+                .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true),
+                           value: isPulsing)
         }
     }
 

@@ -99,7 +99,9 @@ private final class SupabaseRideLiveSubscription: RideLiveSubscription {
         rideID: UUID,
         continuation cont2: AsyncStream<TransportEvent>.Continuation?
     ) async {
-        let topic = "ride:\(rideID.uuidString)"
+        // Lowercased via RideTopic: Postgres broadcasts to 'ride:' || uuid::text (lowercase)
+        // and Realtime topics are case-sensitive, so uuidString here received nothing.
+        let topic = RideTopic.name(rideID: rideID)
         var delay: UInt64 = 1_000_000_000 // 1 s
         let maxDelay: UInt64 = 30_000_000_000 // 30 s
         let maxAttempts = 8

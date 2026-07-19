@@ -251,7 +251,9 @@ struct NavigateHUDView: View {
             // so `ForEvery` iterates zero peers and this is a no-op — the solo map is
             // visually unchanged.
             if let groupSession {
-                ForEvery(groupSession.peers.filter { $0.coordinate != nil }, id: \.userID) { peer in
+                ForEvery(GroupMapDots.visiblePeers(peers: groupSession.peers,
+                                                   selfUserID: groupSession.selfUserID),
+                         id: \.userID) { peer in
                     if let coordinate = peer.coordinate {
                         MapViewAnnotation(coordinate: CLLocationCoordinate2D(
                             latitude: coordinate.latitude, longitude: coordinate.longitude)) {

@@ -155,8 +155,12 @@ struct GroupRideJoinView: View {
     private func attemptJoin() {
         guard let joinCode else { return }
         isFocused = false
-        dismiss()
-        router.startGroupRide(.join(joinCode))
+        // Single path mutation — NOT dismiss() + startGroupRide(). This screen is a pushed
+        // destination, so dismiss() and a router push both mutate the same NavigationStack path
+        // in one runloop tick and reconcile into a blank, broken push (the manual-join dead-end
+        // seen on device). replaceTopWithGroupRide swaps this screen for the group ride in one
+        // write and routes through the same auth gate as the deep-link path.
+        router.replaceTopWithGroupRide(.join(joinCode))
     }
 }
 
