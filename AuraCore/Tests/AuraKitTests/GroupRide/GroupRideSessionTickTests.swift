@@ -20,7 +20,7 @@ struct GroupRideSessionTickTests {
             destination: .init(latitude: 1, longitude: 1), waypoints: [],
             geometry: [.init(latitude: 0, longitude: 0), .init(latitude: 1, longitude: 1)],
             profile: .fastest, distanceMeters: 100, estimatedDurationSeconds: 60, elevationGainMeters: 0))
-        s.startRiding()
+        await s.startRiding()
         return RidingHost(session: s, transport: transport, selfID: selfID)
     }
     private func position(_ id: UUID, _ meters: Double, at t: TimeInterval) -> TransportEvent {

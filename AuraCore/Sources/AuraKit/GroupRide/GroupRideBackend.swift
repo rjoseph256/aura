@@ -48,6 +48,10 @@ public protocol GroupRideBackend: Sendable {
     func joinRide(code: JoinCode) async throws -> JoinedRide
     func roster(rideID: UUID) async throws -> [RosterMember]
     func recordTrackPoints(rideID: UUID, points: [RemoteTrackPoint]) async throws
+    /// Host-only: marks the ride as started (stamps `started_at`). Idempotent.
+    func startRide(rideID: UUID) async throws
+    /// The durable, authoritative lifecycle read (see `RideLifecycleStatus`).
+    func rideStatus(rideID: UUID) async throws -> RideLifecycleStatus
     func endRide(rideID: UUID) async throws
     func leaveRide(rideID: UUID) async throws
     func deleteAccount() async throws

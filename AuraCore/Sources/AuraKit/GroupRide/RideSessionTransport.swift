@@ -14,6 +14,10 @@ public enum TransportEvent: Sendable {
     // nonisolated -> @MainActor boundary. The conformer maps caught errors to a Sendable
     // error type (see Task 16's LiveTransportError).
     case disconnected((any Error & Sendable)?)
+    // Optimistic lifecycle broadcasts (Task 5). A durable `rideStatus` read remains the
+    // authoritative source; these arms let a live session move forward immediately.
+    case rideStarted
+    case rideEnded
 }
 
 /// One owned subscription to a ride's live channel. Owning the channel in a single

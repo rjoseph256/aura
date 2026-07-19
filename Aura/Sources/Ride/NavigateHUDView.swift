@@ -93,11 +93,22 @@ struct NavigateHUDView: View {
                 GroupToastHost(events: groupSession.toasts)
             }
         }
-        // "Reconnecting…" pill when the live layer has dropped
+        // "Reconnecting…" pill when the live layer has dropped, and/or the "Couldn't end —
+        // Retry" chip when the last end/leave attempt failed server-side (ROH-68). Both are
+        // non-blocking status pills scoped to the crew chrome, so they only ever show while
+        // `phase == .riding` (via `showsGroupChrome`) and stack vertically on the rare chance
+        // both conditions hold at once.
         .overlay(alignment: .top) {
-            if showsGroupChrome, let groupSession, !groupSession.isLive {
-                reconnectingPill
-                    .padding(.top, 44)
+            if showsGroupChrome, let groupSession {
+                VStack(spacing: AuraTheme.Spacing.sm) {
+                    if !groupSession.isLive {
+                        reconnectingPill
+                    }
+                    if groupSession.endFailed {
+                        endFailedPill
+                    }
+                }
+                .padding(.top, 44)
             }
         }
         // Turn card pinned below the status bar, with the next-turn preview beneath it.

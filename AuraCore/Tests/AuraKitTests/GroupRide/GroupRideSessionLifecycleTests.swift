@@ -28,7 +28,7 @@ struct GroupRideSessionLifecycleTests {
     @Test func startRidingTransitions() async throws {
         let (s, _) = try await make()
         await s.create(route: route())
-        s.startRiding()
+        await s.startRiding()
         #expect(s.phase == .riding)
     }
     // Builds a signed-in guest session sharing the host's store, ready to join.
@@ -39,12 +39,12 @@ struct GroupRideSessionLifecycleTests {
         return (GroupRideSession(backend: backend, transport: InMemoryRideSessionTransport(),
                                  displayNameProvider: { name }), backend)
     }
-    @Test func joinEntersRidingAsMemberWithRoute() async throws {
+    @Test func joinBeforeStartLandsInLobbyAsMember() async throws {
         let (host, hostBackend) = try await make(name: "Mike")
         await host.create(route: route())
         let (guest, _) = try await guest(sharing: hostBackend, name: "Sara")
         await guest.join(code: host.joinCode!)
-        #expect(guest.phase == .riding)          // D3 rolling join — never parked in a lobby
+        #expect(guest.phase == .lobby)            // authoritative: ride hasn't started server-side
         #expect(guest.isHost == false)
         #expect(guest.route?.geometry.count == 2)
     }

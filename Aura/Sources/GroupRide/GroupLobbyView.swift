@@ -2,14 +2,17 @@ import SwiftUI
 import AuraCore
 import AuraKit
 
-/// The host's rolling-join lobby: a prominent join code in cockpit numerals, a
-/// share-link button, the crew roster as it fills live, and the "Start riding" CTA.
-/// Pure presentation over `GroupRideSession` — every value it reads is
-/// `public private(set)` on the session, so this view never mutates state directly
-/// except through `session.startRiding()`.
+/// The rolling-join lobby, shared by both roles: a prominent join code in cockpit
+/// numerals, a share-link button, and the crew roster as it fills live. The bottom CTA
+/// slot splits by role — the host gets "Start riding" (with an inline retry row on
+/// failure); a guest gets a calm "waiting for the host" status plus Leave. Pure
+/// presentation over `GroupRideSession` — every value it reads is `public private(set)`
+/// on the session, so this view never mutates state directly except through
+/// `session.startRiding()` and `session.leave()`.
 struct GroupLobbyView: View {
     let session: GroupRideSession
 
+    @Environment(AppRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -27,6 +30,13 @@ struct GroupLobbyView: View {
     private var shareURL: URL? {
         guard let code = session.joinCode else { return nil }
         return URL(string: "aura://join?code=\(code.rawValue)")
+    }
+
+    /// The host's display name for the guest-facing waiting copy. Falls back to "the host"
+    /// when the roster fetch hasn't resolved a name yet (or `hostID` itself is unset).
+    private var hostName: String {
+        guard let hostID = session.hostID, let name = session.nameMap[hostID] else { return "the host" }
+        return DisplayName.forDisplay(name)
     }
 
     var body: some View {
@@ -54,7 +64,7 @@ struct GroupLobbyView: View {
 
             Spacer(minLength: AuraTheme.Spacing.lg)
 
-            startButton
+            ctaSection
                 .padding(.horizontal, AuraTheme.Spacing.xxl)
                 .padding(.bottom, AuraTheme.Spacing.xxl)
         }
@@ -167,13 +177,98 @@ struct GroupLobbyView: View {
         .background(AuraTheme.surface, in: RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous))
     }
 
-    // MARK: - Start CTA
+    // MARK: - Role-split CTA
+
+    /// Host keeps the "Start riding" CTA (with an inline retry row on failure); a guest
+    /// gets a calm waiting state plus a Leave button. Both branches share the roster/code/
+    /// share-link chrome above — only this bottom slot differs by role.
+    @ViewBuilder private var ctaSection: some View {
+        if session.isHost {
+            VStack(spacing: AuraTheme.Spacing.sm) {
+                startButton
+                if session.startFailed {
+                    startRetryRow
+                }
+            }
+        } else {
+            guestWaitingSection
+        }
+    }
 
     private var startButton: some View {
         Button("Start riding") {
-            session.startRiding()
+            Task { await session.startRiding() }
         }
         .buttonStyle(.ctaPrimary)
+    }
+
+    /// Inline error-recovery row shown under the Start button when the host's last attempt
+    /// failed server-side. Amber warning treatment mirrors `GPSSignalChip`'s escalated-caution
+    /// styling elsewhere in the app, scaled down to a card row instead of a HUD chip.
+    ///
+    /// The message and the Retry button are deliberately NOT combined into one accessibility
+    /// element: combining the whole row would swallow the Button into an opaque, non-activatable
+    /// label, leaving a VoiceOver user with no way to recover from a failed start. Only the
+    /// message (icon + text) is combined; the Button keeps its own default accessible identity
+    /// ("Retry", `.isButton` trait) so it stays independently focusable and activatable.
+    private var startRetryRow: some View {
+        HStack(spacing: AuraTheme.Spacing.sm) {
+            Label("Couldn't start", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AuraTheme.warning)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Couldn't start the ride")
+            Spacer(minLength: AuraTheme.Spacing.sm)
+            Button("Retry") {
+                Task { await session.startRiding() }
+            }
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(AuraTheme.warning)
+            // No CTAButtonStyle variant keeps the warning color (they're all accent/onAccent/
+            // onDestructive), so the 44pt HIG minimum is met directly rather than by adopting
+            // a style — same fix LocationPermissionView applies to its own sub-40pt tertiary
+            // button: a minHeight plus a rectangular content shape so the whole padded area,
+            // not just the glyph-tight text, is tappable.
+            .padding(.horizontal, AuraTheme.Spacing.sm)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .padding(.horizontal, AuraTheme.Spacing.lg)
+        .padding(.vertical, AuraTheme.Spacing.sm)
+        .background(AuraTheme.warning.opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: AuraTheme.Radius.md, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: AuraTheme.Radius.md, style: .continuous)
+                .strokeBorder(AuraTheme.warning.opacity(0.55))
+        )
+    }
+
+    /// Guest lobby state: no Start authority, so the CTA slot becomes a calm status readout
+    /// (styled like `emptyRosterState`'s surface card, not a disabled button) plus a
+    /// low-emphasis Leave action. Leave never routes through `.ended` — it pops this pushed
+    /// entry straight back home (see the file-header note and Task 8's leave semantics).
+    private var guestWaitingSection: some View {
+        VStack(spacing: AuraTheme.Spacing.md) {
+            HStack(spacing: AuraTheme.Spacing.sm) {
+                Image(systemName: "hourglass")
+                Text("Waiting for \(hostName) to start…")
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(AuraTheme.textSecondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, AuraTheme.Spacing.md)
+            .background(AuraTheme.surface, in: RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Waiting for \(hostName) to start the ride")
+
+            Button("Leave") {
+                Task {
+                    await session.leave()
+                    router.pop()
+                }
+            }
+            .buttonStyle(.ctaTertiary)
+        }
     }
 }
 
@@ -217,6 +312,13 @@ private struct LobbyRosterRowView: View {
 
 #Preview("Lobby — crew filling in") {
     GroupLobbyPreviewHost()
+        .environment(AppRouter())
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Lobby — guest waiting") {
+    GroupLobbyGuestPreviewHost()
+        .environment(AppRouter())
         .preferredColorScheme(.dark)
 }
 
@@ -259,6 +361,64 @@ private struct GroupLobbyPreviewHost: View {
                         userID: userID, coordinate: route.origin, progressMeters: 0,
                         recordedAt: Date(), motionState: .moving)))
                 }
+            }
+    }
+}
+
+/// Same in-memory setup as `GroupLobbyPreviewHost`, but the rendered session belongs to
+/// a second identity that JOINS rather than creates — `isHost` is false, so the lobby
+/// renders the guest's "Waiting for … to start" state and Leave button instead of the
+/// Start CTA. The host's own session runs off-screen only to create the ride and seed
+/// its display name into the shared store for `hostName` to resolve.
+private struct GroupLobbyGuestPreviewHost: View {
+    private let hostBackend: InMemoryGroupRideBackend
+    private let guestBackend: InMemoryGroupRideBackend
+    @State private var guestSession: GroupRideSession
+
+    init() {
+        let hostBackend = InMemoryGroupRideBackend()
+        self.hostBackend = hostBackend
+        let guestBackend = InMemoryGroupRideBackend(sharing: hostBackend)
+        self.guestBackend = guestBackend
+        _guestSession = State(initialValue: GroupRideSession(
+            backend: guestBackend, transport: InMemoryRideSessionTransport(),
+            displayNameProvider: { "Priya" }))
+    }
+
+    var body: some View {
+        GroupLobbyView(session: guestSession)
+            .task {
+                let route = Route(id: UUID(),
+                                  origin: Coordinate(latitude: 40.44, longitude: -79.99),
+                                  destination: Coordinate(latitude: 40.46, longitude: -79.95),
+                                  waypoints: [], geometry: [], profile: .fastest,
+                                  distanceMeters: 8_000, estimatedDurationSeconds: 1_800,
+                                  elevationGainMeters: 60)
+                try? await hostBackend.signIn(idToken: "preview-host", nonce: "preview", displayName: "Jamie Rivera")
+                let hostSession = GroupRideSession(
+                    backend: hostBackend, transport: InMemoryRideSessionTransport(),
+                    displayNameProvider: { "Jamie Rivera" })
+                await hostSession.create(route: route)
+                guard let code = hostSession.joinCode, let hostID = hostSession.hostID else { return }
+
+                try? await guestBackend.signIn(idToken: "preview-guest", nonce: "preview", displayName: "Priya")
+                await guestSession.join(code: code)
+
+                // `GroupLobbyView(session: guestSession)` mounts above as soon as this preview
+                // host's body is evaluated — before `join(code:)` above completes — so the
+                // view's own `.task { await session.beginLiveSession() }` can run while
+                // `guestSession`'s inner `rideSession` is still nil and no-op (same shape as the
+                // production race that `.task` is written to tolerate, except production never
+                // mounts `GroupLobbyView` before `session.phase == .lobby`, so it never hits this
+                // window). Seed `nameMap` explicitly instead, exactly the way `GroupLobbyPreviewHost`
+                // seeds its peer names above: an `ingest(.position(...))` for the host's userID,
+                // issued only after `join(code:)` has set `rideSession`, triggers `refreshRoster()`
+                // or resolves the host's display name from the shared in-memory store so the
+                // guest's "Waiting for Jamie Rivera to start…" label actually renders the name
+                // instead of falling back to "the host".
+                await guestSession.ingest(.position(LivePositionPayload(
+                    userID: hostID, coordinate: route.origin, progressMeters: 0,
+                    recordedAt: Date(), motionState: .moving)))
             }
     }
 }

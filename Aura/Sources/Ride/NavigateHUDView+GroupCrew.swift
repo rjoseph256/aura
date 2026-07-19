@@ -40,6 +40,32 @@ extension NavigateHUDView {
             .accessibilityLabel("Reconnecting to the group ride")
     }
 
+    /// Non-blocking affordance for a transient `end()`/`leave()` failure (ROH-68): the rider
+    /// stays on this HUD — `endRide()` is never called until the server confirms `.ended` —
+    /// so this chip is how they retry without losing their place. Styled identically to
+    /// `reconnectingPill` (same capsule/tokens) so the crew-chrome overlay reads as one
+    /// family of status pills; only its Retry action makes it interactive.
+    var endFailedPill: some View {
+        HStack(spacing: AuraTheme.Spacing.sm) {
+            Label("Couldn't end", systemImage: "exclamationmark.triangle")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AuraTheme.textPrimary)
+            Button("Retry") {
+                Task {
+                    await groupSession?.retryEndIfNeeded()
+                    if groupSession?.phase == .ended { endRide() }
+                }
+            }
+            .font(.subheadline.weight(.bold))
+            .foregroundStyle(AuraTheme.accent)
+        }
+        .padding(.horizontal, AuraTheme.Spacing.md)
+        .padding(.vertical, AuraTheme.Spacing.sm)
+        .background(AuraTheme.surface.opacity(0.9), in: Capsule())
+        .overlay(Capsule().strokeBorder(AuraTheme.border))
+        .accessibilityElement(children: .contain)
+    }
+
     /// The furthest-along peer, so only one name tag renders on the map (declutters
     /// multi-peer rides) — mirrors `RideMapView`'s solo group-map leader logic.
     var groupLeaderID: UUID? {
@@ -60,25 +86,32 @@ extension NavigateHUDView {
 
     /// Host: dissolve the crew for everyone (`end()` calls the backend, emitting the
     /// host-left wire signal so every guest's crew chrome dissolves), then finish this
-    /// rider's own ride into the summary.
+    /// rider's own ride into the summary — but only once `end()` has actually landed
+    /// server-side (ROH-68). A transient failure sets `groupSession.endFailed` instead of
+    /// faking success; `phase` stays `.riding`, the rider stays on this HUD, and
+    /// `endFailedPill`'s Retry re-attempts via `retryEndIfNeeded()`.
     func endGroupRideAsHost() {
         Task {
             await groupSession?.end()
-            endRide()
+            if groupSession?.phase == .ended { endRide() }
         }
     }
 
     /// Member choosing "Leave crew": drop out of the crew (chrome dissolves via phase) but
-    /// keep navigating solo (D10). The ride itself is NOT ended.
+    /// keep navigating solo (D10). The ride itself is NOT ended. `leave()` can still fail
+    /// transiently here (setting `endFailed`), which is acceptable — this path never calls
+    /// `endRide()`, so the rider keeps navigating regardless of whether the crew-side leave
+    /// has landed yet.
     func leaveCrewKeepRiding() {
         Task { await groupSession?.leave() }
     }
 
-    /// Member choosing "End ride": leave the crew first (remove self), then finish the ride.
+    /// Member choosing "End ride": leave the crew first (remove self), then finish the ride
+    /// — only once the leave is server-confirmed (`.ended`), mirroring the host path above.
     func endRideAsMember() {
         Task {
             await groupSession?.leave()
-            endRide()
+            if groupSession?.phase == .ended { endRide() }
         }
     }
 }

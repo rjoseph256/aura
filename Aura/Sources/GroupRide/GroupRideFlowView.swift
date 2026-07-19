@@ -11,9 +11,15 @@ struct GroupRideFlowView: View {
     let entry: GroupRideEntry
 
     @Environment(AppRouter.self) private var router
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var session: GroupRideSession
     @State private var displayNameStore = DisplayNameStore(backend: SupabaseGroupRideBackend())
+    /// Distinguishes a guest/host who actually entered the riding container (rode, then the
+    /// ride ended — keep the solo HUD running) from one who never got past the lobby/join
+    /// before the ride ended (show a dedicated ended surface instead of a blank/wrong screen).
+    /// Set once, in `ridingContainer`'s `.task`, the first time this view enters `.riding`.
+    @State private var didEnterRiding = false
 
     init(entry: GroupRideEntry) {
         self.entry = entry
@@ -23,6 +29,11 @@ struct GroupRideFlowView: View {
     var body: some View {
         content
             .task { await invokeEntry() }
+            .onChange(of: scenePhase) { _, newPhase in
+                if newPhase == .active {
+                    Task { await session.reconcileFromStatus() }
+                }
+            }
     }
 
     @ViewBuilder private var content: some View {
@@ -46,27 +57,22 @@ struct GroupRideFlowView: View {
         case .lobby:
             GroupLobbyView(session: session)
 
-        // `.riding` and `.ended` share one branch: once the crew layer has started, a
-        // host-end (D9) only flips `session.phase` to `.ended` — it must NOT tear this
-        // view back down, or the rider's in-progress solo navigation (owned by the
-        // `RideSessionCoordinator` inside `GroupNavigateContainer`'s `NavigateHUDView`)
-        // would be abandoned along with it. `GroupNavigateContainer` itself reads
-        // `session.phase` to hide the crew chrome once `.ended`, while the solo HUD
-        // underneath keeps running. `.task` re-invokes `beginLiveSession()` only on the
-        // very first entry into this branch (SwiftUI keys `.task` to the view identity,
-        // not to phase, so the ended transition doesn't restart it).
-        case .riding, .ended:
-            if session.route != nil {
-                GroupNavigateContainer(session: session)
-                    .task { await session.beginLiveSession() }
+        // A rider who actually entered `.riding` and whose ride later ends (host-end, D9)
+        // must NOT have this view torn down — the rider's in-progress solo navigation
+        // (owned by the `RideSessionCoordinator` inside `GroupNavigateContainer`'s
+        // `NavigateHUDView`) would be abandoned along with it. `GroupNavigateContainer`
+        // itself reads `session.phase` to hide the crew chrome once `.ended`, while the
+        // solo HUD underneath keeps running — `ridingContainer` handles both `.riding`
+        // and that "rode, then ended" case. A ride that ends while the rider is still in
+        // the lobby/join flow (never entered `.riding`) never had a HUD to preserve, so
+        // it gets a dedicated ended surface instead.
+        case .riding:
+            ridingContainer
+        case .ended:
+            if didEnterRiding {
+                ridingContainer
             } else {
-                // Guarded per the brief: `.riding` with no route is unreachable in
-                // practice (create/join both set `route` before this phase), but
-                // render something sane rather than a blank screen.
-                dismissMessage(
-                    title: "Couldn't load this ride's route.",
-                    systemImage: "exclamationmark.triangle"
-                )
+                endedLobbySurface
             }
 
         case .createFailed:
@@ -87,6 +93,41 @@ struct GroupRideFlowView: View {
                 systemImage: "person.crop.circle.badge.xmark"
             )
         }
+    }
+
+    // MARK: - Riding / ended-while-riding
+
+    /// `.riding`, plus the "rode, then the ride ended" case of `.ended` (`didEnterRiding`
+    /// true) — see the phase switch above for why those two share a screen. `.task`'s
+    /// first-run flips `didEnterRiding` before awaiting `beginLiveSession()`, so a
+    /// same-tick ended transition (a ride that ended the instant it was joined) still
+    /// counts as "entered riding" once this container has mounted. `.task` is keyed to
+    /// this view's identity, not to phase, so the ended transition doesn't restart it.
+    @ViewBuilder private var ridingContainer: some View {
+        if session.route != nil {
+            GroupNavigateContainer(session: session)
+                .task {
+                    didEnterRiding = true
+                    await session.beginLiveSession()
+                }
+        } else {
+            // Guarded per the brief: `.riding` with no route is unreachable in
+            // practice (create/join both set `route` before this phase), but
+            // render something sane rather than a blank screen.
+            dismissMessage(
+                title: "Couldn't load this ride's route.",
+                systemImage: "exclamationmark.triangle"
+            )
+        }
+    }
+
+    // MARK: - Ended from lobby/join
+
+    /// `.ended` reached without ever entering `.riding` — e.g. the host ends the ride
+    /// while a guest is still on the lobby/join screen. There's no solo HUD underneath to
+    /// preserve here, so this is a real terminal screen rather than a pass-through.
+    private var endedLobbySurface: some View {
+        dismissMessage(title: "This ride has ended.", systemImage: "flag.checkered")
     }
 
     // MARK: - Entry invocation

@@ -87,7 +87,7 @@ private struct GroupNavigateContainerPreviewHost: View {
                                   distanceMeters: 8_000, estimatedDurationSeconds: 1_800,
                                   elevationGainMeters: 60)
                 await session.create(route: route)
-                session.startRiding()
+                await session.startRiding()
                 await session.beginLiveSession()
 
                 let peerID = UUID()
@@ -99,12 +99,12 @@ private struct GroupNavigateContainerPreviewHost: View {
                 if !isLive {
                     await session.ingest(.disconnected(nil))
                 }
-                if phase == .ended, let hostID = session.selfUserID {
-                    // This preview session is always its own host (it called `create`), so a
-                    // `.memberLeft` matching self's id is what `GroupRideSession` recognizes
-                    // as the host ending the ride (D9) — the same signal a real "host tapped
-                    // End" would send over the wire.
-                    await session.ingest(.memberLeft(hostID))
+                if phase == .ended {
+                    // `.rideEnded` is the host-end wire signal (Task 7 removed the old
+                    // `.memberLeft(hostID)` heuristic) — the same broadcast a real "host
+                    // tapped End" sends, which moves this session to `.ended` and dissolves
+                    // the crew chrome.
+                    await session.ingest(.rideEnded)
                 }
             }
     }

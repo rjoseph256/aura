@@ -65,11 +65,34 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
             params: ["p_ride_id": AnyJSON.string(rideID.uuidString),
                      "p_points": AnyJSON.array(payload)]).execute()
     }
+    public nonisolated func startRide(rideID: UUID) async throws {
+        _ = try await client.rpc("start_ride", params: ["p_ride_id": rideID.uuidString]).execute()
+    }
+    public nonisolated func rideStatus(rideID: UUID) async throws -> RideLifecycleStatus {
+        let row: RideStatusRow = try await client
+            .rpc("ride_status", params: ["p_ride_id": rideID.uuidString]).single().execute().value
+        return RideLifecycleStatus(hostID: row.hostID, startedAt: row.startedAt, endedAt: row.endedAt)
+    }
     public nonisolated func endRide(rideID: UUID) async throws {
-        _ = try await client.rpc("end_ride", params: ["p_ride_id": rideID.uuidString]).execute()
+        // Map the server's `not host` raise to the typed error so GroupRideSession's
+        // already-gone-is-success retry branch fires in production (ROH-68). A lost-response
+        // retry, a host transfer, or a swept ride all surface as `not host` here — all mean
+        // "already gone", not a transient failure to keep retrying.
+        do {
+            _ = try await client.rpc("end_ride", params: ["p_ride_id": rideID.uuidString]).execute()
+        } catch let error as PostgrestError where error.message.contains("not host") {
+            throw GroupRideError.notHost
+        }
     }
     public nonisolated func leaveRide(rideID: UUID) async throws {
-        _ = try await client.rpc("leave_ride", params: ["p_ride_id": rideID.uuidString]).execute()
+        // Map the server's `not a member` raise to the typed error so the already-gone-is-success
+        // retry branch fires in production (ROH-68): a lost-response retry after the membership
+        // row is already deleted raises `not a member`, which means "already left", not a failure.
+        do {
+            _ = try await client.rpc("leave_ride", params: ["p_ride_id": rideID.uuidString]).execute()
+        } catch let error as PostgrestError where error.message.contains("not a member") {
+            throw GroupRideError.notMember
+        }
     }
     public nonisolated func deleteAccount() async throws {
         _ = try await client.rpc("delete_account").execute()
@@ -111,21 +134,39 @@ private nonisolated struct GroupRideRow: Decodable {
     let status: String
     let createdAt: Date
     let route: AnyJSON
+    let startedAt: Date?
+    let endedAt: Date?
     enum CodingKeys: String, CodingKey {
         case id, status, route
         case hostID = "host_id"
         case joinCode = "join_code"
         case createdAt = "created_at"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
     }
     func toDomain() throws -> GroupRide {
         guard let code = JoinCode(rawValue: joinCode),
               let rideStatus = GroupRide.Status(rawValue: status) else {
             throw GroupRideError.joinFailed
         }
-        return GroupRide(id: id, hostID: hostID, joinCode: code, status: rideStatus, createdAt: createdAt)
+        return GroupRide(id: id, hostID: hostID, joinCode: code, status: rideStatus, createdAt: createdAt,
+                         startedAt: startedAt, endedAt: endedAt)
     }
     func routeData() throws -> Data {
         try JSONEncoder().encode(route)
+    }
+}
+
+/// Wire row returned by ride_status. CodingKeys map snake_case JSON to camelCase
+/// properties, matching the GroupRideRow convention above.
+private nonisolated struct RideStatusRow: Decodable {
+    let hostID: UUID
+    let startedAt: Date?
+    let endedAt: Date?
+    enum CodingKeys: String, CodingKey {
+        case hostID = "host_id"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
     }
 }
 
