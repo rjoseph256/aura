@@ -111,7 +111,8 @@ Two choices worth their rationale:
 - **Raw `payload` as jsonb**, not shredded into columns. New MetricKit fields need no migration,
   and anything we failed to anticipate is still queryable over MCP.
 
-Server-side pruning past ~90 days via the existing `pg_cron`, since payloads accrue daily forever.
+Server-side pruning of rows older than **90 days** via the existing `pg_cron`, since payloads
+accrue daily forever.
 
 ## Consent and privacy
 
@@ -153,7 +154,11 @@ as "telemetry silently stopped working." Stopping the batch is correct for trans
 wrong for permanent ones.
 
 Retention is bounded by **both** age and count, so a signed-out opted-in rider cannot fill the
-container.
+container: **keep at most 50 staged files, and drop anything older than 30 days**, whichever binds
+first. At roughly one metric payload per day plus occasional diagnostics, 50 files is comfortably
+more than a normal backlog and still a hard ceiling on a device that never signs in. These are the
+values `MetricsRetention` is specified and tested against; changing them is a test change, not a
+judgement call at implementation time.
 
 ## Testing
 
