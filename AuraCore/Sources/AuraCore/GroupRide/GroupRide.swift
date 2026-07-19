@@ -7,9 +7,13 @@ public struct GroupRide: Equatable, Codable, Sendable {
     public let joinCode: JoinCode
     public let status: Status
     public let createdAt: Date
-    public init(id: UUID, hostID: UUID, joinCode: JoinCode, status: Status, createdAt: Date) {
+    public let startedAt: Date?
+    public let endedAt: Date?
+    public init(id: UUID, hostID: UUID, joinCode: JoinCode, status: Status, createdAt: Date,
+                startedAt: Date? = nil, endedAt: Date? = nil) {
         self.id = id; self.hostID = hostID; self.joinCode = joinCode
         self.status = status; self.createdAt = createdAt
+        self.startedAt = startedAt; self.endedAt = endedAt
     }
 }
 

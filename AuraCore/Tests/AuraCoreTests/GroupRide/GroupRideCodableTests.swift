@@ -28,4 +28,22 @@ struct GroupRideCodableTests {
         let back = try JSONDecoder().decode(RemoteTrackPoint.self, from: data)
         #expect(back == point)
     }
+
+    @Test func groupRideCarriesLifecycleTimestamps() throws {
+        let started = Date(timeIntervalSince1970: 100)
+        let ended = Date(timeIntervalSince1970: 200)
+        let ride = GroupRide(id: UUID(), hostID: UUID(), joinCode: JoinCode(rawValue: "ABCDEFGH")!,
+                             status: .ended, createdAt: Date(timeIntervalSince1970: 0),
+                             startedAt: started, endedAt: ended)
+        let round = try JSONDecoder().decode(GroupRide.self, from: JSONEncoder().encode(ride))
+        #expect(round.startedAt == started)
+        #expect(round.endedAt == ended)
+    }
+
+    @Test func groupRideDefaultsLifecycleToNil() {
+        let ride = GroupRide(id: UUID(), hostID: UUID(), joinCode: JoinCode(rawValue: "ABCDEFGH")!,
+                             status: .active, createdAt: Date(timeIntervalSince1970: 0))
+        #expect(ride.startedAt == nil)
+        #expect(ride.endedAt == nil)
+    }
 }
