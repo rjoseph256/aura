@@ -83,6 +83,10 @@ public final class RideSession: GroupLocationSink {
             await reseed()
         case .disconnected:
             isLive = false
+        case .rideStarted, .rideEnded:
+            // Lifecycle reconciliation lands in a later task (optimisticPhase/
+            // authoritativePhase wiring); this session doesn't track lifecycle phase yet.
+            break
         }
     }
 

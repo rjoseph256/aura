@@ -77,9 +77,26 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         guard let uid = store.lock.withLock({ store.currentUserID }), store.members[rideID]?.contains(uid) == true
         else { throw GroupRideError.notMember }
     }
+    public func startRide(rideID: UUID) async throws {
+        guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
+        guard let ride = store.rides[rideID], ride.hostID == uid else { throw GroupRideError.notHost }
+        guard ride.startedAt == nil, ride.endedAt == nil else { return }   // idempotent
+        store.rides[rideID] = GroupRide(id: ride.id, hostID: ride.hostID, joinCode: ride.joinCode,
+                                        status: ride.status, createdAt: ride.createdAt,
+                                        startedAt: Date(timeIntervalSince1970: 10), endedAt: ride.endedAt)
+    }
+
+    public func rideStatus(rideID: UUID) async throws -> RideLifecycleStatus {
+        guard let ride = store.rides[rideID] else { throw GroupRideError.joinFailed }
+        return RideLifecycleStatus(hostID: ride.hostID, startedAt: ride.startedAt, endedAt: ride.endedAt)
+    }
+
     public func endRide(rideID: UUID) async throws {
-        guard let uid = store.lock.withLock({ store.currentUserID }), store.rides[rideID]?.hostID == uid
+        guard let uid = store.lock.withLock({ store.currentUserID }), let ride = store.rides[rideID], ride.hostID == uid
         else { throw GroupRideError.notHost }
+        store.rides[rideID] = GroupRide(id: ride.id, hostID: ride.hostID, joinCode: ride.joinCode,
+                                        status: .ended, createdAt: ride.createdAt,
+                                        startedAt: ride.startedAt, endedAt: Date(timeIntervalSince1970: 20))
     }
     public func leaveRide(rideID: UUID) async throws {
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }

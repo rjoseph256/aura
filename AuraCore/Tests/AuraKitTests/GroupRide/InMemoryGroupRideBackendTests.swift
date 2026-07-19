@@ -44,4 +44,36 @@ struct InMemoryGroupRideBackendTests {
             _ = try await ninth.joinRide(code: ride.joinCode)
         }
     }
+
+    @Test func startRideSetsStartedAtReadableByRideStatus() async throws {
+        let backend = InMemoryGroupRideBackend()
+        try await backend.signIn(idToken: "t", nonce: "n", displayName: "Host")
+        let ride = try await backend.createRide(route: Data("{}".utf8))
+        var status = try await backend.rideStatus(rideID: ride.id)
+        #expect(status.startedAt == nil)
+        try await backend.startRide(rideID: ride.id)
+        status = try await backend.rideStatus(rideID: ride.id)
+        #expect(status.startedAt != nil)
+        #expect(status.endedAt == nil)
+        #expect(status.hostID == ride.hostID)
+    }
+
+    @Test func startRideByNonHostThrows() async throws {
+        let host = InMemoryGroupRideBackend()
+        try await host.signIn(idToken: "t", nonce: "n", displayName: "Host")
+        let ride = try await host.createRide(route: Data("{}".utf8))
+        let guest = InMemoryGroupRideBackend(sharing: host)
+        try await guest.signIn(idToken: "t2", nonce: "n", displayName: "Guest")
+        _ = try await guest.joinRide(code: ride.joinCode)
+        await #expect(throws: GroupRideError.notHost) { try await guest.startRide(rideID: ride.id) }
+    }
+
+    @Test func endRideSetsEndedAtInStatus() async throws {
+        let backend = InMemoryGroupRideBackend()
+        try await backend.signIn(idToken: "t", nonce: "n", displayName: "Host")
+        let ride = try await backend.createRide(route: Data("{}".utf8))
+        try await backend.endRide(rideID: ride.id)
+        let status = try await backend.rideStatus(rideID: ride.id)
+        #expect(status.endedAt != nil)
+    }
 }

@@ -65,6 +65,15 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
             params: ["p_ride_id": AnyJSON.string(rideID.uuidString),
                      "p_points": AnyJSON.array(payload)]).execute()
     }
+    // TODO(Task 9): replace these stubs with the real RPC-backed implementations
+    // (start_ride RPC + a durable ride_status read) once the lifecycle-sync work lands.
+    // Added here only to keep the app target compiling after Task 5 grew the protocol.
+    public nonisolated func startRide(rideID: UUID) async throws {
+        fatalError("SupabaseGroupRideBackend.startRide not yet implemented (Task 9)")
+    }
+    public nonisolated func rideStatus(rideID: UUID) async throws -> RideLifecycleStatus {
+        fatalError("SupabaseGroupRideBackend.rideStatus not yet implemented (Task 9)")
+    }
     public nonisolated func endRide(rideID: UUID) async throws {
         _ = try await client.rpc("end_ride", params: ["p_ride_id": rideID.uuidString]).execute()
     }
