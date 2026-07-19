@@ -55,6 +55,29 @@ final class AppRouter {
     }
     func cancelPendingGroupRide() { pendingSignIn = nil }
 
+    /// Hand off to a group-ride action FROM a transient entry screen that is itself a pushed
+    /// destination (the join-code screen), replacing that screen in the back stack rather than
+    /// stacking on top of it. This exists because the caller must not do `dismiss()` + `push()`:
+    /// those mutate the same NavigationStack path through two different mechanisms (SwiftUI's
+    /// dismiss binding and the router) in one runloop tick, and they reconcile into a pushed but
+    /// blank destination — the manual-join dead-end observed on device 2026-07-19. One path write
+    /// here cannot race itself. When signed in, the current top (the entry screen) is replaced by
+    /// `.groupRide` in a single assignment; back then returns home, not to the join screen. When
+    /// signed out, the entry screen is popped and the intent stashed, so sign-in resumes onto a
+    /// clean stack via `resumePendingGroupRide()`.
+    func replaceTopWithGroupRide(_ entry: GroupRideEntry) {
+        if checkSignedIn() {
+            if path.isEmpty {
+                path = [.groupRide(entry)]
+            } else {
+                path[path.count - 1] = .groupRide(entry)
+            }
+        } else if pendingSignIn == nil {
+            pendingSignIn = entry
+            pop()
+        }
+    }
+
     /// Most-recent-first, de-duped by name+coord, cap ~8. Persisted across launches.
     private(set) var recents: [Place] = []
 
