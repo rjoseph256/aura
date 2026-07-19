@@ -1,8 +1,24 @@
 # MetricKit adoption — design
 
 **Date:** 2026-07-19
-**Status:** approved (pending adversarial review)
-**Linear:** to be filed before implementation
+**Status:** ⛔ **PARKED — FAILED ADVERSARIAL REVIEW. DO NOT IMPLEMENT AS WRITTEN.**
+**Linear:** [ROH-76](https://linear.app/rohun/issue/ROH-76) (Backlog)
+
+> Three independent reviewers returned ~20 defects; two independently found the same three
+> blockers. The full findings list lives on ROH-76. Headlines: the error classification
+> **destroys data** (a 401 is a 4xx → "permanent" → drops the file *and* continues the batch,
+> wiping up to 50 staged payloads); retention **contradicts itself** (prune runs after a flush
+> that early-returns when signed out, so the one population it exists for never prunes); the
+> queue **can wedge permanently** on a single large file. Several assertions below are simply
+> false against this repo — the direct `INSERT` grant violates the project's SECURITY-DEFINER
+> write model, the FK to `auth.users` defeats `delete_account()`, `AuraApp.init()` cannot read
+> the consent flag, and `on conflict do nothing` is not reachable via PostgREST `.insert`.
+>
+> **Recommendation on revival: cut the Supabase upload.** Nearly every finding traces to that
+> single decision. Local staging plus on-demand container extraction serves a two-person user
+> base without the compliance surface.
+>
+> The document below is kept unedited as the reviewed artifact. Read the ROH-76 findings first.
 
 ## Why
 
