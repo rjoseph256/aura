@@ -303,7 +303,7 @@ grant execute on function public.ride_status(uuid) to authenticated;
 
 - [ ] **Step 2: Write the pgTAP test**
 
-Mirror the auth/partition harness of `supabase/tests/0005_lifecycle_test.sql` and `0015_member_left_test.sql`. Cover: `start_ride` sets `started_at` when host and unstarted; is idempotent (second call does NOT move the timestamp); rejects a non-host (`not host`); does NOT start an ended ride (`started_at` stays null after `end_ride`); emits exactly one `ride_started` broadcast on the real transition and none on the no-op repeat (create today's `realtime.messages_<date>` partition first); `ride_status` returns the row for a member, `unauthorized` for a non-member, and `host_id` reflects a transfer. Use the project's `pg_temp` SECURITY-DEFINER claims helper + `set_config('request.jwt.claims', …, true)` pattern from those files.
+Mirror the auth/partition harness of `supabase/tests/0005_lifecycle_test.sql` and `0015_member_left_test.sql`. Cover: `start_ride` sets `started_at` when host and unstarted; is idempotent (second call does NOT move the timestamp); rejects a non-host (`not host`); does NOT start an ended ride (`started_at` stays null after `end_ride`); emits exactly one `ride_started` broadcast on the real transition and none on the no-op repeat (create today's `realtime.messages_<date>` partition first); `ride_status` returns the row for a member, `unauthorized` for a non-member, and `host_id` reflects a transfer. The auth pattern in those files is NOT a named helper function — it is an inline `pg_temp` SECURITY DEFINER *flow* function (e.g. `pg_temp.life_flow`, `pg_temp.leave_flow`) that does `perform set_config('request.jwt.claims', '{"sub":…}', true)` before calling the RPC. Copy that shape; there is no shared claims-helper to import.
 
 - [ ] **Step 3: Validate via Supabase MCP**
 
@@ -323,6 +323,7 @@ git commit -m "feat(db): started_at column + start_ride + ride_status RPCs"
 **Files:**
 - Create: `supabase/migrations/0018_ride_ended_broadcast.sql`
 - Test: `supabase/tests/0018_ride_ended_broadcast_test.sql`
+- **Modify (existing test):** `supabase/tests/0015_member_left_test.sql` — its host-end `member_left` assertion is invalidated by this migration.
 
 **Interfaces:**
 - Produces (SQL): `end_ride`/`leave_ride` redefined — idempotent write (`where ended_at is null`), emit `ride_ended` (with the stored `ended_at`), and `end_ride` no longer emits the host's `member_left`.
@@ -330,21 +331,25 @@ git commit -m "feat(db): started_at column + start_ride + ride_status RPCs"
 - [ ] **Step 1: Write the migration**
 
 `create or replace` both functions, copying the bodies from `0015_member_left.sql` and changing only:
-- `end_ride`: guard the update with `... where id = p_ride_id and ended_at is null;`, then `select ended_at into v_ended from public.rides where id = p_ride_id;` and `perform realtime.send(jsonb_build_object('endedAt', v_ended), 'ride_ended', 'ride:' || p_ride_id::text, true);`. **Remove** the trailing `member_left` send.
+- `end_ride`: guard the update with `... where id = p_ride_id and ended_at is null;`, then `select ended_at into v_ended from public.rides where id = p_ride_id;` and `perform realtime.send(jsonb_build_object('endedAt', v_ended), 'ride_ended', 'ride:' || p_ride_id::text, true);`. **Remove** the trailing `member_left` send. The `ride_ended` broadcast is deliberately UNconditional (unlike `start_ride`'s guarded one): a retry after a lost response must re-notify, and `optimisticPhase` is forward-only so a duplicate `ride_ended` is a safe no-op.
 - `leave_ride`: keep the member-departure `member_left(v_uid)` send (a real departure). In the host-leaves-with-no-next-member branch (the one that sets `status='ended'`), guard it with `and ended_at is null` and, after that branch, additionally `perform realtime.send(jsonb_build_object('endedAt', now()), 'ride_ended', 'ride:' || p_ride_id::text, true);` so a host leaving an empty ride ends it for any straggler exactly like `end_ride`.
 
 Declare `v_ended timestamptz;` in `end_ride`.
 
-- [ ] **Step 2: Write the pgTAP test**
+- [ ] **Step 2: Amend the existing `0015` pgTAP test**
+
+`supabase/tests/0015_member_left_test.sql:46` currently asserts `cmp_ok((select end_rows …), '>=', 1, 'end_ride broadcasts member_left for the host')`. This migration removes that broadcast, so under CI `db-tests` (all pgTAP files run against the fully-migrated schema) that assertion would fail. Change it to assert `end_ride` emits **zero** host `member_left` and instead emits `ride_ended` (or drop the host-end `member_left` assertion and move the positive `ride_ended` assertion into the new `0018` test). Do NOT leave the old assertion in place.
+
+- [ ] **Step 3: Write the new pgTAP test (`0018`)**
 
 Cover: `end_ride` sets `status='ended'`/`ended_at`; a second `end_ride` does NOT move `ended_at`; `end_ride` emits `ride_ended` and does NOT emit a `member_left` for the host; `leave_ride` by a plain member still emits `member_left`; host-leaves-empty emits `ride_ended`. Create today's partition before broadcast assertions.
 
-- [ ] **Step 3: Validate via Supabase MCP** — apply + run the pgTAP body; all assertions pass.
+- [ ] **Step 4: Validate via Supabase MCP** — apply `0018`, then run BOTH the amended `0015` body and the new `0018` body; all assertions pass.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add supabase/migrations/0018_ride_ended_broadcast.sql supabase/tests/0018_ride_ended_broadcast_test.sql
+git add supabase/migrations/0018_ride_ended_broadcast.sql supabase/tests/0018_ride_ended_broadcast_test.sql supabase/tests/0015_member_left_test.sql
 git commit -m "feat(db): idempotent end + dedicated ride_ended broadcast"
 ```
 
@@ -477,6 +482,8 @@ git commit -m "feat(kit): startRide/rideStatus backend seams + rideStarted/rideE
 
 - [ ] **Step 1: Write failing tests**
 
+First define `LifecycleFixtures` in the same file. **Every builder returns the `InMemoryGroupRideBackend` it used**, because later tasks (7, 8) must reach `backend.store` to arm error spies and mutate the ride's host. A real `Route` is created and encoded so `join(code:)` decodes it (the fake `createRide` stores the bytes verbatim).
+
 ```swift
 import Foundation
 import Testing
@@ -484,28 +491,50 @@ import AuraCore
 @testable import AuraKit
 
 @MainActor
-struct GroupRideSessionLifecycleSyncTests {
-    private func makeGuestJoin(startedOnServer: Bool) async -> GroupRideSession {
-        let host = InMemoryGroupRideBackend()
-        try? await host.signIn(idToken: "h", nonce: "n", displayName: "Host")
-        let ride = try! await host.createRide(route: Data("{\"id\":\"\(UUID())\"}".utf8))
-        if startedOnServer { try? await host.startRide(rideID: ride.id) }
-        let guest = InMemoryGroupRideBackend(sharing: host)
-        try? await guest.signIn(idToken: "g", nonce: "n", displayName: "Guest")
-        // route bytes must decode to a Route; reuse the host's stored route via a real Route
-        return GroupRideSession(backend: guest, transport: InMemoryRideSessionTransport(),
-                                displayNameProvider: { "Guest" })
+enum LifecycleFixtures {
+    static func route() -> Route {
+        Route(id: UUID(), origin: Coordinate(latitude: 40.44, longitude: -79.99),
+              destination: Coordinate(latitude: 40.46, longitude: -79.95),
+              waypoints: [], geometry: [], profile: .fastest,
+              distanceMeters: 8_000, estimatedDurationSeconds: 1_800, elevationGainMeters: 60)
     }
 
+    /// Host session that has created a ride (phase `.lobby`). Returns (session, its backend).
+    static func createdHost(forceStartError: GroupRideError? = nil) async -> (GroupRideSession, InMemoryGroupRideBackend) {
+        let backend = InMemoryGroupRideBackend()
+        try? await backend.signIn(idToken: "h", nonce: "n", displayName: "Host")
+        backend.store.forceStartError = forceStartError
+        let session = GroupRideSession(backend: backend, transport: InMemoryRideSessionTransport(),
+                                       displayNameProvider: { "Host" })
+        await session.create(route: route())     // phase -> .lobby
+        return (session, backend)
+    }
+
+    /// A GUEST session (not yet joined) against a host's ride, optionally started server-side.
+    /// Returns (guest session, join code, shared backend). Caller then `await session.join(code:)`.
+    static func hostedRide(started: Bool) async -> (GroupRideSession, JoinCode, InMemoryGroupRideBackend) {
+        let host = InMemoryGroupRideBackend()
+        try? await host.signIn(idToken: "h", nonce: "n", displayName: "Host")
+        let ride = try! await host.createRide(route: JSONEncoder().encode(route()))
+        if started { try? await host.startRide(rideID: ride.id) }
+        let guest = InMemoryGroupRideBackend(sharing: host)   // shares the store
+        try? await guest.signIn(idToken: "g", nonce: "n", displayName: "Guest")
+        let session = GroupRideSession(backend: guest, transport: InMemoryRideSessionTransport(),
+                                       displayNameProvider: { "Guest" })
+        return (session, ride.joinCode, guest)
+    }
+}
+
+@MainActor
+struct GroupRideSessionLifecycleSyncTests {
     @Test func joinBeforeStartLandsInLobby() async {
-        // Arrange a real Route round-trip through the fake so join decodes it.
-        let (session, code) = await LifecycleFixtures.hostedRide(started: false)
+        let (session, code, _) = await LifecycleFixtures.hostedRide(started: false)
         await session.join(code: code)
         #expect(session.phase == .lobby)
     }
 
     @Test func joinAfterStartLandsInRiding() async {
-        let (session, code) = await LifecycleFixtures.hostedRide(started: true)
+        let (session, code, _) = await LifecycleFixtures.hostedRide(started: true)
         await session.join(code: code)
         #expect(session.phase == .riding)
     }
@@ -526,7 +555,7 @@ struct GroupRideSessionLifecycleSyncTests {
 }
 ```
 
-Add a `LifecycleFixtures` helper in the same file that builds a host session (via `create`) and a guest session (via a shared backend) with a real `Route` so `join` decodes, and supports a `forceStartError` (add a `forceStartError` spy to `InMemoryGroupRideBackend.Store` mirroring `forceCreateError`, and honor it in `startRide`).
+Add a `forceStartError: GroupRideError?` spy to `InMemoryGroupRideBackend.Store` (mirroring `forceCreateError` at `InMemoryGroupRideBackend.swift:12`) and honor it at the top of `startRide` (`if let forced = store.forceStartError { throw forced }`).
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -537,7 +566,7 @@ Expected: FAIL — `startRiding()` is not async / `startFailed` missing.
 
 In `GroupRideSession.swift`:
 - Add `public private(set) var startFailed = false` and `public private(set) var endFailed = false`.
-- Change `hostID` to `private var hostID: UUID?` (already var-able) and make `isHost` re-derivable.
+- Change `hostID` from `private var hostID: UUID?` (currently `GroupRideSession.swift:56`) to **`public private(set) var hostID: UUID?`** — Task 10's `GroupLobbyView` (app target, a different module) reads `session.hostID`, and a `private` member is invisible cross-module. `isHost` stays `public private(set)` and becomes re-derivable in Task 7.
 - Add the projection:
 
 ```swift
@@ -575,15 +604,29 @@ public func startRiding() async {
 
 (The lobby view owns retry by re-invoking `startRiding()`; a session-held backoff `Task` is added in Task 8 alongside the end retry, sharing one retry helper. For this task the Retry button re-calls `startRiding()`.)
 
-- [ ] **Step 4: Run to verify it passes**
+- [ ] **Step 4: Fix ALL call sites the async change broke (so every commit builds)**
 
-Run: `swift test --package-path AuraCore --filter GroupRideSessionLifecycleSyncTests`
-Expected: PASS.
+`startRiding()` is now `async`. `--filter` still compiles the whole test target, and the app target must compile too, so these existing sync call sites must gain `await`/`Task {}` NOW (not in a later task) or the AuraKitTests module and the `Aura` app target won't build:
 
-- [ ] **Step 5: Commit**
+- `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionTickTests.swift:23` → `await s.startRiding()`
+- `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionToastTests.swift:19` and `:72` → `await host.startRiding()`
+- `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionLiveBridgeTests.swift:39` → `await host.startRiding()`
+- `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionLifecycleTests.swift:31` → `await s.startRiding()` (all five are already inside `async` test funcs)
+- App target — minimal wraps (full UI comes in Tasks 10/12, but these must compile now):
+  - `Aura/Sources/GroupRide/GroupLobbyView.swift:174` → `Button("Start riding") { Task { await session.startRiding() } }`
+  - `Aura/Sources/GroupRide/GroupNavigateContainer.swift:90` (preview `.task`) → `await session.startRiding()`
+
+Also update the now-inverted contract test `GroupRideSessionLifecycleTests.joinEntersRidingAsMemberWithRoute` (`:42–50`): it asserts a member joining an **unstarted** ride lands in `.riding` (the old D3 rolling-join). That path now resolves to `.lobby`. Change the assertion to `#expect(guest.phase == .lobby)` and rename to `joinBeforeStartLandsInLobbyAsMember` (or seed `startRide` first if the test's intent was a started ride — pick the lobby assertion; the started case is already covered by `joinAfterStartLandsInRiding`).
+
+- [ ] **Step 5: Run to verify it passes**
+
+Run: `swift test --package-path AuraCore --filter GroupRideSession` (the broad filter — confirms no existing lifecycle/tick/toast/bridge test regressed).
+Expected: PASS. Then dispatch the `apple-platform-build-tools:builder` agent to build the `Aura` scheme — expected: compiles (the minimal call-site wraps keep it green).
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionLifecycleSyncTests.swift
+git add AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionLifecycleSyncTests.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionTickTests.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionToastTests.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionLiveBridgeTests.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionLifecycleTests.swift Aura/Sources/GroupRide/GroupLobbyView.swift Aura/Sources/GroupRide/GroupNavigateContainer.swift
 git commit -m "feat(kit): guest lobby on join + server-confirmed async start"
 ```
 
@@ -602,24 +645,43 @@ git commit -m "feat(kit): guest lobby on join + server-confirmed async start"
 
 ```swift
 @Test func rideStartedBroadcastMovesLobbyToRiding() async {
-    let (session, code) = await LifecycleFixtures.hostedRide(started: false)
+    let (session, code, _) = await LifecycleFixtures.hostedRide(started: false)
     await session.join(code: code)
     await session.beginLiveSession()
     await session.ingest(.rideStarted)
     #expect(session.phase == .riding)
 }
 
+// exercise the NEW event through the transport wire (not just direct ingest)
+@Test func rideStartedViaTransportMovesLobbyToRiding() async {
+    let (session, code, _) = await LifecycleFixtures.hostedRide(started: false)
+    let transport = session.testTransport   // exposed for the test (see below)
+    await session.join(code: code)
+    await session.beginLiveSession()
+    transport.emit(.rideStarted)
+    // let the session's owned event loop drain
+    try? await Task.sleep(nanoseconds: 50_000_000)
+    #expect(session.phase == .riding)
+}
+
 @Test func rideEndedBroadcastTearsDown() async {
-    let (session, code) = await LifecycleFixtures.hostedRide(started: true)
+    let (session, code, _) = await LifecycleFixtures.hostedRide(started: true)
     await session.join(code: code)
     await session.beginLiveSession()
     await session.ingest(.rideEnded)
     #expect(session.phase == .ended)
 }
 
+@Test func rideEndedToastsHostEndedForGuest() async {
+    let (session, code, _) = await LifecycleFixtures.hostedRide(started: true)
+    await session.join(code: code)                 // guest, not host
+    await session.beginLiveSession()
+    await session.ingest(.rideEnded)
+    #expect(session.toasts.contains(.hostEnded))
+}
+
 @Test func connectedReconcileCorrectsPhantomStart() async {
-    // In lobby, an optimistic start fired, but the server never recorded it (phantom).
-    let (session, code) = await LifecycleFixtures.hostedRide(started: false)
+    let (session, code, _) = await LifecycleFixtures.hostedRide(started: false)
     await session.join(code: code)
     await session.beginLiveSession()
     await session.ingest(.rideStarted)            // optimistic → riding
@@ -629,16 +691,18 @@ git commit -m "feat(kit): guest lobby on join + server-confirmed async start"
 }
 
 @Test func connectedReconcileRederivesPromotedHost() async {
-    // Guest becomes host server-side (host transferred); connected read flips isHost.
-    let (session, code, guestID) = await LifecycleFixtures.hostedRideWithGuestID(started: false)
+    let (session, code, backend) = await LifecycleFixtures.hostedRide(started: false)
     await session.join(code: code)
-    await LifecycleFixtures.promoteHost(to: guestID)   // mutate the shared fake's ride host
+    #expect(session.isHost == false)
+    LifecycleFixtures.promoteHost(backend, forCode: code, to: session.selfUserID!)
     await session.ingest(.connected)
     #expect(session.isHost == true)
 }
 ```
 
-Extend `LifecycleFixtures` with `hostedRideWithGuestID` and `promoteHost(to:)` (the latter replaces the stored ride's `hostID` in the shared `InMemoryGroupRideBackend.store`).
+Notes for these tests:
+- `session.testTransport`: to reach `emit`, either add an internal `@testable`-visible accessor on `GroupRideSession` returning its `transport as? InMemoryRideSessionTransport`, OR (simpler) have `hostedRide` build the transport, keep a reference, and return it too. Prefer the latter — extend `hostedRide`'s return to `(GroupRideSession, JoinCode, InMemoryGroupRideBackend, InMemoryRideSessionTransport)` and update the earlier Task 6/Task 7 destructures accordingly, or add an overload. Keep whichever is least churny; the point is the transport-emit path is exercised once.
+- `LifecycleFixtures.promoteHost(_ backend:forCode:to:)` looks up the ride by join code in `backend.store.codes`/`store.rides` and replaces its `hostID` with the given id (rebuild the `GroupRide` value, since its fields are `let`). This is what makes a "host transferred to this guest" server state.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -657,11 +721,14 @@ case .rideStarted:
         applyLifecyclePhase(optimisticPhase(.started, current: current))
     }
 case .rideEnded:
+    if !isHost { toasts.append(.hostEnded) }   // preserve the guest-facing "host ended" toast
     phase = .ended
     teardownLive(session)
 case .connected:
     await reconcileFromStatus()
 ```
+
+The `.hostEnded` toast MUST be kept — the removed `member_left == hostID` arm produced it (`GroupRideSession.swift:178`), and `GroupToastHost` still renders `.hostEnded` (`GroupToastHost.swift:109`). Dropping it would silently lose the "The host ended the group ride" notification for a guest.
 
 Add the helpers:
 
@@ -687,19 +754,25 @@ private func applyLifecyclePhase(_ next: RideLifecyclePhase) {
 }
 ```
 
-Make `isHost` settable: change `public private(set) var isHost` to remain `private(set)` (only the session writes it — fine). Keep `hostID` as `private var`.
+`isHost` stays `public private(set) var` (only the session writes it, now inside `reconcileFromStatus`). `hostID` is `public private(set) var` (promoted in Task 6, written here).
 
 Note: `.connected` still forwards to `session.ingest(.connected)` (inner reseeds positions) via the existing trailing call — do not remove that.
 
-- [ ] **Step 4: Run to verify it passes**
+- [ ] **Step 4: Rewrite the two existing host-left tests (their contract is inverted by removing the `member_left==host` arm)**
 
-Run: `swift test --package-path AuraCore --filter GroupRideSessionLifecycleSyncTests`
+These assert the OLD heuristic and will fail from this task onward — rewrite them to drive `.rideEnded`:
+- `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionToastTests.swift:60–86` (`hostLeftSignalEmitsHostEndedAndDissolves`): change the driver from `await guest.ingest(.memberLeft(hostID))` to `await guest.ingest(.rideEnded)`. Keep the `#expect(guest.toasts.contains(.hostEnded))` and `#expect(guest.phase == .ended)` assertions — they now pass via the new `.rideEnded` arm.
+- `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionLiveBridgeTests.swift:58–82` (`liveHostLeftSignalDissolvesGuest`): change `transport.emit(.memberLeft(hostID))` to `transport.emit(.rideEnded)`; keep the `.hostEnded`/`.ended` assertions.
+
+- [ ] **Step 5: Run to verify it passes**
+
+Run: `swift test --package-path AuraCore --filter GroupRideSession` (broad — the two rewritten tests plus the new ones).
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionLifecycleSyncTests.swift
+git add AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionLifecycleSyncTests.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionToastTests.swift AuraCore/Tests/AuraKitTests/GroupRide/GroupRideSessionLiveBridgeTests.swift
 git commit -m "feat(kit): live lifecycle reconcile + promoted-host re-derivation"
 ```
 
@@ -716,13 +789,13 @@ git commit -m "feat(kit): live lifecycle reconcile + promoted-host re-derivation
 
 - [ ] **Step 1: Add failing tests**
 
-Add a `forceEndError`/`forceLeaveError` spy to `InMemoryGroupRideBackend.Store` and honor it (throw the forced error once, then clear it so a retry succeeds). Then:
+Add a one-shot `forceEndError: GroupRideError?` spy to `InMemoryGroupRideBackend.Store`, honored at the top of `endRide` (throw and clear it: `if let e = store.forceEndError { store.forceEndError = nil; throw e }`) so the retry succeeds. `createdHost()` already returns the backend, so the test arms the spy directly on it. Then:
 
 ```swift
 @Test func endTransientFailureKeepsRidingThenRetrySucceeds() async {
-    let (session, _) = await LifecycleFixtures.createdHost()
+    let (session, backend) = await LifecycleFixtures.createdHost()
     await session.startRiding()                       // .riding
-    await LifecycleFixtures.forceNextEndError(session, .joinFailed)  // one transient failure
+    backend.store.forceEndError = .joinFailed         // one transient failure, then clears
     await session.end()
     #expect(session.phase == .riding)                 // chrome retained, not faked ended
     #expect(session.endFailed == true)
@@ -731,14 +804,16 @@ Add a `forceEndError`/`forceLeaveError` spy to `InMemoryGroupRideBackend.Store` 
 }
 
 @Test func endAlreadyGoneCountsAsSuccess() async {
-    let (session, _) = await LifecycleFixtures.createdHost()
+    let (session, backend) = await LifecycleFixtures.createdHost()
     await session.startRiding()
-    await LifecycleFixtures.forceNextEndError(session, .notHost)   // "already ended"
+    backend.store.forceEndError = .notHost            // "already ended / not host anymore"
     await session.end()
     #expect(session.phase == .ended)                  // notHost/notMember ⇒ treat as done
     #expect(session.endFailed == false)
 }
 ```
+
+(`store` is `nonisolated let` on `InMemoryGroupRideBackend`, so the test sets `backend.store.forceEndError` directly, mirroring the existing `forceCreateError` usage in `InMemoryGroupRideBackendTests`.)
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -892,7 +967,20 @@ case .ended:
     else { endedLobbySurface }                    // ended from lobby/join: a real screen
 ```
 
-where `ridingContainer` is the existing `GroupNavigateContainer(session:).task { didEnterRiding = true; await session.beginLiveSession() }` and `endedLobbySurface` reuses `dismissMessage(title: "This ride has ended.", systemImage: "flag.checkered")` (its Back already calls `router.pop()`).
+where `ridingContainer` **preserves the existing `session.route != nil` guard** (`GroupRideFlowView.swift:59–70`) — do not drop it:
+
+```swift
+@ViewBuilder private var ridingContainer: some View {
+    if session.route != nil {
+        GroupNavigateContainer(session: session)
+            .task { didEnterRiding = true; await session.beginLiveSession() }
+    } else {
+        dismissMessage(title: "Couldn't load this ride's route.", systemImage: "exclamationmark.triangle")
+    }
+}
+```
+
+and `endedLobbySurface` reuses `dismissMessage(title: "This ride has ended.", systemImage: "flag.checkered")` (its Back already calls `router.pop()`).
 
 - Guard `beginLiveSession` re-entry: it already latches on `didBeginLive`, and the ended-from-lobby branch no longer mounts the container, so `.task` won't re-fire it. Additionally, in `GroupRideSession.beginLiveSession()` add an early `guard phase != .ended else { return }` (belt-and-suspenders — a one-line AuraKit change; add a quick AuraKit test `beginLiveSessionNoOpWhenEnded`).
 - Foreground reconcile: add to the root of `content`/the view: `.onChange(of: scenePhase) { _, new in if new == .active { Task { await session.reconcileFromStatus() } } }`.
@@ -982,4 +1070,16 @@ Not plan tasks — the on-device tail once a second device is back: synchronized
 
 **Placeholder scan:** DB pgTAP tests (T3/T4) describe assertions rather than pasting full SQL bodies — this is deliberate: they mirror the exact harness in `supabase/tests/0005`/`0015`, which the implementer copies; the migration SQL itself is complete. All Swift steps carry complete code.
 
-**Type consistency:** `RideLifecycleStatus(hostID:startedAt:endedAt:)`, `authoritativePhase(_:current:)`, `optimisticPhase(_:current:)`, `startRide(rideID:)`, `rideStatus(rideID:)->RideLifecycleStatus`, `TransportEvent.rideStarted/.rideEnded`, `startRiding() async`, `retryEndIfNeeded()`, `reconcileFromStatus()`, `startFailed`/`endFailed` — used consistently T1→T13.
+**Type consistency:** `RideLifecycleStatus(hostID:startedAt:endedAt:)`, `authoritativePhase(_:current:)`, `optimisticPhase(_:current:)`, `startRide(rideID:)`, `rideStatus(rideID:)->RideLifecycleStatus`, `TransportEvent.rideStarted/.rideEnded`, `startRiding() async`, `retryEndIfNeeded()`, `reconcileFromStatus()`, `startFailed`/`endFailed`, `hostID` (`public private(set)`) — used consistently T1→T13.
+
+## Adversarial plan-review reconciliation (v1 → v2)
+
+Two independent reviewers (TDD/interfaces, codebase-fidelity), refuting mandate. Confirmed findings folded in:
+- **Async `startRiding()` broke 5 existing AuraKit tests + 2 app-target call sites** (both reviewers) → Task 6 Step 4 now `await`s all five test sites and adds minimal `Task{}`/`await` wraps at `GroupLobbyView:174` + `GroupNavigateContainer:90`, so every commit builds.
+- **`hostID` was `private`, unreadable by Task 10's cross-module `GroupLobbyView`** → Task 6 Step 3 promotes it to `public private(set)`.
+- **Three existing tests encode inverted contracts** (`joinEntersRidingAsMemberWithRoute` → lobby; the two `member_left==host` host-end tests → `.rideEnded`) → rewritten in Task 6 Step 4 and Task 7 Step 4.
+- **Removing `end_ride`'s host `member_left` breaks the existing `0015` pgTAP assertion** → Task 4 Step 2 amends `0015_member_left_test.sql`.
+- **`.hostEnded` toast was silently dropped** → Task 7 Step 3's `.rideEnded` arm re-appends it for a non-host.
+- **`LifecycleFixtures`/`forceNextEndError`/`promoteHost` were unreachable** → fixtures now return the `InMemoryGroupRideBackend`; the spy is set directly on `backend.store`.
+- **Minors:** `ride_ended` unconditional-broadcast documented as deliberate (Task 4); a transport-`emit` path test added (Task 7); the `ridingContainer` `route != nil` guard preserved (Task 11); the `pg_temp` "flow function" harness phrasing corrected (Task 3); `rideStatus`/`startRide` placed on `GroupRideBackend` (spec §2 updated to match).
+- **Verified sound by both reviewers:** end call-site gating genuinely prevents silent-finish; every live reconcile passes the real phase (only `join` uses the documented `.lobby` seed); already-gone-is-success resolves the leave-retry-strand. One residual risk flagged, not fixable in-plan: `SupabaseRideSessionTransport`'s `broadcastStream(event:)` wiring is annotated UNVERIFIED against supabase-swift v2 — gated by the Task 9 app build.
