@@ -19,7 +19,11 @@ public enum RideLifecyclePhase: Equatable, Sendable { case lobby, riding, ended 
 public enum RideLifecycleEvent: Equatable, Sendable { case started, ended }
 
 private func rank(_ p: RideLifecyclePhase) -> Int {
-    switch p { case .lobby: return 0; case .riding: return 1; case .ended: return 2 }
+    switch p {
+    case .lobby: return 0
+    case .riding: return 1
+    case .ended: return 2
+    }
 }
 
 private func naturalPhase(_ s: RideLifecycleStatus) -> RideLifecyclePhase {

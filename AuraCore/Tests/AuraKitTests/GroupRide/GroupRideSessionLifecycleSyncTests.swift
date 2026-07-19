@@ -23,9 +23,11 @@ enum LifecycleFixtures {
         return (session, backend)
     }
 
-    /// A GUEST session (not yet joined) against a host's ride, optionally started server-side.
-    /// Returns (guest session, join code, shared backend, its transport — exposed so tests can
-    /// `transport.emit(_:)` onto the live wire). Caller then `await session.join(code:)`.
+    // A GUEST session (not yet joined) against a host's ride, optionally started server-side.
+    // Returns (guest session, join code, shared backend, its transport — exposed so tests can
+    // `transport.emit(_:)` onto the live wire). Caller then `await session.join(code:)`.
+    // The four-member tuple is a deliberate test-fixture bundle; all members are used by callers.
+    // swiftlint:disable:next large_tuple
     static func hostedRide(started: Bool) async -> (GroupRideSession, JoinCode, InMemoryGroupRideBackend, InMemoryRideSessionTransport) {
         let host = InMemoryGroupRideBackend()
         try? await host.signIn(idToken: "h", nonce: "n", displayName: "Host")
