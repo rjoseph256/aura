@@ -155,6 +155,10 @@ private final class SupabaseRideLiveSubscription: RideLiveSubscription {
         // UNVERIFIED: broadcastStream(event:) return element type ([String: AnyJSON]).
         let positions = channel.broadcastStream(event: "position")
         let lefts = channel.broadcastStream(event: "member_left")
+        // Task 5/9: optimistic lifecycle broadcasts. No body decode — the event name
+        // alone is the signal (see RideLifecycleEvent / TransportEvent.rideStarted/.rideEnded).
+        let started = channel.broadcastStream(event: "ride_started")
+        let ended = channel.broadcastStream(event: "ride_ended")
 
         let positionTask = Task {
             for await message in positions {
@@ -172,15 +176,29 @@ private final class SupabaseRideLiveSubscription: RideLiveSubscription {
                 }
             }
         }
+        let startedTask = Task {
+            for await _ in started {
+                guard !Task.isCancelled else { break }
+                cont2?.yield(.rideStarted)
+            }
+        }
+        let endedTask = Task {
+            for await _ in ended {
+                guard !Task.isCancelled else { break }
+                cont2?.yield(.rideEnded)
+            }
+        }
 
         // UNVERIFIED: subscribe() name and whether it throws.
         await channel.subscribe()
         cont2?.yield(.connected)
 
-        // Wait until both broadcast streams drain (channel closed/cancelled).
+        // Wait until all broadcast streams drain (channel closed/cancelled).
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await positionTask.value }
             group.addTask { await leftTask.value }
+            group.addTask { await startedTask.value }
+            group.addTask { await endedTask.value }
         }
     }
 

@@ -65,14 +65,13 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
             params: ["p_ride_id": AnyJSON.string(rideID.uuidString),
                      "p_points": AnyJSON.array(payload)]).execute()
     }
-    // TODO(Task 9): replace these stubs with the real RPC-backed implementations
-    // (start_ride RPC + a durable ride_status read) once the lifecycle-sync work lands.
-    // Added here only to keep the app target compiling after Task 5 grew the protocol.
     public nonisolated func startRide(rideID: UUID) async throws {
-        fatalError("SupabaseGroupRideBackend.startRide not yet implemented (Task 9)")
+        _ = try await client.rpc("start_ride", params: ["p_ride_id": rideID.uuidString]).execute()
     }
     public nonisolated func rideStatus(rideID: UUID) async throws -> RideLifecycleStatus {
-        fatalError("SupabaseGroupRideBackend.rideStatus not yet implemented (Task 9)")
+        let row: RideStatusRow = try await client
+            .rpc("ride_status", params: ["p_ride_id": rideID.uuidString]).single().execute().value
+        return RideLifecycleStatus(hostID: row.hostID, startedAt: row.startedAt, endedAt: row.endedAt)
     }
     public nonisolated func endRide(rideID: UUID) async throws {
         _ = try await client.rpc("end_ride", params: ["p_ride_id": rideID.uuidString]).execute()
@@ -120,21 +119,39 @@ private nonisolated struct GroupRideRow: Decodable {
     let status: String
     let createdAt: Date
     let route: AnyJSON
+    let startedAt: Date?
+    let endedAt: Date?
     enum CodingKeys: String, CodingKey {
         case id, status, route
         case hostID = "host_id"
         case joinCode = "join_code"
         case createdAt = "created_at"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
     }
     func toDomain() throws -> GroupRide {
         guard let code = JoinCode(rawValue: joinCode),
               let rideStatus = GroupRide.Status(rawValue: status) else {
             throw GroupRideError.joinFailed
         }
-        return GroupRide(id: id, hostID: hostID, joinCode: code, status: rideStatus, createdAt: createdAt)
+        return GroupRide(id: id, hostID: hostID, joinCode: code, status: rideStatus, createdAt: createdAt,
+                         startedAt: startedAt, endedAt: endedAt)
     }
     func routeData() throws -> Data {
         try JSONEncoder().encode(route)
+    }
+}
+
+/// Wire row returned by ride_status. CodingKeys map snake_case JSON to camelCase
+/// properties, matching the GroupRideRow convention above.
+private nonisolated struct RideStatusRow: Decodable {
+    let hostID: UUID
+    let startedAt: Date?
+    let endedAt: Date?
+    enum CodingKeys: String, CodingKey {
+        case hostID = "host_id"
+        case startedAt = "started_at"
+        case endedAt = "ended_at"
     }
 }
 
