@@ -74,10 +74,25 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
         return RideLifecycleStatus(hostID: row.hostID, startedAt: row.startedAt, endedAt: row.endedAt)
     }
     public nonisolated func endRide(rideID: UUID) async throws {
-        _ = try await client.rpc("end_ride", params: ["p_ride_id": rideID.uuidString]).execute()
+        // Map the server's `not host` raise to the typed error so GroupRideSession's
+        // already-gone-is-success retry branch fires in production (ROH-68). A lost-response
+        // retry, a host transfer, or a swept ride all surface as `not host` here — all mean
+        // "already gone", not a transient failure to keep retrying.
+        do {
+            _ = try await client.rpc("end_ride", params: ["p_ride_id": rideID.uuidString]).execute()
+        } catch let error as PostgrestError where error.message.contains("not host") {
+            throw GroupRideError.notHost
+        }
     }
     public nonisolated func leaveRide(rideID: UUID) async throws {
-        _ = try await client.rpc("leave_ride", params: ["p_ride_id": rideID.uuidString]).execute()
+        // Map the server's `not a member` raise to the typed error so the already-gone-is-success
+        // retry branch fires in production (ROH-68): a lost-response retry after the membership
+        // row is already deleted raises `not a member`, which means "already left", not a failure.
+        do {
+            _ = try await client.rpc("leave_ride", params: ["p_ride_id": rideID.uuidString]).execute()
+        } catch let error as PostgrestError where error.message.contains("not a member") {
+            throw GroupRideError.notMember
+        }
     }
     public nonisolated func deleteAccount() async throws {
         _ = try await client.rpc("delete_account").execute()
