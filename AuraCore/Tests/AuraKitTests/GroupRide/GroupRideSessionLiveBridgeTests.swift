@@ -56,15 +56,14 @@ struct GroupRideSessionLiveBridgeTests {
     }
 
     @Test func liveHostLeftSignalDissolvesGuest() async throws {
-        // Guest session; the host-left wire signal (member_left carrying the host id, D9)
-        // arriving on the LIVE stream must drive .hostEnded + phase == .ended.
+        // Guest session; a `.rideEnded` broadcast arriving on the LIVE stream must drive
+        // .hostEnded + phase == .ended.
         let transport = InMemoryRideSessionTransport()
         let hostBackend = InMemoryGroupRideBackend()
         try await hostBackend.signIn(idToken: "t", nonce: "n", displayName: "Mike")
         let host = GroupRideSession(backend: hostBackend, transport: InMemoryRideSessionTransport(),
                                     displayNameProvider: { "Mike" })
         await host.create(route: route())
-        let hostID = try await hostBackend.currentUserID()
 
         let guestBackend = InMemoryGroupRideBackend(sharing: hostBackend)
         try await guestBackend.signIn(idToken: "t2", nonce: "n2", displayName: "Sara")
@@ -74,7 +73,7 @@ struct GroupRideSessionLiveBridgeTests {
 
         await guest.beginLiveSession()
 
-        transport.emit(.memberLeft(hostID))
+        transport.emit(.rideEnded)
         await settle()
 
         #expect(guest.toasts.contains(.hostEnded))

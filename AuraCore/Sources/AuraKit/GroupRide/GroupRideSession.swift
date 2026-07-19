@@ -9,10 +9,10 @@ public enum GroupToastEvent: Equatable, Sendable {
 }
 
 /// The group-ride session owner: create/join lifecycle, phase, the live tick layer,
-/// and membership toasts (nameMap resolution + joined/left notifications). On a
-/// member's session, a `.memberLeft` whose id matches the ride's host is recognized
-/// as the host ending the ride (D9/D12: the host has no graceful-leave action, so
-/// this is the wire's only signal) — it toasts `.hostEnded` and dissolves the live layer.
+/// and membership toasts (nameMap resolution + joined/left notifications). A
+/// `.rideEnded` broadcast (or an authoritative `.connected` reconcile that reads
+/// `endedAt`) is how a member's session learns the ride ended — it toasts
+/// `.hostEnded` for a guest and dissolves the live layer.
 @MainActor
 @Observable
 public final class GroupRideSession {
@@ -194,9 +194,10 @@ public final class GroupRideSession {
     /// then snapshots peers/isLive. A `.position` from an unknown peer triggers a throttled
     /// roster refresh and (if a name resolves) a `.joined` toast; a motion-state change on an
     /// already-known peer is deliberately silent (D11). `.memberLeft` toasts `.left` for a
-    /// normal member — but when the departing id is the ride's host (D9/D12: the host has no
-    /// graceful-leave action, so this is the only signal that the host ended the ride), it
-    /// instead toasts `.hostEnded`, moves to `.ended`, and tears down the live layer.
+    /// normal member. `.rideStarted`/`.rideEnded` are optimistic lifecycle broadcasts —
+    /// `.rideEnded` toasts `.hostEnded` for a guest, moves to `.ended`, and tears down the
+    /// live layer. `.connected` triggers an authoritative `reconcileFromStatus()` re-read
+    /// (corrects a phantom optimistic transition and re-derives host identity).
     public func ingest(_ event: TransportEvent) async {
         guard let session = rideSession else { return }
         switch event {
@@ -205,18 +206,44 @@ public final class GroupRideSession {
             if let name = nameMap[payload.userID] {
                 toasts.append(.joined(name))
             }
-        case .memberLeft(let id) where id == hostID:
-            toasts.append(.hostEnded)
-            phase = .ended
-            teardownLive(session)
         case .memberLeft(let id):
             toasts.append(.left(nameMap[id] ?? "Rider"))
+        case .rideStarted:
+            if let current = lifecyclePhase {
+                applyLifecyclePhase(optimisticPhase(.started, current: current))
+            }
+        case .rideEnded:
+            if !isHost { toasts.append(.hostEnded) }   // preserve the guest-facing "host ended" toast
+            phase = .ended
+            teardownLive(session)
+        case .connected:
+            await reconcileFromStatus()
         default:
             break
         }
         await session.ingest(event)
         peers = session.peers
         isLive = session.isLive
+    }
+
+    /// Authoritative re-read used on connect and on foreground. Corrects a phantom optimistic
+    /// transition and re-derives host identity (so a promoted host gains controls).
+    public func reconcileFromStatus() async {
+        guard let rideID, let current = lifecyclePhase,
+              let status = try? await backend.rideStatus(rideID: rideID) else { return }
+        hostID = status.hostID
+        if let selfUserID { isHost = (status.hostID == selfUserID) }
+        applyLifecyclePhase(authoritativePhase(status, current: current))
+    }
+
+    private func applyLifecyclePhase(_ next: RideLifecyclePhase) {
+        switch next {
+        case .lobby:  phase = .lobby
+        case .riding: phase = .riding
+        case .ended:
+            phase = .ended
+            teardownLive(rideSession)
+        }
     }
 
     /// Merges the backend roster's display names into `nameMap` and returns the fetched

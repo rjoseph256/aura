@@ -24,30 +24,41 @@ enum LifecycleFixtures {
     }
 
     /// A GUEST session (not yet joined) against a host's ride, optionally started server-side.
-    /// Returns (guest session, join code, shared backend). Caller then `await session.join(code:)`.
-    static func hostedRide(started: Bool) async -> (GroupRideSession, JoinCode, InMemoryGroupRideBackend) {
+    /// Returns (guest session, join code, shared backend, its transport — exposed so tests can
+    /// `transport.emit(_:)` onto the live wire). Caller then `await session.join(code:)`.
+    static func hostedRide(started: Bool) async -> (GroupRideSession, JoinCode, InMemoryGroupRideBackend, InMemoryRideSessionTransport) {
         let host = InMemoryGroupRideBackend()
         try? await host.signIn(idToken: "h", nonce: "n", displayName: "Host")
         let ride = try! await host.createRide(route: JSONEncoder().encode(route()))
         if started { try? await host.startRide(rideID: ride.id) }
         let guest = InMemoryGroupRideBackend(sharing: host)   // shares the store
         try? await guest.signIn(idToken: "g", nonce: "n", displayName: "Guest")
-        let session = GroupRideSession(backend: guest, transport: InMemoryRideSessionTransport(),
+        let transport = InMemoryRideSessionTransport()
+        let session = GroupRideSession(backend: guest, transport: transport,
                                        displayNameProvider: { "Guest" })
-        return (session, ride.joinCode, guest)
+        return (session, ride.joinCode, guest, transport)
+    }
+
+    /// Rewrites the ride's `hostID` server-side (simulates a host transfer/promotion),
+    /// looked up by join code. Rebuilds the value since `GroupRide`'s fields are `let`.
+    static func promoteHost(_ backend: InMemoryGroupRideBackend, forCode code: JoinCode, to newHostID: UUID) {
+        guard let rideID = backend.store.codes[code.rawValue], let ride = backend.store.rides[rideID] else { return }
+        backend.store.rides[rideID] = GroupRide(id: ride.id, hostID: newHostID, joinCode: ride.joinCode,
+                                                 status: ride.status, createdAt: ride.createdAt,
+                                                 startedAt: ride.startedAt, endedAt: ride.endedAt)
     }
 }
 
 @MainActor
 struct GroupRideSessionLifecycleSyncTests {
     @Test func joinBeforeStartLandsInLobby() async {
-        let (session, code, _) = await LifecycleFixtures.hostedRide(started: false)
+        let (session, code, _, _) = await LifecycleFixtures.hostedRide(started: false)
         await session.join(code: code)
         #expect(session.phase == .lobby)
     }
 
     @Test func joinAfterStartLandsInRiding() async {
-        let (session, code, _) = await LifecycleFixtures.hostedRide(started: true)
+        let (session, code, _, _) = await LifecycleFixtures.hostedRide(started: true)
         await session.join(code: code)
         #expect(session.phase == .riding)
     }
@@ -64,5 +75,59 @@ struct GroupRideSessionLifecycleSyncTests {
         await session.startRiding()
         #expect(session.phase == .lobby)
         #expect(session.startFailed == true)
+    }
+
+    @Test func rideStartedBroadcastMovesLobbyToRiding() async {
+        let (session, code, _, _) = await LifecycleFixtures.hostedRide(started: false)
+        await session.join(code: code)
+        await session.beginLiveSession()
+        await session.ingest(.rideStarted)
+        #expect(session.phase == .riding)
+    }
+
+    // exercise the NEW event through the transport wire (not just direct ingest)
+    @Test func rideStartedViaTransportMovesLobbyToRiding() async {
+        let (session, code, _, transport) = await LifecycleFixtures.hostedRide(started: false)
+        await session.join(code: code)
+        await session.beginLiveSession()
+        transport.emit(.rideStarted)
+        // let the session's owned event loop drain
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(session.phase == .riding)
+    }
+
+    @Test func rideEndedBroadcastTearsDown() async {
+        let (session, code, _, _) = await LifecycleFixtures.hostedRide(started: true)
+        await session.join(code: code)
+        await session.beginLiveSession()
+        await session.ingest(.rideEnded)
+        #expect(session.phase == .ended)
+    }
+
+    @Test func rideEndedToastsHostEndedForGuest() async {
+        let (session, code, _, _) = await LifecycleFixtures.hostedRide(started: true)
+        await session.join(code: code)                 // guest, not host
+        await session.beginLiveSession()
+        await session.ingest(.rideEnded)
+        #expect(session.toasts.contains(.hostEnded))
+    }
+
+    @Test func connectedReconcileCorrectsPhantomStart() async {
+        let (session, code, _, _) = await LifecycleFixtures.hostedRide(started: false)
+        await session.join(code: code)
+        await session.beginLiveSession()
+        await session.ingest(.rideStarted)            // optimistic → riding
+        #expect(session.phase == .riding)
+        await session.ingest(.connected)              // authoritative read: started_at still nil
+        #expect(session.phase == .lobby)              // corrected back
+    }
+
+    @Test func connectedReconcileRederivesPromotedHost() async {
+        let (session, code, backend, _) = await LifecycleFixtures.hostedRide(started: false)
+        await session.join(code: code)
+        #expect(session.isHost == false)
+        LifecycleFixtures.promoteHost(backend, forCode: code, to: session.selfUserID!)
+        await session.ingest(.connected)
+        #expect(session.isHost == true)
     }
 }
