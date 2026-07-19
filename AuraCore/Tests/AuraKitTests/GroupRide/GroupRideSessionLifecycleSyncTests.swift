@@ -150,4 +150,23 @@ struct GroupRideSessionLifecycleSyncTests {
         #expect(session.phase == .ended)                  // notHost/notMember ⇒ treat as done
         #expect(session.endFailed == false)
     }
+
+    // Belt-and-suspenders: the ended-from-lobby UI branch no longer mounts a container
+    // that re-invokes `beginLiveSession()`, but the session itself must refuse to go
+    // live once `.ended` regardless of caller. Drives a guest to `.ended` WITHOUT ever
+    // calling `beginLiveSession()` (so no prior latch/subscription exists), calls it,
+    // then proves no live subscription got established: a `.connected` event emitted
+    // on the wire afterward never reaches the session (isLive stays false). Without the
+    // guard, `beginLiveSession()` would subscribe fresh and `isLive` would flip true.
+    @Test func beginLiveSessionNoOpWhenEnded() async {
+        let (session, code, _, transport) = await LifecycleFixtures.hostedRide(started: true)
+        await session.join(code: code)
+        await session.ingest(.rideEnded)
+        #expect(session.phase == .ended)
+
+        await session.beginLiveSession()
+        transport.emit(.connected)
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(session.isLive == false)
+    }
 }

@@ -185,6 +185,7 @@ public final class GroupRideSession {
     /// Idempotent (the lobby and the riding view both call it); tests may still drive
     /// `tick`/`ingest` directly for the deterministic seams.
     public func beginLiveSession() async {
+        guard phase != .ended else { return }
         guard !didBeginLive, let session = rideSession else { return }
         didBeginLive = true
 
