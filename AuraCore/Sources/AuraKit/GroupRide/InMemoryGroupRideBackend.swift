@@ -13,6 +13,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var forceRenameError: GroupRideError?    // test spy
         var forceDeleteError: GroupRideError?    // test spy
         var forceStartError: GroupRideError?     // test spy
+        var forceEndError: GroupRideError?       // test spy, one-shot: cleared on throw so a retry succeeds
 
         // Auth-state seam (added Task 2). The signed-in id and its observers live
         // here (not on the actor) so `cachedUserID` can be `nonisolated` while
@@ -94,6 +95,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
     }
 
     public func endRide(rideID: UUID) async throws {
+        if let forced = store.forceEndError { store.forceEndError = nil; throw forced }
         guard let uid = store.lock.withLock({ store.currentUserID }), let ride = store.rides[rideID], ride.hostID == uid
         else { throw GroupRideError.notHost }
         store.rides[rideID] = GroupRide(id: ride.id, hostID: ride.hostID, joinCode: ride.joinCode,

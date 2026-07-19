@@ -35,7 +35,8 @@ public final class GroupRideSession {
     /// Set when the most recent `startRiding()` call failed server-side; cleared at the
     /// start of the next attempt. The lobby view surfaces this as a retry affordance.
     public private(set) var startFailed = false
-    /// Set when the most recent `end()` call failed server-side (Task 8 wires retry).
+    /// Set when the most recent `end()`/`leave()` call failed server-side. The HUD surfaces
+    /// this as a retry affordance; `retryEndIfNeeded()` re-attempts without faking success.
     public private(set) var endFailed = false
 
     /// The seam the ride's `RideSessionCoordinator` publishes the rider's own position
@@ -59,6 +60,19 @@ public final class GroupRideSession {
     private var didBeginLive = false
     private var isRefreshingRoster = false
     public private(set) var hostID: UUID?
+    /// A `startRiding()` the server hasn't confirmed yet — gates `retryStartIfNeeded()`.
+    private var pendingStart = false
+    /// An `end()`/`leave()` the server hasn't confirmed yet — gates `retryEndIfNeeded()`.
+    private var pendingEnd = false
+    private var isLeaveNotEnd = false
+    // TODO(backoff timer): production auto-retry. Spec calls for a session-held backoff
+    // Task (2s, 4s, 8s, cap 8s) started when startFailed/endFailed first sets and cancelled
+    // in teardownLive, driving retryStartIfNeeded()/retryEndIfNeeded(). Deferred: a real
+    // Task.sleep loop outlives a test's await points (tests finish in milliseconds, the
+    // backoff would still be pending 2s+ later), which risks flaky/leaked Tasks retrying
+    // against a torn-down fixture. retryStartIfNeeded()/retryEndIfNeeded() are the retry
+    // primitives; today they're invoked synchronously by the UI's Retry buttons (Tasks 10/12).
+    // Wiring the auto-backoff Task is a follow-up, not part of Task 8.
 
     /// Projects the observable `Phase` onto the three phases reconciliation reasons about;
     /// `nil` for the non-live phases (`.idle`, `.createFailed`, etc.) that don't participate.
@@ -140,15 +154,27 @@ public final class GroupRideSession {
     /// Host-only: asks the backend to mark the ride started (stamps `started_at` durably),
     /// then advances to `.riding` only once the server confirms. On failure sets
     /// `startFailed` and stays in `.lobby` — the lobby view's Retry re-invokes this.
-    public func startRiding() async {
+    public func startRiding() async { await attemptStart() }
+
+    private func attemptStart() async {
         guard let rideID else { return }
         startFailed = false
         do {
             try await backend.startRide(rideID: rideID)
             phase = .riding
+            pendingStart = false
         } catch {
             startFailed = true
+            pendingStart = true
         }
+    }
+
+    /// Re-attempts a pending `startRiding()`. Bound to the lobby's Retry affordance (and, in
+    /// production, an auto-backoff Task — see the TODO above).
+    public func retryStartIfNeeded() async {
+        guard pendingStart else { return }
+        pendingStart = false
+        await attemptStart()
     }
 
     /// Called by the production call sites (the lobby `.task` and the `.riding` `.task`)
@@ -275,16 +301,43 @@ public final class GroupRideSession {
         }
     }
 
-    public func end() async {
-        if let rideID { try? await backend.endRide(rideID: rideID) }
-        phase = .ended
-        teardownLive(rideSession)
+    public func end() async { await finishRide(leaveOnly: false) }
+
+    public func leave() async { await finishRide(leaveOnly: true) }
+
+    /// Ends (host) or leaves (member) the ride without ever faking success: `.ended` is set
+    /// only when the server confirms, or when the server says the caller is already gone
+    /// (`.notHost`/`.notMember` — a stale retry or a race with an already-processed end/leave).
+    /// Any other error is transient — `endFailed` is surfaced and the chrome (phase stays
+    /// `.riding`) is kept so the UI can retry via `retryEndIfNeeded()` rather than losing state.
+    private func finishRide(leaveOnly: Bool) async {
+        guard let rideID else { phase = .ended; teardownLive(rideSession); return }
+        endFailed = false
+        isLeaveNotEnd = leaveOnly
+        do {
+            if leaveOnly {
+                try await backend.leaveRide(rideID: rideID)
+            } else {
+                try await backend.endRide(rideID: rideID)
+            }
+            phase = .ended
+            teardownLive(rideSession)
+        } catch GroupRideError.notHost, GroupRideError.notMember {
+            // Already gone server-side (or a lost-response retry) — treat as success.
+            phase = .ended
+            teardownLive(rideSession)
+        } catch {
+            endFailed = true
+            pendingEnd = true   // keep chrome (phase stays .riding), allow retry
+        }
     }
 
-    public func leave() async {
-        if let rideID { try? await backend.leaveRide(rideID: rideID) }
-        phase = .ended
-        teardownLive(rideSession)
+    /// Re-attempts a pending end/leave. Bound to a Retry button (and, in production, an
+    /// auto-backoff Task — see the TODO above).
+    public func retryEndIfNeeded() async {
+        guard pendingEnd else { return }
+        pendingEnd = false
+        await finishRide(leaveOnly: isLeaveNotEnd)
     }
 
     /// Single teardown path for every dissolve (host end, member leave, host-end wire

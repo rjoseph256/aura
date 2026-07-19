@@ -130,4 +130,24 @@ struct GroupRideSessionLifecycleSyncTests {
         await session.ingest(.connected)
         #expect(session.isHost == true)
     }
+
+    @Test func endTransientFailureKeepsRidingThenRetrySucceeds() async {
+        let (session, backend) = await LifecycleFixtures.createdHost()
+        await session.startRiding()                       // .riding
+        backend.store.forceEndError = .joinFailed         // one transient failure, then clears
+        await session.end()
+        #expect(session.phase == .riding)                 // chrome retained, not faked ended
+        #expect(session.endFailed == true)
+        await session.retryEndIfNeeded()                  // second attempt succeeds
+        #expect(session.phase == .ended)
+    }
+
+    @Test func endAlreadyGoneCountsAsSuccess() async {
+        let (session, backend) = await LifecycleFixtures.createdHost()
+        await session.startRiding()
+        backend.store.forceEndError = .notHost            // "already ended / not host anymore"
+        await session.end()
+        #expect(session.phase == .ended)                  // notHost/notMember ⇒ treat as done
+        #expect(session.endFailed == false)
+    }
 }
