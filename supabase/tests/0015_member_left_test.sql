@@ -19,8 +19,9 @@ insert into auth.users (instance_id, id, aud, role, email) values
   ('00000000-0000-0000-0000-000000000000','aaaaaaaa-0000-0000-0000-000000000001','authenticated','authenticated','u1@test.dev'),
   ('00000000-0000-0000-0000-000000000000','bbbbbbbb-0000-0000-0000-000000000002','authenticated','authenticated','u2@test.dev');
 
--- Drives both broadcast paths: a non-host member leaves (leave_ride), and the host
--- ends the ride (end_ride). Each must emit a member_left row for the acting user.
+-- Drives both paths: a non-host member leaves (leave_ride) -> member_left for the leaver;
+-- and the host ends the ride (end_ride) -> since 0018, end_ride emits ride_ended, NOT a
+-- host member_left, so end_rows must be zero.
 create function pg_temp.leave_flow(out leave_rows int, out end_rows int)
 language plpgsql security definer set search_path = '' as $$
 declare rid uuid; code text;
@@ -43,6 +44,8 @@ end; $$;
 
 create temp table mlf as select * from pg_temp.leave_flow();
 select cmp_ok((select leave_rows from mlf), '>=', 1, 'leave_ride broadcasts member_left for the leaver');
-select cmp_ok((select end_rows from mlf), '>=', 1, 'end_ride broadcasts member_left for the host');
+-- 0018 removed end_ride's host member_left (the crew now learns via ride_ended); this
+-- must now emit zero. The positive ride_ended assertion lives in 0018's test.
+select is((select end_rows from mlf), 0, 'end_ride no longer broadcasts member_left for the host');
 select * from finish();
 rollback;
