@@ -1,7 +1,7 @@
 # Interactive Home Map (ROH-84) — Design
 
 **Linear:** [ROH-84](https://linear.app/rohun/issue/ROH-84) · **Epic:** Summary & Map Polish
-**Date:** 2026-07-20 · **Status:** Approved (brainstorming)
+**Date:** 2026-07-20 · **Status:** Approved (brainstorming), reconciled after 3-reviewer adversarial spec review
 
 ## Summary
 
@@ -9,163 +9,276 @@ Make the Home screen map something a rider can move: pan and pinch-zoom to look
 around their area, scout terrain, and check a specific place before a ride. Today
 the Home backdrop is an inert, cached terrain image hardcoded to downtown
 Pittsburgh. This work turns it into a genuine, movable map that opens framed on the
-rider's current location — while keeping Home's signature Aura terrain look and its
-current low-power idle behavior.
+rider's current location, keeps Home's signature Aura terrain look, and preserves
+Home's current low-power *untouched-idle* behavior.
 
-Discovery (gems, route-planning, "ride here from the map") is explicitly **not** in
-scope — that stays the job of the Explore surface (ROH-50). Home stays lightweight:
-pan/zoom only.
+To make "check a specific place" real (rather than a pan-by-eye scavenger hunt), a
+**light assist** is in scope: tapping a search result or a Saved place flies the map
+to it, and Saved places render as pins. Deeper discovery (gems, route tracing, "ride
+here from the map") stays the Explore surface's job (ROH-50).
 
-## Background & prior decisions this reverses
+## Locked decisions (from brainstorming + reviews)
 
-- **ROH-43** (Chunk 1, Home reinvention, Done) made the Home backdrop a cached
-  Mapbox Snapshotter image, deliberately *not* a live map, to keep the sheet/gesture
-  surface free and avoid a live renderer on Home. This spec keeps that cached image
-  as the resting state but adds a live map on demand (see Approach B).
-- **ROH-7** (single hoisted Mapbox map, Canceled) failed because it placed a live
-  `Map` *outside* the `NavigationStack`, where the UIKit navigation container
-  swallowed its touches. **That failure does not apply here:** Home's backdrop
-  already lives *inside* the `NavigationStack` root (`HomeView` is the root content),
-  which is the safe side of the line ROH-7 tripped over.
-- **ROH-83** (idle Home should stay low-power / release location, High, open) is
-  *advanced* by this design, not regressed — the interactive map is mounted only
-  while in use.
+1. **Genuine pan + pinch-zoom.** No rotation, no pitch. North-up. Zoom bounded
+   (roughly neighborhood-out to street-level-in).
+2. **Keeps the authored Aura terrain style** (identity), shared with today's snapshot.
+3. **Camera persists within an app session.** The map stays where the rider left it
+   while the app lives; a recenter control returns to the rider on demand. It resets
+   to the rider only on a **cold app launch** or **after a completed ride** — never
+   while the rider is looking at Home. There is **no idle-timeout camera reset**.
+4. **Light "check a place" assist in scope:** search-result / Saved-place tap →
+   fly-to; Saved places shown as pins. No gems, no route tracing.
+5. **Approach B** (snapshot idle → live map on interaction), chosen and re-confirmed
+   below.
+
+## Background & prior decisions this touches
+
+- **ROH-43** (Home reinvention) made the backdrop a cached Snapshotter image,
+  deliberately not a live map. This work keeps that image as the resting state and
+  adds a live map on interaction.
+- **ROH-7** (single hoisted map, Canceled) failed on a live map placed *outside* the
+  `NavigationStack` having its touches swallowed. **Correction from review:** what
+  actually lets touches reach Home's backdrop is the dashboard sheet's
+  `.presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.55)))`
+  (`Aura/Sources/Home/HomeSheet.swift:39`), *not* NavigationStack placement. This
+  changes the gesture design (see Controls).
+- **ROH-83** (idle Home low-power / release location, open) — this design keeps the
+  *untouched* idle state renderer-free and GPS-free, and adds explicit teardown, but
+  it does **not** claim a blanket "location off when leaving Home" (the ride path
+  legitimately keeps location on — see Location lifecycle).
 
 ## Current implementation (as-is)
 
 - `Aura/Sources/Home/HomeView.swift` — root content of the app's single
-  `NavigationStack` (`AuraApp.swift` `RootView`). A `ZStack`: `HomeBackdrop` at the
-  bottom, a header + `HomeLaunchBand` above it, a `SearchOverlay` when expanded, and
-  an always-present dashboard sheet (`.homeDashboardSheet`) peeking ~250pt at the
-  bottom.
-- `Aura/Sources/Home/HomeBackdrop.swift` — renders `Image(uiImage:)` from
-  `renderer.image(for:size:)`. No hit-testing, no gestures. Doc: "a cached,
-  non-interactive rendered image (never a live Map)".
-- `Aura/Sources/Home/MapboxTerrainSnapshotter.swift` — `MapboxMaps.Snapshotter`,
-  disk-cached PNG by `request.cacheKey`, fixed camera `zoom: 12.5, pitch: 0`, loads
-  the authored bundled style JSON (`AuraTerrainStyle.json`, ROH-6) via `styleJSON`,
-  else falls back to `dark-v11`.
-- `AuraCore/Sources/AuraKit/Home/TerrainSnapshotRequest.swift` — center is
-  `center(forRider:) = rider ?? curatedDefaultCenter(40.4406, -79.9959)`. **Home
-  passes `riderCoordinate: nil`, so it always renders Pittsburgh, not the rider.**
-- Reusable live-map infra (MapboxMaps v11 SwiftUI `Map(viewport:)` + `Viewport` +
-  `@MapContentBuilder` + `Puck2D`): `RideMapView.swift`, `NavigateHUDView.swift`,
-  `RoutePreviewView.swift`; static-map reference `StaticRouteMap.swift`
-  (`.allowsHitTesting(false)`). Style bridge `MapStyle+Mapbox.swift`. Token set once
-  at launch (`AuraApp.swift`).
-- Location: `LocationService.current()` is one-shot (cached fix < 30s, else a 3s-timeout
-  race, else Pittsburgh fallback). Home holds **no** continuous location subscription
-  today — `current()` is called once for the greeting weather only.
+  `NavigationStack` (`AuraApp.swift` `RootView`). `ZStack`: `HomeBackdrop` bottom;
+  header + `HomeLaunchBand` above; `SearchOverlay` when expanded; an always-present
+  dashboard sheet (`.homeDashboardSheet`) peeking ~250pt, raisable to `.large` by the
+  Saved chip (`HomeView.swift:100`). `HomeBackdrop` is passed `riderCoordinate: nil`
+  (`HomeView.swift:88`).
+- `HomeBackdrop.swift` — `Image(uiImage:)` from `renderer.image(for:size:)`; no
+  hit-testing, no gestures.
+- `MapboxTerrainSnapshotter.swift` — `MapboxMaps.Snapshotter`, disk-cached PNG,
+  **hardcoded `pixelRatio: 3` (`:22`)** and **hardcoded `zoom: 12.5, pitch: 0`
+  (`:38`)**, authored bundled style via `styleJSON` (`:28`) else `dark-v11`.
+- `AuraCore/.../Home/TerrainSnapshotRequest.swift` — `center(forRider:) = rider ??
+  curatedDefaultCenter(40.4406,-79.9959)`. **cacheKey quantizes center to a ~1.1 km
+  grid (`quantizationDegrees = 0.01`, `:11,21-27`)** — so a cached image can be up to
+  ~0.8 km from the true center. No zoom field on the request.
+- `TerrainSnapshotDiskCache.swift` — `read`/`write`/`url` only; **no eviction / size
+  cap** (files live in OS-evictable `Caches/`).
+- `LocationService.swift` — `current()` is one-shot (cached <30 s, else 3 s-timeout
+  race, else Pittsburgh). Home's only call is inside `refreshWeather()`, **gated on
+  `authorization == .authorized`** (`HomeView.swift:141-143`) — so an unauthorized
+  user triggers no `current()` today.
+- Reusable live-map infra: MapboxMaps v11 SwiftUI `Map(viewport:)` + `Viewport` +
+  `@MapContentBuilder` + `Puck2D` in `RideMapView.swift`, `NavigateHUDView.swift`,
+  `RoutePreviewView.swift`; static reference `StaticRouteMap.swift`. **All existing
+  live maps use `.followPuck` / `.overview` viewports only — none uses a fixed
+  `.camera(center:zoom:)`, `onCameraChanged`, `MapReader`, or `onStyleLoaded` on a
+  live `Map`.** Those are net-new for this feature. `App` retains Home beneath pushed
+  routes (`AuraApp.swift:75-77`).
 
-## Approach (B — snapshot idle, live on touch)
+## Approach B (snapshot idle → live on interaction)
 
-The backdrop is a two-phase surface bridged by a shared camera.
+The backdrop is a two-phase surface.
 
-Alternatives considered and rejected: **(A) always-live map** — simplest, but a live
-renderer + standing GPS run the whole time Home is on screen even when untouched;
-regresses ROH-83. **(C) live only while foregrounded** — still pays the full idle
-cost on every Home visit. B is the only option that preserves Home's current
-zero-cost idle state.
+- **Idle** — the cached snapshot PNG (rendered per the fixes below), now centered on
+  the rider. No live renderer, no standing GPS. Carries a visible **"tap to explore"**
+  affordance so the rider knows it is interactive.
+- **Live** — a MapboxMaps v11 `Map(viewport:)` at the authored Aura terrain style,
+  mounted when the rider activates the map, with the location puck (see Location
+  lifecycle).
 
-### Phases
+**Why B over always-live (A/C):** because idle shows a static image with no renderer,
+the *common* ride-start path (rider taps "start ride" from a resting Home) has no live
+Home map to collide with the ride's map — so the single-renderer invariant holds in
+the common case. Always-live variants hold a Home renderer at every ride-start,
+guaranteeing a two-map window. B's cost is the idle↔live seam, addressed below.
 
-- **Idle** — the existing cached snapshot PNG, now centered on the rider. No live
-  renderer, no standing GPS. Shown on Home appearance and whenever the map is not
-  actively in use.
-- **Live** — a MapboxMaps v11 `Map(viewport:)` at the authored Aura terrain style
-  with a location puck, mounted on first touch.
+### First-touch interaction (fixes lost-gesture + discoverability)
 
-### Shared camera
+A freshly mounted SwiftUI/UIKit view does **not** receive an already-in-flight touch,
+so "start panning a static image and have a live map pick it up mid-drag" is not
+achievable — the first drag would be lost. Instead the idle map is explicitly
+**tap-to-activate**: a visible affordance ("tap to explore" / a subtle control)
+invites a tap; the tap mounts the live map at the current camera; the rider then pans.
+This turns the unavoidable mount boundary into a designed, discoverable gesture rather
+than a dropped-first-pan bug.
 
-A single camera value (`center` + `zoom`) is the bridge. The snapshot renders at
-that camera; when the live map mounts, its `Viewport` opens at the **same** camera
-so there is no positional jump. The still snapshot stays painted beneath the live
-map until the live style finishes loading (`onStyleLoaded`), then cross-fades out.
-Reduce Motion → hard cut, no fade.
+### Idle→live handoff (fixes pixel-ratio + quantization jump)
 
-Default zoom is the snapshot's current `12.5`; a shared constant is used by both the
-snapshot request and the live viewport so they cannot drift.
+Two root causes would otherwise make the handoff visibly jump:
 
-### Lifecycle
+1. **Pixel ratio.** The snapshot is `pixelRatio: 3`; a live `Map` renders at device
+   scale. On 2× devices, label/glyph/stroke sizing differs. Fix: render the
+   on-appear/interactive snapshot at the **device screen scale**, not a hardcoded 3.
+2. **Center quantization.** The cache key rounds center to a ~1.1 km grid, so the
+   idle image may be offset from the rider's true `current()` coordinate, while the
+   live map opens at the true coordinate. Fix: render the rider-centered idle snapshot
+   at the **true center** (a precise-center render path that bypasses / tightens the
+   quantized cache for the on-appear image).
 
-- **Home appear** — one-shot `LocationService.current()` resolves the camera center
-  to the rider's location (reuses the call Home already makes; no new standing
-  subscription). Idle snapshot renders there. This is the "always reset to me"
-  behavior: every Home appearance re-centers on the rider.
-- **Idle → Live** — first touch on the map area transitions to the live phase.
-- **Live** — pan/zoom freely; the puck's location updates run only in this phase.
-- **Live → Idle (teardown)** — triggers: navigation away from Home (ride start,
-  History, Settings), app backgrounding, or the map sitting untouched past a short
-  idle timeout. Teardown unmounts the live map and releases its location. Because we
-  always reset to the rider on the next appearance, no camera is persisted.
+Even with both fixed, exact pixel-identity across a raster→live cross-fade is not
+guaranteed by any in-repo precedent. The transition is therefore designed as a
+**tasteful short cross-fade** (snapshot held beneath the live map until the live
+`Map`'s style is ready, then faded out; hard cut under Reduce Motion) that tolerates
+minor differences — not a promise of an invisible swap. Whether a tighter
+zero-artifact handoff is achievable is a **device spike** (see Risks).
 
-## Controls & gestures
+### Camera model & session persistence
 
-- **Gestures:** pan + pinch-zoom only. Rotation and pitch are **locked off** (calm,
-  north-up "look around"). Zoom bounded to roughly neighborhood-out to street-level-in.
-- **Recenter control:** a small floating button (reusing the ride maps' recenter
-  affordance) appears in the live phase once the rider has moved off-center; tapping
-  animates the viewport back to the rider's location at default zoom. Absent in idle
-  (idle is already centered on the rider).
-- **Coexistence with existing Home layout:** the map is interactive only in the open
-  area *above* the dashboard sheet's ~250pt peek. The dashboard sheet, launch band
-  ("Where to?" + Explore/Join/Saved chips), header cluster, and search overlay are
-  unchanged — they keep floating above the map and capture their own touches; map
-  pans happen in the gaps. The only change to the existing `ZStack` is that the
-  backdrop becomes hit-testable in the live phase.
+- A shared **default-zoom constant** (net-new; today `12.5` is a literal in the
+  snapshotter) is threaded to both the snapshot request (gaining a zoom field) and the
+  live `Viewport` so they cannot drift.
+- **Session persistence:** while the app is alive and Home is retained, the live
+  camera the rider leaves is preserved and restored when they return to Home (the
+  retain-beneath architecture already keeps Home mounted, so this is the natural
+  behavior). On **cold launch** and **after a completed ride**, the camera resets to
+  the rider's current location at default zoom. No idle-timeout reset.
+- **Recenter control:** a floating button appears in the live phase once the camera
+  has moved off the rider (detected via `onCameraChanged` — net-new; the ride
+  recenter's follow-puck state logic does *not* transfer, only its visuals). Tap →
+  animate the viewport to the rider at default zoom. Hidden/disabled without a usable
+  fix.
+
+### Lifecycle & teardown (fixes retain-beneath multi-renderer window)
+
+Because pushing a route **retains** Home (`AuraApp.swift:75-77`), teardown cannot rely
+on unmount. Instead:
+
+- The live phase is **gated on Home being top-of-stack and the scene active**
+  (`router.path.isEmpty` + `scenePhase`). Net-new: Home has no scenePhase observer
+  today.
+- On any navigation push (ride start, History, Settings) the map flips **to idle
+  synchronously before/at the push** so Home is showing the static snapshot (no
+  renderer) by the time the pushed screen's map mounts — closing the two-map window.
+  Starting a ride mid-pan must specifically force idle before `router.push`.
+- On backgrounding, tear down to idle.
+- Teardown must be **ordering-safe**, not merely idempotent: a new `Map` must not
+  mount before the previous `MapView`'s GPU context releases on rapid leave/return.
+  This is a **device spike** (see Risks).
+
+### Location lifecycle (fixes puck-provider leak + ROH-83 over-claim)
+
+- **Centering:** one-shot `LocationService.current()` on the relevant Home appearances
+  (cold launch, post-ride). This is **net-new plumbing** — `HomeBackdrop` is currently
+  fed `nil`, and today's `current()` call is gated on authorization, so an
+  unauthorized user needs a distinct code path. `current()` may take up to 3 s or fall
+  back; the idle snapshot renders at the fallback first and re-centers when the fix
+  lands (a brief idle-side re-frame, acceptable, animated).
+- **Puck:** the live map's `Puck2D` is driven by Mapbox's **own** internal
+  `LocationProvider` (a separate `CLLocationManager`), not `LocationService`. The
+  design must **explicitly start it only in the live phase and stop it on teardown**;
+  "no `LocationService` subscription" is not the same as "no location running."
+- **ROH-83 scope, corrected:** the acceptance test is "leaving Home **to History /
+  Settings** releases location (indicator off)" — *not* the ride path, where location
+  legitimately stays on and the indicator cannot distinguish a leak. Verifying the ride
+  path requires confirming exactly one location consumer is alive after the transition
+  (instrumentation, not the indicator).
+
+## Controls, gestures & layout coexistence
+
+- **Gestures:** pan + pinch-zoom only; rotation and pitch disabled; zoom bounded.
+- **Sheet detents (corrected):** background interaction reaches the map only up
+  through the sheet's `0.55` fraction. At the **`.large` detent** (Saved chip)
+  background interaction is disabled — the map is intentionally inert there. The spec
+  treats "map interactive" as a function of detent, and the design must define behavior
+  at each detent rather than assume the map is always live.
+- **Gesture precedence (must be explicit, not "in the gaps"):** define who wins for
+  (a) a vertical drag near the sheet's top edge (sheet expand vs map pan), (b) a pinch
+  spanning a floating chip and open map, (c) taps on header / launch-band / search
+  controls. Floating controls consume their own hits; the map receives pans/pinches
+  only in the uncovered region above the peek.
+- **Usable area:** after the ~250pt peek and the top header + launch band, the clean
+  interactive band is roughly a third of the screen. Acceptable for "look around," and
+  the fly-to assist (below) reduces reliance on long manual pans.
+
+## "Check a place" assist (in scope)
+
+- **Search → fly-to:** selecting a result in the existing `SearchOverlay` flies the
+  live map to that coordinate (activating the live phase if idle).
+- **Saved-place pins:** Saved places render as lightweight map annotations; tapping a
+  pin flies to / focuses it. Reuses the existing saved-places store and the ride maps'
+  annotation patterns.
+- Out: gems, route lines, turn-by-turn, "ride here" — Explore's job.
 
 ## Style
 
-The live map loads the authored `AuraTerrainStyle.json` via `MapStyle(json:)` (the
-same JSON the snapshotter uses), so idle and live are visually identical. On load
-failure, fall back to `dark-v11` — the snapshotter's existing fallback.
+Live map loads the authored `AuraTerrainStyle.json` via `MapStyle(json:)` (same JSON
+and same `dark-v11` fallback as the snapshotter), so idle and live match. Close-zoom
+legibility of a style authored for a single zoom-12.5 snapshot is an unknown —
+device-verify checkpoint; `dark-v11` fallback covers a hard failure (at the cost of
+the signature look).
+
+## Cache growth (fixes unbounded disk use)
+
+Once snapshots follow the rider, the coordinate-quantized cache accumulates a
+full-screen PNG per grid cell × size × style version. Add a **bound** (LRU or a simple
+size/count cap with eviction) to `TerrainSnapshotDiskCache`, rather than relying on
+unpredictable OS `Caches/` eviction (which can also purge mid-session and stall a
+re-render).
 
 ## Error handling & edge cases
 
-- **No location permission / fetch timeout:** `current()` already falls back to the
-  curated Pittsburgh center. Interactivity still works, just not centered on the
-  rider; recenter is hidden or disabled without a usable fix.
-- **Authored style fails on the live map:** fall back to `dark-v11`.
-- **Handoff flash:** snapshot stays beneath the live map until `onStyleLoaded`, then
-  cross-fades (hard cut under Reduce Motion).
-- **Rapid leave during live:** teardown is idempotent; no renderer leak.
-- **Close-zoom legibility of the authored style:** the authored style was tuned for a
-  single zoom-12.5 snapshot; how it reads when zoomed in is the one genuine unknown —
-  a device-verify checkpoint, with the `dark-v11` fallback covering a hard failure.
+- **Location denied / timeout:** replace the silent Pittsburgh fallback with a
+  **visible state** — a small "Location off — showing a default area · Enable"
+  affordance — so a rider in another city understands why the map isn't on them and
+  can act. Interactivity still works.
+- **Authored style fails on live map:** fall back to `dark-v11`.
+- **Handoff:** snapshot held beneath live map until style-ready, then cross-fade (hard
+  cut under Reduce Motion).
+- **Rapid leave/return during live:** ordering-safe teardown (see Lifecycle) — no
+  renderer leak, no double-mount.
+- **In-flight snapshot vs live mount:** a tap arriving while the on-appear `Snapshotter`
+  is still rendering must not leave both a `Snapshotter` and a live `Map` active;
+  cancel/await the snapshot before/at live mount.
 
 ## Components & boundaries
 
-- **AuraCore (pure, unit-tested):**
-  - Camera-center resolution (extends the existing `center(forRider:)`) and the
-    shared default-zoom constant.
-  - A pure phase-transition reducer: `idle ↔ live` given the trigger inputs (touch,
-    navigation-away, background, idle-timeout). Testable with no Mapbox dependency.
-- **App target (device-verified):**
-  - The idle snapshot render (existing `HomeBackdrop` / `MapboxTerrainSnapshotter`,
-    changed only to center on the rider).
-  - The live `Map(viewport:)` view, its authored-style + puck content, the recenter
-    control, gesture configuration, and the cross-fade handoff.
+- **AuraCore (pure, macOS-CI-safe, unit-tested):**
+  - `center(forRider:)` resolution and the shared default-zoom constant.
+  - A pure **phase reducer**: `idle ↔ live` over abstract triggers (activate,
+    push/top-of-stack change, background, permission state) — no Mapbox/CoreLocation
+    types leak in; those are mapped to abstract inputs at the app boundary.
+- **App target (device-verified + as much XCUITest as practical):**
+  - Snapshot render (device-scale, true-center), the live `Map` view + authored style +
+    puck + Saved-place annotations + fly-to, recenter, gesture config, cross-fade,
+    scenePhase/router-path teardown wiring, cache bound.
 
 ## Testing
 
-- **Unit (AuraCore):** camera-center resolution; phase-transition reducer across all
-  triggers.
-- **Device-first (per project norm):** handoff has no visible jump; pan/zoom smooth;
-  rotation/pitch absent; recenter returns to the rider; authored style legible at
-  close zoom; and — proving the ROH-83 tie — the iOS location indicator goes **off**
-  when leaving Home.
-- **XCUITest (optional):** the map region is hit-testable in the live phase; the
-  recenter control appears after panning.
+- **Unit (AuraCore):** center resolution; phase reducer across all triggers
+  (activate, top-of-stack change during a push, background, permission changes).
+- **Instrumented / device-first — the load-bearing properties, explicitly covered
+  (not left to "optional"):**
+  - Exactly one live Mapbox renderer across a Home-live → ride-start transition (the
+    multi-renderer invariant) — verified by instrumentation/logging, since XCUITest
+    can't assert renderer count.
+  - Location released when leaving Home **to History/Settings** (indicator off); one
+    location consumer after leaving to a ride (instrumented).
+  - Handoff has no gross jump; recenter returns to rider; fly-to lands on the target;
+    Saved pins appear; map inert at `.large` detent; "tap to explore" discoverable.
+- **XCUITest (where feasible):** map region hit-testable in live phase; recenter
+  appears after panning; search result fly-to.
+
+## Risks / device spikes (run early in execution)
+
+1. **Teardown/mount ordering** — confirm a synchronous flip-to-idle before push
+   actually prevents a two-renderer overlap given SwiftUI update timing and async
+   MapboxMaps `MapView` teardown. If it can't be guaranteed, revisit the approach.
+2. **Handoff seam** — confirm device-scale + true-center render brings the cross-fade
+   within acceptable visual tolerance; if not, fall back to a more overt transition.
+3. **Close-zoom legibility** of the authored style.
 
 ## Out of scope (YAGNI)
 
-- Gems, discovery, route-planning, "ride here from the map" — Explore's job (ROH-50).
-- Persisted camera across Home visits (contradicts "always reset to me").
+- Gems, discovery, route tracing, "ride here from the map" — Explore's job (ROH-50).
 - Rotation / pitch / 3D.
+- Persisting the camera across cold launches or across a completed ride (both reset by
+  design).
 
 ## Open follow-ups (not blocking)
 
-- If the authored style reads poorly at close zoom, a zoom-aware style tweak is a
-  separate ticket.
-- "Panning Home flows into Explore" is a natural additive follow-up once this
-  interactive canvas exists — deliberately deferred.
+- Zoom-aware authored-style tweak if close-zoom reads poorly (separate ticket).
+- "Panning Home flows into Explore" — a natural additive follow-up once this canvas
+  exists; deliberately deferred.
