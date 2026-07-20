@@ -85,8 +85,9 @@ In `LocationService.swift`, add the property after line 10 (`public private(set)
 
 ```swift
     /// The current location tier. Drives which manager configuration is active and
-    /// whether the background session/indicator is armed. Read by the RootView controller.
-    public private(set) var mode: LocationAccuracyMode = .idle
+    /// whether the background session/indicator is armed. Read by the RootView controller
+    /// and tests; not observed by any view, so it is observation-ignored.
+    @ObservationIgnored public private(set) var mode: LocationAccuracyMode = .idle
 ```
 
 Replace `setMode(_:)` (lines 45-53) with:
@@ -120,7 +121,7 @@ Replace `setMode(_:)` (lines 45-53) with:
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `swift test --package-path AuraCore --filter LocationServiceTests`
-Expected: PASS (all four tests).
+Expected: PASS (the new `test_setMode_configuresManagerPerTier` plus the existing ingest/auth tests).
 
 - [ ] **Step 6: Commit**
 
@@ -215,9 +216,11 @@ git commit -m "feat(location): pure desired-tier selection (ROH-83)"
 
 **Interfaces:**
 - Produces:
-  - `struct LocationFix: Equatable, Sendable { let coordinate: Coordinate; let at: Date }`
+  - `struct LocationFix: Equatable, Sendable { let coordinate: Coordinate; let horizontalAccuracy: Double; let at: Date }`
   - `enum LocationPurpose: Sendable { case routing, coarse }`
-  - `func resolveOrigin(cached: LocationFix?, ambient: LocationFix?, purpose: LocationPurpose, now: Date, freshness: TimeInterval = 30) -> Coordinate?` — returns a coordinate when one of the cheap sources is fresh enough for the purpose, else `nil` (caller then does a one-shot / fallback). Routing never accepts the coarse ambient sample.
+  - `func resolveOrigin(cached: LocationFix?, ambient: LocationFix?, purpose: LocationPurpose, now: Date, freshness: TimeInterval = 30, fineThreshold: Double = 100) -> Coordinate?` — returns a coordinate when one of the cheap sources is fresh AND accurate enough for the purpose, else `nil` (caller then does a one-shot / fallback). Routing rejects a cached fix whose `horizontalAccuracy` is coarse (> `fineThreshold`) or invalid (< 0), and never accepts the ambient sample.
+
+**Why `horizontalAccuracy` matters:** the only thing that populates `manager.location` is the coarse ambient monitor (Task 6), so a cached fix can be ~1 km after Home ambient has run. Without an accuracy gate, `current(for: .routing)` would feed that coarse fix into route planning — a regression. The accuracy field lets the resolver reject it and fall through to the precise one-shot.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -232,30 +235,43 @@ final class LocationOriginTests: XCTestCase {
     private let b = Coordinate(latitude: 40.45, longitude: -79.98)   // ambient
     private let now = Date(timeIntervalSince1970: 10_000)
 
-    func test_freshCachedFix_alwaysWins() {
-        let cached = LocationFix(coordinate: a, at: now.addingTimeInterval(-10))
+    private func fix(_ c: Coordinate, acc: Double, age: TimeInterval) -> LocationFix {
+        LocationFix(coordinate: c, horizontalAccuracy: acc, at: now.addingTimeInterval(-age))
+    }
+
+    func test_freshFineCached_winsForBothPurposes() {
+        let cached = fix(a, acc: 8, age: 10)
         XCTAssertEqual(resolveOrigin(cached: cached, ambient: nil, purpose: .routing, now: now), a)
         XCTAssertEqual(resolveOrigin(cached: cached, ambient: nil, purpose: .coarse, now: now), a)
     }
 
+    func test_coarseCached_rejectedForRouting_butOkForCoarse() {
+        let cached = fix(a, acc: 1000, age: 10)   // ~1 km ambient fix
+        XCTAssertNil(resolveOrigin(cached: cached, ambient: nil, purpose: .routing, now: now))
+        XCTAssertEqual(resolveOrigin(cached: cached, ambient: nil, purpose: .coarse, now: now), a)
+    }
+
+    func test_invalidAccuracyCached_rejectedForRouting() {
+        let cached = fix(a, acc: -1, age: 5)      // CLLocation reports -1 for invalid horizontal accuracy
+        XCTAssertNil(resolveOrigin(cached: cached, ambient: nil, purpose: .routing, now: now))
+    }
+
     func test_staleCached_isIgnored() {
-        let cached = LocationFix(coordinate: a, at: now.addingTimeInterval(-31))
+        let cached = fix(a, acc: 8, age: 31)
         XCTAssertNil(resolveOrigin(cached: cached, ambient: nil, purpose: .routing, now: now))
     }
 
     func test_coarsePurpose_acceptsFreshAmbient() {
-        let ambient = LocationFix(coordinate: b, at: now.addingTimeInterval(-5))
-        XCTAssertEqual(resolveOrigin(cached: nil, ambient: ambient, purpose: .coarse, now: now), b)
+        XCTAssertEqual(resolveOrigin(cached: nil, ambient: fix(b, acc: 1000, age: 5), purpose: .coarse, now: now), b)
     }
 
     func test_routingPurpose_neverAcceptsAmbient() {
-        let ambient = LocationFix(coordinate: b, at: now)   // even perfectly fresh
-        XCTAssertNil(resolveOrigin(cached: nil, ambient: ambient, purpose: .routing, now: now))
+        // Even a perfectly fresh, fine-looking ambient sample is refused for routing.
+        XCTAssertNil(resolveOrigin(cached: nil, ambient: fix(b, acc: 8, age: 0), purpose: .routing, now: now))
     }
 
     func test_staleAmbient_ignoredEvenForCoarse() {
-        let ambient = LocationFix(coordinate: b, at: now.addingTimeInterval(-31))
-        XCTAssertNil(resolveOrigin(cached: nil, ambient: ambient, purpose: .coarse, now: now))
+        XCTAssertNil(resolveOrigin(cached: nil, ambient: fix(b, acc: 1000, age: 31), purpose: .coarse, now: now))
     }
 }
 ```
@@ -272,13 +288,16 @@ Create `AuraCore/Sources/AuraCore/Geo/LocationOrigin.swift`:
 ```swift
 import Foundation
 
-/// A coordinate plus the instant it was observed. `Equatable` so SwiftUI `.onChange`
-/// can watch it; `Sendable` so it crosses actor boundaries from delegate callbacks.
+/// A coordinate, its horizontal accuracy (metres; CLLocation reports < 0 when invalid), and
+/// the instant it was observed. `Equatable` so SwiftUI `.onChange` can watch it; `Sendable`
+/// so it crosses actor boundaries from delegate callbacks.
 public struct LocationFix: Equatable, Sendable {
     public let coordinate: Coordinate
+    public let horizontalAccuracy: Double
     public let at: Date
-    public init(coordinate: Coordinate, at: Date) {
+    public init(coordinate: Coordinate, horizontalAccuracy: Double, at: Date) {
         self.coordinate = coordinate
+        self.horizontalAccuracy = horizontalAccuracy
         self.at = at
     }
 }
@@ -287,16 +306,20 @@ public struct LocationFix: Equatable, Sendable {
 /// the ~kilometre ambient sample.
 public enum LocationPurpose: Sendable { case routing, coarse }
 
-/// Pick a cheap origin without hitting the location hardware, or return nil so the caller
-/// falls through to a one-shot request. A fresh precise cached fix always wins; the coarse
-/// ambient sample is only acceptable for `.coarse` callers. "Fresh" = within `freshness` of `now`.
+/// Pick a cheap origin without hitting the location hardware, or return nil so the caller falls
+/// through to a one-shot request. A fresh cached fix wins — but for `.routing` only if it is also
+/// precise (`0 <= horizontalAccuracy <= fineThreshold`), since a coarse cached fix would start a
+/// route ~1 km off. The ambient sample is acceptable for `.coarse` only. "Fresh" = within
+/// `freshness` of `now`.
 public func resolveOrigin(cached: LocationFix?,
                           ambient: LocationFix?,
                           purpose: LocationPurpose,
                           now: Date,
-                          freshness: TimeInterval = 30) -> Coordinate? {
+                          freshness: TimeInterval = 30,
+                          fineThreshold: Double = 100) -> Coordinate? {
     func isFresh(_ fix: LocationFix) -> Bool { now.timeIntervalSince(fix.at) < freshness }
-    if let cached, isFresh(cached) { return cached.coordinate }
+    func isFine(_ fix: LocationFix) -> Bool { fix.horizontalAccuracy >= 0 && fix.horizontalAccuracy <= fineThreshold }
+    if let cached, isFresh(cached), purpose == .coarse || isFine(cached) { return cached.coordinate }
     if purpose == .coarse, let ambient, isFresh(ambient) { return ambient.coordinate }
     return nil
 }
@@ -305,7 +328,7 @@ public func resolveOrigin(cached: LocationFix?,
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `swift test --package-path AuraCore --filter LocationOriginTests`
-Expected: PASS (all five tests).
+Expected: PASS (all seven tests).
 
 - [ ] **Step 5: Commit**
 
@@ -326,8 +349,10 @@ git commit -m "feat(location): LocationFix + pure origin resolver (ROH-83)"
 - Consumes: `LocationFix` (Task 3).
 - Produces:
   - `LocationService.lastKnown: LocationFix?` (`private(set)`, observable) — most recent ambient fix.
-  - private `oneShotManager: CLLocationManager` and `oneShotWaiters: [CheckedContinuation<Coordinate?, Never>]`.
-  - `@MainActor func handleLocationUpdate(managerID:coordinate:timestamp:)` and `@MainActor func handleLocationFailure(managerID:)` — internal, called by the nonisolated delegate methods; also directly unit-testable.
+  - internal `oneShotManager: CLLocationManager`; internal `oneShotContinuation: CheckedContinuation<Coordinate?, Never>?` (single-slot, resume-once by nil-guard); internal `oneShotTask: Task<Coordinate?, Never>?` (coalesces concurrent callers). Both internal so Task 5's tests can observe they clear.
+  - `@MainActor func handleLocationUpdate(managerID:coordinate:accuracy:timestamp:)` and `@MainActor func handleLocationFailure(managerID:)` — internal, called by the nonisolated delegate methods; also directly unit-testable.
+
+**Why a single continuation + coalescing Task (not a waiter array):** a shared array plus a never-cancelled per-cycle timeout can let a *previous* `current()` call's timeout drain a *later* call's waiter and hand it the fallback. A single-slot continuation that is nil-checked on resume, guarded by one in-flight `oneShotTask` that later callers await, makes every callback a no-op once its cycle has resolved — no cross-cycle contamination, no cancellation (so no Swift 6.2 cancel-while-sleeping abort).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -339,15 +364,15 @@ func test_ambientUpdate_setsLastKnown() {
     let coord = Coordinate(latitude: 40.44, longitude: -79.99)
     let t = Date()
     // Simulate a fix arriving on the ambient (shared) manager.
-    svc.handleLocationUpdate(managerID: ObjectIdentifier(svc.manager), coordinate: coord, timestamp: t)
-    XCTAssertEqual(svc.lastKnown, LocationFix(coordinate: coord, at: t))
+    svc.handleLocationUpdate(managerID: ObjectIdentifier(svc.manager), coordinate: coord, accuracy: 8, timestamp: t)
+    XCTAssertEqual(svc.lastKnown, LocationFix(coordinate: coord, horizontalAccuracy: 8, at: t))
 }
 
 func test_oneShotUpdate_doesNotTouchLastKnown() {
     let svc = LocationService()
     let coord = Coordinate(latitude: 1, longitude: 2)
     // A fix on the one-shot manager must NOT be recorded as the ambient lastKnown.
-    svc.handleLocationUpdate(managerID: ObjectIdentifier(svc.oneShotManager), coordinate: coord, timestamp: Date())
+    svc.handleLocationUpdate(managerID: ObjectIdentifier(svc.oneShotManager), coordinate: coord, accuracy: 5, timestamp: Date())
     XCTAssertNil(svc.lastKnown)
 }
 ```
@@ -370,9 +395,13 @@ In `LocationService.swift`, after the `manager` declaration (line 12) add:
     /// `.coarse` branch of `current()`. Nil until the ambient monitor delivers.
     public private(set) var lastKnown: LocationFix?
 
-    /// Callers awaiting the current in-flight one-shot fix; resumed together (coalesced) when
-    /// the one-shot manager delivers or fails, then cleared. Guarantees resume-exactly-once.
-    @ObservationIgnored private var oneShotWaiters: [CheckedContinuation<Coordinate?, Never>] = []
+    /// Single-slot continuation for the in-flight one-shot fix; resumed exactly once (the
+    /// resumer nils it first, so any later callback is a no-op). Internal for test observation.
+    @ObservationIgnored var oneShotContinuation: CheckedContinuation<Coordinate?, Never>?
+
+    /// The in-flight one-shot request. Concurrent `current()` callers await this same task
+    /// instead of starting a second `requestLocation()`. Internal for test observation.
+    @ObservationIgnored var oneShotTask: Task<Coordinate?, Never>?
 ```
 
 In `init()` (after line 21 `manager.delegate = self`) add:
@@ -387,22 +416,21 @@ Add these methods inside the `LocationService` class body (e.g. after `stop()`):
 
 ```swift
     /// Route a delegate fix to the right consumer by manager identity: the one-shot manager
-    /// resumes every coalesced `current()` waiter; any other manager (the ambient `manager`)
-    /// records `lastKnown`. Internal so unit tests can drive it without a device.
-    @MainActor func handleLocationUpdate(managerID: ObjectIdentifier, coordinate: Coordinate, timestamp: Date) {
+    /// resumes the in-flight `current()` continuation (nil-guarded so it fires at most once);
+    /// any other manager (the ambient `manager`) records `lastKnown`. Internal so unit tests
+    /// can drive it without a device.
+    @MainActor func handleLocationUpdate(managerID: ObjectIdentifier, coordinate: Coordinate, accuracy: Double, timestamp: Date) {
         if managerID == ObjectIdentifier(oneShotManager) {
-            let waiters = oneShotWaiters; oneShotWaiters = []
-            waiters.forEach { $0.resume(returning: coordinate) }
+            if let cont = oneShotContinuation { oneShotContinuation = nil; cont.resume(returning: coordinate) }
         } else {
-            lastKnown = LocationFix(coordinate: coordinate, at: timestamp)
+            lastKnown = LocationFix(coordinate: coordinate, horizontalAccuracy: accuracy, at: timestamp)
         }
     }
 
-    /// A one-shot failure resumes every waiter with nil (they fall back). Ambient failures are ignored.
+    /// A one-shot failure resumes the continuation with nil (caller falls back). Ambient failures ignored.
     @MainActor func handleLocationFailure(managerID: ObjectIdentifier) {
         guard managerID == ObjectIdentifier(oneShotManager) else { return }
-        let waiters = oneShotWaiters; oneShotWaiters = []
-        waiters.forEach { $0.resume(returning: nil) }
+        if let cont = oneShotContinuation { oneShotContinuation = nil; cont.resume(returning: nil) }
     }
 ```
 
@@ -421,9 +449,10 @@ extension LocationService: CLLocationManagerDelegate {
         // Extract Sendable values synchronously; CLLocation is not Sendable.
         guard let loc = locations.last else { return }
         let coord = Coordinate(latitude: loc.coordinate.latitude, longitude: loc.coordinate.longitude)
+        let acc = loc.horizontalAccuracy
         let ts = loc.timestamp
         let id = ObjectIdentifier(m)
-        Task { @MainActor in self.handleLocationUpdate(managerID: id, coordinate: coord, timestamp: ts) }
+        Task { @MainActor in self.handleLocationUpdate(managerID: id, coordinate: coord, accuracy: acc, timestamp: ts) }
     }
 
     nonisolated public func locationManager(_ m: CLLocationManager, didFailWithError error: Error) {
@@ -454,18 +483,51 @@ git commit -m "feat(location): dedicated one-shot manager + demuxed delegate + l
 - Test: `AuraCore/Tests/AuraKitTests/LocationServiceTests.swift`
 
 **Interfaces:**
-- Consumes: `resolveOrigin`, `LocationPurpose`, `LocationFix` (Task 3); `oneShotManager`, `oneShotWaiters`, `lastKnown` (Task 4).
+- Consumes: `resolveOrigin`, `LocationPurpose`, `LocationFix` (Task 3); `oneShotManager`, `oneShotContinuation`, `oneShotTask`, `lastKnown`, `handleLocationUpdate` (Task 4).
 - Produces: `LocationService.current(for purpose: LocationPurpose = .routing) async -> Coordinate`. Callers: `RoutePreviewView` (default `.routing`), `HomeView` (`.coarse`, wired in Task 8).
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 Add to `LocationServiceTests.swift`:
 
 ```swift
-func test_current_deniedAuthorization_returnsFallbackWithoutHanging() async {
+func test_current_returnsDeliveredOneShotFix_andClearsState() async {
     let svc = LocationService()
-    // Fresh service on macOS/sim test host is not authorized; the denied/undetermined path
-    // must resolve to the Pittsburgh fallback via the timeout race, never hang.
+    let fix = Coordinate(latitude: 12.0, longitude: 34.0)
+    // Deliver a one-shot fix as soon as current() parks its continuation.
+    Task { @MainActor in
+        while svc.oneShotContinuation == nil { await Task.yield() }
+        svc.handleLocationUpdate(managerID: ObjectIdentifier(svc.oneShotManager),
+                                 coordinate: fix, accuracy: 5, timestamp: Date())
+    }
+    let origin = await svc.current(for: .routing)
+    XCTAssertEqual(origin.latitude, 12.0, accuracy: 0.0001)
+    XCTAssertNil(svc.oneShotContinuation, "continuation must be cleared after resume")
+    XCTAssertNil(svc.oneShotTask, "in-flight task must be cleared after completion")
+}
+
+func test_current_concurrentCallers_coalesceToOneFix() async {
+    let svc = LocationService()
+    let fix = Coordinate(latitude: 12.0, longitude: 34.0)
+    Task { @MainActor in
+        while svc.oneShotContinuation == nil { await Task.yield() }
+        svc.handleLocationUpdate(managerID: ObjectIdentifier(svc.oneShotManager),
+                                 coordinate: fix, accuracy: 5, timestamp: Date())
+    }
+    // Two concurrent callers must share ONE request and both receive the single delivered fix.
+    async let a = svc.current(for: .routing)
+    async let b = svc.current(for: .routing)
+    let (ra, rb) = await (a, b)
+    XCTAssertEqual(ra.latitude, 12.0, accuracy: 0.0001)
+    XCTAssertEqual(rb.latitude, 12.0, accuracy: 0.0001)
+    XCTAssertNil(svc.oneShotContinuation)
+    XCTAssertNil(svc.oneShotTask)
+}
+
+func test_current_timesOutToFallback_whenNoFixDelivered() async {
+    // Fresh host is .notDetermined; requestLocation delivers no usable fix, so the internal
+    // timeout resolves to the Pittsburgh fallback. Must not hang.
+    let svc = LocationService()
     let origin = await svc.current(for: .routing)
     XCTAssertEqual(origin.latitude, 40.4406, accuracy: 0.0001)
     XCTAssertEqual(origin.longitude, -79.9959, accuracy: 0.0001)
@@ -474,7 +536,7 @@ func test_current_deniedAuthorization_returnsFallbackWithoutHanging() async {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `swift test --package-path AuraCore --filter LocationServiceTests/test_current_deniedAuthorization_returnsFallbackWithoutHanging`
+Run: `swift test --package-path AuraCore --filter LocationServiceTests/test_current_returnsDeliveredOneShotFix_andClearsState`
 Expected: FAIL — `current` has no `for:` parameter (extra-argument error).
 
 - [ ] **Step 3: Rewrite `current()` and delete `firstLiveCoordinate()`**
@@ -483,15 +545,17 @@ Replace `current()` (lines 106-122) with:
 
 ```swift
     /// One-shot origin for plan/preview and Home weather, with a Pittsburgh fallback. Never
-    /// throws and never opens a continuous stream. Resolution: a fresh precise cached fix wins;
-    /// a `.coarse` caller may take a fresh ambient fix; otherwise a single `requestLocation()`
-    /// on the dedicated one-shot manager, bounded by a timeout, then the fallback.
+    /// throws and never opens a continuous stream. Resolution: a fresh *precise* cached fix wins
+    /// (routing rejects a coarse cached fix — see `resolveOrigin`); a `.coarse` caller may take a
+    /// fresh ambient fix; otherwise a single `requestLocation()` on the dedicated one-shot manager,
+    /// bounded by a timeout, then the fallback.
     public func current(for purpose: LocationPurpose = .routing) async -> Coordinate {
         let fallback = Coordinate(latitude: 40.4406, longitude: -79.9959)
         let now = Date()
         let cached = manager.location.map {
             LocationFix(coordinate: Coordinate(latitude: $0.coordinate.latitude,
-                                               longitude: $0.coordinate.longitude), at: $0.timestamp)
+                                               longitude: $0.coordinate.longitude),
+                        horizontalAccuracy: $0.horizontalAccuracy, at: $0.timestamp)
         }
         if let resolved = resolveOrigin(cached: cached, ambient: lastKnown, purpose: purpose, now: now) {
             return resolved
@@ -503,27 +567,30 @@ Replace `current()` (lines 106-122) with:
         return await firstOneShotCoordinate() ?? fallback
     }
 
-    /// Await a single fix from the dedicated one-shot manager, bounded by `timeout`. Coalesces
-    /// concurrent callers onto one `requestLocation()`; all waiters resume together — from the
-    /// delegate on success/failure (Task 4), or from the timeout below, whichever fires first.
-    /// Resume is exactly-once per waiter: whichever path runs first empties `oneShotWaiters` on
-    /// the main actor, so the other sees an empty list and resumes nobody. The timeout task is
-    /// never cancelled (avoids the Swift 6.2 cancel-while-sleeping abort); it just clears stragglers.
-    /// NOTE: do NOT wrap this in a `withTaskGroup` timeout race — `withCheckedContinuation` ignores
-    /// cancellation, so a parked waiter would keep the group's implicit await-all alive past the
-    /// timeout and hang `current()`. The timeout must live inside the continuation, as here.
+    /// Await a single fix from the dedicated one-shot manager, bounded by `timeout`. Concurrent
+    /// callers coalesce onto one `oneShotTask` (and thus one `requestLocation()`); the single-slot
+    /// `oneShotContinuation` is resumed exactly once — by the delegate on success/failure (Task 4)
+    /// or by the timeout below, whichever nils it first; the loser sees nil and no-ops. The timeout
+    /// task is never cancelled (avoids the Swift 6.2 cancel-while-sleeping abort). Do NOT reintroduce
+    /// a `withTaskGroup` race: `withCheckedContinuation` ignores cancellation, so a parked waiter
+    /// would keep the group's implicit await-all alive past the timeout and hang `current()`.
     private func firstOneShotCoordinate(timeout: TimeInterval = 3) async -> Coordinate? {
-        await withCheckedContinuation { (cont: CheckedContinuation<Coordinate?, Never>) in
-            oneShotWaiters.append(cont)
-            guard oneShotWaiters.count == 1 else { return }   // coalesce: a request is already in flight
-            oneShotManager.requestLocation()
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                let waiters = self.oneShotWaiters
-                self.oneShotWaiters = []
-                waiters.forEach { $0.resume(returning: nil) }
+        if let task = oneShotTask { return await task.value }   // coalesce concurrent callers
+        let task = Task { @MainActor [weak self] () -> Coordinate? in
+            guard let self else { return nil }
+            return await withCheckedContinuation { (cont: CheckedContinuation<Coordinate?, Never>) in
+                self.oneShotContinuation = cont
+                self.oneShotManager.requestLocation()
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    if let cont = self.oneShotContinuation { self.oneShotContinuation = nil; cont.resume(returning: nil) }
+                }
             }
         }
+        oneShotTask = task
+        let result = await task.value
+        oneShotTask = nil
+        return result
     }
 ```
 
@@ -532,13 +599,13 @@ Delete `firstLiveCoordinate()` (old lines 124-136) entirely.
 - [ ] **Step 4: Run the whole package test suite**
 
 Run: `swift test --package-path AuraCore --filter LocationServiceTests`
-Expected: PASS. (The denied-path test returns the fallback within ~3s.)
+Expected: PASS. (The delivery/coalesce tests resolve immediately; the timeout test returns the fallback within ~3s.)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add AuraCore/Sources/AuraKit/LocationService.swift AuraCore/Tests/AuraKitTests/LocationServiceTests.swift
-git commit -m "feat(location): true one-shot current(for:) on dedicated manager (ROH-83)"
+git commit -m "feat(location): coalesced one-shot current(for:), accuracy-gated origin (ROH-83)"
 ```
 
 ---
@@ -552,10 +619,11 @@ git commit -m "feat(location): true one-shot current(for:) on dedicated manager 
 **Interfaces:**
 - Consumes: `setMode`, `mode` (Task 1).
 - Produces:
+  - `LocationService.sessionActive: Bool` (`private(set)`, cross-platform) — true while the ride pipeline holds (or, on macOS, would hold) the background location session. Gives host-independent test coverage of the teardown guarantee that `showsBackgroundLocationIndicator` (iOS-only) cannot.
   - `LocationService.startAmbient()` — gated on `authorization == .authorized` and `mode != .navigating`.
   - `LocationService.releaseNonRide()` — stops the ambient monitor + one-shot; **no-op while `.navigating`** (never touches the ride pipeline).
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 Add to `LocationServiceTests.swift`:
 
@@ -564,6 +632,7 @@ func test_startAmbient_noopsWhenNotAuthorized() {
     let svc = LocationService()   // fresh -> notDetermined
     svc.startAmbient()
     XCTAssertEqual(svc.mode, .idle, "ambient must not start without authorization")
+    XCTAssertFalse(svc.sessionActive)
 }
 
 func test_releaseNonRide_isNoopWhileNavigating() {
@@ -579,14 +648,45 @@ func test_releaseNonRide_stopsAmbient() {
     svc.releaseNonRide()
     XCTAssertEqual(svc.mode, .idle)
 }
+
+func test_points_armsSession_stopClearsIt() {
+    let svc = LocationService()
+    _ = svc.points()
+    XCTAssertTrue(svc.sessionActive, "points() must arm the ride session")
+    XCTAssertEqual(svc.mode, .navigating)
+    svc.stop()
+    XCTAssertFalse(svc.sessionActive, "stop() must synchronously release the ride session")
+    XCTAssertEqual(svc.mode, .idle)
+}
+
+func test_stop_doesNotClobberReArmedAmbient() {
+    // Ride-end race: the controller re-arms ambient (path pop) BEFORE the HUD's
+    // onDisappear->cancel->stop lands. stop() must release the session but NOT force
+    // the tier back to .idle when ambient already took over.
+    let svc = LocationService()
+    _ = svc.points()              // ride armed: sessionActive, .navigating
+    svc.setMode(.ambient)         // controller re-armed ambient first
+    svc.stop()                    // late teardown arrives
+    XCTAssertFalse(svc.sessionActive, "session must still be released")
+    XCTAssertEqual(svc.mode, .ambient, "stop() must not clobber a re-armed ambient tier")
+}
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `swift test --package-path AuraCore --filter LocationServiceTests/test_startAmbient_noopsWhenNotAuthorized`
-Expected: FAIL — `has no member 'startAmbient'`.
+Expected: FAIL — `has no member 'startAmbient'` / `'sessionActive'`.
 
-- [ ] **Step 3: Implement ambient + releaseNonRide**
+- [ ] **Step 3: Add `sessionActive` and implement ambient + releaseNonRide**
+
+In `LocationService.swift`, add the flag after the `mode` declaration:
+
+```swift
+    /// True while the ride pipeline holds the background location session. On macOS (no
+    /// `CLBackgroundActivitySession`) it still tracks the ride's intent, so the teardown
+    /// guarantee is unit-testable on the CI host. Only `points()` sets it; only `stop()` clears it.
+    @ObservationIgnored public private(set) var sessionActive = false
+```
 
 Add to the `LocationService` class body (after `stop()`):
 
@@ -611,46 +711,47 @@ Add to the `LocationService` class body (after `stop()`):
     }
 ```
 
-- [ ] **Step 4: Harden ride teardown — drop the async self-stop race**
+- [ ] **Step 4: Arm `sessionActive` in `points()`; keep the `onTermination` safety net**
 
-In `points()`, delete the `continuation.onTermination` block (lines 84-88):
+In `points()`, after `setMode(.navigating)` (line 60) add:
 
 ```swift
-        continuation.onTermination = { [weak self] _ in
-            // onTermination fires off the main actor when the consumer drops the
-            // stream; hop back in to tear down the manager state.
-            Task { @MainActor in self?.stop() }
-        }
+        sessionActive = true
 ```
 
-Rationale to record in the commit: teardown is now explicit and synchronous via `stop()` (called by the coordinator on finish/cancel and by `.onDisappear`). The delayed async self-stop could land after the controller re-armed `.ambient` and clobber it. `stop()` (lines 92-100) already cancels the task, invalidates+nils the background session, finishes the continuation, and calls `setMode(.idle)` synchronously — leave that body unchanged.
+Leave the `continuation.onTermination` block (lines 84-88) **in place** — it is the backstop that releases the session if the stream is ever dropped without an explicit `stop()`. It is now safe to keep because `stop()` is made clobber-proof in Step 5.
 
-- [ ] **Step 5: Add a ride-teardown regression test**
+- [ ] **Step 5: Make `stop()` clobber-proof and clear `sessionActive`**
 
-Add to `LocationServiceTests.swift`:
+Replace `stop()` (lines 92-100) with:
 
 ```swift
-func test_stop_releasesToIdle() {
-    let svc = LocationService()
-    svc.setMode(.navigating)
-    svc.stop()
-    XCTAssertEqual(svc.mode, .idle)
-    #if os(iOS)
-    XCTAssertFalse(svc.manager.showsBackgroundLocationIndicator)
-    #endif
-}
+    public func stop() {
+        updatesTask?.cancel(); updatesTask = nil
+        #if os(iOS)
+        backgroundSession?.invalidate(); backgroundSession = nil
+        #endif
+        continuation?.finish(); continuation = nil
+        sessionActive = false
+        // Only return the manager to idle if WE still own it as the ride. If the lifecycle
+        // controller already re-armed `.ambient` (ride-end race: path pop fires startAmbient
+        // before the HUD's onDisappear->cancel->stop lands), don't clobber it. The session
+        // teardown above is unconditional; only the tier reset is guarded.
+        if mode == .navigating { setMode(.idle) }
+        signal = .good
+    }
 ```
 
 - [ ] **Step 6: Run tests to verify they pass**
 
 Run: `swift test --package-path AuraCore --filter LocationServiceTests`
-Expected: PASS (all tests).
+Expected: PASS (all tests, including the two new session/clobber tests).
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add AuraCore/Sources/AuraKit/LocationService.swift AuraCore/Tests/AuraKitTests/LocationServiceTests.swift
-git commit -m "feat(location): ambient monitor + releaseNonRide; drop onTermination self-stop race (ROH-83)"
+git commit -m "feat(location): ambient monitor, releaseNonRide, clobber-proof stop() + sessionActive (ROH-83)"
 ```
 
 ---
@@ -682,8 +783,12 @@ Inside `RootView`, add:
     /// app state (never from view appear/disappear, which is unreliable on this retained nav
     /// root) and applies it. The ride pipeline owns `.navigating` via the coordinator, so this
     /// yields entirely while a ride is active.
+    ///
+    /// `isHomeForeground` uses `scenePhase != .background` (NOT `== .active`): a transient
+    /// `.inactive` — Control Center, a notification banner, a permission alert — must NOT tear
+    /// down the ambient monitor. Ambient is released only on a real `.background`.
     private func syncLocationActivity() {
-        let isHomeForeground = router.path.isEmpty && scenePhase == .active
+        let isHomeForeground = router.path.isEmpty && scenePhase != .background
         switch LocationAccuracyMode.desired(isRideActive: router.isRideActive,
                                             isHomeForeground: isHomeForeground,
                                             authorized: location.authorization == .authorized) {
