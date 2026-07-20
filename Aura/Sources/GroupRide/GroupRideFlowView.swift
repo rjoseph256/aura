@@ -36,7 +36,26 @@ struct GroupRideFlowView: View {
             }
     }
 
+    /// A rider who actually entered `.riding` and whose ride later ends (host-end, D9) must
+    /// NOT have the HUD torn down — the in-progress solo navigation (owned by the
+    /// `RideSessionCoordinator` inside `GroupNavigateContainer`'s `NavigateHUDView`) would be
+    /// abandoned, its recording discarded, and the end-summary lost (it would be set on a
+    /// destroyed coordinator). So `.riding` and the "rode, then ended" case of `.ended` share
+    /// ONE structural branch here — a single `if`, not two `switch` cases. SwiftUI gives each
+    /// `switch` case its own `_ConditionalContent` identity, so routing both phases through
+    /// separate cases (even to the same `ridingContainer`) rebuilds the subtree on the
+    /// `.riding → .ended` transition and destroys that `@State` (ROH-81 device finding). A ride
+    /// that ends while the rider is still in the lobby/join flow never had a HUD to preserve, so
+    /// it falls to `otherPhaseContent`'s dedicated ended surface.
     @ViewBuilder private var content: some View {
+        if session.phase == .riding || (session.phase == .ended && didEnterRiding) {
+            ridingContainer
+        } else {
+            otherPhaseContent
+        }
+    }
+
+    @ViewBuilder private var otherPhaseContent: some View {
         switch session.phase {
         case .idle:
             ProgressView()
@@ -57,23 +76,11 @@ struct GroupRideFlowView: View {
         case .lobby:
             GroupLobbyView(session: session)
 
-        // A rider who actually entered `.riding` and whose ride later ends (host-end, D9)
-        // must NOT have this view torn down — the rider's in-progress solo navigation
-        // (owned by the `RideSessionCoordinator` inside `GroupNavigateContainer`'s
-        // `NavigateHUDView`) would be abandoned along with it. `GroupNavigateContainer`
-        // itself reads `session.phase` to hide the crew chrome once `.ended`, while the
-        // solo HUD underneath keeps running — `ridingContainer` handles both `.riding`
-        // and that "rode, then ended" case. A ride that ends while the rider is still in
-        // the lobby/join flow (never entered `.riding`) never had a HUD to preserve, so
-        // it gets a dedicated ended surface instead.
-        case .riding:
-            ridingContainer
+        // Reached only when `!didEnterRiding` (the `content` `if` owns the rode-then-ended
+        // case): the ride ended while the rider was still in the lobby/join flow, so there's no
+        // HUD to preserve — show a terminal surface.
         case .ended:
-            if didEnterRiding {
-                ridingContainer
-            } else {
-                endedLobbySurface
-            }
+            endedLobbySurface
 
         case .createFailed:
             dismissMessage(
@@ -92,6 +99,10 @@ struct GroupRideFlowView: View {
                 title: "Couldn't join — double-check the code with your host.",
                 systemImage: "person.crop.circle.badge.xmark"
             )
+
+        // Unreachable: `content`'s `if` renders `.riding`. Here only for switch exhaustiveness.
+        case .riding:
+            EmptyView()
         }
     }
 

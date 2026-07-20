@@ -93,25 +93,12 @@ struct NavigateHUDView: View {
                 GroupToastHost(events: groupSession.toasts)
             }
         }
-        // "Reconnecting…" pill when the live layer has dropped, and/or the "Couldn't end —
-        // Retry" chip when the last end/leave attempt failed server-side (ROH-68). Both are
-        // non-blocking status pills scoped to the crew chrome, so they only ever show while
-        // `phase == .riding` (via `showsGroupChrome`) and stack vertically on the rare chance
-        // both conditions hold at once.
-        .overlay(alignment: .top) {
-            if showsGroupChrome, let groupSession {
-                VStack(spacing: AuraTheme.Spacing.sm) {
-                    if !groupSession.isLive {
-                        reconnectingPill
-                    }
-                    if groupSession.endFailed {
-                        endFailedPill
-                    }
-                }
-                .padding(.top, 44)
-            }
-        }
-        // Turn card pinned below the status bar, with the next-turn preview beneath it.
+        // Turn card pinned below the status bar, with the next-turn preview beneath it, and —
+        // on a group ride — the crew status pills (Reconnecting… / Ending… / "Couldn't end —
+        // Retry") tucked tight under that banner cluster. The pills live in THIS overlay (not a
+        // top overlay of their own) because the turn card is a higher-z top overlay that would
+        // otherwise occlude them (ROH-81); nesting here keeps them just below the card and
+        // moving with it as it resizes, always visible and tappable.
         .overlay(alignment: .top) {
             VStack(spacing: AuraTheme.Spacing.sm) {
                 TurnCardView(state: guidance.turn, reduceMotion: reduceMotion)
@@ -121,6 +108,9 @@ struct NavigateHUDView: View {
                         .transition(reduceMotion
                             ? .opacity
                             : .move(edge: .top).combined(with: .opacity))
+                }
+                if showsGroupChrome, let groupSession {
+                    groupStatusPills(groupSession)
                 }
             }
             .padding(.top, 8) // sits in the safe area; no hardcoded status-bar inset
@@ -172,6 +162,9 @@ struct NavigateHUDView: View {
                 Button("Keep riding", role: .cancel) { }
             }
         }
+        // ROH-81: acknowledge a waited-on end/leave the moment it starts + announce/haptic the
+        // outcome — feedback the top-of-screen pill alone can miss. (Extracted to +GroupCrew.)
+        .groupEndFeedback(isEnding: groupSession?.isEnding, endFailed: groupSession?.endFailed)
         // Summary sheet: when dismissed, return to the home dashboard.
         .sheet(item: $coordinator.finishedRide, onDismiss: {
             router.popToRoot()
@@ -391,7 +384,8 @@ private extension NavigateHUDView {
                     onRecenter: { recenter() },
                     onMarkSpot: nil,
                     onToggleMute: { toggleMute() },
-                    onEndRide: { onEndTapped() })
+                    onEndRide: { onEndTapped() },
+                    isEndDisabled: groupSession?.isEnding == true)
             }
             .padding(.horizontal, AuraTheme.Spacing.lg)
 

@@ -1,6 +1,7 @@
 import AuraCore
 import AuraKit
 import SwiftUI
+import UIKit
 
 /// The group-ride crew chrome `NavigateHUDView` overlays on top of its map + solo HUD
 /// whenever it's hosting a group ride (`groupSession != nil`). Split into its own file
@@ -28,6 +29,45 @@ extension NavigateHUDView {
                                  selfProgress: selfProgressMeters, isImperial: settings.units == .imperial)
     }
 
+    /// Immediate acknowledgment that a waited-on end/leave is in flight (ROH-81). Styled
+    /// identically to `reconnectingPill`/`endFailedPill` so the crew chrome reads as one family.
+    /// Only shown for host-end / member-end (a keep-riding leave never sets `isEnding`), so the
+    /// "Ending…" wording is always accurate.
+    var endingPill: some View {
+        HStack(spacing: AuraTheme.Spacing.sm) {
+            ProgressView().controlSize(.small).tint(AuraTheme.accent)
+            Text("Ending…")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AuraTheme.textPrimary)
+        }
+        .padding(.horizontal, AuraTheme.Spacing.md)
+        .padding(.vertical, AuraTheme.Spacing.sm)
+        .background(AuraTheme.surface.opacity(0.9), in: Capsule())
+        .overlay(Capsule().strokeBorder(AuraTheme.border))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Ending the group ride")
+    }
+
+    /// The stacked crew status pills (ending / reconnecting / end-failed). Rendered tucked
+    /// under the turn-card banner (inside that top overlay's VStack), NOT as a top overlay of
+    /// their own — the always-present turn card is a higher-z overlay that was occluding them
+    /// there (ROH-81). At most one shows in practice (`endFailed` is only set after `isEnding`
+    /// clears).
+    @ViewBuilder
+    func groupStatusPills(_ groupSession: GroupRideSession) -> some View {
+        VStack(spacing: AuraTheme.Spacing.sm) {
+            if groupSession.isEnding {
+                endingPill
+            }
+            if !groupSession.isLive {
+                reconnectingPill
+            }
+            if groupSession.endFailed {
+                endFailedPill
+            }
+        }
+    }
+
     var reconnectingPill: some View {
         Label("Reconnecting…", systemImage: "wifi.exclamationmark")
             .font(.subheadline.weight(.semibold))
@@ -53,7 +93,7 @@ extension NavigateHUDView {
             Button("Retry") {
                 Task {
                     await groupSession?.retryEndIfNeeded()
-                    if groupSession?.phase == .ended { endRide() }
+                    await finishOwnRideIfEnded()
                 }
             }
             .font(.subheadline.weight(.bold))
@@ -93,7 +133,7 @@ extension NavigateHUDView {
     func endGroupRideAsHost() {
         Task {
             await groupSession?.end()
-            if groupSession?.phase == .ended { endRide() }
+            await finishOwnRideIfEnded()
         }
     }
 
@@ -110,8 +150,53 @@ extension NavigateHUDView {
     /// — only once the leave is server-confirmed (`.ended`), mirroring the host path above.
     func endRideAsMember() {
         Task {
-            await groupSession?.leave()
-            if groupSession?.phase == .ended { endRide() }
+            await groupSession?.endAsMember()
+            await finishOwnRideIfEnded()
         }
+    }
+
+    /// Finish the rider's own ride into the summary once the crew lifecycle call has landed
+    /// (`phase == .ended`), deferred one run-loop past the `phase → .ended` transition so the
+    /// phase-driven crew-chrome dissolve commits before the summary sheet is presented — keeping
+    /// those two SwiftUI updates in separate transactions. `endRide()` is idempotent
+    /// (`coordinator.finish()` guards on `isRecording`), so a late wire `.rideEnded` landing in
+    /// the gap is harmless. (The end-not-ending device bug that motivated ROH-81's device pass
+    /// was the HUD being rebuilt on the `.riding → .ended` transition — fixed separately in
+    /// `GroupRideFlowView`; this deferral is belt-and-suspenders sequencing.)
+    private func finishOwnRideIfEnded() async {
+        guard groupSession?.phase == .ended else { return }
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        endRide()
+    }
+}
+
+/// Announces (VoiceOver) and haptically signals a waited-on end/leave outcome — feedback the
+/// top-of-screen "Ending…" pill alone can miss for a host looking at the map or using VoiceOver
+/// (ROH-81). Both inputs are `Bool?` so the optional `groupSession` composes cleanly.
+struct GroupEndFeedback: ViewModifier {
+    let isEnding: Bool?
+    let endFailed: Bool?
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: isEnding) { _, value in
+                if value == true {
+                    AccessibilityNotification.Announcement("Ending the group ride").post()
+                }
+            }
+            .onChange(of: endFailed) { _, value in
+                if value == true {
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    AccessibilityNotification.Announcement("Couldn't end the group ride. Retry available.").post()
+                }
+            }
+    }
+}
+
+extension View {
+    /// Applies `GroupEndFeedback` for a group ride's `isEnding`/`endFailed` transitions.
+    func groupEndFeedback(isEnding: Bool?, endFailed: Bool?) -> some View {
+        modifier(GroupEndFeedback(isEnding: isEnding, endFailed: endFailed))
     }
 }
