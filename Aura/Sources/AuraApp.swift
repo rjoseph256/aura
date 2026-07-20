@@ -80,6 +80,7 @@ private struct RootView: View {
     @Environment(AuthStore.self) private var auth
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) private var settings
+    @Environment(LocationService.self) private var location
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -130,7 +131,12 @@ private struct RootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+            syncLocationActivity()
         }
+        .onChange(of: router.path) { _, _ in syncLocationActivity() }
+        .onChange(of: router.isRideActive) { _, _ in syncLocationActivity() }
+        .onChange(of: location.authorization) { _, _ in syncLocationActivity() }
+        .task { syncLocationActivity() }
         .onChange(of: router.pendingSignIn) { _, entry in
             guard entry != nil else { return }          // fires only on nil -> entry (gate's reentrancy guard blocks overwrite)
             Task {
@@ -138,6 +144,25 @@ private struct RootView: View {
                 // cancel or failure: drop the intent, stay put
                 if auth.isSignedIn { router.resumePendingGroupRide() } else { router.cancelPendingGroupRide() }
             }
+        }
+    }
+
+    /// Single writer for the non-ride location tier. Computes the desired tier from explicit
+    /// app state (never from view appear/disappear, which is unreliable on this retained nav
+    /// root) and applies it. The ride pipeline owns `.navigating` via the coordinator, so this
+    /// yields entirely while a ride is active.
+    ///
+    /// `isHomeForeground` uses `scenePhase != .background` (NOT `== .active`): a transient
+    /// `.inactive` — Control Center, a notification banner, a permission alert — must NOT tear
+    /// down the ambient monitor. Ambient is released only on a real `.background`.
+    private func syncLocationActivity() {
+        let isHomeForeground = router.path.isEmpty && scenePhase != .background
+        switch LocationAccuracyMode.desired(isRideActive: router.isRideActive,
+                                            isHomeForeground: isHomeForeground,
+                                            authorized: location.authorization == .authorized) {
+        case .ambient: location.startAmbient()
+        case .idle: location.releaseNonRide()
+        case .navigating: break   // owned by the ride pipeline
         }
     }
 }
