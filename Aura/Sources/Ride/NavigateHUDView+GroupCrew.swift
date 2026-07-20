@@ -48,8 +48,9 @@ extension NavigateHUDView {
         .accessibilityLabel("Ending the group ride")
     }
 
-    /// The stacked crew status pills (ending / reconnecting / end-failed). Extracted from
-    /// `NavigateHUDView`'s body to keep it under the length limit; at most one shows in practice
+    /// The stacked crew status pills (ending / reconnecting / end-failed). Rendered just above
+    /// the control cluster in `bottomCockpit` (not at the top, where the always-present turn
+    /// card — a higher-z overlay — was occluding them, ROH-81). At most one shows in practice
     /// (`endFailed` is only set after `isEnding` clears).
     @ViewBuilder
     func groupStatusPills(_ groupSession: GroupRideSession) -> some View {
@@ -64,7 +65,6 @@ extension NavigateHUDView {
                 endFailedPill
             }
         }
-        .padding(.top, 44)
     }
 
     var reconnectingPill: some View {

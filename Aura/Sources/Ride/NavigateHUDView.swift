@@ -93,16 +93,6 @@ struct NavigateHUDView: View {
                 GroupToastHost(events: groupSession.toasts)
             }
         }
-        // "Reconnecting…" pill when the live layer has dropped, and/or the "Couldn't end —
-        // Retry" chip when the last end/leave attempt failed server-side (ROH-68). Both are
-        // non-blocking status pills scoped to the crew chrome, so they only ever show while
-        // `phase == .riding` (via `showsGroupChrome`) and stack vertically on the rare chance
-        // both conditions hold at once.
-        .overlay(alignment: .top) {
-            if showsGroupChrome, let groupSession {
-                groupStatusPills(groupSession)
-            }
-        }
         // Turn card pinned below the status bar, with the next-turn preview beneath it.
         .overlay(alignment: .top) {
             VStack(spacing: AuraTheme.Spacing.sm) {
@@ -373,6 +363,14 @@ private extension NavigateHUDView {
     /// ride; the solo path never renders it.)
     @ViewBuilder var bottomCockpit: some View {
         VStack(spacing: AuraTheme.Spacing.sm) {
+            // Crew status pills (Reconnecting… / Ending… / "Couldn't end — Retry") sit just
+            // above the controls rather than at the top: the top-center is owned by the
+            // always-present turn card (a higher-z overlay), which was occluding them there
+            // (ROH-81). Here they're always visible, and the Retry chip lands right beside the
+            // End button the rider just tapped. Only rendered on the group path (`showsGroupChrome`).
+            if showsGroupChrome, let groupSession {
+                groupStatusPills(groupSession)
+            }
             HStack(alignment: .bottom, spacing: AuraTheme.Spacing.md) {
                 if showsGroupChrome, let groupSession {
                     GroupRosterSheet(rows: rosterRows(for: groupSession))
