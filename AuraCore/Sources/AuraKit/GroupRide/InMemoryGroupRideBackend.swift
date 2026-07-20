@@ -14,6 +14,9 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var forceDeleteError: GroupRideError?    // test spy
         var forceStartError: GroupRideError?     // test spy
         var forceEndError: GroupRideError?       // test spy, one-shot: cleared on throw so a retry succeeds
+        var hangEndLeave = false                          // test spy: park endRide/leaveRide until cancelled
+        var onEndLeaveEntered: (@Sendable () -> Void)?    // test spy: fired when end/leave is entered
+        var endLeaveCallCount = 0                          // test spy: how many times end/leave ran
 
         // Auth-state seam (added Task 2). The signed-in id and its observers live
         // here (not on the actor) so `cachedUserID` can be `nonisolated` while
@@ -95,6 +98,9 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
     }
 
     public func endRide(rideID: UUID) async throws {
+        store.endLeaveCallCount += 1
+        store.onEndLeaveEntered?()
+        if store.hangEndLeave { try await Task.sleep(for: .seconds(1000)) }
         if let forced = store.forceEndError { store.forceEndError = nil; throw forced }
         guard let uid = store.lock.withLock({ store.currentUserID }), let ride = store.rides[rideID], ride.hostID == uid
         else { throw GroupRideError.notHost }
@@ -103,6 +109,9 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
                                         startedAt: ride.startedAt, endedAt: Date(timeIntervalSince1970: 20))
     }
     public func leaveRide(rideID: UUID) async throws {
+        store.endLeaveCallCount += 1
+        store.onEndLeaveEntered?()
+        if store.hangEndLeave { try await Task.sleep(for: .seconds(1000)) }
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
         store.members[rideID]?.removeAll { $0 == uid }
         store.leaveCalled = true

@@ -20,6 +20,10 @@ public final class GroupRideSession {
         case idle, lobby, riding, ended, routeUnavailable, createFailed, needsDisplayName, joinFailed
     }
 
+    /// Which end/leave the caller intends — drives whether the rider waits on it (and sees
+    /// pending/timeout feedback) or it's fire-and-forget (keep-riding leave).
+    public enum FinishIntent: Sendable, Equatable { case hostEnd, memberEnd, memberLeave }
+
     public private(set) var phase: Phase = .idle
     public private(set) var isHost: Bool = false
     public private(set) var rideID: UUID?
@@ -38,6 +42,9 @@ public final class GroupRideSession {
     /// Set when the most recent `end()`/`leave()` call failed server-side. The HUD surfaces
     /// this as a retry affordance; `retryEndIfNeeded()` re-attempts without faking success.
     public private(set) var endFailed = false
+    /// True from a waited-on end/leave tap (hostEnd/memberEnd) until it resolves. Drives the
+    /// "Ending…" pill and disables the End control. Never set for a keep-riding leave.
+    public private(set) var isEnding = false
 
     /// The seam the ride's `RideSessionCoordinator` publishes the rider's own position
     /// through, so peers see this rider's dot on the map. `rideSession` (the private inner
@@ -49,6 +56,12 @@ public final class GroupRideSession {
     private let transport: any RideSessionTransport
     private let displayNameProvider: @Sendable () -> String
     private let cadence: LiveShareCadence
+    /// How long a waited-on end/leave may hang before it's treated as a transient failure
+    /// (surfaces `endFailed`). Injected (defaulted) so tests drive the timeout deterministically.
+    private let endTimeout: Duration
+    /// The timeout clock — injected so tests race the backend call against a controllable sleep
+    /// instead of a real one.
+    private let sleep: @Sendable (Duration) async throws -> Void
     private var rideSession: RideSession?
     private var currentLifecycle: RideLifecycle = .foreground
     private var tickerTask: Task<Void, Never>?
@@ -64,7 +77,8 @@ public final class GroupRideSession {
     private var pendingStart = false
     /// An `end()`/`leave()` the server hasn't confirmed yet — gates `retryEndIfNeeded()`.
     private var pendingEnd = false
-    private var isLeaveNotEnd = false
+    /// The intent of the in-flight/last end/leave, so `retryEndIfNeeded()` replays the same one.
+    private var finishIntent: FinishIntent = .hostEnd
     // TODO(backoff timer): production auto-retry. Spec calls for a session-held backoff
     // Task (2s, 4s, 8s, cap 8s) started when startFailed/endFailed first sets and cancelled
     // in teardownLive, driving retryStartIfNeeded()/retryEndIfNeeded(). Deferred: a real
@@ -86,11 +100,15 @@ public final class GroupRideSession {
     }
 
     public init(backend: any GroupRideBackend, transport: any RideSessionTransport,
-                displayNameProvider: @escaping @Sendable () -> String, cadence: LiveShareCadence = .init()) {
+                displayNameProvider: @escaping @Sendable () -> String, cadence: LiveShareCadence = .init(),
+                endTimeout: Duration = .seconds(4),
+                sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
         self.backend = backend
         self.transport = transport
         self.displayNameProvider = displayNameProvider
         self.cadence = cadence
+        self.endTimeout = endTimeout
+        self.sleep = sleep
     }
 
     public func create(route inputRoute: Route) async {
@@ -302,24 +320,57 @@ public final class GroupRideSession {
         }
     }
 
-    public func end() async { await finishRide(leaveOnly: false) }
-
-    public func leave() async { await finishRide(leaveOnly: true) }
-
-    /// Ends (host) or leaves (member) the ride without ever faking success: `.ended` is set
-    /// only when the server confirms, or when the server says the caller is already gone
-    /// (`.notHost`/`.notMember` — a stale retry or a race with an already-processed end/leave).
-    /// Any other error is transient — `endFailed` is surfaced and the chrome (phase stays
-    /// `.riding`) is kept so the UI can retry via `retryEndIfNeeded()` rather than losing state.
-    private func finishRide(leaveOnly: Bool) async {
-        guard let rideID else { phase = .ended; teardownLive(rideSession); return }
+    /// Single teardown path for every dissolve (host end, member leave, host-end wire
+    /// signal): stops the inner session's subscription, cancels the owned event loop and
+    /// ticker, and clears `didBeginLive` so a fresh session could begin again.
+    private func teardownLive(_ session: RideSession?) {
+        // Clear the end/leave latches so no stale chip/pending state survives a dissolve by any
+        // route (host end, member leave, wire `.rideEnded`, authoritative reconcile → `.ended`).
         endFailed = false
-        isLeaveNotEnd = leaveOnly
+        pendingEnd = false
+        isEnding = false
+        session?.stop()
+        eventLoopTask?.cancel()
+        eventLoopTask = nil
+        tickerTask?.cancel()
+        tickerTask = nil
+        didBeginLive = false
+    }
+}
+
+// MARK: - End / Leave lifecycle
+//
+// Split into a same-file extension purely to keep `GroupRideSession`'s primary body under
+// SwiftLint's `type_body_length` ceiling; same-file access to the private stored state is
+// unaffected. Behavior is identical to living in the main declaration.
+extension GroupRideSession {
+    public func end() async { await finishRide(.hostEnd) }
+
+    public func endAsMember() async { await finishRide(.memberEnd) }
+
+    public func leave() async { await finishRide(.memberLeave) }
+
+    /// Ends (host) or leaves (member) the ride without ever faking success. `.ended` is set only
+    /// when the server confirms, or when the server says the caller is already gone
+    /// (`.notHost`/`.notMember`). Waited-on paths (`.hostEnd`/`.memberEnd`) show a pending state
+    /// and, on a hang past `endTimeout` or any transient throw, surface `endFailed` (the Retry
+    /// chip) while keeping the chrome. A keep-riding leave (`.memberLeave`) is fire-and-forget:
+    /// no pending state, no chip — the rider keeps navigating solo regardless (D10).
+    private func finishRide(_ intent: FinishIntent) async {
+        guard let rideID else { phase = .ended; teardownLive(rideSession); return }
+        let leaveOnly = (intent != .hostEnd)
+        let showsFeedback = (intent != .memberLeave)
+        if showsFeedback, isEnding { return }   // re-entrancy guard for waited-on paths
+        finishIntent = intent
+        if showsFeedback { endFailed = false; isEnding = true }
+        defer { if showsFeedback { isEnding = false } }
         do {
-            if leaveOnly {
-                try await backend.leaveRide(rideID: rideID)
-            } else {
-                try await backend.endRide(rideID: rideID)
+            try await withTimeout(endTimeout, sleep: sleep) { [backend] in
+                if leaveOnly {
+                    try await backend.leaveRide(rideID: rideID)
+                } else {
+                    try await backend.endRide(rideID: rideID)
+                }
             }
             phase = .ended
             teardownLive(rideSession)
@@ -328,28 +379,21 @@ public final class GroupRideSession {
             phase = .ended
             teardownLive(rideSession)
         } catch {
-            endFailed = true
-            pendingEnd = true   // keep chrome (phase stays .riding), allow retry
+            // TimeoutError OR any transient throw. Only a waited-on path surfaces a retry, and
+            // only if the ride hasn't already ended out from under us (a racing wire `.rideEnded`
+            // / reconcile can flip `.ended` while we were suspended — don't relatch).
+            if showsFeedback, phase != .ended {
+                endFailed = true
+                pendingEnd = true
+            }
         }
     }
 
-    /// Re-attempts a pending end/leave. Bound to a Retry button (and, in production, an
-    /// auto-backoff Task — see the TODO above).
+    /// Re-attempts a pending waited-on end/leave, replaying the same intent. Bound to a Retry
+    /// button (and, in production, an auto-backoff Task — see the TODO above).
     public func retryEndIfNeeded() async {
         guard pendingEnd else { return }
         pendingEnd = false
-        await finishRide(leaveOnly: isLeaveNotEnd)
-    }
-
-    /// Single teardown path for every dissolve (host end, member leave, host-end wire
-    /// signal): stops the inner session's subscription, cancels the owned event loop and
-    /// ticker, and clears `didBeginLive` so a fresh session could begin again.
-    private func teardownLive(_ session: RideSession?) {
-        session?.stop()
-        eventLoopTask?.cancel()
-        eventLoopTask = nil
-        tickerTask?.cancel()
-        tickerTask = nil
-        didBeginLive = false
+        await finishRide(finishIntent)
     }
 }
