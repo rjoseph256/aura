@@ -58,7 +58,11 @@ struct HomeLiveMap: View {
         .ignoresSafeArea()
         // External camera change (post-ride reset) must move an already-mounted map.
         .onChange(of: model.liveCamera) { _, cam in
-            guard !model.movedOffRider else { return } // don't fight an active pan
+            // Ignore both an active user pan AND frames from OUR OWN in-flight animation —
+            // `onCameraChanged` writes `liveCamera` on every frame regardless of `programmatic`,
+            // so without the `!programmatic` guard each mid-flight frame would re-arm a fresh
+            // animation toward the current position and the camera would never settle.
+            guard !programmatic, !model.movedOffRider else { return }
             animate(to: cam)
         }
         .onChange(of: flyTo) { _, target in
@@ -72,21 +76,28 @@ struct HomeLiveMap: View {
         }
     }
 
-    private func animate(to cam: HomeMapCamera) {
+    /// - Parameter onComplete: run once the animation finishes, AFTER `programmatic` is cleared.
+    ///   Used by recenter to hide the button only when the fly-to-rider actually lands, rather
+    ///   than instantly while the camera is still mid-flight.
+    private func animate(to cam: HomeMapCamera, onComplete: (() -> Void)? = nil) {
         programmatic = true
         withViewportAnimation(.easeOut(duration: 0.4)) {
             viewport = .camera(center: CLLocationCoordinate2D(latitude: cam.center.latitude,
                                                               longitude: cam.center.longitude),
                                zoom: cam.zoom)
-        } completion: { _ in programmatic = false }
+        } completion: { _ in
+            programmatic = false
+            onComplete?()
+        }
     }
 
     private var recenterButton: some View {
         GlassCircleButton {
             Task {
                 let rider = await location.current()
-                animate(to: HomeMapCamera(center: rider, zoom: HomeMapCamera.defaultZoom))
-                model.movedOffRider = false
+                animate(to: HomeMapCamera(center: rider, zoom: HomeMapCamera.defaultZoom)) {
+                    model.movedOffRider = false
+                }
             }
         } label: { Image(systemName: "location.fill") }
         .accessibilityLabel("Recenter on me")
