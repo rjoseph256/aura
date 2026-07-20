@@ -6,9 +6,10 @@ import AuraCore
 @MainActor
 struct WithTimeoutTests {
     @Test func operationWinsReturnsValue() async throws {
-        // Instant operation, never-firing sleep → operation value returned.
+        // Instant operation beats the sleep → operation value returned. The sleep is bounded
+        // (not an indefinite park) so the un-cancelled success-path timer reaps promptly.
         let value = try await withTimeout(.seconds(1), sleep: { _ in
-            try await Task.sleep(for: .seconds(1000))
+            try await Task.sleep(for: .milliseconds(200))
         }, operation: { 42 })
         #expect(value == 42)
     }
@@ -29,7 +30,7 @@ struct WithTimeoutTests {
         // return type anchors the generic `T` (the throwing body gives it nothing to infer).
         await #expect(throws: SampleError.self) {
             try await withTimeout(.seconds(1), sleep: { _ in
-                try await Task.sleep(for: .seconds(1000))
+                try await Task.sleep(for: .milliseconds(200))
             }, operation: { () async throws -> Int in throw SampleError() })
         }
     }

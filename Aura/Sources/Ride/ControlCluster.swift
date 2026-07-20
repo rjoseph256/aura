@@ -19,6 +19,9 @@ struct ControlCluster: View {
     /// When nil, the mute button is omitted.
     var onToggleMute: (() -> Void)?
     var onEndRide: () -> Void
+    /// Disables the End (stop) button while a waited-on group end/leave is pending, so repeated
+    /// taps do nothing. Defaulted so the solo/Explore call sites are unaffected.
+    var isEndDisabled: Bool = false
 
     var body: some View {
         VStack(spacing: AuraTheme.Spacing.xxxl) {
@@ -56,6 +59,7 @@ struct ControlCluster: View {
                 Image(systemName: "stop.fill")
             }
             .buttonStyle(.hudControl(role: .destructive))
+            .disabled(isEndDisabled)
             .accessibilityLabel("End ride")
         }
     }

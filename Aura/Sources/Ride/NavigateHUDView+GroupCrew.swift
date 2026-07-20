@@ -1,6 +1,7 @@
 import AuraCore
 import AuraKit
 import SwiftUI
+import UIKit
 
 /// The group-ride crew chrome `NavigateHUDView` overlays on top of its map + solo HUD
 /// whenever it's hosting a group ride (`groupSession != nil`). Split into its own file
@@ -26,6 +27,44 @@ extension NavigateHUDView {
         GroupRosterViewData.rows(peers: groupSession.peers, nameMap: groupSession.nameMap,
                                  selfUserID: groupSession.selfUserID ?? UUID(),
                                  selfProgress: selfProgressMeters, isImperial: settings.units == .imperial)
+    }
+
+    /// Immediate acknowledgment that a waited-on end/leave is in flight (ROH-81). Styled
+    /// identically to `reconnectingPill`/`endFailedPill` so the crew chrome reads as one family.
+    /// Only shown for host-end / member-end (a keep-riding leave never sets `isEnding`), so the
+    /// "Ending…" wording is always accurate.
+    var endingPill: some View {
+        HStack(spacing: AuraTheme.Spacing.sm) {
+            ProgressView().controlSize(.small).tint(AuraTheme.accent)
+            Text("Ending…")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(AuraTheme.textPrimary)
+        }
+        .padding(.horizontal, AuraTheme.Spacing.md)
+        .padding(.vertical, AuraTheme.Spacing.sm)
+        .background(AuraTheme.surface.opacity(0.9), in: Capsule())
+        .overlay(Capsule().strokeBorder(AuraTheme.border))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Ending the group ride")
+    }
+
+    /// The stacked crew status pills (ending / reconnecting / end-failed). Extracted from
+    /// `NavigateHUDView`'s body to keep it under the length limit; at most one shows in practice
+    /// (`endFailed` is only set after `isEnding` clears).
+    @ViewBuilder
+    func groupStatusPills(_ groupSession: GroupRideSession) -> some View {
+        VStack(spacing: AuraTheme.Spacing.sm) {
+            if groupSession.isEnding {
+                endingPill
+            }
+            if !groupSession.isLive {
+                reconnectingPill
+            }
+            if groupSession.endFailed {
+                endFailedPill
+            }
+        }
+        .padding(.top, 44)
     }
 
     var reconnectingPill: some View {
@@ -110,8 +149,37 @@ extension NavigateHUDView {
     /// — only once the leave is server-confirmed (`.ended`), mirroring the host path above.
     func endRideAsMember() {
         Task {
-            await groupSession?.leave()
+            await groupSession?.endAsMember()
             if groupSession?.phase == .ended { endRide() }
         }
+    }
+}
+
+/// Announces (VoiceOver) and haptically signals a waited-on end/leave outcome — feedback the
+/// top-of-screen "Ending…" pill alone can miss for a host looking at the map or using VoiceOver
+/// (ROH-81). Both inputs are `Bool?` so the optional `groupSession` composes cleanly.
+struct GroupEndFeedback: ViewModifier {
+    let isEnding: Bool?
+    let endFailed: Bool?
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: isEnding) { _, value in
+                if value == true {
+                    AccessibilityNotification.Announcement("Ending the group ride").post()
+                }
+            }
+            .onChange(of: endFailed) { _, value in
+                if value == true {
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    AccessibilityNotification.Announcement("Couldn't end the group ride. Retry available.").post()
+                }
+            }
+    }
+}
+
+extension View {
+    /// Applies `GroupEndFeedback` for a group ride's `isEnding`/`endFailed` transitions.
+    func groupEndFeedback(isEnding: Bool?, endFailed: Bool?) -> some View {
+        modifier(GroupEndFeedback(isEnding: isEnding, endFailed: endFailed))
     }
 }

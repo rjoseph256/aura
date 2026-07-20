@@ -100,15 +100,7 @@ struct NavigateHUDView: View {
         // both conditions hold at once.
         .overlay(alignment: .top) {
             if showsGroupChrome, let groupSession {
-                VStack(spacing: AuraTheme.Spacing.sm) {
-                    if !groupSession.isLive {
-                        reconnectingPill
-                    }
-                    if groupSession.endFailed {
-                        endFailedPill
-                    }
-                }
-                .padding(.top, 44)
+                groupStatusPills(groupSession)
             }
         }
         // Turn card pinned below the status bar, with the next-turn preview beneath it.
@@ -172,6 +164,9 @@ struct NavigateHUDView: View {
                 Button("Keep riding", role: .cancel) { }
             }
         }
+        // ROH-81: acknowledge a waited-on end/leave the moment it starts + announce/haptic the
+        // outcome — feedback the top-of-screen pill alone can miss. (Extracted to +GroupCrew.)
+        .groupEndFeedback(isEnding: groupSession?.isEnding, endFailed: groupSession?.endFailed)
         // Summary sheet: when dismissed, return to the home dashboard.
         .sheet(item: $coordinator.finishedRide, onDismiss: {
             router.popToRoot()
@@ -391,7 +386,8 @@ private extension NavigateHUDView {
                     onRecenter: { recenter() },
                     onMarkSpot: nil,
                     onToggleMute: { toggleMute() },
-                    onEndRide: { onEndTapped() })
+                    onEndRide: { onEndTapped() },
+                    isEndDisabled: groupSession?.isEnding == true)
             }
             .padding(.horizontal, AuraTheme.Spacing.lg)
 
