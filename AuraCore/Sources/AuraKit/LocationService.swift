@@ -21,6 +21,11 @@ public final class LocationService: NSObject, LocationStreaming {
     /// guarantee is unit-testable on the CI host. Only `points()` sets it; only `stop()` clears it.
     @ObservationIgnored public private(set) var sessionActive = false
 
+    /// Identifies the current ride session. Bumped by each `points()`; the stream's
+    /// `onTermination` backstop captures it and only tears down if it is still current, so a
+    /// stale termination from a prior ride can never invalidate a newly-started ride's session.
+    @ObservationIgnored private var rideSessionID = 0
+
     /// A dedicated manager for one-shot `current()` fixes, kept separate from the ambient
     /// `manager` so a one-shot and the continuous ambient monitor never share delegate state.
     @ObservationIgnored let oneShotManager = CLLocationManager()
@@ -101,6 +106,8 @@ public final class LocationService: NSObject, LocationStreaming {
         }
         setMode(.navigating)
         sessionActive = true
+        rideSessionID &+= 1
+        let sessionID = rideSessionID
         #if os(iOS)
         // A background activity session keeps location flowing when the app is
         // backgrounded; it replaces the legacy `allowsBackgroundLocationUpdates` flag.
@@ -125,9 +132,13 @@ public final class LocationService: NSObject, LocationStreaming {
             continuation.finish()
         }
         continuation.onTermination = { [weak self] _ in
-            // onTermination fires off the main actor when the consumer drops the
-            // stream; hop back in to tear down the manager state.
-            Task { @MainActor in self?.stop() }
+            // Backstop: if the consumer drops the stream without an explicit stop(), tear down.
+            // Guarded by the session token so a stale termination from THIS ride can never
+            // invalidate a newer ride's session — only tear down if this session is still current.
+            Task { @MainActor in
+                guard let self, self.rideSessionID == sessionID else { return }
+                self.stop()
+            }
         }
         return stream
     }
