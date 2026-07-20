@@ -170,6 +170,30 @@ struct GroupRideEndTimeoutTests {
         first.cancel()
     }
 
+    @Test func strayLeaveDoesNotDowngradePendingEndIntent() async throws {
+        // Cross-path regression (whole-branch review Important #1): a fire-and-forget keep-riding
+        // leave interleaving between a failed member-End and its Retry must NOT clobber the
+        // remembered waited-on intent. Otherwise Retry replays memberLeave and can yank a
+        // still-riding member into the summary (the bug this branch exists to fix).
+        let ctrl = SleepControl(fireImmediately: true)
+        let entered = AsyncGate()
+        let (s, backend) = try await ridingHost(sleep: { try await ctrl.sleep($0) })
+        backend.store.hangEndLeave = true
+        await s.endAsMember()               // memberEnd times out → endFailed, pendingEnd, finishIntent=.memberEnd
+        #expect(s.endFailed == true)
+        await s.leave()                     // stray keep-riding leave, also times out (fire-and-forget)
+        #expect(s.endFailed == true)        // untouched by the leave
+        #expect(s.phase == .riding)
+        // Retry must replay the FEEDBACK-bearing memberEnd (isEnding set), not the fire-and-forget
+        // leave. Make the retry hang so isEnding is observable mid-flight.
+        ctrl.fireImmediately = false
+        backend.store.onEndLeaveEntered = { entered.open() }
+        let task = Task { await s.retryEndIfNeeded() }
+        await entered.wait()
+        #expect(s.isEnding == true)         // false here would mean memberLeave was replayed (the bug)
+        task.cancel()
+    }
+
     @Test func wireEndedAfterTimeoutClearsPendingLatch() async throws {
         // 1) End times out → endFailed = true, pendingEnd = true, endLeaveCallCount == 1.
         let (s, backend) = try await ridingHost()   // default instant sleep → timeout wins

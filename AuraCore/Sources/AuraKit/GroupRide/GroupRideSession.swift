@@ -361,8 +361,15 @@ extension GroupRideSession {
         let leaveOnly = (intent != .hostEnd)
         let showsFeedback = (intent != .memberLeave)
         if showsFeedback, isEnding { return }   // re-entrancy guard for waited-on paths
-        finishIntent = intent
-        if showsFeedback { endFailed = false; isEnding = true }
+        // Only a waited-on path owns the retry latches. A fire-and-forget `memberLeave` must NOT
+        // clobber `finishIntent`/`endFailed`/`pendingEnd` left by a prior host/member end — else a
+        // later Retry would replay the wrong (keep-riding) intent and could yank a still-riding
+        // member into the summary, or leave a dead chip.
+        if showsFeedback {
+            finishIntent = intent
+            endFailed = false
+            isEnding = true
+        }
         defer { if showsFeedback { isEnding = false } }
         do {
             try await withTimeout(endTimeout, sleep: sleep) { [backend] in
