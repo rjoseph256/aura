@@ -62,6 +62,10 @@ struct HomeView: View {
         // absent (spec: no permission → weather hidden). Silent-hides on any failure.
         .task { await refreshWeather() }
         .onChange(of: location.authorization) { Task { await refreshWeather() } }
+        // The ambient monitor publishes a new coarse fix roughly every 500 m (distanceFilter);
+        // refresh weather when it changes so the greeting tracks the rider without a continuous
+        // high-power locate.
+        .onChange(of: location.lastKnown) { Task { await refreshWeather() } }
         // Refetch when CloudKit merges a remote ride, so the glance + last-ride stay live even
         // with the sheet at peek (the subscription is on the always-mounted container).
         .onChange(of: rideStore.syncRevision) { Task { await loadRides() } }
@@ -139,7 +143,7 @@ struct HomeView: View {
     /// rider isn't at. Failures inside `refresh` are already swallowed (weather hides).
     private func refreshWeather() async {
         guard location.authorization == .authorized else { return }
-        await weather.refresh(near: location.current(), now: Date())
+        await weather.refresh(near: location.current(for: .coarse), now: Date())
     }
 
     private var header: some View {
