@@ -12,14 +12,13 @@ final class MapboxTerrainSnapshotter: TerrainSnapshotRendering {
     private let cache = TerrainSnapshotDiskCache(directory: TerrainSnapshotDiskCache.defaultDirectory())
     private var tokens: Set<AnyCancelable> = []
 
-    func image(for request: TerrainSnapshotRequest, size: CGSize) async -> UIImage? {
+    func image(for request: TerrainSnapshotRequest, size: CGSize, scale: CGFloat) async -> UIImage? {
         if let data = cache.read(request.cacheKey), let img = UIImage(data: data) { return img }
         guard size.width > 0, size.height > 0 else { return nil }
 
         let options = MapSnapshotOptions(
             size: size,
-            // Fixed @3x: `UIScreen.main.scale` is deprecated and unsafe under multiple scenes.
-            pixelRatio: 3,
+            pixelRatio: scale, // device scale so a 2x device's raster matches its live Map
             glyphsRasterizationOptions: GlyphsRasterizationOptions(rasterizationMode: .ideographsRasterizedLocally))
         let snapshotter = Snapshotter(options: options)
 
@@ -35,7 +34,7 @@ final class MapboxTerrainSnapshotter: TerrainSnapshotRendering {
         snapshotter.setCamera(to: CameraOptions(
             center: CLLocationCoordinate2D(latitude: request.center.latitude,
                                             longitude: request.center.longitude),
-            zoom: 12.5,
+            zoom: request.zoom,
             pitch: 0))
         // Surface a style load failure (e.g. a ROH-6 authoring typo) instead of leaving the
         // caller with a silent, permanent placeholder — this is a diagnostic log only; the

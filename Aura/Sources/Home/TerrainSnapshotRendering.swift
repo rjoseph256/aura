@@ -6,5 +6,5 @@ import AuraKit
 /// previews and by Mapbox at runtime.
 @MainActor
 protocol TerrainSnapshotRendering: AnyObject {
-    func image(for request: TerrainSnapshotRequest, size: CGSize) async -> UIImage?
+    func image(for request: TerrainSnapshotRequest, size: CGSize, scale: CGFloat) async -> UIImage?
 }

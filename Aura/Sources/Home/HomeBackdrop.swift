@@ -16,6 +16,7 @@ struct HomeBackdrop: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
     @State private var settled = false
 
@@ -38,7 +39,7 @@ struct HomeBackdrop: View {
             .task(id: req?.cacheKey) {
                 guard let req else { return }
                 settled = false
-                image = await renderer.image(for: req, size: geo.size)
+                image = await renderer.image(for: req, size: geo.size, scale: displayScale)
                 if reduceMotion {
                     settled = true
                 } else {
