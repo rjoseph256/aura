@@ -77,11 +77,12 @@ struct WithTimeoutTests {
     struct SampleError: Error, Equatable {}
 
     @Test func operationErrorPropagates() async {
-        // Operation throws first → its own error, not TimeoutError.
+        // Operation throws first → its own error, not TimeoutError. The explicit `-> Int`
+        // return type anchors the generic `T` (the throwing body gives it nothing to infer).
         await #expect(throws: SampleError.self) {
             try await withTimeout(.seconds(1), sleep: { _ in
                 try await Task.sleep(for: .seconds(1000))
-            }, operation: { throw SampleError() })
+            }, operation: { () async throws -> Int in throw SampleError() })
         }
     }
 }
@@ -191,11 +192,18 @@ For `leaveRide` (it has no `forceEndError`; keep its existing body after the gat
 
 - [ ] **Step 2: Write the failing tests**
 
-Append to `GroupRideEndTimeoutTests.swift`. First a small deterministic gate helper and a session factory:
+First, move the `import AuraCore` to the TOP of `GroupRideEndTimeoutTests.swift` (with the Task-1 imports) — it's needed for `Route`/`.init(latitude:…)`, which are NOT re-exported by `@testable import AuraKit`. The header becomes:
 
 ```swift
+import Testing
+import Foundation
 import AuraCore
+@testable import AuraKit
+```
 
+Then append to `GroupRideEndTimeoutTests.swift` two deterministic test helpers and the session factory:
+
+```swift
 /// A one-shot async gate: `wait()` suspends until `open()` is called (once).
 final class AsyncGate: @unchecked Sendable {
     private var continuation: CheckedContinuation<Void, Never>?
@@ -212,6 +220,25 @@ final class AsyncGate: @unchecked Sendable {
     func open() {
         lock.lock(); opened = true; let c = continuation; continuation = nil; lock.unlock()
         c?.resume()
+    }
+}
+
+/// A switchable sleep seam. While `fireImmediately` is true it returns at once (the timeout
+/// wins the race); when false it parks indefinitely (the operation wins). Lets one session —
+/// whose `sleep` seam is fixed at init — time out on the first attempt and then succeed on a
+/// retry (needed because `sleep: { _ in }` would otherwise beat even a would-succeed backend,
+/// which must take an actor hop).
+final class SleepControl: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fire: Bool
+    init(fireImmediately: Bool = true) { fire = fireImmediately }
+    var fireImmediately: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return fire }
+        set { lock.lock(); fire = newValue; lock.unlock() }
+    }
+    func sleep(_ duration: Duration) async throws {
+        if fireImmediately { return }
+        try await Task.sleep(for: .seconds(1000))
     }
 }
 
@@ -249,13 +276,18 @@ struct GroupRideEndTimeoutTests {
     }
 
     @Test func hostEndTimeoutThenRetryReattempts() async throws {
-        let (s, backend) = try await ridingHost()
+        // First attempt times out (fireImmediately); retry succeeds once the seam stops firing
+        // and the backend stops hanging — the operation then wins its actor-hop race.
+        let ctrl = SleepControl(fireImmediately: true)
+        let (s, backend) = try await ridingHost(sleep: { try await ctrl.sleep($0) })
         backend.store.hangEndLeave = true
         await s.end()
         #expect(s.endFailed == true)
         backend.store.hangEndLeave = false             // signal restored
+        ctrl.fireImmediately = false                   // let the operation win the retry
         await s.retryEndIfNeeded()
         #expect(s.phase == .ended)                     // second attempt succeeds
+        #expect(s.endFailed == false)                  // cleared on the successful finish
     }
 
     @Test func memberEndTimeoutSetsEndFailed() async throws {
@@ -445,34 +477,36 @@ git commit -m "feat(group): intent-scoped Ending state + 4s end/leave timeout (R
 
 - [ ] **Step 1: Write the failing test**
 
+This test sets the latches FIRST (via a completed timeout), THEN dissolves via a wire `.rideEnded`,
+so `teardownLive`'s reset is the only thing that can clear them — it fails without the Task-3 edit.
 Append to `GroupRideEndTimeoutTests`:
 
 ```swift
-    @Test func racingRideEndedDuringHangLeavesNoStaleLatch() async throws {
-        // End is in flight (parked); a wire .rideEnded flips .ended before the timeout resolves.
-        // The eventual timeout must NOT relatch endFailed, and no pending latch survives.
-        let timeoutGate = AsyncGate()
-        let entered = AsyncGate()
-        let (s, backend) = try await ridingHost(sleep: { _ in await timeoutGate.wait() })
+    @Test func wireEndedAfterTimeoutClearsPendingLatch() async throws {
+        // 1) End times out → endFailed = true, pendingEnd = true, endLeaveCallCount == 1.
+        let (s, backend) = try await ridingHost()   // default instant sleep → timeout wins
         backend.store.hangEndLeave = true
-        backend.store.onEndLeaveEntered = { entered.open() }
-        let task = Task { await s.end() }
-        await entered.wait()                 // end() is in flight; isEnding == true, phase == .riding
-        await s.ingest(.rideEnded)           // wire signal → phase = .ended, teardownLive clears latches
-        #expect(s.phase == .ended)
-        timeoutGate.open()                   // now let the timeout fire; catch sees phase == .ended
-        await task.value
-        #expect(s.endFailed == false)
-        #expect(s.isEnding == false)
-        await s.retryEndIfNeeded()           // pendingEnd cleared → no re-hit
+        await s.end()
+        #expect(s.endFailed == true)
         #expect(backend.store.endLeaveCallCount == 1)
+        // 2) A wire .rideEnded dissolves the ride (host is this session; the guest-toast branch is
+        //    skipped, but phase = .ended + teardownLive still run).
+        backend.store.hangEndLeave = false
+        await s.ingest(.rideEnded)
+        #expect(s.phase == .ended)
+        // 3) teardownLive must have cleared the latches: no stale chip, and retry is a no-op.
+        #expect(s.endFailed == false)               // FAILS without the teardownLive reset
+        #expect(s.isEnding == false)
+        await s.retryEndIfNeeded()
+        #expect(backend.store.endLeaveCallCount == 1) // FAILS (== 2) without the pendingEnd reset
     }
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Delegate to the builder agent: run `GroupRideEndTimeoutTests/racingRideEndedDuringHangLeavesNoStaleLatch`.
-Expected: FAIL — `teardownLive` does not yet clear the latches (a stale `endFailed`/`pendingEnd` remains, or the retry re-hits the backend making `endLeaveCallCount == 2`).
+Delegate to the builder agent: run `GroupRideEndTimeoutTests/wireEndedAfterTimeoutClearsPendingLatch`.
+Expected: FAIL — without `teardownLive` clearing the latches, `endFailed` stays `true` after the wire
+dissolve and/or `pendingEnd` stays set so `retryEndIfNeeded()` re-hits the backend (`endLeaveCallCount == 2`).
 
 - [ ] **Step 3: Implement the latch-clear**
 
@@ -544,6 +578,10 @@ And apply it to the End button (the `Button(action: onEndRide)` near line 55):
             }
             .disabled(isEndDisabled)
 ```
+
+Note: `ControlCluster` has a second call site at `Aura/Sources/Ride/RideHUDView.swift:236` (and the
+`#Preview`s); all use named arguments, so the new trailing defaulted param leaves them untouched — do not
+edit them.
 
 - [ ] **Step 2: Add `endingPill` and split the member-end call**
 
@@ -617,7 +655,18 @@ In `Aura/Sources/Ride/NavigateHUDView.swift`:
                     isEndDisabled: groupSession?.isEnding == true)
 ```
 
-(c) Add failure haptic + VoiceOver announcements. Attach these modifiers to the main `body` `ZStack` (place them near the other `.onChange` modifiers, e.g. after the `.alert`/`.confirmationDialog` block). Import UIKit at the top of the file if not already imported.
+(c) First add `import UIKit` to the top of `NavigateHUDView.swift` (its current imports —
+`AVFoundation`, `CoreLocation`, `MapboxMaps`, `AuraCore`, `AuraKit`, `SwiftUI` — do NOT include UIKit,
+and `UINotificationFeedbackGenerator` is UIKit-only):
+
+```swift
+import UIKit
+```
+
+Then add failure haptic + VoiceOver announcements. Attach these modifiers to the main `body` `ZStack`
+(place them near the other `.onChange` modifiers, e.g. after the `.alert`/`.confirmationDialog` block).
+`groupSession?.isEnding`/`?.endFailed` are `Bool?` (Equatable), and reading the observable property inside
+the `onChange(of:)` value expression registers the observation, so the closure fires on change:
 
 ```swift
         .onChange(of: groupSession?.isEnding) { _, isEnding in
