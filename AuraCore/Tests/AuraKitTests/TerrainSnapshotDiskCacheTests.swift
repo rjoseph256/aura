@@ -24,4 +24,19 @@ import Foundation
         cache.write(Data([0xAA]), for: "a")
         #expect(cache.read("b") == nil)
     }
+    @Test func pruneEvictsOldestUntilUnderLimit() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("terrain-prune-\(UUID().uuidString)", isDirectory: true)
+        let cache = TerrainSnapshotDiskCache(directory: dir)
+        for key in ["a", "b", "c"] {
+            cache.write(Data(repeating: 0, count: 10), for: key)
+            let date = Date(timeIntervalSince1970: Double(["a", "b", "c"].firstIndex(of: key)!))
+            try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: cache.url(for: key).path)
+        }
+        #expect(cache.totalBytes() == 30)
+        cache.prune(toMaxBytes: 15)
+        #expect(cache.read("a") == nil)   // oldest evicted
+        #expect(cache.read("c") != nil)   // newest kept
+        #expect(cache.totalBytes() <= 15)
+    }
 }
