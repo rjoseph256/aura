@@ -44,7 +44,9 @@ struct HomeLiveMap: View {
         .gestureOptions(GestureOptions(rotateEnabled: false, pitchEnabled: false))
         // Enforce zoom bounds on the MAP (not just clamp state) so a pinch can't exceed them.
         .cameraBounds(CameraBoundsOptions(maxZoom: HomeMapCamera.maxZoom, minZoom: HomeMapCamera.minZoom))
-        .ignoresSafeArea()
+        // Map-specific modifiers (above) return `Self` (still `Map`); `.onCameraChanged` must
+        // stay in that chain — a generic View modifier (e.g. `.ignoresSafeArea()`) before it
+        // would type-erase to `some View` and drop the Map-only API.
         .onCameraChanged { ctx in
             // Store in the @Observable model, never in @State (MapboxMaps guidance: high-freq).
             model.liveCamera = HomeMapCamera(
@@ -53,6 +55,7 @@ struct HomeLiveMap: View {
                 zoom: Double(ctx.cameraState.zoom)).clampedZoom()
             if !programmatic { model.movedOffRider = true } // user pan only
         }
+        .ignoresSafeArea()
         // External camera change (post-ride reset) must move an already-mounted map.
         .onChange(of: model.liveCamera) { _, cam in
             guard !model.movedOffRider else { return } // don't fight an active pan
