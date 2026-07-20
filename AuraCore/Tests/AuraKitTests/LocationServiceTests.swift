@@ -34,9 +34,21 @@ final class LocationServiceTests: XCTestCase {
         XCTAssertEqual(svc.manager.distanceFilter, kCLDistanceFilterNone)
 
         #if os(iOS)
+        // Only .navigating shows the background pill and disables auto-pause.
+        svc.setMode(.navigating)
         XCTAssertTrue(svc.manager.showsBackgroundLocationIndicator)
+        XCTAssertFalse(svc.manager.pausesLocationUpdatesAutomatically)
+        XCTAssertEqual(svc.manager.activityType, .fitness)
+
         svc.setMode(.ambient)
         XCTAssertFalse(svc.manager.showsBackgroundLocationIndicator)
+        XCTAssertTrue(svc.manager.pausesLocationUpdatesAutomatically)
+        XCTAssertEqual(svc.manager.activityType, .fitness)
+
+        svc.setMode(.idle)
+        XCTAssertFalse(svc.manager.showsBackgroundLocationIndicator)
+        XCTAssertTrue(svc.manager.pausesLocationUpdatesAutomatically)
+        XCTAssertEqual(svc.manager.activityType, .other)
         #endif
     }
 
@@ -123,6 +135,29 @@ final class LocationServiceTests: XCTestCase {
         XCTAssertEqual(rb.latitude, 12.0, accuracy: 0.0001)
         XCTAssertNil(svc.oneShotContinuation)
         XCTAssertNil(svc.oneShotTask)
+    }
+
+    func test_current_sequentialCalls_eachGetsOwnFix_stateClearsBetween() async {
+        // Two back-to-back (non-overlapping) one-shot cycles must each resolve to their own
+        // delivered fix, with all one-shot state cleared between them — no bleed from cycle 1
+        // into cycle 2 (the cross-cycle contamination guard's happy path).
+        let svc = LocationService()
+        func deliver(_ c: Coordinate) {
+            Task { @MainActor in
+                while svc.oneShotContinuation == nil { await Task.yield() }
+                svc.handleLocationUpdate(managerID: ObjectIdentifier(svc.oneShotManager),
+                                         coordinate: c, accuracy: 5, timestamp: Date())
+            }
+        }
+        deliver(Coordinate(latitude: 1.0, longitude: 1.0))
+        let a = await svc.current(for: .routing)
+        XCTAssertEqual(a.latitude, 1.0, accuracy: 0.0001)
+        XCTAssertNil(svc.oneShotContinuation)
+        XCTAssertNil(svc.oneShotTask)
+
+        deliver(Coordinate(latitude: 2.0, longitude: 2.0))
+        let b = await svc.current(for: .routing)
+        XCTAssertEqual(b.latitude, 2.0, accuracy: 0.0001)
     }
 
     func test_current_timesOutToFallback_whenNoFixDelivered() async {

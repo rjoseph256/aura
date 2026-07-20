@@ -37,6 +37,11 @@ public final class LocationService: NSObject, LocationStreaming {
     /// instead of starting a second `requestLocation()`. Internal for test observation.
     @ObservationIgnored var oneShotTask: Task<Coordinate?, Never>?
 
+    /// Bumped every time a one-shot cycle resolves. A cycle's timeout captures the value at
+    /// launch and no-ops if it has since advanced — so a completed cycle's still-sleeping timer
+    /// can never drain a *later* cycle's continuation (the cross-cycle contamination trap).
+    @ObservationIgnored private var oneShotGeneration = 0
+
     @ObservationIgnored private var updatesTask: Task<Void, Never>?
     @ObservationIgnored private var continuation: AsyncStream<TrackPoint>.Continuation?
     #if os(iOS)
@@ -152,9 +157,10 @@ public final class LocationService: NSObject, LocationStreaming {
         manager.startUpdatingLocation()
     }
 
-    /// Release all NON-ride location: stop the ambient monitor and drop any pending one-shot.
+    /// Release the continuous NON-ride location: stop the ambient monitor and return to idle.
     /// A no-op while navigating so it can be called freely from the app lifecycle controller
-    /// without ever interrupting a recording ride.
+    /// without ever interrupting a recording ride. An in-flight one-shot `current()` is left to
+    /// self-resolve (it is bounded by its own timeout and holds no session/indicator).
     public func releaseNonRide() {
         guard mode != .navigating else { return }
         manager.stopUpdatingLocation()
@@ -162,21 +168,32 @@ public final class LocationService: NSObject, LocationStreaming {
     }
 
     /// Route a delegate fix to the right consumer by manager identity: the one-shot manager
-    /// resumes the in-flight `current()` continuation (nil-guarded so it fires at most once);
-    /// any other manager (the ambient `manager`) records `lastKnown`. Internal so unit tests
-    /// can drive it without a device.
+    /// resolves the in-flight `current()` request; any other manager (the ambient `manager`)
+    /// records `lastKnown`. Internal so unit tests can drive it without a device.
     @MainActor func handleLocationUpdate(managerID: ObjectIdentifier, coordinate: Coordinate, accuracy: Double, timestamp: Date) {
         if managerID == ObjectIdentifier(oneShotManager) {
-            if let cont = oneShotContinuation { oneShotContinuation = nil; cont.resume(returning: coordinate) }
+            resolveOneShot(with: coordinate)
         } else {
             lastKnown = LocationFix(coordinate: coordinate, horizontalAccuracy: accuracy, at: timestamp)
         }
     }
 
-    /// A one-shot failure resumes the continuation with nil (caller falls back). Ambient failures ignored.
+    /// A one-shot failure resolves the request with nil (caller falls back). Ambient failures ignored.
     @MainActor func handleLocationFailure(managerID: ObjectIdentifier) {
         guard managerID == ObjectIdentifier(oneShotManager) else { return }
-        if let cont = oneShotContinuation { oneShotContinuation = nil; cont.resume(returning: nil) }
+        resolveOneShot(with: nil)
+    }
+
+    /// Resolve the in-flight one-shot exactly once: nil the slot, advance the generation (so this
+    /// cycle's still-sleeping timeout can never fire into a later cycle), and cancel any pending
+    /// `requestLocation` (so a late delegate callback from a timed-out cycle can't leak into the
+    /// next). No-op if nothing is in flight.
+    @MainActor private func resolveOneShot(with coordinate: Coordinate?) {
+        guard let cont = oneShotContinuation else { return }
+        oneShotContinuation = nil
+        oneShotGeneration &+= 1
+        oneShotManager.stopUpdatingLocation()
+        cont.resume(returning: coordinate)
     }
 
     /// One-shot origin for plan/preview and Home weather, with a Pittsburgh fallback. Never
@@ -213,12 +230,15 @@ public final class LocationService: NSObject, LocationStreaming {
         if let task = oneShotTask { return await task.value }   // coalesce concurrent callers
         let task = Task { @MainActor [weak self] () -> Coordinate? in
             guard let self else { return nil }
+            let generation = self.oneShotGeneration
             return await withCheckedContinuation { (cont: CheckedContinuation<Coordinate?, Never>) in
                 self.oneShotContinuation = cont
                 self.oneShotManager.requestLocation()
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                    if let cont = self.oneShotContinuation { self.oneShotContinuation = nil; cont.resume(returning: nil) }
+                    // Only this cycle's timeout may resolve it; a newer cycle owns the slot now.
+                    guard self.oneShotGeneration == generation else { return }
+                    self.resolveOneShot(with: nil)
                 }
             }
         }
