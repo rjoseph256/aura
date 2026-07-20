@@ -48,10 +48,11 @@ extension NavigateHUDView {
         .accessibilityLabel("Ending the group ride")
     }
 
-    /// The stacked crew status pills (ending / reconnecting / end-failed). Rendered just above
-    /// the control cluster in `bottomCockpit` (not at the top, where the always-present turn
-    /// card — a higher-z overlay — was occluding them, ROH-81). At most one shows in practice
-    /// (`endFailed` is only set after `isEnding` clears).
+    /// The stacked crew status pills (ending / reconnecting / end-failed). Rendered tucked
+    /// under the turn-card banner (inside that top overlay's VStack), NOT as a top overlay of
+    /// their own — the always-present turn card is a higher-z overlay that was occluding them
+    /// there (ROH-81). At most one shows in practice (`endFailed` is only set after `isEnding`
+    /// clears).
     @ViewBuilder
     func groupStatusPills(_ groupSession: GroupRideSession) -> some View {
         VStack(spacing: AuraTheme.Spacing.sm) {
@@ -92,7 +93,7 @@ extension NavigateHUDView {
             Button("Retry") {
                 Task {
                     await groupSession?.retryEndIfNeeded()
-                    if groupSession?.phase == .ended { endRide() }
+                    await finishOwnRideIfEnded()
                 }
             }
             .font(.subheadline.weight(.bold))
@@ -132,7 +133,7 @@ extension NavigateHUDView {
     func endGroupRideAsHost() {
         Task {
             await groupSession?.end()
-            if groupSession?.phase == .ended { endRide() }
+            await finishOwnRideIfEnded()
         }
     }
 
@@ -150,8 +151,24 @@ extension NavigateHUDView {
     func endRideAsMember() {
         Task {
             await groupSession?.endAsMember()
-            if groupSession?.phase == .ended { endRide() }
+            await finishOwnRideIfEnded()
         }
+    }
+
+    /// Finish the rider's own ride into the summary once the crew lifecycle call has landed
+    /// (`phase == .ended`), deferred one run-loop past the `phase → .ended` transition so the
+    /// phase-driven crew-chrome dissolve commits before the summary sheet is presented — keeping
+    /// those two SwiftUI updates in separate transactions. `endRide()` is idempotent
+    /// (`coordinator.finish()` guards on `isRecording`), so a late wire `.rideEnded` landing in
+    /// the gap is harmless. (The end-not-ending device bug that motivated ROH-81's device pass
+    /// was the HUD being rebuilt on the `.riding → .ended` transition — fixed separately in
+    /// `GroupRideFlowView`; this deferral is belt-and-suspenders sequencing.)
+    private func finishOwnRideIfEnded() async {
+        guard groupSession?.phase == .ended else { return }
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        endRide()
     }
 }
 

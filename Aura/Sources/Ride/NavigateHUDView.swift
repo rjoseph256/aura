@@ -93,7 +93,12 @@ struct NavigateHUDView: View {
                 GroupToastHost(events: groupSession.toasts)
             }
         }
-        // Turn card pinned below the status bar, with the next-turn preview beneath it.
+        // Turn card pinned below the status bar, with the next-turn preview beneath it, and —
+        // on a group ride — the crew status pills (Reconnecting… / Ending… / "Couldn't end —
+        // Retry") tucked tight under that banner cluster. The pills live in THIS overlay (not a
+        // top overlay of their own) because the turn card is a higher-z top overlay that would
+        // otherwise occlude them (ROH-81); nesting here keeps them just below the card and
+        // moving with it as it resizes, always visible and tappable.
         .overlay(alignment: .top) {
             VStack(spacing: AuraTheme.Spacing.sm) {
                 TurnCardView(state: guidance.turn, reduceMotion: reduceMotion)
@@ -103,6 +108,9 @@ struct NavigateHUDView: View {
                         .transition(reduceMotion
                             ? .opacity
                             : .move(edge: .top).combined(with: .opacity))
+                }
+                if showsGroupChrome, let groupSession {
+                    groupStatusPills(groupSession)
                 }
             }
             .padding(.top, 8) // sits in the safe area; no hardcoded status-bar inset
@@ -363,14 +371,6 @@ private extension NavigateHUDView {
     /// ride; the solo path never renders it.)
     @ViewBuilder var bottomCockpit: some View {
         VStack(spacing: AuraTheme.Spacing.sm) {
-            // Crew status pills (Reconnecting… / Ending… / "Couldn't end — Retry") sit just
-            // above the controls rather than at the top: the top-center is owned by the
-            // always-present turn card (a higher-z overlay), which was occluding them there
-            // (ROH-81). Here they're always visible, and the Retry chip lands right beside the
-            // End button the rider just tapped. Only rendered on the group path (`showsGroupChrome`).
-            if showsGroupChrome, let groupSession {
-                groupStatusPills(groupSession)
-            }
             HStack(alignment: .bottom, spacing: AuraTheme.Spacing.md) {
                 if showsGroupChrome, let groupSession {
                     GroupRosterSheet(rows: rosterRows(for: groupSession))
