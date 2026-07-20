@@ -13,12 +13,16 @@ struct HomeView: View {
     @Environment(LocationService.self) private var location
     @Environment(WeatherStore.self) private var weather
 
+    @Environment(\.scenePhase) private var scenePhase
+
     @State private var query = ""
     @State private var summaries: [RideSummary] = []
     @State private var didLoad = false
     @State private var renameTarget: SavedPlace?
     @State private var renameText = ""
     @State private var searchExpanded = false
+    @State private var mapModel = HomeMapModel(initial: .initial(forRider: nil))
+    @State private var didResolveInitialCenter = false
     /// Kept in sync (via onChange/onAppear) so the dashboard sheet shows only at Home root and
     /// when not searching — a pushed screen (Explore, preview, join) is never covered by the
     /// sheet, and search never stacks with it. Using @State (not a derived binding) so the
@@ -57,6 +61,13 @@ struct HomeView: View {
             }
         }
         .task { await loadRides() }
+        // One-shot cold-launch center resolve → rider (authorized) or curated fallback.
+        .task {
+            if !didResolveInitialCenter {
+                didResolveInitialCenter = true
+                await resolveCenter(reset: false)
+            }
+        }
         // Fetch weather for the greeting, and again if authorization changes. Gated on real
         // authorization so we never show weather for the location fallback when permission is
         // absent (spec: no permission → weather hidden). Silent-hides on any failure.
@@ -85,10 +96,15 @@ struct HomeView: View {
 
     private var populated: some View {
         ZStack {
-            HomeBackdrop(renderer: renderer, riderCoordinate: nil, placeName: nil)
+            HomeBackdrop(renderer: renderer, camera: mapModel.idleCamera, precise: true, placeName: nil)
 
             VStack(spacing: 0) {
                 header.padding(.top, AuraTheme.Spacing.lg)
+                if location.authorization != .authorized {
+                    HomeLocationHint()
+                        .padding(.horizontal, AuraTheme.Spacing.xxl)
+                        .padding(.top, AuraTheme.Spacing.sm)
+                }
                 Spacer(minLength: 0)
                 if !searchExpanded {
                     HomeLaunchBand(
@@ -132,6 +148,17 @@ struct HomeView: View {
     private func loadRides() async {
         summaries = (try? rideStore.summaries()) ?? []
         didLoad = true
+    }
+
+    /// One-shot center resolve → rider (authorized) or curated fallback. Writes the model's cameras.
+    private func resolveCenter(reset: Bool) async {
+        let camera: HomeMapCamera
+        if location.authorization == .authorized {
+            camera = HomeMapCamera.initial(forRider: await location.current())
+        } else {
+            camera = HomeMapCamera.initial(forRider: nil)
+        }
+        if reset { mapModel.reset(to: camera) } else { mapModel.idleCamera = camera; mapModel.liveCamera = camera }
     }
 
     /// Refreshes greeting weather only when location is actually authorized — otherwise
