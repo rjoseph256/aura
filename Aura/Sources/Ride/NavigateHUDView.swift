@@ -77,7 +77,6 @@ struct NavigateHUDView: View {
     // MARK: Body
 
     var body: some View {
-        @Bindable var coordinator = coordinator
         ZStack(alignment: .bottom) {
             // Full-bleed map
             navigateMapView
@@ -165,12 +164,6 @@ struct NavigateHUDView: View {
         // ROH-81: acknowledge a waited-on end/leave the moment it starts + announce/haptic the
         // outcome — feedback the top-of-screen pill alone can miss. (Extracted to +GroupCrew.)
         .groupEndFeedback(isEnding: groupSession?.isEnding, endFailed: groupSession?.endFailed)
-        // Summary sheet: when dismissed, return to the home dashboard.
-        .sheet(item: $coordinator.finishedRide, onDismiss: {
-            router.popToRoot()
-        }, content: { ride in
-            RideSummaryView(ride: ride, saveFailed: coordinator.saveFailed)
-        })
         .sheet(isPresented: $showPermission) {
             LocationPermissionView(onOpenSettings: RideSettingsLink.open)
         }
@@ -203,7 +196,12 @@ struct NavigateHUDView: View {
             router.isRideActive = recording
         }
         .onChange(of: coordinator.finishedRide) { _, ride in
-            if ride != nil { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+            guard let ride else { return }
+            // Refresh widgets BEFORE navigating: showRideSummary collapses the path and tears
+            // this HUD down. saveFailed is already set by finish() (before finishedRide), so it
+            // reads correctly here. (ROH-85)
+            WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+            router.showRideSummary(ride, saveFailed: coordinator.saveFailed)
         }
         .onChange(of: settings.units) { _, newUnits in
             guidance.units = newUnits
