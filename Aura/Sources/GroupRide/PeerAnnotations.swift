@@ -13,7 +13,8 @@ struct PeerAnnotations: MapContent {
             MapViewAnnotation(coordinate: CLLocationCoordinate2D(
                 latitude: dot.coordinate.latitude, longitude: dot.coordinate.longitude)) {
                 PeerDotView(monogram: dot.monogram, displayName: dot.displayName, status: dot.status,
-                            identityColor: AuraTheme.riderColor(dot.colorIndex), isSelf: false,
+                            identityColor: AuraTheme.riderColor(dot.colorIndex),
+                            identityInk: AuraTheme.riderInk(dot.colorIndex), isSelf: false,
                             bearing: dot.bearing, pulsePhase: frame.pulsePhase,
                             showsNameTag: dot.showsNameTag)
                     .offset(x: dot.offset.dx, y: dot.offset.dy)
@@ -45,7 +46,11 @@ struct PeerFrame: Equatable { var dots: [PeerDot]; var pulsePhase: Double }
 /// by the host's `TimelineView` clock and `.onChange(of: peers)`, so it needs no observation — and
 /// its per-frame continuity caches can be mutated inside `frame(...)` without any invalidation loop.
 final class PeerAnnotationDriver {
-    private var interpolators = PeerInterpolators()
+    // Snap-on-silence must trip on the same boundary as the `.dropped` status flip (spec §3.3),
+    // so the interpolator's `snapSilence` is pinned to the cadence's `droppedTimeout` rather than
+    // a matching literal — the two can't silently diverge if the timeout is retuned.
+    private var interpolators = PeerInterpolators(
+        config: .init(snapSilence: LiveShareCadence().droppedTimeout))
     // Memoised on peer-set change (NOT per frame):
     private var visible: [RidePeer] = []
     private var colorIndex: [UUID: Int] = [:]

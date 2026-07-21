@@ -13,6 +13,8 @@ struct PeerDotView: View {
     let displayName: String
     let status: PeerStatus
     let identityColor: Color
+    /// Contrast-correct monogram ink for `identityColor` (light on dark hues, dark on light).
+    let identityInk: Color
     let isSelf: Bool
     /// Degrees clockwise from north; nil retracts the pointer to a plain disc.
     let bearing: Double?
@@ -83,7 +85,7 @@ struct PeerDotView: View {
                 .frame(width: Self.discDiameter, height: Self.discDiameter)
             Text(monogram)
                 .font(.system(size: monogram.count > 1 ? 8 : 10, weight: .bold, design: .rounded))
-                .foregroundStyle(isHollow ? headColor : AuraTheme.onAccent)
+                .foregroundStyle(isHollow ? headColor : (isSelf ? AuraTheme.background : identityInk))
         }
     }
 

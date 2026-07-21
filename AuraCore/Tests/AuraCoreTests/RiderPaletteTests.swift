@@ -51,6 +51,18 @@ struct RiderPaletteTests {
         }
     }
 
+    /// The monogram is the colour-independent, CVD-safe identity cue, so its ink must stay legible
+    /// on EVERY hue — including the dark ones where a fixed dark ink drops below AA. The app picks
+    /// the better of a dark/light ink per hue (`AuraTheme.riderInk`); assert such a choice exists.
+    @Test func aLegibleMonogramInkExistsForEveryHue() {
+        let darkInk = AuraPalette.inkOnMint
+        let lightInk = RGBColor.white(1.0)
+        for h in AuraPalette.riderHues {
+            let best = max(WCAGContrast.ratio(darkInk, h), WCAGContrast.ratio(lightInk, h))
+            #expect(best >= 4.5)   // WCAG AA for the small bold monogram
+        }
+    }
+
     @Test func riderHuesAreMutuallyDistinctInNormalAndDeuteranopia() {
         let hues = AuraPalette.riderHues
         for i in hues.indices {
