@@ -13,6 +13,9 @@ struct HomeScreen {
     // Maps-style utility cluster on the Home header (there is no tab bar).
     var historyButton: XCUIElement { app.buttons["home.history"] }
     var settingsButton: XCUIElement { app.buttons["home.settings"] }
+    // Idle-map affordance (HomeMapCanvas) and the live-map recenter control (HomeLiveMap).
+    var tapToExplore: XCUIElement { app.buttons["home.tapToExplore"] }
+    var recenterButton: XCUIElement { app.buttons["home.recenter"] }
 
     @discardableResult func goToHistory() -> HistoryScreen {
         historyButton.tap()

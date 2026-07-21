@@ -79,6 +79,7 @@ final class MapboxTerrainSnapshotter: TerrainSnapshotRendering {
         }
         if let image, let data = image.pngData() {
             cache.write(data, for: request.cacheKey)
+            cache.prune(toMaxBytes: TerrainSnapshotDiskCache.defaultMaxBytes)
         }
         return image
     }
