@@ -59,10 +59,10 @@ struct NavigateHUDView: View {
     // MARK: Map
 
     @State private var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
-    /// Each peer's previous fix, so a heading cone can be derived on-device between
-    /// consecutive updates — mirrors `RideMapView`'s solo-map peer layer. Stays empty (and
-    /// this state unused) whenever `groupSession` is nil.
-    @State private var previousPeerCoordinates: [UUID: Coordinate] = [:]
+    /// Drives peer-dot interpolation, identity, and declutter (ROH-69 / ROH-72). A plain class
+    /// held in `@State`; the `TimelineView` clock and `.onChange(of: peers)` drive repaints. Stays
+    /// empty (a no-op) whenever `groupSession` is nil.
+    @State private var peerModel = PeerAnnotationDriver()
 
     init(route: AuraCore.Route, destination: Place? = nil, groupSession: GroupRideSession? = nil) {
         self.route = route
@@ -230,56 +230,57 @@ struct NavigateHUDView: View {
     // MARK: Map view (puck follow + live route polyline + group peer dots)
 
     private var navigateMapView: some View {
-        Map(viewport: $viewport) {
-            // Rider puck follows heading
-            Puck2D(bearing: .heading)
+        MapReader { proxy in
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0,
+                                    paused: !peerModel.shouldAnimate(now: Date()))) { context in
+                Map(viewport: $viewport) {
+                    // Rider puck follows heading
+                    Puck2D(bearing: .heading)
 
-            // Live route polyline: switches to the post-reroute geometry when available.
-            // guidance.routeGeometry is updated by GuidanceViewModel on each reroute event.
-            if (guidance.routeGeometry ?? route.geometry).count > 1 {
-                PolylineAnnotationGroup {
-                    PolylineAnnotation(
-                        lineCoordinates: (guidance.routeGeometry ?? route.geometry).map {
-                            CLLocationCoordinate2D(latitude: $0.latitude,
-                                                   longitude: $0.longitude)
+                    // Live route polyline: switches to the post-reroute geometry when available.
+                    // guidance.routeGeometry is updated by GuidanceViewModel on each reroute event.
+                    if (guidance.routeGeometry ?? route.geometry).count > 1 {
+                        PolylineAnnotationGroup {
+                            PolylineAnnotation(
+                                lineCoordinates: (guidance.routeGeometry ?? route.geometry).map {
+                                    CLLocationCoordinate2D(latitude: $0.latitude,
+                                                           longitude: $0.longitude)
+                                }
+                            )
+                            .lineColor(StyleColor(AuraTheme.routeUIColor))
+                            .lineWidth(6)
                         }
-                    )
-                    .lineColor(StyleColor(AuraTheme.routeUIColor))
-                    .lineWidth(6)
-                }
-            }
-
-            // Group-ride peer dots. `groupSession?.peers` is nil/empty on the solo path,
-            // so `ForEvery` iterates zero peers and this is a no-op — the solo map is
-            // visually unchanged.
-            if let groupSession {
-                ForEvery(GroupMapDots.visiblePeers(peers: groupSession.peers,
-                                                   selfUserID: groupSession.selfUserID),
-                         id: \.userID) { peer in
-                    if let coordinate = peer.coordinate {
-                        MapViewAnnotation(coordinate: CLLocationCoordinate2D(
-                            latitude: coordinate.latitude, longitude: coordinate.longitude)) {
-                            PeerDotView(displayName: groupSession.nameMap[peer.userID] ?? peer.displayName,
-                                       status: peer.status,
-                                       isSelf: false,
-                                       bearing: PeerBearing.heading(from: previousPeerCoordinates[peer.userID],
-                                                                    to: coordinate),
-                                       showsNameTag: peer.userID == groupLeaderID)
-                        }
-                        .allowOverlapWithPuck(true)
                     }
+
+                    // Group-ride peer dots. On the solo path `frame.dots` is empty, so this is a
+                    // no-op and the map is visually unchanged.
+                    PeerAnnotations(frame: peerModel.frame(now: context.date,
+                                                           project: { project($0, proxy) }))
                 }
+                .mapStyle(settings.mapStyle.mapboxStyle)
             }
         }
-        .mapStyle(settings.mapStyle.mapboxStyle)
-        .onChange(of: groupSession?.peers) { _, newPeers in
-            guard let newPeers else { return }
-            for peer in newPeers {
-                if let coordinate = peer.coordinate {
-                    previousPeerCoordinates[peer.userID] = coordinate
-                }
-            }
+        .onAppear { syncPeers() }
+        .onChange(of: groupSession?.peers) { syncPeers() }
+        .onChange(of: reduceMotion) { syncPeers() }
+    }
+
+    private func syncPeers() {
+        guard let groupSession else {
+            peerModel.updateSet(peers: [], selfUserID: nil, nameMap: [:],
+                                reduceMotion: reduceMotion, now: Date())
+            return
         }
+        peerModel.updateSet(peers: groupSession.peers, selfUserID: groupSession.selfUserID,
+                            nameMap: groupSession.nameMap, reduceMotion: reduceMotion, now: Date())
+    }
+
+    /// Real Mapbox projection for declutter; nil when the coordinate is off-screen/unavailable.
+    private func project(_ c: Coordinate, _ proxy: MapProxy) -> ClusterDeclutter.Point2D? {
+        guard let map = proxy.map else { return nil }
+        let pt = map.point(for: CLLocationCoordinate2D(latitude: c.latitude, longitude: c.longitude))
+        guard pt.x.isFinite, pt.y.isFinite else { return nil }
+        return ClusterDeclutter.Point2D(x: Double(pt.x), y: Double(pt.y))
     }
 
     // MARK: Cluster actions

@@ -15,7 +15,17 @@ public enum GroupMapDots {
     /// Order is preserved so dot identity stays stable across refreshes. `selfUserID` is
     /// optional because the solo map has no group identity to exclude — nil filters on
     /// coordinate alone rather than forcing callers to invent a placeholder id.
-    public static func visiblePeers(peers: [RidePeer], selfUserID: UUID?) -> [RidePeer] {
-        peers.filter { $0.userID != selfUserID && $0.coordinate != nil }
+    public static func visiblePeers(peers: [RidePeer], selfUserID: UUID?,
+                                    maxDots: Int = 7) -> [RidePeer] {
+        let visible = peers.filter { $0.userID != selfUserID && $0.coordinate != nil }
+        guard visible.count > maxDots else { return visible }
+        // Runaway roster (> 8): keep the leader (furthest along) + fill the rest in existing order.
+        let leaderID = visible.max { ($0.progressMeters ?? -.infinity) < ($1.progressMeters ?? -.infinity) }?.userID
+        var kept = visible.filter { $0.userID == leaderID }
+        for peer in visible where peer.userID != leaderID {
+            if kept.count == maxDots { break }
+            kept.append(peer)
+        }
+        return kept
     }
 }

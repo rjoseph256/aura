@@ -22,6 +22,31 @@ enum AuraTheme {
     static let onWarning     = rgb(AuraPalette.inkOnAmber)
     static let border        = Color.white.opacity(AuraPalette.borderWhite)
 
+    // MARK: - Rider identity palette (ROH-72)
+    /// Index-aligned with `AuraPalette.riderHues`; `PeerPalette.assign` returns the index.
+    static let riderPalette: [Color] = AuraPalette.riderHues.map { rgb($0) }
+    static func riderColor(_ index: Int) -> Color {
+        guard !riderPalette.isEmpty else { return accent }
+        return riderPalette[wrapped(index)]
+    }
+
+    /// The monogram ink for a rider hue: whichever of a dark or light ink has more contrast on
+    /// that hue, so the (colour-independent, CVD-safe) monogram stays legible on the dark hues
+    /// too — a fixed dark ink drops below AA on navy/rust. Gated by `RiderPaletteTests`.
+    static let riderInkDark = AuraPalette.inkOnMint          // near-black
+    static let riderInkLight = RGBColor.white(1.0)           // pure white (needed to clear AA on rust)
+    static func riderInk(_ index: Int) -> Color {
+        guard !AuraPalette.riderHues.isEmpty else { return onAccent }
+        let hue = AuraPalette.riderHues[wrapped(index)]
+        return WCAGContrast.ratio(riderInkLight, hue) > WCAGContrast.ratio(riderInkDark, hue)
+            ? rgb(riderInkLight) : rgb(riderInkDark)
+    }
+
+    private static func wrapped(_ index: Int) -> Int {
+        let n = AuraPalette.riderHues.count
+        return ((index % n) + n) % n
+    }
+
     // MARK: - Contrast-aware resolvers
     // Scoped to high-value over-map / sunlight spots. Named apart from the constants above
     // so a call site can't silently fall back to the standard value by omitting the argument.

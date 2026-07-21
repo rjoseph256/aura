@@ -57,4 +57,31 @@ struct GroupMapDotsTests {
             peers: [peer(peerID, at: here), peer(selfID, at: nil)], selfUserID: nil)
         #expect(dots.map(\.userID) == [peerID])
     }
+
+    /// A runaway roster is capped, but the leader (furthest along) is always kept.
+    @Test func capKeepsLeaderWhenOverBudget() {
+        let leader = UUID()
+        var peers: [RidePeer] = (0..<9).map {
+            RidePeer(userID: UUID(), displayName: "\($0)",
+                     coordinate: Coordinate(latitude: 0, longitude: Double($0)),
+                     progressMeters: Double($0), status: .riding)
+        }
+        peers.append(RidePeer(userID: leader, displayName: "L",
+                              coordinate: Coordinate(latitude: 1, longitude: 1),
+                              progressMeters: 9_999, status: .riding))
+        let visible = GroupMapDots.visiblePeers(peers: peers, selfUserID: nil, maxDots: 7)
+        #expect(visible.count == 7)
+        #expect(visible.contains { $0.userID == leader })
+    }
+
+    /// Under budget, the default cap is a no-op and order is unchanged.
+    @Test func underBudgetIsUnchangedOrder() {
+        let peers = [
+            RidePeer(userID: UUID(), displayName: "A",
+                     coordinate: Coordinate(latitude: 0, longitude: 0), status: .riding),
+            RidePeer(userID: UUID(), displayName: "B",
+                     coordinate: Coordinate(latitude: 0, longitude: 1), status: .riding)
+        ]
+        #expect(GroupMapDots.visiblePeers(peers: peers, selfUserID: nil) == peers)
+    }
 }
