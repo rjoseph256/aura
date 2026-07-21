@@ -269,23 +269,31 @@ rotates; the monogram never spins.
 - Contrast: the pointer's dark outline + full opacity fixes the original "invisible cone" via
   size + contrast, independent of the (dark) map behind it.
 
-### 4.4 Overlap handling — hue + monogram + de-occluded tags (disc spreading deferred)
+### 4.4 Overlap handling — declutter (spread discs) + de-occluded tags
 
-Real group spacing is tight (drafting riders sit ~5–30 m apart), so the disambiguation must work
-when discs overlap. **Geometric disc spider/cluster spreading stays deferred** (needs live
-screen-space projection each frame, interacts poorly with interpolation → own follow-up ticket,
-logged). What *is* in scope so the reported case is actually solved:
+Real group spacing is tight (drafting riders sit ~5–30 m apart), so overlap must be handled
+directly, not only worked around by colour. **In scope this pass** (PO pulled geometric
+spreading in):
 
-- **Distinct hue + monogram** make even two stacked discs tell-apart-able (top disc's colour +
-  label differ), and z-order is the deterministic `userID` order so the same dot stays on top
-  (no flicker).
-- **Name tags that never occlude each other.** The tag decision is **screen-space** (project each
-  visible peer to a point; tag the leader always, plus any peer whose projected point is within a
-  px threshold of another), with **hysteresis** (show < X px, hide > 1.5·X px) so tags don't
-  flicker as riders cross a boundary — fixing the "fixed 60 m barely declutters / flickers" flaw.
-  When two tags *would* overlap, they **stack with a deterministic vertical offset** (never draw
-  on top of each other). Projection is app-side; the pure part is a small
-  `TagLayout.resolve(points:) -> offsets` helper (unit-tested on synthetic points).
+- **Screen-space declutter.** The app projects each visible peer's interpolated coordinate to a
+  screen point (Mapbox `point(for:)`), and a **pure** `ClusterDeclutter.resolve(points:radius:)
+  -> [UUID: Offset]` helper detects clusters (points within `radius`) and returns a **deterministic
+  radial spread offset** per dot (evenly-spaced around the cluster centroid, ordered by `userID`
+  so it's stable). The offset is applied as an **animated `.offset`** on the annotation *view*.
+  Screen-space is correct here (unlike position, §3.5) because this is a deliberate *visual*
+  nudge, not a location claim — the anchor coordinate stays the true fix.
+- **No jitter.** Declutter re-solves only when **cluster membership changes** (hysteresis: enter a
+  cluster < `radius`, leave > 1.5·`radius`), and offset changes animate, so dots don't pop as
+  riders drift near the threshold. `ClusterDeclutter` is pure and unit-tested on synthetic points
+  (two-dot spread, three-dot even spacing, no-overlap → zero offset, stable ordering, hysteresis).
+- **Distinct hue + monogram** still carry identity (top disc's colour + label differ even mid-
+  spread and for CVD riders), z-order is deterministic `userID` order.
+- **Name tags** attach to the *spread* dot positions and use the same cluster result — leader
+  always tagged, plus clustered peers — and **stack with a deterministic vertical offset** if two
+  tags would still overlap, so labels never occlude.
+
+Coupling to interpolation is bounded: declutter reads the already-projected interpolated points
+(no new geographic math) and its hysteresis keeps it stable while dots glide.
 
 ### 4.5 Disambiguated monogram — `RiderMonogram` (new, pure, AuraCore)
 
@@ -324,19 +332,22 @@ always-tagged leader can't be dropped), with a doc note + one-line log if exceed
   position, shortest-arc bearing (§3.2–3.4).
 - `PeerPalette.swift` — stable, de-colliding index assignment (§4.2).
 - `RiderMonogram.swift` — collision-widening monogram assignment (§4.5).
-- `GroupMapDots.swift` — leader-preserving `maxDots` cap (§4.7); `TagLayout.resolve` stacking
-  helper (§4.4).
+- `GroupMapDots.swift` — leader-preserving `maxDots` cap (§4.7).
+- `ClusterDeclutter.swift` — pure screen-space cluster detection + radial spread + tag-stacking
+  offsets, with hysteresis (§4.4).
 - (Reuse `PeerBearing`, `Coordinate`, `LiveShareCadence`.)
 
 **AuraCore tests:** `PeerInterpolatorTests` (first-fix appear-in-place, stale/dup/unchanged
 guard no-ops, snap-on-silence via `recordedAt` gap, no false-snap on bunched arrivals, linear
 position, 0/360 seam bearing, coincident→no idle activity), `PeerPaletteTests`,
-`RiderMonogramTests`, `TagLayoutTests`, extended `GroupMapDotsTests`.
+`RiderMonogramTests`, `ClusterDeclutterTests` (spread geometry, hysteresis, stable ordering),
+extended `GroupMapDotsTests`.
 
 **App target:**
 - New `PeerAnnotations` sub-view — owns the TimelineView clock (+ the display-tick fallback,
-  §3.5), `@State` interpolators, and **all** memoised per-set derivations (route split, leader,
-  visible peers, palette, monograms, tag layout). Shared by both hosts.
+  §3.5), `@State` interpolators, screen-space projection → `ClusterDeclutter`, and **all**
+  memoised per-set derivations (route split, leader, visible peers, palette, monograms). Shared
+  by both hosts.
 - `PeerDotView` — identity(hue+monogram)/status(opacity+glyph+pulse) encoding + upright-head
   directional marker with a rotating outlined pointer (§4.1, §4.3); clock-driven pulse (§4.6).
 - `AuraTheme` / `AuraPalette` — add rider palette tokens (lime/amber excluded) + `riderPalette`;
@@ -397,5 +408,5 @@ Coherence holds because interpolation and presence are now keyed on the **same c
 
 ## 8. Out of scope
 
-Geometric collision **disc** spreading (spider/cluster → follow-up ticket, logged); ROH-66
-heartbeat & presence-semantics changes; ROH-16 peer-focus tap/framing; any wire/schema change.
+ROH-66 heartbeat & presence-semantics changes; ROH-16 peer-focus tap/framing; any wire/schema
+change. (Geometric declutter is now **in** scope — §4.4.)
