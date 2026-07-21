@@ -25,6 +25,9 @@ struct RideHUDView: View {
     @State private var showPermission: Bool
     @State private var showEndConfirm: Bool
     @State private var viewport: Viewport
+    /// Live camera for the +/- zoom pill (ROH-57). Written every frame by `RideMapView`'s
+    /// `.onCameraChanged`, read only at tap time, so it never re-renders the HUD.
+    @State private var cameraBox = MapZoomCameraBox()
     // Free rides are solo by construction — group rides use NavigateHUDView +
     // GroupRideSession, never this HUD — so gem discovery is never suppressed here.
     // (GemDiscoveryStore.isSuppressed exists for a future group-explore surface.)
@@ -67,6 +70,7 @@ struct RideHUDView: View {
                         seenGemIDs: gems?.seenIDs ?? [],
                         onSelectGem: { gem in gems?.select(gem) },
                         detourRoute: guidance.activeRoute?.geometry ?? [],
+                        cameraBox: cameraBox,
                         viewport: $viewport)
             bottomCockpit
         }
@@ -234,6 +238,8 @@ private extension RideHUDView {
                     isFollowing: viewport.followPuck != nil,
                     onRecenter: { recenter() },
                     onMarkSpot: gems?.riderCoordinate != nil ? { markSpot() } : nil,
+                    onZoomIn: { zoom(.zoomIn) },
+                    onZoomOut: { zoom(.zoomOut) },
                     onEndRide: { showEndConfirm = true })
             }
             .padding(.horizontal, AuraTheme.Spacing.lg)
@@ -274,6 +280,29 @@ private extension RideHUDView {
             withViewportAnimation(.easeOut(duration: 0.4)) {
                 viewport = .followPuck(zoom: 16, bearing: .heading)
             }
+        }
+    }
+
+    /// Steps the map zoom for a +/- tap (ROH-57). Re-follows the puck at the new zoom while
+    /// following; zooms around the current center once the rider has panned off (recenter is the
+    /// separate control for returning to the puck). Snaps under Reduce Motion, otherwise a quick
+    /// 0.3s flick — matches the navigate HUD's `zoom`.
+    func zoom(_ direction: MapZoomStep.Direction) {
+        guard cameraBox.zoom.isFinite else { return }
+        let target = MapZoomStep.stepped(from: cameraBox.zoom, direction)
+        let next: Viewport
+        if viewport.followPuck != nil {
+            next = .followPuck(zoom: target, bearing: .heading)
+        } else if let center = cameraBox.center {
+            next = .camera(center: center, zoom: target, bearing: cameraBox.bearing, pitch: cameraBox.pitch)
+        } else {
+            // Panned but no camera frame yet: do nothing rather than snap back to the puck.
+            return
+        }
+        if reduceMotion {
+            viewport = next
+        } else {
+            withViewportAnimation(.easeOut(duration: 0.3)) { viewport = next }
         }
     }
 

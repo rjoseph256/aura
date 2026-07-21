@@ -34,6 +34,9 @@ struct RoutePreviewView: View {
     @State private var selected: Route?
     @State private var phase: Phase = .loading
     @State private var viewport: Viewport = .styleDefault
+    /// Live camera for the +/- zoom pill (ROH-57). Written every frame by `.onCameraChanged`,
+    /// read only at tap time, so it never re-renders this view.
+    @State private var cameraBox = MapZoomCameraBox()
     @State private var saveMoment: SaveMoment?
     @State private var saveMomentDismiss: Task<Void, Never>?
     @State private var showFullAlert = false
@@ -67,41 +70,6 @@ struct RoutePreviewView: View {
         .toolbar(.hidden, for: .tabBar)
         .navigationBarBackButtonHidden(true)
         .swipeBackEnabled(true)
-    }
-
-    // MARK: Map pane
-
-    private var mapPane: some View {
-        ZStack(alignment: .topLeading) {
-            Map(viewport: $viewport) {
-                if let route = selected, route.geometry.count > 1 {
-                    PolylineAnnotationGroup {
-                        PolylineAnnotation(
-                            lineCoordinates: route.geometry.map {
-                                CLLocationCoordinate2D(latitude: $0.latitude,
-                                                       longitude: $0.longitude)
-                            }
-                        )
-                        .lineColor(StyleColor(AuraTheme.routeUIColor))
-                        .lineWidth(5)
-                    }
-                }
-            }
-            .mapStyle(settings.mapStyle.mapboxStyle)
-            .ignoresSafeArea()
-
-            // Back chevron — HUDControlButton carries the 44pt hit area and the
-            // Reduce Transparency fallback.
-            Button {
-                router.pop()
-            } label: {
-                Image(systemName: "chevron.left")
-            }
-            .buttonStyle(HUDControlButton())
-            .accessibilityLabel("Back")
-            .padding(.top, AuraTheme.Spacing.sm)   // sits in the safe area
-            .padding(.leading, AuraTheme.Spacing.lg)
-        }
     }
 
     // MARK: Bottom panel
@@ -325,6 +293,75 @@ struct RoutePreviewView: View {
             }
         } else {
             viewport = targetViewport
+        }
+    }
+}
+
+// MARK: - Map pane (extension keeps the main type body under the length limit)
+
+private extension RoutePreviewView {
+    var mapPane: some View {
+        ZStack(alignment: .topLeading) {
+            Map(viewport: $viewport) {
+                if let route = selected, route.geometry.count > 1 {
+                    PolylineAnnotationGroup {
+                        PolylineAnnotation(
+                            lineCoordinates: route.geometry.map {
+                                CLLocationCoordinate2D(latitude: $0.latitude,
+                                                       longitude: $0.longitude)
+                            }
+                        )
+                        .lineColor(StyleColor(AuraTheme.routeUIColor))
+                        .lineWidth(5)
+                    }
+                }
+            }
+            .mapStyle(settings.mapStyle.mapboxStyle)
+            // Mirror the live camera into the zoom box. Must precede `.ignoresSafeArea()`
+            // (a type-erasing View modifier) to stay in the Map-only modifier chain.
+            .onCameraChanged { ctx in
+                cameraBox.zoom = ctx.cameraState.zoom
+                cameraBox.center = ctx.cameraState.center
+                cameraBox.bearing = ctx.cameraState.bearing
+                cameraBox.pitch = ctx.cameraState.pitch
+            }
+            .ignoresSafeArea()
+
+            // Back chevron — HUDControlButton carries the 44pt hit area and the
+            // Reduce Transparency fallback.
+            Button {
+                router.pop()
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .buttonStyle(HUDControlButton())
+            .accessibilityLabel("Back")
+            .padding(.top, AuraTheme.Spacing.sm)   // sits in the safe area
+            .padding(.leading, AuraTheme.Spacing.lg)
+        }
+        // +/- zoom pill (ROH-57), top-trailing so it mirrors the back chevron and clears the
+        // route-options panel seam below. `.standard` sizing — the rider is stationary here.
+        .overlay(alignment: .topTrailing) {
+            MapZoomControl(metrics: .standard,
+                           onZoomIn: { zoomStep(.zoomIn) },
+                           onZoomOut: { zoomStep(.zoomOut) })
+                .padding(.top, AuraTheme.Spacing.sm)
+                .padding(.trailing, AuraTheme.Spacing.lg)
+        }
+    }
+
+    /// Steps the preview map zoom for a +/- tap (ROH-57). The preview never follows a puck, so
+    /// this always zooms around the current center. Snaps under Reduce Motion, otherwise a quick
+    /// 0.3s flick. No-op until the first camera frame gives us a finite center + zoom.
+    func zoomStep(_ direction: MapZoomStep.Direction) {
+        guard let center = cameraBox.center, cameraBox.zoom.isFinite else { return }
+        let target = MapZoomStep.stepped(from: cameraBox.zoom, direction)
+        let next = Viewport.camera(center: center, zoom: target,
+                                   bearing: cameraBox.bearing, pitch: cameraBox.pitch)
+        if reduceMotion {
+            viewport = next
+        } else {
+            withViewportAnimation(.easeOut(duration: 0.3)) { viewport = next }
         }
     }
 }
