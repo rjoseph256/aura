@@ -125,6 +125,10 @@ struct HomeView: View {
                           onSelectSaved: { saved in
                               mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .activate)
                               flyToTarget = saved.place.coordinate
+                              // Keep the "Ride here" card + focus in sync with whichever pin was
+                              // tapped — otherwise a different saved pin's tap would fly the map
+                              // while leaving a stale/mismatched card up for a previous place.
+                              focusedPlace = saved.place
                           },
                           flyTo: $flyToTarget, focusedPlace: focusedPlace, bottomInset: peekHeight)
 

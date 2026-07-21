@@ -69,7 +69,11 @@ struct HomeLiveMap: View {
                 }
                 .allowOverlapWithPuck(true)
             }
-            if let focusedPlace {
+            // Suppress the dropped pin when the focused place is already a saved place — the
+            // star `SavedPinView` above already marks that location, so both would otherwise
+            // stack a mappin and a star at the same coordinate.
+            if let focusedPlace,
+               !savedPlaces.contains(where: { $0.place.coordinate == focusedPlace.coordinate }) {
                 MapViewAnnotation(coordinate: CLLocationCoordinate2D(
                     latitude: focusedPlace.coordinate.latitude, longitude: focusedPlace.coordinate.longitude)) {
                     DestinationPinView(name: focusedPlace.name)
