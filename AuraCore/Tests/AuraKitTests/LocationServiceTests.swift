@@ -5,6 +5,13 @@ import CoreLocation
 
 @MainActor
 final class LocationServiceTests: XCTestCase {
+    /// Build a service backed by fakes so the test never constructs a real `CLLocationManager`
+    /// (ROH-88: real managers leak `locationd` XPC connections on the headless CI runner).
+    private func makeService(authorization: CLAuthorizationStatus = .notDetermined) -> LocationService {
+        LocationService(manager: FakeLocationManager(authorizationStatus: authorization),
+                        oneShotManager: FakeLocationManager())
+    }
+
     func test_authorizationMapping() {
         XCTAssertEqual(LocationAuthorization(.notDetermined), .notDetermined)
         XCTAssertEqual(LocationAuthorization(.denied), .denied)
@@ -15,8 +22,38 @@ final class LocationServiceTests: XCTestCase {
         XCTAssertEqual(LocationAuthorization(.authorizedAlways), .authorized)
     }
 
+    // MARK: Seam — injected LocationManaging (ROH-88: no real CLLocationManager under test)
+
+    func test_setMode_writesThroughInjectedManager() {
+        let fake = FakeLocationManager()
+        let svc = LocationService(manager: fake, oneShotManager: FakeLocationManager())
+
+        svc.setMode(.ambient)
+        // The tier config must land on the injected manager, proving the seam is wired.
+        XCTAssertEqual(fake.desiredAccuracy, kCLLocationAccuracyKilometer)
+        XCTAssertEqual(fake.distanceFilter, 500)
+    }
+
+    func test_startAmbient_startsInjectedManager_whenAuthorized() {
+        let fake = FakeLocationManager(authorizationStatus: .authorizedAlways)
+        let svc = LocationService(manager: fake, oneShotManager: FakeLocationManager())
+
+        svc.startAmbient()
+        XCTAssertEqual(svc.mode, .ambient)
+        XCTAssertEqual(fake.startUpdatingCount, 1, "startAmbient must drive the injected ambient manager")
+    }
+
+    func test_oneShot_requestsThroughInjectedOneShotManager() async {
+        let oneShot = FakeLocationManager()
+        let svc = LocationService(manager: FakeLocationManager(), oneShotManager: oneShot)
+        // No fix is ever delivered by the fake, so current() times out to the fallback — but it
+        // must have issued exactly one requestLocation() on the injected one-shot manager.
+        _ = await svc.current(for: .routing)
+        XCTAssertEqual(oneShot.requestLocationCount, 1)
+    }
+
     func test_setMode_configuresManagerPerTier() {
-        let svc = LocationService()
+        let svc = LocationService(manager: FakeLocationManager(), oneShotManager: FakeLocationManager())
 
         svc.setMode(.idle)
         XCTAssertEqual(svc.mode, .idle)
@@ -53,7 +90,7 @@ final class LocationServiceTests: XCTestCase {
     }
 
     func test_ingest_acceptsGoodFix_updatesSignal() {
-        let svc = LocationService()
+        let svc = makeService()
         let loc = CLLocation(coordinate: .init(latitude: 40.44, longitude: -79.99),
                              altitude: 250, horizontalAccuracy: 8, verticalAccuracy: 5,
                              timestamp: Date())
@@ -64,7 +101,7 @@ final class LocationServiceTests: XCTestCase {
     }
 
     func test_ingest_dropsInaccurateFix_signalLost() {
-        let svc = LocationService()
+        let svc = makeService()
         let loc = CLLocation(coordinate: .init(latitude: 40.44, longitude: -79.99),
                              altitude: 0, horizontalAccuracy: 120, verticalAccuracy: 5,
                              timestamp: Date())
@@ -73,7 +110,7 @@ final class LocationServiceTests: XCTestCase {
     }
 
     func test_ingest_staleButAccurateFix_signalLost_butStillRecorded() {
-        let svc = LocationService()
+        let svc = makeService()
         let t = Date()
         let loc = CLLocation(coordinate: .init(latitude: 40.44, longitude: -79.99),
                              altitude: 10, horizontalAccuracy: 8, verticalAccuracy: 5,
@@ -86,7 +123,7 @@ final class LocationServiceTests: XCTestCase {
     // MARK: Task 4 — delegate demux + lastKnown
 
     func test_ambientUpdate_setsLastKnown() {
-        let svc = LocationService()
+        let svc = makeService()
         let coord = Coordinate(latitude: 40.44, longitude: -79.99)
         let t = Date()
         // Simulate a fix arriving on the ambient (shared) manager.
@@ -95,7 +132,7 @@ final class LocationServiceTests: XCTestCase {
     }
 
     func test_oneShotUpdate_doesNotTouchLastKnown() {
-        let svc = LocationService()
+        let svc = makeService()
         let coord = Coordinate(latitude: 1, longitude: 2)
         // A fix on the one-shot manager must NOT be recorded as the ambient lastKnown.
         svc.handleLocationUpdate(managerID: ObjectIdentifier(svc.oneShotManager), coordinate: coord, accuracy: 5, timestamp: Date())
@@ -105,7 +142,7 @@ final class LocationServiceTests: XCTestCase {
     // MARK: Task 5 — one-shot current(for:)
 
     func test_current_returnsDeliveredOneShotFix_andClearsState() async {
-        let svc = LocationService()
+        let svc = makeService()
         let fix = Coordinate(latitude: 12.0, longitude: 34.0)
         // Deliver a one-shot fix as soon as current() parks its continuation.
         Task { @MainActor in
@@ -120,7 +157,7 @@ final class LocationServiceTests: XCTestCase {
     }
 
     func test_current_concurrentCallers_coalesceToOneFix() async {
-        let svc = LocationService()
+        let svc = makeService()
         let fix = Coordinate(latitude: 12.0, longitude: 34.0)
         Task { @MainActor in
             while svc.oneShotContinuation == nil { await Task.yield() }
@@ -141,7 +178,7 @@ final class LocationServiceTests: XCTestCase {
         // Two back-to-back (non-overlapping) one-shot cycles must each resolve to their own
         // delivered fix, with all one-shot state cleared between them — no bleed from cycle 1
         // into cycle 2 (the cross-cycle contamination guard's happy path).
-        let svc = LocationService()
+        let svc = makeService()
         func deliver(_ c: Coordinate) {
             Task { @MainActor in
                 while svc.oneShotContinuation == nil { await Task.yield() }
@@ -163,7 +200,7 @@ final class LocationServiceTests: XCTestCase {
     func test_current_timesOutToFallback_whenNoFixDelivered() async {
         // Fresh host is .notDetermined; requestLocation delivers no usable fix, so the internal
         // timeout resolves to the Pittsburgh fallback. Must not hang.
-        let svc = LocationService()
+        let svc = makeService()
         let origin = await svc.current(for: .routing)
         XCTAssertEqual(origin.latitude, 40.4406, accuracy: 0.0001)
         XCTAssertEqual(origin.longitude, -79.9959, accuracy: 0.0001)
@@ -172,28 +209,28 @@ final class LocationServiceTests: XCTestCase {
     // MARK: Task 6 — ambient monitor, releaseNonRide, clobber-proof stop()
 
     func test_startAmbient_noopsWhenNotAuthorized() {
-        let svc = LocationService()   // fresh -> notDetermined
+        let svc = makeService()   // fresh -> notDetermined
         svc.startAmbient()
         XCTAssertEqual(svc.mode, .idle, "ambient must not start without authorization")
         XCTAssertFalse(svc.sessionActive)
     }
 
     func test_releaseNonRide_isNoopWhileNavigating() {
-        let svc = LocationService()
+        let svc = makeService()
         svc.setMode(.navigating)      // pretend a ride is configuring the manager
         svc.releaseNonRide()
         XCTAssertEqual(svc.mode, .navigating, "releaseNonRide must never tear down the ride pipeline")
     }
 
     func test_releaseNonRide_stopsAmbient() {
-        let svc = LocationService()
+        let svc = makeService()
         svc.setMode(.ambient)         // simulate ambient running
         svc.releaseNonRide()
         XCTAssertEqual(svc.mode, .idle)
     }
 
     func test_points_armsSession_stopClearsIt() {
-        let svc = LocationService()
+        let svc = makeService()
         _ = svc.points()
         XCTAssertTrue(svc.sessionActive, "points() must arm the ride session")
         XCTAssertEqual(svc.mode, .navigating)
@@ -206,7 +243,7 @@ final class LocationServiceTests: XCTestCase {
         // Ride-end race: the controller re-arms ambient (path pop) BEFORE the HUD's
         // onDisappear->cancel->stop lands. stop() must release the session but NOT force
         // the tier back to .idle when ambient already took over.
-        let svc = LocationService()
+        let svc = makeService()
         _ = svc.points()              // ride armed: sessionActive, .navigating
         svc.setMode(.ambient)         // controller re-armed ambient first
         svc.stop()                    // late teardown arrives
