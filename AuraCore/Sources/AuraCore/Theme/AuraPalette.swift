@@ -25,4 +25,20 @@ public enum AuraPalette {
 
     // Cockpit scrim over the map: surface opacity in the non-opaque branch.
     public static let mapScrimOpacity = 0.85
+
+    // MARK: - Rider identity palette (ROH-72)
+    // Muted terrain tones that read as one Aura family on dark terrain, deliberately spanning
+    // a wide lightness range so red-green colour-blind riders can still tell them apart.
+    // Deuteranopia collapses the red-green axis, so distinctness must come from the blue-yellow
+    // axis AND lightness — hence at most one hue per warm/cool family at a given lightness (the
+    // two warm tones, rust and gold, are far apart in lightness). NEVER includes `mint`
+    // (route/accent) or `amber` (warning/stopped). Guarded by RiderPaletteTests (ΔE distinctness
+    // in normal + simulated deuteranopia, and contrast on `nearBlack`).
+    public static let riderHues: [RGBColor] = [
+        RGBColor(red: 0.325, green: 0.812, blue: 0.847),  // cyan    #53CFD8  (cool, light)
+        RGBColor(red: 0.290, green: 0.408, blue: 0.788),  // navy    #4A68C9  (cool, dark)
+        RGBColor(red: 0.690, green: 0.478, blue: 0.816),  // violet  #B07AD0  (cool, mid-light)
+        RGBColor(red: 0.722, green: 0.318, blue: 0.220),  // rust    #B85138  (warm, dark)
+        RGBColor(red: 0.847, green: 0.722, blue: 0.369)   // gold    #D8B85E  (warm, light)
+    ]
 }

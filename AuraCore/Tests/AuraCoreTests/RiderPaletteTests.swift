@@ -1,0 +1,55 @@
+import Testing
+import Foundation
+@testable import AuraCore
+
+struct RiderPaletteTests {
+    // CIELAB ΔE (76) between two sRGB colours.
+    func deltaE(_ a: RGBColor, _ b: RGBColor) -> Double {
+        let la = lab(a), lb = lab(b)
+        let dl = la.0 - lb.0, da = la.1 - lb.1, db = la.2 - lb.2
+        return (dl * dl + da * da + db * db).squareRoot()
+    }
+    func lab(_ c: RGBColor) -> (Double, Double, Double) {
+        func lin(_ v: Double) -> Double { v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        let r = lin(c.red), g = lin(c.green), b = lin(c.blue)
+        let x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047
+        let y =  r * 0.2126 + g * 0.7152 + b * 0.0722
+        let z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883
+        func f(_ t: Double) -> Double { t > 0.008856 ? pow(t, 1.0 / 3) : 7.787 * t + 16.0 / 116 }
+        let fx = f(x), fy = f(y), fz = f(z)
+        return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+    }
+    // Crude deuteranopia simulation (project onto the confusion axis) for a distinctness floor.
+    func deuter(_ c: RGBColor) -> RGBColor {
+        RGBColor(red: 0.625 * c.red + 0.375 * c.green,
+                 green: 0.700 * c.red + 0.300 * c.green,
+                 blue: 0.300 * c.green + 0.700 * c.blue)
+    }
+
+    @Test func atLeastFourRiderHues() {
+        #expect(AuraPalette.riderHues.count >= 4)
+    }
+
+    @Test func riderHuesExcludeReservedTokens() {
+        for h in AuraPalette.riderHues {
+            #expect(h != AuraPalette.mint)   // lime = route/accent
+            #expect(h != AuraPalette.amber)  // amber = warning/stopped
+        }
+    }
+
+    @Test func riderHuesReadOnDarkBackground() {
+        for h in AuraPalette.riderHues {
+            #expect(WCAGContrast.ratio(h, AuraPalette.nearBlack) >= 3.0)
+        }
+    }
+
+    @Test func riderHuesAreMutuallyDistinctInNormalAndDeuteranopia() {
+        let hues = AuraPalette.riderHues
+        for i in hues.indices {
+            for j in (i + 1)..<hues.count {
+                #expect(deltaE(hues[i], hues[j]) >= 20)                         // normal vision
+                #expect(deltaE(deuter(hues[i]), deuter(hues[j])) >= 12)         // red-green CVD floor
+            }
+        }
+    }
+}
