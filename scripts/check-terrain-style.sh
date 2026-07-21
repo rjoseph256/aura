@@ -47,6 +47,25 @@ if not hill:
 elif dem_id is not None and not any(l.get("source") == dem_id for l in hill):
     errs.append("hillshade layer does not reference the terrain-DEM source")
 
+# --- street labels (ROH-86): an interactive, pan/pinch-zoomable map must label streets when
+# zoomed in, but stay label-free at the far-out Home framing. Require a road-label symbol layer
+# (source-layer 'road') that is zoom-gated (a minzoom, or a zoom-interpolated text-opacity), so a
+# future edit can't silently drop street labels OR splash them across the calm far-out snapshot.
+road_labels = [l for l in layers if isinstance(l, dict)
+               and l.get("type") == "symbol" and l.get("source-layer") == "road"]
+if not road_labels:
+    errs.append("missing a road-label symbol layer (source-layer 'road') — streets unlabeled at close zoom")
+else:
+    def zoom_gated(l):
+        # Home's far-out snapshot renders at zoom 12.5 (HomeMapCamera.defaultZoom); a minzoom
+        # gate only keeps that framing calm if it sits strictly above 12.5.
+        mz = l.get("minzoom")
+        if isinstance(mz, (int, float)) and mz > 12.5:
+            return True
+        return "\"zoom\"" in json.dumps(l.get("paint", {}).get("text-opacity"))
+    if not any(zoom_gated(l) for l in road_labels):
+        errs.append("road-label layer is not zoom-gated (needs minzoom>12.5 or a zoom-based text-opacity) — would clutter far-out Home")
+
 # --- static guardrail: no animated / time-of-day / transition expressions anywhere ---
 def walk_keys(node):
     if isinstance(node, dict):
@@ -139,10 +158,29 @@ good = {
     "layers": [
         {"id": "hillshade", "type": "hillshade", "source": "dem",
          "paint": {"hillshade-shadow-color": "#05080A"}},
-        {"id": "bg", "type": "background", "paint": {"background-color": "#0D1411"}}]}
+        {"id": "bg", "type": "background", "paint": {"background-color": "#0D1411"}},
+        {"id": "road-label", "type": "symbol", "source": "composite", "source-layer": "road",
+         "minzoom": 13,
+         "layout": {"symbol-placement": "line", "text-field": ["get", "name"]},
+         "paint": {"text-color": "#A7B0BB",
+                   "text-opacity": ["interpolate", ["linear"], ["zoom"], 13, 0, 15, 1]}}]}
 def w(name, obj): json.dump(obj, open(os.path.join(tmp, name), "w"))
 w("good.json", good)
 w("not_a_style.json", {"not": "a style"})
+# a style with no road-label symbol layer must be rejected (the ROH-86 regression)
+d = copy.deepcopy(good); d["layers"] = [l for l in d["layers"] if l["id"] != "road-label"]; w("no_road_label.json", d)
+# a road-label present but ungated (labels at every zoom, incl. far-out Home) must be rejected
+d = copy.deepcopy(good)
+for l in d["layers"]:
+    if l["id"] == "road-label":
+        del l["minzoom"]; l["paint"]["text-opacity"] = 1
+w("ungated_road_label.json", d)
+# a minzoom that still shows at the 12.5 Home framing (<= 12.5) with flat opacity must be rejected
+d = copy.deepcopy(good)
+for l in d["layers"]:
+    if l["id"] == "road-label":
+        l["minzoom"] = 12; l["paint"]["text-opacity"] = 1
+w("low_minzoom_road_label.json", d)
 d = copy.deepcopy(good); d["layers"][1]["paint"]["background-color"] = "#7CF0A8"; w("reserved_mint.json", d)
 d = copy.deepcopy(good); d["layers"][1]["paint"]["background-color"] = "#FFFFFF"; w("white_casing.json", d)
 # a reserved hue hidden inside a zoom-interpolated expression must also be rejected
@@ -154,7 +192,7 @@ d = copy.deepcopy(good); d["layers"].append({"id": "sky", "type": "sky"}); w("sk
 d = copy.deepcopy(good); d["sources"]["dem"]["type"] = "vector"; w("bad_dem.json", d)
 PY
   local bad
-  for bad in not_a_style reserved_mint white_casing expr_mint animated_transition sky_layer bad_dem; do
+  for bad in not_a_style reserved_mint white_casing expr_mint animated_transition sky_layer bad_dem no_road_label ungated_road_label low_minzoom_road_label; do
     if validate "$tmp/$bad.json" >/dev/null 2>&1; then
       echo "SELF-TEST FAIL: validator passed a bad style ($bad)"; rm -rf "$tmp"; exit 1
     fi
