@@ -136,19 +136,7 @@ struct HomeView: View {
                         .padding(.top, AuraTheme.Spacing.sm)
                 }
                 Spacer(minLength: 0)
-                if !searchExpanded {
-                    HomeLaunchBand(
-                        onWhereTo: { searchExpanded = true },
-                        onExplore: { leaveHome(pushing: .freeRide) },
-                        onJoin: { leaveHome(pushing: .joinRide) },
-                        onSaved: {
-                            if searchExpanded { searchExpanded = false }
-                            selectedDetent = .large
-                            revealSavedNonce += 1
-                        },
-                        hasSaved: !savedPlaces.places.isEmpty)
-                        .padding(.bottom, peekHeight + AuraTheme.Spacing.md) // sit above the peek sheet
-                }
+                if !searchExpanded { launchSlot }
             }
 
             if searchExpanded {
@@ -314,6 +302,40 @@ private extension HomeView {
     func loadRides() async {
         summaries = (try? rideStore.summaries()) ?? []
         didLoad = true
+    }
+
+    /// "Ride here" on the focused-place card: clears the pin and hands off to route preview via
+    /// `leaveHome` (single-renderer-safe teardown), same as any other saved/recent pick.
+    func rideToFocusedPlace() {
+        let target = focusedPlace
+        focusedPlace = nil
+        if let target { leaveHome(pushing: .preview(target)) }
+    }
+
+    /// The launch band's slot: a focused (flown-to) place takes it over with a "Ride here"
+    /// card instead of stacking alongside the band, so there is always exactly one bottom
+    /// action surface.
+    @ViewBuilder
+    var launchSlot: some View {
+        if let focusedPlace {
+            FocusedPlaceCard(
+                place: focusedPlace,
+                onRideHere: { rideToFocusedPlace() },
+                onDismiss: { self.focusedPlace = nil })
+                .padding(.bottom, peekHeight + AuraTheme.Spacing.md) // sit above the peek sheet
+        } else {
+            HomeLaunchBand(
+                onWhereTo: { searchExpanded = true },
+                onExplore: { leaveHome(pushing: .freeRide) },
+                onJoin: { leaveHome(pushing: .joinRide) },
+                onSaved: {
+                    if searchExpanded { searchExpanded = false }
+                    selectedDetent = .large
+                    revealSavedNonce += 1
+                },
+                hasSaved: !savedPlaces.places.isEmpty)
+                .padding(.bottom, peekHeight + AuraTheme.Spacing.md) // sit above the peek sheet
+        }
     }
 
     /// Leaves Home for a pushed route that will mount its own map (ride HUD, join flow). Commits
