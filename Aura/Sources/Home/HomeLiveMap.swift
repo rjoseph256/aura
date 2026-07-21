@@ -72,8 +72,10 @@ struct HomeLiveMap: View {
             // Suppress the dropped pin when the focused place is already a saved place — the
             // star `SavedPinView` above already marks that location, so both would otherwise
             // stack a mappin and a star at the same coordinate.
-            if let focusedPlace,
-               !savedPlaces.contains(where: { $0.place.coordinate == focusedPlace.coordinate }) {
+            // Suppress the destination pin when the focused place is already a saved (star) pin.
+            // Use the canonical ID + bucketed-coordinate match (never raw-Double coordinate
+            // equality across Mapbox paths — see SavedPlaceKey / the RouteRanker sourceIndex rule).
+            if let focusedPlace, !SavedPlacesLogic.isSaved(focusedPlace, in: savedPlaces) {
                 MapViewAnnotation(coordinate: CLLocationCoordinate2D(
                     latitude: focusedPlace.coordinate.latitude, longitude: focusedPlace.coordinate.longitude)) {
                     DestinationPinView(name: focusedPlace.name)
