@@ -1,7 +1,27 @@
 {
+  "1 Allegheny Avenue, Pittsburgh, PA": [
+    40.44563,
+    -80.017931
+  ],
+  "2007 Centre Avenue, Pittsburgh, PA": [
+    40.444,
+    -79.97992
+  ],
+  "24 Maryland Avenue, Millvale, PA": [
+    40.476891,
+    -79.969611
+  ],
   "40th Street Bridge, Pittsburgh, PA": [
     40.471865,
     -79.967085
+  ],
+  "980 Liberty Avenue, Pittsburgh, PA": [
+    40.443195,
+    -79.995873
+  ],
+  "Acrisure Stadium, Pittsburgh, PA": [
+    40.446717,
+    -80.01572
   ],
   "Allegheny Cemetery, Pittsburgh, PA": [
     40.472093,
@@ -19,6 +39,10 @@
     40.482583,
     -80.020697
   ],
+  "Allegheny West, Pittsburgh, PA": [
+    40.452273,
+    -80.015741
+  ],
   "Andy Warhol Bridge, Pittsburgh, PA": [
     40.446474,
     -80.001537
@@ -34,6 +58,10 @@
   "Arsenal Park, Pittsburgh, PA": [
     40.466631,
     -79.961136
+  ],
+  "Aspinwall Riverfront Park, Aspinwall, PA": [
+    40.488585,
+    -79.903118
   ],
   "August Wilson House, Pittsburgh, PA": [
     40.445419,
@@ -55,6 +83,10 @@
     40.456312,
     -80.032413
   ],
+  "Bigelow Boulevard, Pittsburgh, PA": [
+    40.456797,
+    -79.963175
+  ],
   "Birmingham Bridge, Pittsburgh, PA": [
     40.433122,
     -79.973566
@@ -75,9 +107,17 @@
     40.404986,
     -80.031497
   ],
+  "Brookline Boulevard, Pittsburgh, PA": [
+    40.391042,
+    -79.99985
+  ],
   "Butler Street, Lawrenceville, Pittsburgh, PA": [
     40.471815,
     -79.959536
+  ],
+  "Calvary Episcopal Church, Shadyside, Pittsburgh, PA": [
+    40.456273,
+    -79.921872
   ],
   "Canton Avenue, Beechview, Pittsburgh, PA": [
     40.410075,
@@ -127,9 +167,17 @@
     40.485193,
     -79.94677
   ],
+  "David L. Lawrence Convention Center, Pittsburgh, PA": [
+    40.445782,
+    -79.99651
+  ],
   "Davis Avenue, Pittsburgh, PA": [
     40.480809,
     -80.037967
+  ],
+  "Dormont Pool, Dormont, PA": [
+    40.397591,
+    -80.045296
   ],
   "Duck Hollow, Pittsburgh, PA": [
     40.416694,
@@ -138,6 +186,10 @@
   "Duquesne Incline, Pittsburgh, PA": [
     40.438774,
     -80.018445
+  ],
+  "Duquesne University, Pittsburgh, PA": [
+    40.436531,
+    -79.990482
   ],
   "East Carson Street, South Side, Pittsburgh, PA": [
     40.428986,
@@ -159,9 +211,21 @@
     40.426587,
     -79.995695
   ],
+  "Epiphany Church, Pittsburgh, PA": [
+    40.440065,
+    -79.99076
+  ],
   "Fern Hollow, Pittsburgh, PA": [
     40.434295,
     -79.899136
+  ],
+  "Fineview, Pittsburgh, PA": [
+    40.464514,
+    -80.003942
+  ],
+  "First Presbyterian Church, Pittsburgh, PA": [
+    40.441499,
+    -79.999144
   ],
   "Flagstaff Hill, Pittsburgh, PA": [
     40.440058,
@@ -171,9 +235,17 @@
     40.44022,
     -79.958845
   ],
+  "Forbes Field Wall, Pittsburgh, PA": [
+    40.441221,
+    -79.952692
+  ],
   "Fort Pitt Block House, Pittsburgh, PA": [
     40.441188,
     -80.009823
+  ],
+  "Fort Pitt Bridge, Pittsburgh, PA": [
+    40.439056,
+    -80.010994
   ],
   "Fort Pitt Museum, Pittsburgh, PA": [
     40.440693,
@@ -186,6 +258,10 @@
   "Frick Environmental Center, Pittsburgh, PA": [
     40.436479,
     -79.907589
+  ],
+  "Frick Fine Arts Building, Pittsburgh, PA": [
+    40.441561,
+    -79.951094
   ],
   "Frick Park Clay Courts, Pittsburgh, PA": [
     40.437367,
@@ -215,6 +291,14 @@
     40.426587,
     -79.995695
   ],
+  "Grant Building, Pittsburgh, PA": [
+    40.437649,
+    -79.997542
+  ],
+  "Gulf Tower, Pittsburgh, PA": [
+    40.442602,
+    -79.995213
+  ],
   "Hazelwood Green, Pittsburgh, PA": [
     40.418047,
     -79.949555
@@ -222,6 +306,14 @@
   "Heinz Hall, Pittsburgh, PA": [
     40.442569,
     -80.00172
+  ],
+  "Heinz Memorial Chapel, Pittsburgh, PA": [
+    40.445259,
+    -79.95186
+  ],
+  "Highland Park Bridge, Pittsburgh, PA": [
+    40.489472,
+    -79.911774
   ],
   "Highland Park Reservoir, Pittsburgh, PA": [
     40.480425,
@@ -255,6 +347,14 @@
     40.378135,
     -80.085691
   ],
+  "Katz Plaza, Pittsburgh, PA": [
+    40.443382,
+    -80.000673
+  ],
+  "Kelly Strayhorn Theater, Pittsburgh, PA": [
+    40.461744,
+    -79.925199
+  ],
   "La Prima Espresso, Strip District, Pittsburgh, PA": [
     40.445572,
     -79.99384
@@ -266,6 +366,18 @@
   "Larimer, Pittsburgh, PA": [
     40.462569,
     -79.908384
+  ],
+  "Liberty Avenue, Bloomfield, Pittsburgh, PA": [
+    40.461111,
+    -79.948022
+  ],
+  "Liberty Bridge, Pittsburgh, PA": [
+    40.432475,
+    -79.997005
+  ],
+  "Manchester, Pittsburgh, PA": [
+    40.455202,
+    -80.024341
   ],
   "Market Square, Pittsburgh, PA": [
     40.440733,
@@ -343,6 +455,10 @@
     40.43043,
     -80.018573
   ],
+  "PNC Park, Pittsburgh, PA": [
+    40.446926,
+    -80.005606
+  ],
   "PPG Place, Pittsburgh, PA": [
     40.44001,
     -80.003761
@@ -375,6 +491,10 @@
     40.438891,
     -79.948711
   ],
+  "Pittsburgh Glass Center, Pittsburgh, PA": [
+    40.464122,
+    -79.932836
+  ],
   "Pittsburgh Zoo, Pittsburgh, PA": [
     40.483545,
     -79.919182
@@ -395,6 +515,10 @@
     40.446561,
     -79.999704
   ],
+  "Regent Square, Pittsburgh, PA": [
+    40.433121,
+    -79.897669
+  ],
   "Rialto Street, Pittsburgh, PA": [
     40.466597,
     -79.982378
@@ -410,6 +534,14 @@
   "Roberto Clemente Bridge, Pittsburgh, PA": [
     40.445585,
     -80.003325
+  ],
+  "Rodef Shalom Congregation, Pittsburgh, PA": [
+    40.447901,
+    -79.943366
+  ],
+  "Sacred Heart Parish, Shadyside, Pittsburgh, PA": [
+    40.45628,
+    -79.923108
   ],
   "Saint Anthony Chapel, Troy Hill, Pittsburgh, PA": [
     40.464933,
@@ -447,6 +579,10 @@
     40.434674,
     -80.002269
   ],
+  "Smithfield United Church of Christ, Pittsburgh, PA": [
+    40.441927,
+    -79.997075
+  ],
   "Soldiers and Sailors Memorial Hall, Oakland, Pittsburgh, PA": [
     40.445013,
     -79.956378
@@ -470,6 +606,10 @@
   "SouthSide Works, Pittsburgh, PA": [
     40.427384,
     -79.96495
+  ],
+  "St. Michael the Archangel Church, South Side, Pittsburgh, PA": [
+    40.424938,
+    -79.984214
   ],
   "Station Square, Pittsburgh, PA": [
     40.431568,
@@ -503,6 +643,10 @@
     40.434449,
     -80.002279
   ],
+  "Trinity Cathedral, Pittsburgh, PA": [
+    40.441331,
+    -79.998743
+  ],
   "Troy Hill Road, Pittsburgh, PA": [
     40.457375,
     -79.989835
@@ -511,6 +655,14 @@
     40.468958,
     -79.978664
   ],
+  "U.S. Steel Tower, Pittsburgh, PA": [
+    40.441377,
+    -79.994756
+  ],
+  "Union Station, Pittsburgh, PA": [
+    40.444577,
+    -79.991639
+  ],
   "Union Trust Building, Pittsburgh, PA": [
     40.43995,
     -79.997011
@@ -518,6 +670,10 @@
   "University of Pittsburgh, Pittsburgh, PA": [
     40.444153,
     -79.962461
+  ],
+  "Walnut Street, Shadyside, Pittsburgh, PA": [
+    40.451167,
+    -79.933849
   ],
   "Washington Boulevard, Pittsburgh, PA": [
     40.474584,
@@ -542,5 +698,9 @@
   "Westinghouse Park, Pittsburgh, PA": [
     40.452965,
     -79.902767
+  ],
+  "Wightman Park, Pittsburgh, PA": [
+    40.443336,
+    -79.92708
   ]
 }

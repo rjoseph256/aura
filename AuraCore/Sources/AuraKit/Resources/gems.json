@@ -189,8 +189,8 @@
     },
     "id": "curated:duquesne-incline",
     "name": "Duquesne Incline",
-    "photoAsset": null,
-    "photoAttribution": null,
+    "photoAsset": "gem-duquesne-incline",
+    "photoAttribution": "Dllu / CC BY-SA 4.0 via Wikimedia Commons",
     "source": "curated",
     "tier": 2,
     "why": "Since 1877 this cable car has climbed Mount Washington."
@@ -203,8 +203,8 @@
     },
     "id": "curated:monongahela-incline",
     "name": "Monongahela Incline",
-    "photoAsset": null,
-    "photoAttribution": null,
+    "photoAsset": "gem-monongahela-incline",
+    "photoAttribution": "Suckindiesel at English Wikipedia / CC BY-SA 3.0 via Wikimedia Commons",
     "source": "curated",
     "tier": 2,
     "why": "Ride the oldest working incline in the country up from Station Square."
@@ -217,8 +217,8 @@
     },
     "id": "curated:mattress-factory",
     "name": "Mattress Factory",
-    "photoAsset": null,
-    "photoAttribution": null,
+    "photoAsset": "gem-mattress-factory",
+    "photoAttribution": "Popscreenshot / CC BY-SA 4.0 via Wikimedia Commons",
     "source": "curated",
     "tier": 2,
     "why": "Room-sized installation art fills a former Northside warehouse."
@@ -231,8 +231,8 @@
     },
     "id": "curated:national-aviary",
     "name": "National Aviary",
-    "photoAsset": null,
-    "photoAttribution": null,
+    "photoAsset": "gem-national-aviary",
+    "photoAttribution": "Notyourbroom, Changes by --Kersti (talk) 06:00, 2 August 2009 (UTC) / CC BY 3.0 via Wikimedia Commons",
     "source": "curated",
     "tier": 2,
     "why": "Walk through free-flight rooms of birds on the Northside."
@@ -245,8 +245,8 @@
     },
     "id": "curated:phipps-conservatory",
     "name": "Phipps Conservatory",
-    "photoAsset": null,
-    "photoAttribution": null,
+    "photoAsset": "gem-phipps-conservatory",
+    "photoAttribution": "Dllu / CC BY-SA 4.0 via Wikimedia Commons",
     "source": "curated",
     "tier": 2,
     "why": "Glass Victorian greenhouses stand at the edge of Schenley Park."
@@ -287,7 +287,7 @@
     },
     "id": "curated:andy-warhol-museum",
     "name": "Andy Warhol Museum",
-    "photoAsset": null,
+    "photoAsset": "gem-andy-warhol-museum",
     "photoAttribution": null,
     "source": "curated",
     "tier": 2,
@@ -301,8 +301,8 @@
     },
     "id": "curated:mexican-war-streets",
     "name": "Mexican War Streets",
-    "photoAsset": null,
-    "photoAttribution": null,
+    "photoAsset": "gem-mexican-war-streets",
+    "photoAttribution": "Ainulindale / CC BY-SA 3.0 via Wikimedia Commons",
     "source": "curated",
     "tier": 2,
     "why": "Restored 1800s row houses line block after Northside block."
@@ -343,8 +343,8 @@
     },
     "id": "curated:heinz-hall",
     "name": "Heinz Hall",
-    "photoAsset": null,
-    "photoAttribution": null,
+    "photoAsset": "gem-heinz-hall",
+    "photoAttribution": "Popscreenshot / CC BY-SA 4.0 via Wikimedia Commons",
     "source": "curated",
     "tier": 2,
     "why": "Once a movie palace, this 1920s room is now the symphony's home."
@@ -553,8 +553,8 @@
     },
     "id": "curated:roberto-clemente-bridge",
     "name": "Roberto Clemente Bridge",
-    "photoAsset": null,
-    "photoAttribution": null,
+    "photoAsset": "gem-roberto-clemente-bridge",
+    "photoAttribution": "David Trainer from Mosteiros, Cape Verde / CC BY-SA 2.0 via Wikimedia Commons",
     "source": "curated",
     "tier": 2,
     "why": "On game days this yellow suspension span closes to cars."
@@ -595,7 +595,7 @@
     },
     "id": "curated:smithfield-street-bridge",
     "name": "Smithfield Street Bridge",
-    "photoAsset": null,
+    "photoAsset": "gem-smithfield-street-bridge",
     "photoAttribution": null,
     "source": "curated",
     "tier": 2,
@@ -609,7 +609,7 @@
     },
     "id": "curated:fort-pitt-block-house",
     "name": "Fort Pitt Block House",
-    "photoAsset": null,
+    "photoAsset": "gem-fort-pitt-block-house",
     "photoAttribution": null,
     "source": "curated",
     "tier": 2,
@@ -1071,8 +1071,8 @@
     },
     "id": "curated:station-square",
     "name": "Station Square",
-    "photoAsset": null,
-    "photoAttribution": null,
+    "photoAsset": "gem-station-square",
+    "photoAttribution": "Luke H. Gordon from Greenwood Lake, NY, USA / CC BY 2.0 via Wikimedia Commons",
     "source": "curated",
     "tier": 2,
     "why": "An old rail terminal now holds riverfront shops and a dock."
@@ -2056,5 +2056,565 @@
     "source": "curated",
     "tier": 1,
     "why": "Public fairways roll through the heart of Schenley Park."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.442602,
+      "longitude": -79.995213
+    },
+    "id": "curated:gulf-tower",
+    "name": "Gulf Tower",
+    "photoAsset": "gem-gulf-tower",
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Its stepped Art Deco crown lights up as a weather beacon each night."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.437649,
+      "longitude": -79.997542
+    },
+    "id": "curated:grant-building",
+    "name": "Grant Building",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A rooftop beacon blinks out P-I-T-T-S-B-U-R-G-H in Morse code."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.441377,
+      "longitude": -79.994756
+    },
+    "id": "curated:us-steel-tower",
+    "name": "U.S. Steel Tower",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The city's tallest tower is clad in rust-brown weathering steel."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.441331,
+      "longitude": -79.998743
+    },
+    "id": "curated:trinity-cathedral",
+    "name": "Trinity Cathedral",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Colonial-era graves fill the churchyard between the Sixth Avenue towers."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.443382,
+      "longitude": -80.000673
+    },
+    "id": "curated:katz-plaza",
+    "name": "Katz Plaza",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Louise Bourgeois designed the eye-shaped benches in this Cultural District plaza."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.443195,
+      "longitude": -79.995873
+    },
+    "id": "curated:august-wilson-center",
+    "name": "August Wilson African American Cultural Center",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Downtown galleries and a theater center on African American art."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.441927,
+      "longitude": -79.997075
+    },
+    "id": "curated:smithfield-united-church",
+    "name": "Smithfield United Church of Christ",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A slender Gothic spire rises between the downtown high-rises."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.444577,
+      "longitude": -79.991639
+    },
+    "id": "curated:union-station-rotunda",
+    "name": "Union Station Rotunda",
+    "photoAsset": "gem-union-station-rotunda",
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Daniel Burnham's terra-cotta rotunda fronts the old Pennsylvania Station."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.445782,
+      "longitude": -79.99651
+    },
+    "id": "curated:convention-center",
+    "name": "David L. Lawrence Convention Center",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A sail-shaped roof arcs over the riverfront convention hall."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.439056,
+      "longitude": -80.010994
+    },
+    "id": "curated:fort-pitt-bridge",
+    "name": "Fort Pitt Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Exit the tunnel and downtown snaps into view across this double-deck span."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.432475,
+      "longitude": -79.997005
+    },
+    "id": "curated:liberty-bridge",
+    "name": "Liberty Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "The long green truss carries you from the Liberty Tunnel over the Mon."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.441499,
+      "longitude": -79.999144
+    },
+    "id": "curated:first-presbyterian-downtown",
+    "name": "First Presbyterian Church",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Tiffany windows line this Gothic sanctuary on Sixth Avenue."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.446926,
+      "longitude": -80.005606
+    },
+    "id": "curated:pnc-park",
+    "name": "PNC Park",
+    "photoAsset": "gem-pnc-park",
+    "photoAttribution": "daveynin on Flickr / CC BY 2.0 via Wikimedia Commons",
+    "source": "curated",
+    "tier": 2,
+    "why": "The ballpark frames the skyline across the Allegheny."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.44563,
+      "longitude": -80.017931
+    },
+    "id": "curated:carnegie-science-center",
+    "name": "Carnegie Science Center",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A retired submarine sits moored beside the North Shore science center."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.446717,
+      "longitude": -80.01572
+    },
+    "id": "curated:acrisure-stadium",
+    "name": "Acrisure Stadium",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "The Steelers' river-facing stadium opens toward downtown."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.445259,
+      "longitude": -79.95186
+    },
+    "id": "curated:heinz-chapel",
+    "name": "Heinz Memorial Chapel",
+    "photoAsset": "gem-heinz-chapel",
+    "photoAttribution": "Dllu / CC BY-SA 4.0 via Wikimedia Commons",
+    "source": "curated",
+    "tier": 2,
+    "why": "Tall stained-glass windows fill this Gothic chapel beside the Cathedral."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.441221,
+      "longitude": -79.952692
+    },
+    "id": "curated:forbes-field-wall",
+    "name": "Forbes Field Wall",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A slice of the old ballpark's outfield wall survives on Pitt's campus."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.441561,
+      "longitude": -79.951094
+    },
+    "id": "curated:frick-fine-arts",
+    "name": "Frick Fine Arts Building",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A cloister garden hides inside this Oakland arts building."
+  },
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.456797,
+      "longitude": -79.963175
+    },
+    "id": "curated:bigelow-boulevard-overlook",
+    "name": "Bigelow Boulevard Overlook",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Bigelow Boulevard curls along the bluff above the Strip."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.451167,
+      "longitude": -79.933849
+    },
+    "id": "curated:walnut-street-shadyside",
+    "name": "Walnut Street",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Boutiques and cafes fill Shadyside's main shopping blocks."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.447901,
+      "longitude": -79.943366
+    },
+    "id": "curated:rodef-shalom",
+    "name": "Rodef Shalom Temple",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Henry Hornbostel designed this domed 1907 synagogue on Fifth Avenue."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.45628,
+      "longitude": -79.923108
+    },
+    "id": "curated:sacred-heart-shadyside",
+    "name": "Sacred Heart Parish",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A Gothic Revival tower rises over Shady Avenue."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.456273,
+      "longitude": -79.921872
+    },
+    "id": "curated:calvary-episcopal",
+    "name": "Calvary Episcopal Church",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A tall stone spire marks the Episcopal parish on Shady Avenue."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.461111,
+      "longitude": -79.948022
+    },
+    "id": "curated:liberty-avenue-bloomfield",
+    "name": "Liberty Avenue",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Italian delis and corner bars run the length of Bloomfield's main street."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.436531,
+      "longitude": -79.990482
+    },
+    "id": "curated:duquesne-university",
+    "name": "Duquesne University",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The campus crowns a bluff above the Mon, topped by a chapel tower."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.440065,
+      "longitude": -79.99076
+    },
+    "id": "curated:epiphany-church",
+    "name": "Church of the Epiphany",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A red-brick 1900s church stands below the arena in Uptown."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.455202,
+      "longitude": -80.024341
+    },
+    "id": "curated:manchester-historic-district",
+    "name": "Manchester",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Victorian brick rowhouses fill this North Side district."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.452273,
+      "longitude": -80.015741
+    },
+    "id": "curated:allegheny-west",
+    "name": "Allegheny West",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Gilded Age mansions line the quiet blocks west of the Commons."
+  },
+  {
+    "category": "viewpoint",
+    "coordinate": {
+      "latitude": 40.464514,
+      "longitude": -80.003942
+    },
+    "id": "curated:fineview-overlook",
+    "name": "Fineview Overlook",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "The Fineview ridge drops straight toward downtown."
+  },
+  {
+    "category": "mural",
+    "coordinate": {
+      "latitude": 40.476891,
+      "longitude": -79.969611
+    },
+    "id": "curated:maxo-vanka-murals",
+    "name": "Maxo Vanka Murals",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Depression-era murals cover the walls of a Millvale church."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.464122,
+      "longitude": -79.932836
+    },
+    "id": "curated:pittsburgh-glass-center",
+    "name": "Pittsburgh Glass Center",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "Glassblowers work behind big windows on Penn Avenue."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.461744,
+      "longitude": -79.925199
+    },
+    "id": "curated:kelly-strayhorn-theater",
+    "name": "Kelly Strayhorn Theater",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A restored movie house now stages dance and theater in East Liberty."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.444,
+      "longitude": -79.97992
+    },
+    "id": "curated:new-granada-theater",
+    "name": "New Granada Theater",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A jazz-era theater facade survives on Centre Avenue in the Hill."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.433121,
+      "longitude": -79.897669
+    },
+    "id": "curated:regent-square",
+    "name": "Regent Square",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A small business district and old movie house edge Frick Park."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.391042,
+      "longitude": -79.99985
+    },
+    "id": "curated:brookline-boulevard",
+    "name": "Brookline Boulevard",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "Shops and diners run the length of this South Hills main street."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.397591,
+      "longitude": -80.045296
+    },
+    "id": "curated:dormont-pool",
+    "name": "Dormont Pool",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "One of the state's largest municipal pools opened here in the 1920s."
+  },
+  {
+    "category": "historic",
+    "coordinate": {
+      "latitude": 40.424938,
+      "longitude": -79.984214
+    },
+    "id": "curated:st-michael-slopes",
+    "name": "Saint Michael the Archangel",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A former German parish church looks down from the South Side Slopes."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.488585,
+      "longitude": -79.903118
+    },
+    "id": "curated:aspinwall-riverfront-park",
+    "name": "Aspinwall Riverfront Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 2,
+    "why": "A former industrial lot is now a riverside park and trail stop."
+  },
+  {
+    "category": "landmark",
+    "coordinate": {
+      "latitude": 40.489472,
+      "longitude": -79.911774
+    },
+    "id": "curated:highland-park-bridge",
+    "name": "Highland Park Bridge",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "The bridge crosses the Allegheny toward the lock and dam."
+  },
+  {
+    "category": "park",
+    "coordinate": {
+      "latitude": 40.443336,
+      "longitude": -79.92708
+    },
+    "id": "curated:wightman-park",
+    "name": "Wightman Park",
+    "photoAsset": null,
+    "photoAttribution": null,
+    "source": "curated",
+    "tier": 1,
+    "why": "A neighborhood park and playground sit in the heart of Squirrel Hill."
   }
 ]
