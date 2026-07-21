@@ -18,6 +18,11 @@ public enum AppRoute: Sendable {
     case history
     /// App settings, pushed on the nav stack — same rationale as `history`.
     case settings
+    /// The finished-ride summary, pushed as a navigation destination (not a sheet) so that
+    /// returning Home via `popToRoot()` animates summary → Home directly, with no ride HUD
+    /// left in the stack to flash (ROH-85). Reached by collapsing the whole path to this single
+    /// entry, so only Home sits beneath it.
+    case rideSummary(RideSummaryPayload)
 
     /// The navigation path a parsed `DeepLink` resolves to. Pure so it is unit-testable
     /// (the app target has no test bundle). `.home` maps to an empty path (pop to root);
@@ -87,6 +92,9 @@ extension AppRoute: Hashable {
             return true
         case (.settings, .settings):
             return true
+        case let (.rideSummary(a), .rideSummary(b)):
+            // saveFailed deliberately excluded — identity is the ride, not its save outcome.
+            return a.ride.id == b.ride.id
         default:
             return false
         }
@@ -112,6 +120,23 @@ extension AppRoute: Hashable {
             hasher.combine(5)
         case .settings:
             hasher.combine(6)
+        case let .rideSummary(payload):
+            // saveFailed deliberately excluded from identity — hash the ride only.
+            hasher.combine(7)
+            hasher.combine(payload.ride.id)
         }
+    }
+}
+
+/// Self-contained payload for `AppRoute.rideSummary`: the finished ride and whether it failed
+/// to persist. Held by value so the summary renders after the producing coordinator/HUD is torn
+/// down. `AppRoute` hashes/equates this case by `ride.id` ONLY (see the comment on `AppRoute`'s
+/// `==`/`hash`); `saveFailed` is deliberately outside identity.
+public struct RideSummaryPayload: Sendable {
+    public var ride: Ride
+    public var saveFailed: Bool
+    public init(ride: Ride, saveFailed: Bool) {
+        self.ride = ride
+        self.saveFailed = saveFailed
     }
 }

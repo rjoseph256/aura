@@ -17,6 +17,17 @@ struct AppRouteTests {
               elevationGainMeters: 10)
     }
 
+    private func ride(_ id: UUID = UUID(), trackCount: Int = 0) -> Ride {
+        Ride(id: id, kind: .navigate, startedAt: Date(timeIntervalSince1970: 0),
+             endedAt: Date(timeIntervalSince1970: 60),
+             track: Array(repeating: TrackPoint(coordinate: Coordinate(latitude: 40.44,
+                                                                       longitude: -79.99),
+                                                elevation: nil,
+                                                timestamp: Date(timeIntervalSince1970: 0)),
+                          count: trackCount),
+             stats: nil, routeId: nil, destinationPlaceId: nil)
+    }
+
     @Test func freeRideEqualsItself() {
         let a = AppRoute.freeRide
         let b = AppRoute.freeRide
@@ -91,5 +102,28 @@ struct AppRouteTests {
     @Test func joinLinkWrapsInGroupRide() {
         let code = JoinCode(rawValue: "7K2Q9FX3")!
         #expect(AppRoute.stack(for: .join(code)) == [.groupRide(.join(code))])
+    }
+
+    // MARK: rideSummary
+
+    @Test func rideSummaryEqualByRideIdIgnoringSaveFailedAndTrack() {
+        let id = UUID()
+        let a = AppRoute.rideSummary(RideSummaryPayload(ride: ride(id, trackCount: 2),
+                                                        saveFailed: false))
+        let b = AppRoute.rideSummary(RideSummaryPayload(ride: ride(id, trackCount: 5000),
+                                                        saveFailed: true))
+        #expect(a == b)
+        #expect(a.hashValue == b.hashValue)
+    }
+
+    @Test func rideSummaryDifferentRideIdsUnequal() {
+        #expect(AppRoute.rideSummary(RideSummaryPayload(ride: ride(), saveFailed: false))
+                != AppRoute.rideSummary(RideSummaryPayload(ride: ride(), saveFailed: false)))
+    }
+
+    @Test func rideSummaryDistinctFromOtherCases() {
+        let r = AppRoute.rideSummary(RideSummaryPayload(ride: ride(), saveFailed: false))
+        #expect(r != AppRoute.freeRide)
+        #expect(r != AppRoute.history)
     }
 }
