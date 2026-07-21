@@ -151,7 +151,14 @@ struct HomeView: View {
             if searchExpanded {
                 SearchOverlay(
                     query: $query,
-                    onPick: { place in router.remember(place); router.push(.preview(place)) },
+                    onPick: { place in
+                        // Picking a place flies the Home map to it (PO decision 2026-07-20),
+                        // rather than opening route preview.
+                        router.remember(place)
+                        searchExpanded = false
+                        mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .activate)
+                        flyToTarget = place.coordinate
+                    },
                     onCollapse: { searchExpanded = false })
             }
         }
@@ -239,17 +246,6 @@ struct HomeView: View {
         // in VoiceOver — never before the dominant action, despite sitting at the top.
         .accessibilitySortPriority(-1)
     }
-
-    private var greeting: String {
-        switch Calendar.current.component(.hour, from: Date()) {
-        case 5..<12: return "Good morning"
-        case 12..<17: return "Good afternoon"
-        case 17..<22: return "Good evening"
-        default: return "Late ride?"
-        }
-    }
-
-    private var visibleRecents: [Place] { router.recents.filter { !savedPlaces.isSaved($0) } }
 
     @ViewBuilder private var sheetBody: some View {
         VStack(spacing: AuraTheme.Spacing.xxxl) {
@@ -344,4 +340,15 @@ private extension HomeView {
         guard location.authorization == .authorized else { return }
         await weather.refresh(near: location.current(), now: Date())
     }
+
+    var greeting: String {
+        switch Calendar.current.component(.hour, from: Date()) {
+        case 5..<12: return "Good morning"
+        case 12..<17: return "Good afternoon"
+        case 17..<22: return "Good evening"
+        default: return "Late ride?"
+        }
+    }
+
+    var visibleRecents: [Place] { router.recents.filter { !savedPlaces.isSaved($0) } }
 }
