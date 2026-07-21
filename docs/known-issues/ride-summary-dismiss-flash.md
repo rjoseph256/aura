@@ -1,8 +1,26 @@
 # Ride-summary dismiss flash (ride HUD briefly visible before Home)
 
-**Status:** open, pre-existing. Not part of ROH-81 (which fixed the End/Leave feedback, pill
-placement, and the HUD-recreation bug). Split out here so it can be fixed with a proper design
-pass instead of trial-and-error in a device loop.
+**Status: RESOLVED (ROH-85), merged to local main `f8cd569`, device-verified all 3 ride types
+2026-07-21.** Kept as a historical record of the bug and the four failed approaches below.
+
+**Resolution:** the summary is no longer a `.sheet` on the HUD. It is now a pushed
+`AppRoute.rideSummary` route, reached by *collapsing the whole nav path to a single entry*
+(`AppRouter.showRideSummary` → `RideSummaryRouting.collapsed` = `[.rideSummary(payload)]`), so
+only Home sits beneath it. **Done** calls `popToRoot()` — a single-level pop straight to Home with
+no HUD (and no stale preview) left in the stack to flash. Applies to all three ride types (the
+group HUD is `NavigateHUDView`); `HistoryView`'s summary sheet is unchanged. A path *collapse*
+(not a top-swap that would leave `[.preview, .rideSummary]` and re-skin the flash over the preview
+map) was the load-bearing decision; the single-entry invariant is unit-tested in
+`RideSummaryRouting.collapsed`. Design + plan: `docs/superpowers/specs/2026-07-20-ride-summary-dismiss-flash-design.md`,
+`docs/superpowers/plans/2026-07-20-ride-summary-dismiss-flash.md`.
+
+---
+
+_Original report (historical):_
+
+Not part of ROH-81 (which fixed the End/Leave feedback, pill placement, and the HUD-recreation
+bug). Split out so it could be fixed with a proper design pass instead of trial-and-error in a
+device loop.
 
 ## Symptom
 
