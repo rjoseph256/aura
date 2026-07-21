@@ -23,6 +23,7 @@ struct HomeView: View {
     @State private var searchExpanded = false
     @State private var mapModel = HomeMapModel(initial: .initial(forRider: nil))
     @State private var didResolveInitialCenter = false
+    @State private var flyToTarget: Coordinate?
     /// Kept in sync (via onChange/onAppear) so the dashboard sheet shows only at Home root and
     /// when not searching — a pushed screen (Explore, preview, join) is never covered by the
     /// sheet, and search never stacks with it. Using @State (not a derived binding) so the
@@ -76,8 +77,29 @@ struct HomeView: View {
         // Refetch when CloudKit merges a remote ride, so the glance + last-ride stay live even
         // with the sheet at peek (the subscription is on the always-mounted container).
         .onChange(of: rideStore.syncRevision) { Task { await loadRides() } }
-        .onChange(of: router.path) { syncSheet() }
+        .onChange(of: router.path) {
+            syncSheet()
+            if router.path.isEmpty {
+                mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .becameTopActive) // no reset
+            } else {
+                mapModel.freezeIdleFromLive()
+                mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .resignedTop)
+            }
+        }
         .onChange(of: searchExpanded) { syncSheet() }
+        .onChange(of: scenePhase) {
+            if scenePhase != .active {
+                mapModel.freezeIdleFromLive()
+                mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .background)
+            }
+        }
+        // Real post-ride reset: the ride HUD sets router.isRideActive; its true→false edge is a
+        // ride ending.
+        .onChange(of: router.isRideActive) { wasActive, isActive in
+            if wasActive && !isActive, HomeMapCamera.shouldReset(on: .rideCompleted) {
+                Task { await resolveCenter(reset: true) }
+            }
+        }
         // Align the selected detent with the sheet's *scaled* peek detent (the @State literal
         // is only correct at default Dynamic Type); keeps the selection binding valid at all sizes.
         .onAppear { syncSheet(); selectedDetent = .height(peekHeight) }
@@ -96,7 +118,12 @@ struct HomeView: View {
 
     private var populated: some View {
         ZStack {
-            HomeBackdrop(renderer: renderer, camera: mapModel.idleCamera, precise: true, placeName: nil)
+            HomeMapCanvas(renderer: renderer, model: mapModel, savedPlaces: savedPlaces.places,
+                          onSelectSaved: { saved in
+                              mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .activate)
+                              flyToTarget = saved.place.coordinate
+                          },
+                          flyTo: flyToTarget)
 
             VStack(spacing: 0) {
                 header.padding(.top, AuraTheme.Spacing.lg)
@@ -109,8 +136,8 @@ struct HomeView: View {
                 if !searchExpanded {
                     HomeLaunchBand(
                         onWhereTo: { searchExpanded = true },
-                        onExplore: { router.push(.freeRide) },
-                        onJoin: { router.push(.joinRide) },
+                        onExplore: { leaveHome(pushing: .freeRide) },
+                        onJoin: { leaveHome(pushing: .joinRide) },
                         onSaved: {
                             if searchExpanded { searchExpanded = false }
                             selectedDetent = .large
@@ -143,30 +170,6 @@ struct HomeView: View {
         } body: {
             sheetBody
         }
-    }
-
-    private func loadRides() async {
-        summaries = (try? rideStore.summaries()) ?? []
-        didLoad = true
-    }
-
-    /// One-shot center resolve → rider (authorized) or curated fallback. Writes the model's cameras.
-    private func resolveCenter(reset: Bool) async {
-        let camera: HomeMapCamera
-        if location.authorization == .authorized {
-            camera = HomeMapCamera.initial(forRider: await location.current())
-        } else {
-            camera = HomeMapCamera.initial(forRider: nil)
-        }
-        if reset { mapModel.reset(to: camera) } else { mapModel.idleCamera = camera; mapModel.liveCamera = camera }
-    }
-
-    /// Refreshes greeting weather only when location is actually authorized — otherwise
-    /// `location.current()` returns a city fallback and we'd show weather for a place the
-    /// rider isn't at. Failures inside `refresh` are already swallowed (weather hides).
-    private func refreshWeather() async {
-        guard location.authorization == .authorized else { return }
-        await weather.refresh(near: location.current(), now: Date())
     }
 
     private var header: some View {
@@ -301,5 +304,44 @@ struct HomeView: View {
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(AuraTheme.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Data & lifecycle helpers
+// Extracted into an extension so the main `HomeView` body stays within SwiftLint's
+// type_body_length limit; behavior is unchanged.
+private extension HomeView {
+    func loadRides() async {
+        summaries = (try? rideStore.summaries()) ?? []
+        didLoad = true
+    }
+
+    /// Leaves Home for a pushed route that will mount its own map (ride HUD, join flow). Commits
+    /// `.idle` (tearing down the live map THIS update, no animation on that edge) before pushing
+    /// on the NEXT runloop tick, so SwiftUI removes `HomeLiveMap` before the destination's map
+    /// mounts — never two live maps at once (single-renderer invariant).
+    func leaveHome(pushing route: AppRoute) {
+        mapModel.freezeIdleFromLive()
+        mapModel.phase = .idle
+        DispatchQueue.main.async { router.push(route) }
+    }
+
+    /// One-shot center resolve → rider (authorized) or curated fallback. Writes the model's cameras.
+    func resolveCenter(reset: Bool) async {
+        let camera: HomeMapCamera
+        if location.authorization == .authorized {
+            camera = HomeMapCamera.initial(forRider: await location.current())
+        } else {
+            camera = HomeMapCamera.initial(forRider: nil)
+        }
+        if reset { mapModel.reset(to: camera) } else { mapModel.idleCamera = camera; mapModel.liveCamera = camera }
+    }
+
+    /// Refreshes greeting weather only when location is actually authorized — otherwise
+    /// `location.current()` returns a city fallback and we'd show weather for a place the
+    /// rider isn't at. Failures inside `refresh` are already swallowed (weather hides).
+    func refreshWeather() async {
+        guard location.authorization == .authorized else { return }
+        await weather.refresh(near: location.current(), now: Date())
     }
 }
