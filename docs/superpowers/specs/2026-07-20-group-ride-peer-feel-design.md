@@ -79,12 +79,14 @@ logic go in AuraCore next to `PeerBearing`/`PeerStatusReducer`.
 ### 3.1 Model: chase-to-target, linear-normal / ease-late
 
 On each new fix, tween the *rendered* position from where the dot currently is → the new fix,
-over a duration equal to the observed fix spacing (§3.4). **Normal (on-time) segments use
-linear** timing — a constant-speed rider must read as constant glide, not decelerate-into-
-every-fix (uniform ease-out manufactures a stop-and-go ripple at the fix cadence). **Ease-out
-is applied only to a late/last segment** (when the tween runs past its expected duration with
-no new fix): the dot then decelerates to a stop rather than freezing mid-glide or overshooting.
-Never extrapolate past the last fix.
+over a duration equal to the observed fix spacing (§3.4), with **linear** timing — a
+constant-speed rider must read as constant glide, not decelerate-into-every-fix (uniform
+ease-out manufactures a stop-and-go ripple at the fix cadence). "Ease to a stop on a
+late/last packet" is delivered by **clamp-and-hold**: when a segment runs past its duration
+with no new fix, the position clamps at the last fix and holds — it never freezes mid-glide
+and never extrapolates/overshoots. (If, on device, the hard velocity-drop at a genuinely late
+packet reads badly, an overdue ease-out tail is the documented follow-up — see §7 — but the
+default is linear, chosen for constant-speed fidelity.)
 
 Inherent latency: like *any* interpolation-not-extrapolation model (buffer or chase), the dot
 reaches fix N ≈ when fix N+1 arrives, so peer dots trail true position by ~one fix interval
@@ -154,13 +156,16 @@ frame reads interpolated **geographic coordinate** + bearing per visible peer an
 
 - **Why geographic, not a view-space offset:** the HUD map follows heading, so a point offset
   would skew as the map rotates — interpolated lat/lon is the only correct anchor.
-- **`paused` = `noPeerActive`** only (**not** gated on Reduce Motion — see §4.6; RM keeps a
-  gentle glide, it just suppresses pulse + pointer rotation). When the last tween settles the
-  clock stops; the next fix mutates `@State` (§3.6) → body re-eval → `paused` flips false →
-  TimelineView resumes. Idle cost is zero when nobody is mid-tween.
-- **One final settle frame:** when a tween completes, commit its target coordinate into the
-  memoised display state so the dot rests exactly on the fix (no ~2% short freeze) before the
-  clock pauses.
+- **`paused`** is false while **any tween is active OR (any peer is `.riding` and not Reduce
+  Motion)** — the second clause keeps the liveness **pulse** running for a present-but-stationary
+  rider (its pulse must not freeze just because they stopped moving). Under RM the pulse clause
+  drops (no pulse), so the clock runs only while a tween is active — RM still glides, just without
+  pulse or pointer spin. In practice a peer is `.riding` for most of a ride, so the clock runs
+  continuously then and idles only in the lobby / after everyone stops; the `GroupRideSession`
+  1 Hz tick re-evaluates the body each second, so `paused` is re-read promptly when the last
+  rider settles (bounded ≤1 s of extra ticking, not indefinite).
+- **Settle:** linear `position(at:)` clamps to the exact target for `t ≥ 1`, so a completed tween
+  already rests on the fix — no separate settle-frame bookkeeping needed.
 - **Per-frame cost — hoist everything derived, not just the route split.** All of these are
   computed **once per peer-set change** into `@State`, never inside the 30fps closure:
   `RouteSplit.splitIndex` (memoise on `track`/`selfProgress`), `leaderID` (O(n) max-scan),
@@ -282,15 +287,18 @@ spreading in):
   so it's stable). The offset is applied as an **animated `.offset`** on the annotation *view*.
   Screen-space is correct here (unlike position, §3.5) because this is a deliberate *visual*
   nudge, not a location claim — the anchor coordinate stays the true fix.
-- **No jitter.** Declutter re-solves only when **cluster membership changes** (hysteresis: enter a
-  cluster < `radius`, leave > 1.5·`radius`), and offset changes animate, so dots don't pop as
-  riders drift near the threshold. `ClusterDeclutter` is pure and unit-tested on synthetic points
-  (two-dot spread, three-dot even spacing, no-overlap → zero offset, stable ordering, hysteresis).
+- **No jitter.** Declutter uses **two-radius hysteresis** (a pair links when < `enterRadius`, and a
+  previously-clustered pair stays linked until > `leaveRadius ≈ 1.5·enterRadius`); the prior
+  membership is passed *in* so the helper stays pure. Offset changes also animate, so dots don't
+  pop as riders drift near the threshold. `ClusterDeclutter` is unit-tested (two-dot spread,
+  even spacing, no-overlap → zero offset, stable ordering, hysteresis hold). It reads the live
+  interpolated points, so it is the one derivation computed per frame — bounded and cheap
+  (O(k²), k ≤ 7); everything else is hoisted to the peer-set change (§3.5).
 - **Distinct hue + monogram** still carry identity (top disc's colour + label differ even mid-
   spread and for CVD riders), z-order is deterministic `userID` order.
 - **Name tags** attach to the *spread* dot positions and use the same cluster result — leader
-  always tagged, plus clustered peers — and **stack with a deterministic vertical offset** if two
-  tags would still overlap, so labels never occlude.
+  always tagged, plus clustered peers. Because each tag rides above its already-spread dot, the
+  radial spread de-occludes the tags too; no separate tag-stacking pass is needed.
 
 Coupling to interpolation is bounded: declutter reads the already-projected interpolated points
 (no new geographic math) and its hysteresis keeps it stable while dots glide.
@@ -307,10 +315,11 @@ overlap. Pure, unit-tested (unique initials unchanged; collisions widen minimall
 
 Under Reduce Motion the dots **still glide** — a 22 pt dot sliding across the map is not a
 vestibular trigger, and a *snap* is a harsher motion event than a smooth translate. RM suppresses
-only the **pulse** and the **pointer rotation** (the potentially-agitating repetitive/rotational
-motion), keeping a gentle **linear** position tween. Concretely: the frame clock is **not** paused
-for RM (§3.5); the pulse is clock-driven so it simply isn't emitted under RM; pointer rotation
-falls back to a stepped value. This gives RM riders the ROH-69 benefit instead of withholding it.
+only the **pulse** and continuous **pointer rotation**, keeping a gentle **linear** position tween.
+Concretely: the frame clock still runs while a tween is active (§3.5); the pulse is clock-driven so
+it simply isn't emitted under RM; and the heading pointer **snaps to the 8-point compass (45°
+steps)** rather than rotating continuously — direction stays readable without a spinning element.
+This gives RM riders the ROH-69 glide instead of withholding it.
 
 The pulse is driven by the **frame-clock phase** (a function of `context.date`), not `@State` +
 `.onAppear` — so it survives status/identity morphs on the persistent marker view (never stranded
@@ -319,9 +328,10 @@ by a one-shot `.onAppear`) and is naturally absent when the clock is paused or R
 ### 4.7 Annotation budget
 
 `GroupMapDots.visiblePeers` takes `maxDots` (default **7**, matching ≤8-rider rides) and caps
-**leader-preserving** (keep the leader + the nearest peers, not arbitrary `userID` order, so the
-always-tagged leader can't be dropped), with a doc note + one-line log if exceeded. Bounds the
-§3.5 per-frame cost against a runaway roster.
+**leader-preserving** (always keep the leader, then fill the remaining slots in the existing
+deterministic order), with a doc note + one-line log if exceeded. Bounds the §3.5 per-frame cost
+against a runaway roster. (Overflow only occurs for a broken roster > 8; refined "nearest" selection
+is unnecessary at that size.)
 
 ---
 
@@ -402,6 +412,13 @@ Coherence holds because interpolation and presence are now keyed on the **same c
   simulate deuteranopia/protanopia on the actual terrain style; the monogram (§4.5) is the
   colour-independent backstop.
 - **Planar lerp** — correct at sub-100 m deltas; snap covers the large-gap case.
+- **Motion feel** — position is linear (constant-speed fidelity). Two watch-items on device:
+  the hard velocity-drop when a genuinely *late* packet clamps to a stop (follow-up: an overdue
+  ease-out tail); and speed variation from using the raw `recordedAt` gap as duration under
+  timestamp jitter (follow-up: light duration smoothing). Neither blocks; both are tunable.
+- **Screen projection is required, not optional** — `ClusterDeclutter` is inert without real
+  Mapbox `point(for:)` projection, so the build must wire it (via `MapReader`/`MapProxy`); the
+  degraded no-projection state is a fallback of last resort, not the acceptance target.
 - **Acceptance is a two-phone ride** (§1): dots glide, two riders instantly tell-apart-able even
   when close and sharing a first initial, heading obvious. **Reduce Motion re-verified** — dots
   still *glide* (linear), only pulse + pointer-rotation suppressed.

@@ -27,7 +27,7 @@
 - `PeerInterpolator.swift` — per-peer tween + `PeerInterpolators` collection.
 - `PeerPalette.swift` — stable de-colliding index assignment.
 - `RiderMonogram.swift` — collision-widening monogram assignment.
-- `ClusterDeclutter.swift` — `Point2D` + screen-space cluster spread / tag-stack geometry.
+- `ClusterDeclutter.swift` — `Point2D` + screen-space cluster spread (two-radius hysteresis).
 - `GroupMapDots.swift` (modify) — leader-preserving `maxDots` cap.
 
 **AuraCore — new tests (`AuraCore/Tests/AuraCoreTests/GroupRide/`):** one file per type above, plus a rider-palette test under `AuraCore/Tests/AuraCoreTests/`.
@@ -440,10 +440,23 @@ struct RiderMonogramTests {
         #expect(m[a] == "SA"); #expect(m[b] == "SI")
     }
 
+    @Test func sameFirstTwoLettersWidenUntilDistinct() {   // the literal acceptance case
+        let a = UUID(), b = UUID()
+        let m = RiderMonogram.assign(names: [a: "Sam", b: "Sara"])
+        #expect(m[a] == "SAM"); #expect(m[b] == "SAR")
+        #expect(m[a] != m[b])
+    }
+
     @Test func nonColliderKeepsOneCharWhenOthersCollide() {
         let a = UUID(), b = UUID(), c = UUID()
         let m = RiderMonogram.assign(names: [a: "Sam", b: "Sid", c: "Priya"])
         #expect(m[c] == "P")    // untouched
+    }
+
+    @Test func identicalNamesStillResolveToDistinctLabels() {
+        let a = UUID(), b = UUID()
+        let m = RiderMonogram.assign(names: [a: "Sam", b: "Sam"])
+        #expect(m[a] != m[b])   // guaranteed distinct (index fallback)
     }
 }
 ```
@@ -459,33 +472,50 @@ Expected: FAIL.
 import Foundation
 
 /// A short, colour-independent per-rider label for the map dot. Normally the first letter
-/// (today's behaviour); when two riders in the ride share a first initial, only the colliding
-/// ones widen to the shortest distinguishing form — so two close riders whose names start with
-/// the same letter are still tell-apart-able (and it works for colour-blind riders).
+/// (today's behaviour); riders sharing a label are widened — one width step at a time, all
+/// colliders together — until the labels are mutually distinct, so two close riders whose names
+/// start with the same letter are still tell-apart-able (and it works for colour-blind riders).
+/// A final index fallback guarantees distinctness even for identical names.
 public enum RiderMonogram {
     public static func assign(names: [UUID: String]) -> [UUID: String] {
-        let firsts = names.mapValues { firstLetter($0) }
-        var counts: [String: Int] = [:]
-        for v in firsts.values { counts[v, default: 0] += 1 }
-        var result: [UUID: String] = [:]
-        for (id, name) in names {
-            let f = firsts[id] ?? ""
-            result[id] = (counts[f] ?? 0) > 1 ? widened(name) : f
+        var widths = names.mapValues { _ in 1 }
+        for _ in 0..<6 {
+            let labels = labelsFor(names, widths: widths)
+            let stuck = collisions(labels)
+            if stuck.isEmpty { return labels }
+            for ids in stuck { for id in ids { widths[id, default: 1] += 1 } }
         }
-        return result
+        // Cap reached (e.g. identical names): break remaining ties by sorted-uuid index.
+        var labels = labelsFor(names, widths: widths)
+        for ids in collisions(labels) {
+            for (i, id) in ids.sorted(by: { $0.uuidString < $1.uuidString }).enumerated() {
+                labels[id] = "\(labels[id] ?? "")\(i + 1)"
+            }
+        }
+        return labels
     }
 
-    private static func firstLetter(_ name: String) -> String {
-        String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased()
+    private static func labelsFor(_ names: [UUID: String], widths: [UUID: Int]) -> [UUID: String] {
+        names.reduce(into: [UUID: String]()) { $0[$1.key] = label($1.value, width: widths[$1.key] ?? 1) }
     }
 
-    private static func widened(_ name: String) -> String {
+    /// Groups of userIDs that share a label (each group has >1 member).
+    private static func collisions(_ labels: [UUID: String]) -> [[UUID]] {
+        var byLabel: [String: [UUID]] = [:]
+        for (id, l) in labels { byLabel[l, default: []].append(id) }
+        return byLabel.values.filter { $0.count > 1 }.map { $0 }
+    }
+
+    /// width 1 → first letter; width 2 → first+last-word initials for a multi-word name, else the
+    /// first two letters; width ≥3 → the first `width` letters of the name (spaces removed).
+    private static func label(_ name: String, width: Int) -> String {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
+        if width <= 1 { return String(trimmed.prefix(1)).uppercased() }
         let words = trimmed.split(separator: " ")
-        if words.count >= 2, let first = words.first?.first, let last = words.last?.first {
-            return "\(first)\(last)".uppercased()
+        if width == 2, words.count >= 2, let f = words.first?.first, let l = words.last?.first {
+            return "\(f)\(l)".uppercased()
         }
-        return String(trimmed.prefix(2)).uppercased()
+        return String(trimmed.replacingOccurrences(of: " ", with: "").prefix(width)).uppercased()
     }
 }
 ```
@@ -514,8 +544,8 @@ git commit -m "feat(roh-72): RiderMonogram — disambiguated colour-independent 
 - Produces:
   - `struct Point2D: Equatable, Sendable { var x, y: Double }`
   - `struct DeclutterOffset: Equatable, Sendable { var dx, dy: Double }`
-  - `ClusterDeclutter.resolve(points: [Point2D], radius: Double, spread: Double) -> [DeclutterOffset]` — one offset per input index (order preserved); singletons get `.zero`; overlapping points spread evenly around their cluster centroid.
-  - `ClusterDeclutter.clustered(points: [Point2D], radius: Double) -> [Bool]` — which points share a cluster (drives which tags show).
+  - `ClusterDeclutter.clustered(points:previouslyClustered:enterRadius:leaveRadius:) -> [Bool]` — with two-radius hysteresis: a pair links when closer than `enterRadius`, and a *previously*-clustered pair stays linked until farther than `leaveRadius`. `previouslyClustered` is the last result (all-false to start); the helper stays pure (state passed in).
+  - `ClusterDeclutter.resolve(points:previouslyClustered:enterRadius:leaveRadius:spread:) -> [DeclutterOffset]` — one offset per input index (order preserved); singletons get `.zero`; a cluster's members spread evenly around their centroid. Same hysteresis inputs.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -526,30 +556,48 @@ import Foundation
 
 struct ClusterDeclutterTests {
     func p(_ x: Double, _ y: Double) -> ClusterDeclutter.Point2D { .init(x: x, y: y) }
+    let none = [false, false]
 
     @Test func nonOverlappingPointsGetNoOffset() {
-        let offs = ClusterDeclutter.resolve(points: [p(0, 0), p(100, 100)], radius: 24, spread: 18)
+        let pts = [p(0, 0), p(100, 100)]
+        let offs = ClusterDeclutter.resolve(points: pts, previouslyClustered: none,
+                                            enterRadius: 24, leaveRadius: 36, spread: 18)
         #expect(offs == [.init(dx: 0, dy: 0), .init(dx: 0, dy: 0)])
-        #expect(ClusterDeclutter.clustered(points: [p(0, 0), p(100, 100)], radius: 24) == [false, false])
+        #expect(ClusterDeclutter.clustered(points: pts, previouslyClustered: none,
+                                           enterRadius: 24, leaveRadius: 36) == [false, false])
     }
 
     @Test func twoOverlappingPointsSpreadApart() {
-        let pts = [p(0, 0), p(4, 0)]                 // 4px apart, within radius
-        let offs = ClusterDeclutter.resolve(points: pts, radius: 24, spread: 18)
+        let pts = [p(0, 0), p(4, 0)]                 // 4px apart, within enterRadius
+        let offs = ClusterDeclutter.resolve(points: pts, previouslyClustered: none,
+                                            enterRadius: 24, leaveRadius: 36, spread: 18)
         #expect(offs[0] != .init(dx: 0, dy: 0))
         #expect(offs[1] != .init(dx: 0, dy: 0))
-        // final positions land ~2*spread apart
         let f0 = (pts[0].x + offs[0].dx, pts[0].y + offs[0].dy)
         let f1 = (pts[1].x + offs[1].dx, pts[1].y + offs[1].dy)
         let d = ((f0.0 - f1.0) * (f0.0 - f1.0) + (f0.1 - f1.1) * (f0.1 - f1.1)).squareRoot()
         #expect(abs(d - 36) < 1.0)                   // 2 * spread(18)
-        #expect(ClusterDeclutter.clustered(points: pts, radius: 24) == [true, true])
+        #expect(ClusterDeclutter.clustered(points: pts, previouslyClustered: none,
+                                           enterRadius: 24, leaveRadius: 36) == [true, true])
+    }
+
+    @Test func hysteresisHoldsClusterBetweenRadii() {
+        let pts = [p(0, 0), p(30, 0)]                 // 30px: > enter(24), < leave(36)
+        // not previously clustered → stays apart
+        #expect(ClusterDeclutter.clustered(points: pts, previouslyClustered: none,
+                                           enterRadius: 24, leaveRadius: 36) == [false, false])
+        // previously clustered → held together until beyond leaveRadius
+        #expect(ClusterDeclutter.clustered(points: pts, previouslyClustered: [true, true],
+                                           enterRadius: 24, leaveRadius: 36) == [true, true])
     }
 
     @Test func resultIsDeterministicForSameInput() {
         let pts = [p(1, 1), p(3, 1), p(2, 2)]
-        #expect(ClusterDeclutter.resolve(points: pts, radius: 24, spread: 18)
-                == ClusterDeclutter.resolve(points: pts, radius: 24, spread: 18))
+        let a = ClusterDeclutter.resolve(points: pts, previouslyClustered: [false, false, false],
+                                         enterRadius: 24, leaveRadius: 36, spread: 18)
+        let b = ClusterDeclutter.resolve(points: pts, previouslyClustered: [false, false, false],
+                                         enterRadius: 24, leaveRadius: 36, spread: 18)
+        #expect(a == b)
     }
 }
 ```
@@ -565,10 +613,11 @@ Expected: FAIL.
 import Foundation
 
 /// Screen-space overlap handling for peer dots. Given projected dot centres, it groups those
-/// that overlap and returns a per-dot offset that fans a cluster evenly around its centroid so
-/// stacked riders separate. Pure geometry (no Mapbox/UIKit): the app projects coordinates to
-/// points, applies the offsets as an animated `.offset`, and animates transitions so dots don't
-/// pop as riders drift together. Input order is preserved (caller keys by `userID`).
+/// that overlap (with two-radius hysteresis so membership doesn't flip-flop) and returns a
+/// per-dot offset that fans a cluster evenly around its centroid so stacked riders — and their
+/// name tags, which ride above the spread dots — separate. Pure geometry (no Mapbox/UIKit): the
+/// app projects coordinates to points, feeds back the last membership, and applies the offsets
+/// as an animated `.offset`. Input order is preserved (caller keys by `userID`).
 public enum ClusterDeclutter {
     public struct Point2D: Equatable, Sendable {
         public var x: Double; public var y: Double
@@ -580,15 +629,21 @@ public enum ClusterDeclutter {
         public static let zero = DeclutterOffset(dx: 0, dy: 0)
     }
 
-    /// Union points within `radius` of each other (transitive) into clusters, preserving order.
-    private static func clusters(_ points: [Point2D], radius: Double) -> [[Int]] {
+    /// Union points into clusters with two-radius hysteresis. A pair links when closer than
+    /// `enterRadius`, or — if both were previously clustered — until farther than `leaveRadius`.
+    /// Order is preserved. `previouslyClustered` must be index-aligned to `points`.
+    private static func clusters(_ points: [Point2D], previouslyClustered: [Bool],
+                                 enterRadius: Double, leaveRadius: Double) -> [[Int]] {
         var parent = Array(points.indices)
         func find(_ i: Int) -> Int { var r = i; while parent[r] != r { parent[r] = parent[parent[r]]; r = parent[r] }; return r }
         func union(_ a: Int, _ b: Int) { parent[find(a)] = find(b) }
+        func wasClustered(_ i: Int) -> Bool { i < previouslyClustered.count && previouslyClustered[i] }
         for i in points.indices {
             for j in (i + 1)..<points.count {
                 let dx = points[i].x - points[j].x, dy = points[i].y - points[j].y
-                if (dx * dx + dy * dy).squareRoot() < radius { union(i, j) }
+                let d = (dx * dx + dy * dy).squareRoot()
+                let threshold = (wasClustered(i) && wasClustered(j)) ? leaveRadius : enterRadius
+                if d < threshold { union(i, j) }
             }
         }
         var groups: [Int: [Int]] = [:]
@@ -596,17 +651,21 @@ public enum ClusterDeclutter {
         return groups.values.map { $0.sorted() }.sorted { $0[0] < $1[0] }
     }
 
-    public static func clustered(points: [Point2D], radius: Double) -> [Bool] {
+    public static func clustered(points: [Point2D], previouslyClustered: [Bool],
+                                 enterRadius: Double, leaveRadius: Double) -> [Bool] {
         var flags = Array(repeating: false, count: points.count)
-        for group in clusters(points, radius: radius) where group.count > 1 {
+        for group in clusters(points, previouslyClustered: previouslyClustered,
+                              enterRadius: enterRadius, leaveRadius: leaveRadius) where group.count > 1 {
             for i in group { flags[i] = true }
         }
         return flags
     }
 
-    public static func resolve(points: [Point2D], radius: Double, spread: Double) -> [DeclutterOffset] {
+    public static func resolve(points: [Point2D], previouslyClustered: [Bool],
+                               enterRadius: Double, leaveRadius: Double, spread: Double) -> [DeclutterOffset] {
         var offsets = Array(repeating: DeclutterOffset.zero, count: points.count)
-        for group in clusters(points, radius: radius) where group.count > 1 {
+        for group in clusters(points, previouslyClustered: previouslyClustered,
+                             enterRadius: enterRadius, leaveRadius: leaveRadius) where group.count > 1 {
             let cx = group.map { points[$0].x }.reduce(0, +) / Double(group.count)
             let cy = group.map { points[$0].y }.reduce(0, +) / Double(group.count)
             let step = 2 * Double.pi / Double(group.count)
@@ -799,20 +858,28 @@ Add near the other tokens (values chosen to vary in BOTH hue and lightness so th
     // a wide lightness range so red-green colour-blind riders can still tell them apart. Never
     // includes `mint` (route/accent) or `amber` (warning/stopped). Guarded by RiderPaletteTests
     // (ΔE distinctness in normal + simulated deuteranopia, and contrast on `nearBlack`).
+    // Deuteranopia collapses the red-green axis, so distinctness must come from the blue-yellow
+    // axis AND lightness. This set keeps at most one hue per warm/cool family at a given lightness
+    // (the two warm tones, rust and gold, are far apart in lightness) — the arrangement that
+    // survives the RiderPaletteTests CVD floor.
     public static let riderHues: [RGBColor] = [
-        RGBColor(red: 0.204, green: 0.706, blue: 0.792),  // teal    #34B4CA
-        RGBColor(red: 0.435, green: 0.549, blue: 0.941),  // blue    #6F8CF0
-        RGBColor(red: 0.706, green: 0.514, blue: 0.855),  // violet  #B483DA
-        RGBColor(red: 0.851, green: 0.396, blue: 0.353),  // rust    #D9655A
-        RGBColor(red: 0.902, green: 0.573, blue: 0.729),  // rose    #E692BA
-        RGBColor(red: 0.812, green: 0.741, blue: 0.545)   // sand    #CFBD8B
+        RGBColor(red: 0.247, green: 0.710, blue: 0.784),  // teal    #40B5C8  (cool, mid-light)
+        RGBColor(red: 0.369, green: 0.525, blue: 0.910),  // blue    #5E86E8  (cool, mid)
+        RGBColor(red: 0.690, green: 0.478, blue: 0.816),  // violet  #B07AD0  (cool, mid-light)
+        RGBColor(red: 0.722, green: 0.318, blue: 0.220),  // rust    #B85138  (warm, dark)
+        RGBColor(red: 0.847, green: 0.722, blue: 0.369)   // gold    #D8B85E  (warm, light)
     ]
 ```
 
-- [ ] **Step 4: Run the gate; tune only if a pair fails**
+- [ ] **Step 4: Run the gate; iterate the hues until it is green (the test IS the acceptance)**
 
 Run: `swift test --package-path AuraCore --filter RiderPaletteTests`
-Expected: PASS. If a specific pair fails the ΔE floor, adjust the lighter/darker of the two by nudging its lightness (scale all three RGB components toward 0 or 1 by ~0.08) and re-run — the test is the acceptance gate. Do not add mint/amber.
+The starting set above is a candidate, not a guarantee — **treat the test as the gate and iterate
+until all four @Tests pass.** If a pair fails the normal ΔE floor, shift one hue's *hue angle*
+(move it toward an unused region of the wheel). If a pair fails the **deuteranopia** floor, the two
+are on the red-green confusion axis — separate them by *lightness* (make one materially lighter or
+darker) or move one to the blue-yellow axis; do not just nudge saturation. Never introduce mint or
+amber. Reducing to 4 hues is acceptable if 5 cannot all clear the floor. Re-run until PASS.
 
 - [ ] **Step 5: Add `riderPalette` to `AuraTheme.swift`**
 
@@ -842,16 +909,28 @@ git commit -m "feat(roh-72): rider identity palette tokens + ΔE/CVD distinctnes
 
 ---
 
-## Task 7: `PeerDotView` redesign (app — build-verified)
+## Task 7: App integration — PeerDotView + PeerAnnotations + host wiring (build-verified as ONE unit)
 
 **Files:**
-- Modify: `Aura/Sources/GroupRide/GroupRideMapOverlay.swift`
+- Modify: `Aura/Sources/GroupRide/GroupRideMapOverlay.swift` (Part A — `PeerDotView`)
+- Create: `Aura/Sources/GroupRide/PeerAnnotations.swift` (Part B — driver + MapContent)
+- Modify: `Aura/Sources/Ride/RideMapView.swift`, `Aura/Sources/Ride/NavigateHUDView.swift` (Part C — hosts)
+
+**Why one task:** the new `PeerDotView` signature, `PeerAnnotations`, and the host call sites are
+mutually dependent — changing `PeerDotView` alone breaks both existing callers (`RideMapView.swift:58`,
+`NavigateHUDView.swift:262`), so no intermediate state compiles. Build **once**, at the end (Step 8).
+Verification is **compile + on-device** (app target is not unit-tested); the pure logic is already
+tested in Tasks 1–5.
 
 **Interfaces:**
-- Consumes: `AuraTheme.riderColor(_:)`, `PeerStatus`.
-- Produces: `PeerDotView(monogram:displayName:status:identityColor:isSelf:bearing:pulsePhase:showsNameTag:reduceMotion:)` — a single persistent marker: upright round head (identity hue + monogram + status treatment) with a rotating outlined heading pointer that retracts to a plain disc when `bearing == nil`. `monogram` labels the disc; `displayName` is the name-tag text. `pulsePhase: Double` (0…1, clock-driven) and `reduceMotion: Bool` are injected so the view holds no animation `@State`.
+- `PeerDotView(monogram:displayName:status:identityColor:isSelf:bearing:pulsePhase:showsNameTag:)`
+  — upright round head (hue + monogram + status glyph) with an outlined heading pointer that
+  retracts when `bearing == nil`. `bearing` is already deadbanded / RM-coarsened by the driver, so
+  the view just rotates by it. `pulsePhase: Double` (0…1) is injected (0 = no pulse) so the view
+  holds no animation `@State`.
+- `PeerAnnotationDriver` (plain `final class`, held in host `@State`): `updateSet(peers:selfUserID:nameMap:reduceMotion:now:)`, `frame(now:project:) -> PeerFrame`, `shouldAnimate(now:) -> Bool`.
 
-Verification for this task is **compile + on-device** (app target is not unit-tested).
+### Part A — `PeerDotView`
 
 - [ ] **Step 1: Rewrite `PeerDotView`** (replace the whole struct; keep the `Triangle` shape, add an outlined pointer)
 
@@ -864,10 +943,10 @@ struct PeerDotView: View {
     let isSelf: Bool
     /// Degrees clockwise from north; nil retracts the pointer to a plain disc.
     let bearing: Double?
-    /// 0…1 pulse phase driven by the frame clock (nil/constant under Reduce Motion → no pulse).
+    /// 0…1 pulse phase driven by the frame clock; 0 means no pulse (the driver passes 0 under
+    /// Reduce Motion and whenever the peer isn't `.riding`).
     let pulsePhase: Double
     let showsNameTag: Bool
-    let reduceMotion: Bool
 
     private static let discDiameter: CGFloat = 22
     private static let pointerLength: CGFloat = 14
@@ -898,21 +977,21 @@ struct PeerDotView: View {
         .accessibilityLabel(Text("\(monogram), \(statusAccessibilityLabel)"))
     }
 
-    // Pulse is a pure function of the injected phase — no @State, so it survives status morphs
-    // and is simply absent under Reduce Motion (phase held constant by the host).
+    // Pulse is a pure function of the injected phase — no @State, so it survives status morphs.
+    // pulsePhase 0 (driver decides: not riding, or Reduce Motion) → a calm static ring.
     @ViewBuilder private var pulseRing: some View {
-        if status == .riding && !reduceMotion {
+        if status == .riding && pulsePhase > 0 {
             let grow = 6 + 12 * pulsePhase
             Circle().stroke(headColor.opacity(0.5 * (1 - pulsePhase)), lineWidth: 2)
                 .frame(width: Self.discDiameter + grow, height: Self.discDiameter + grow)
         } else if status == .riding {
-            Circle().stroke(headColor.opacity(0.4), lineWidth: 2)     // static RM ring
+            Circle().stroke(headColor.opacity(0.4), lineWidth: 2)     // static ring (RM / paused)
                 .frame(width: Self.discDiameter + 8, height: Self.discDiameter + 8)
         }
     }
 
-    // Bold, dark-outlined pointer; rotates with bearing. Only the pointer rotates — the head
-    // (monogram) never spins, so it stays legible.
+    // Bold, dark-outlined pointer; rotates with the already-deadbanded/coarsened bearing the driver
+    // supplies. Only the pointer rotates — the head (monogram) never spins, so it stays legible.
     @ViewBuilder private var pointer: some View {
         if showsPointer, let bearing {
             Triangle()
@@ -920,7 +999,7 @@ struct PeerDotView: View {
                 .overlay(Triangle().stroke(AuraTheme.background, lineWidth: 1.5))
                 .frame(width: 12, height: Self.pointerLength)
                 .offset(y: -(Self.discDiameter / 2 + Self.pointerLength / 2 - 2))
-                .rotationEffect(.degrees(reduceMotion ? bearing.rounded() : bearing))
+                .rotationEffect(.degrees(bearing))
         }
     }
 
@@ -974,59 +1053,31 @@ struct PeerDotView: View {
 }
 ```
 
-- [ ] **Step 2: Update the `#Preview`** (and any preview in this file) to the new `PeerDotView` signature so the file compiles — supply `monogram:`, `displayName:`, `identityColor: AuraTheme.riderColor(0)`, `pulsePhase: 0.5`, `reduceMotion: false`.
+- [ ] **Step 2: Update the `#Preview`** to the new `PeerDotView` signature so the file compiles — supply `monogram:`, `displayName:`, `identityColor: AuraTheme.riderColor(0)`, `pulsePhase: 0.5` (drop the old `reduceMotion:` argument; the view no longer takes it).
 
-- [ ] **Step 3: Build the app (delegate to builder)**
+### Part B — `PeerAnnotations.swift` (driver + MapContent)
 
-Dispatch `apple-platform-build-tools:builder`: "Build the Aura app scheme for the iPhone 17 simulator; report pass/fail + first error." Expected: build succeeds.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add Aura/Sources/GroupRide/GroupRideMapOverlay.swift
-git commit -m "feat(roh-72): PeerDotView — identity head + rotating pointer + glyph status"
-```
-
----
-
-## Task 8: `PeerAnnotations` sub-view (app — build-verified)
-
-**Files:**
-- Create: `Aura/Sources/GroupRide/PeerAnnotations.swift`
-
-**Interfaces:**
-- Consumes: `PeerInterpolators`, `PeerPalette`, `RiderMonogram`, `ClusterDeclutter`, `GroupMapDots`, `AuraTheme.riderColor`, `PeerDotView`, MapboxMaps.
-- Produces: `PeerAnnotations` — a `@MapContentBuilder`-returning view fragment usable inside both hosts' `Map { }`. It owns interpolation `@State`, the TimelineView-driven frame values, and memoised per-set derivations.
-
-This task wires the pure pieces together. Because `MapViewAnnotation` lives inside `Map { }`, the frame clock is realised by driving a `@State` `frameDate` from a `TimelineView` sibling OR (fallback) a display-tick `Task`; the memoised derivations are recomputed only on `.onChange(of:)` of the peer set, not per frame.
-
-- [ ] **Step 1: Implement `PeerAnnotations.swift`**
+- [ ] **Step 3: Implement `PeerAnnotations.swift`** — the MapContent fragment, the per-frame render structs, and the `PeerAnnotationDriver` that owns interpolation, memoised per-set derivations, the pulse clock, the bearing deadband, and cluster hysteresis
 
 ```swift
 import SwiftUI
 import MapboxMaps
 import AuraCore
 
-/// Renders the live peer dots for a group ride: smooth interpolation (ROH-69) + distinct
-/// identity/heading (ROH-72). Owns the per-peer interpolators and all memoised derivations so
-/// the 30fps frame path only rebuilds ≤7 annotations. Shared by NavigateHUDView and RideMapView.
+/// The live peer dots for a group ride: smooth interpolation (ROH-69) + distinct identity /
+/// heading (ROH-72). A thin MapContent fragment — every per-frame decision is resolved into
+/// `frame` by `PeerAnnotationDriver`, so this only rebuilds ≤7 annotations. Shared by both hosts.
 struct PeerAnnotations: MapContent {
-    let peers: [RidePeer]
-    let selfUserID: UUID?
-    let nameMap: [UUID: String]
-    /// Interpolated display state, recomputed each frame by the host (see `PeerAnnotationsLayer`).
     let frame: PeerFrame
 
     var body: some MapContent {
         ForEvery(frame.dots, id: \.userID) { dot in
             MapViewAnnotation(coordinate: CLLocationCoordinate2D(
                 latitude: dot.coordinate.latitude, longitude: dot.coordinate.longitude)) {
-                PeerDotView(monogram: dot.monogram, displayName: dot.displayName,
-                            status: dot.status,
-                            identityColor: AuraTheme.riderColor(dot.colorIndex),
-                            isSelf: false, bearing: dot.bearing,
-                            pulsePhase: frame.pulsePhase, showsNameTag: dot.showsNameTag,
-                            reduceMotion: frame.reduceMotion)
+                PeerDotView(monogram: dot.monogram, displayName: dot.displayName, status: dot.status,
+                            identityColor: AuraTheme.riderColor(dot.colorIndex), isSelf: false,
+                            bearing: dot.bearing, pulsePhase: frame.pulsePhase,
+                            showsNameTag: dot.showsNameTag)
                     .offset(x: dot.offset.dx, y: dot.offset.dy)
                     .animation(.easeInOut(duration: 0.25), value: dot.offset)
             }
@@ -1049,160 +1100,173 @@ struct PeerDot: Identifiable, Equatable {
     var id: UUID { userID }
 }
 
-struct PeerFrame: Equatable {
-    var dots: [PeerDot]
-    var pulsePhase: Double
-    var reduceMotion: Bool
-}
-```
+struct PeerFrame: Equatable { var dots: [PeerDot]; var pulsePhase: Double }
 
-> **Note on projection:** `ClusterDeclutter` needs screen points. In the host layer below, project
-> each interpolated coordinate with the map's `MapProxy`/`mapboxMap.point(for:)`. If a proxy is not
-> reachable from the content builder in this Mapbox v11 setup, degrade gracefully: pass
-> `offset = .zero` and compute `showsNameTag` from `GroupMapDots`/leader only (declutter then reduces
-> to hue+monogram+z-order, still a valid state), and revisit projection wiring during device verify.
-
-- [ ] **Step 2: Implement the host layer that owns the clock + memoisation**
-
-Add to the same file — the view both hosts embed, which produces a `PeerFrame` and hands it to `Map { PeerAnnotations(...) }` via a binding-like closure. Because Mapbox's `Map` takes content directly, the host computes `PeerFrame` in the enclosing SwiftUI view and passes it down:
-
-```swift
-/// Drives interpolation + memoised derivations for the peer dots and exposes a `PeerFrame`.
-/// The host view keeps one of these in `@State` and calls `advance` from a `TimelineView`.
-@Observable
-final class PeerAnnotationModel {
+/// Owns interpolation + all memoised per-set derivations + the pulse clock, bearing deadband, and
+/// cluster hysteresis. A PLAIN class (not `@Observable`) held in host `@State`: repaints are driven
+/// by the host's `TimelineView` clock and `.onChange(of: peers)`, so it needs no observation — and
+/// its per-frame continuity caches can be mutated inside `frame(...)` without any invalidation loop.
+final class PeerAnnotationDriver {
     private var interpolators = PeerInterpolators()
-    // Memoised per peer-set change (NOT per frame):
+    // Memoised on peer-set change (NOT per frame):
     private var visible: [RidePeer] = []
     private var colorIndex: [UUID: Int] = [:]
     private var monograms: [UUID: String] = [:]
     private var displayNames: [UUID: String] = [:]
     private var leaderID: UUID?
+    private var anyRiding = false
+    private var reduceMotion = false
+    // Per-frame continuity caches:
+    private var displayBearing: [UUID: Double] = [:]
+    private var prevClustered: [Bool] = []
 
-    /// Recompute the set-derived data. Call from `.onChange(of: peers)` only.
-    func updateSet(peers: [RidePeer], selfUserID: UUID?, nameMap: [UUID: String], now: Date) {
+    /// Recompute set-derived data + commit new fixes. Call from `.onChange(of: peers)` / `.onAppear`.
+    func updateSet(peers: [RidePeer], selfUserID: UUID?, nameMap: [UUID: String],
+                   reduceMotion: Bool, now: Date) {
+        self.reduceMotion = reduceMotion
         visible = GroupMapDots.visiblePeers(peers: peers, selfUserID: selfUserID)
+        anyRiding = visible.contains { $0.status == .riding }
         let ids = visible.map(\.userID)
         displayNames = Dictionary(uniqueKeysWithValues:
             visible.map { ($0.userID, nameMap[$0.userID] ?? $0.displayName) })
-        colorIndex = PeerPalette.assign(userIDs: ids, paletteCount: AuraTheme.riderPalette.count)
+        colorIndex = PeerPalette.assign(userIDs: ids, paletteCount: max(1, AuraTheme.riderPalette.count))
         monograms = RiderMonogram.assign(names: displayNames)
         leaderID = visible.max { ($0.progressMeters ?? -.infinity) < ($1.progressMeters ?? -.infinity) }?.userID
         interpolators.commit(peers: visible, now: now)
+        let live = Set(ids)
+        displayBearing = displayBearing.filter { live.contains($0.key) }
     }
 
-    var reduceMotion = false
+    /// Keep the clock alive while any tween runs OR (any peer is riding and not Reduce Motion) —
+    /// the second clause keeps a stationary rider's liveness pulse animating (it must not freeze
+    /// just because they stopped moving).
+    func shouldAnimate(now: Date) -> Bool {
+        interpolators.anyActive(at: now) || (anyRiding && !reduceMotion)
+    }
 
-    /// Build the frame for wall-clock `now`. `project` maps a coordinate to a screen point (nil
-    /// if unavailable → no declutter). Pure-ish; cheap for ≤7 dots.
+    /// Resolve the frame for wall-clock `now`. `project` maps a coordinate to a screen point (nil
+    /// if off-screen/unavailable). Declutter is the one intentional per-frame derivation (needs live
+    /// positions; O(k²), k ≤ 7). Everything else was memoised in `updateSet`.
     func frame(now: Date, project: (Coordinate) -> ClusterDeclutter.Point2D?) -> PeerFrame {
         let coords = visible.compactMap { p in interpolators.position(p.userID, at: now).map { (p, $0) } }
         let points = coords.map { project($0.1) }
-        let declutterInput = points.map { $0 ?? .init(x: 0, y: 0) }
-        let canDeclutter = points.allSatisfy { $0 != nil }
-        let offsets = canDeclutter
-            ? ClusterDeclutter.resolve(points: declutterInput, radius: 26, spread: 18)
-            : Array(repeating: .zero, count: coords.count)
-        let clustered = canDeclutter
-            ? ClusterDeclutter.clustered(points: declutterInput, radius: 26)
-            : Array(repeating: false, count: coords.count)
+        let canDeclutter = !points.isEmpty && points.allSatisfy { $0 != nil }
+        let input = points.map { $0 ?? ClusterDeclutter.Point2D(x: 0, y: 0) }
+        if prevClustered.count != input.count { prevClustered = Array(repeating: false, count: input.count) }
+        let offsets: [ClusterDeclutter.DeclutterOffset]
+        let clustered: [Bool]
+        if canDeclutter {
+            offsets = ClusterDeclutter.resolve(points: input, previouslyClustered: prevClustered,
+                                               enterRadius: 26, leaveRadius: 40, spread: 18)
+            clustered = ClusterDeclutter.clustered(points: input, previouslyClustered: prevClustered,
+                                                   enterRadius: 26, leaveRadius: 40)
+        } else {
+            offsets = Array(repeating: .zero, count: input.count)
+            clustered = Array(repeating: false, count: input.count)
+        }
+        prevClustered = clustered
 
+        let pulsePhase = (anyRiding && !reduceMotion) ? triangleWave(now) : 0
         let dots: [PeerDot] = coords.enumerated().map { i, pc in
             let (peer, coord) = pc
-            let bearing = reduceMotion ? interpolators.bearing(peer.userID, at: now)?.rounded()
-                                       : interpolators.bearing(peer.userID, at: now)
-            return PeerDot(userID: peer.userID, coordinate: coord, bearing: bearing,
+            let shown = displayedBearing(peer.userID, raw: interpolators.bearing(peer.userID, at: now))
+            return PeerDot(userID: peer.userID, coordinate: coord, bearing: shown,
                            status: peer.status, colorIndex: colorIndex[peer.userID] ?? 0,
                            monogram: monograms[peer.userID] ?? "?",
                            displayName: displayNames[peer.userID] ?? peer.displayName,
-                           showsNameTag: peer.userID == leaderID || clustered[i],
-                           offset: offsets[i])
+                           showsNameTag: peer.userID == leaderID || (i < clustered.count && clustered[i]),
+                           offset: i < offsets.count ? offsets[i] : .zero)
         }
-        // Pulse phase: triangle wave, ~1.1s up / down; held at 0 under Reduce Motion.
-        let phase = reduceMotion ? 0 : abs((now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.2) / 1.1) - 1)
-        return PeerFrame(dots: dots, pulsePhase: 1 - phase, reduceMotion: reduceMotion)
+        return PeerFrame(dots: dots, pulsePhase: pulsePhase)
     }
 
-    func anyActive(now: Date) -> Bool { interpolators.anyActive(at: now) }
+    /// Deadband (~10°) so a noisy bearing doesn't jitter the pointer; Reduce Motion snaps to the
+    /// 8-point compass (45° steps) so there's no continuous rotation. Holds last when direction is
+    /// unknown, so a stopped dot's pointer (already hidden by status) never resets to north.
+    private func displayedBearing(_ id: UUID, raw: Double?) -> Double? {
+        guard let raw else { return displayBearing[id] }
+        if reduceMotion {
+            let coarse = (raw / 45).rounded() * 45
+            displayBearing[id] = coarse
+            return coarse
+        }
+        if let prev = displayBearing[id] {
+            let diff = abs(((raw - prev) + 540).truncatingRemainder(dividingBy: 360) - 180)
+            if diff < 10 { return prev }
+        }
+        displayBearing[id] = raw
+        return raw
+    }
+
+    private func triangleWave(_ now: Date) -> Double {
+        let t = now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.2) / 1.1
+        return 1 - abs(t - 1)   // 0 → 1 → 0 over 2.2 s
+    }
 }
 ```
 
-> The host (Task 9) wraps its `Map` in `TimelineView(.animation(paused: !model.anyActive(now:) ))`,
-> reads `model.frame(now: context.date, project:)` each tick, and passes the resulting
-> `PeerAnnotations(... frame:)` into `Map { }`. `updateSet` is called from `.onChange(of: peers)`.
-> `project` uses the map's `point(for:)`; if unreachable in this Mapbox setup, pass `{ _ in nil }`
-> (declutter degrades per the note in Step 1) and finish projection wiring during device verify.
+### Part C — host wiring (`RideMapView`, `NavigateHUDView`)
 
-- [ ] **Step 3: Build the app (delegate to builder)**
+- [ ] **Step 4: `RideMapView`** — wrap the map in `MapReader` (for the projection proxy) + `TimelineView`, swap the inline peer `ForEvery` for `PeerAnnotations`, and delete `previousPeerCoordinates`, its `.onChange(of: peers)` updater, and the `leaderID` computed property (now in the driver).
 
-Dispatch `apple-platform-build-tools:builder`: "Build the Aura app scheme for the iPhone 17 simulator; report pass/fail + first error." Expected: build succeeds. Resolve any Mapbox `MapContent`/`@Observable` wiring errors so it compiles.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add Aura/Sources/GroupRide/PeerAnnotations.swift
-git commit -m "feat(roh-69,roh-72): PeerAnnotations — interpolation clock + declutter + identity"
-```
-
----
-
-## Task 9: Wire both hosts + remove `previousPeerCoordinates` (app — build-verified)
-
-**Files:**
-- Modify: `Aura/Sources/Ride/RideMapView.swift`
-- Modify: `Aura/Sources/Ride/NavigateHUDView.swift`
-
-**Interfaces:**
-- Consumes: `PeerAnnotationModel`, `PeerAnnotations`, `PeerFrame`.
-
-- [ ] **Step 1: `RideMapView`** — replace the inline peer `ForEvery` and `previousPeerCoordinates`.
-
-Add `@State private var peerModel = PeerAnnotationModel()` and `@Environment(\.accessibilityReduceMotion) private var reduceMotion`. Delete `@State private var previousPeerCoordinates` and its `.onChange(of: peers)` updater and the `leaderID` computed property (now in the model). Wrap the `Map` in a `TimelineView`:
+Add `@State private var peerModel = PeerAnnotationDriver()` and `@Environment(\.accessibilityReduceMotion) private var reduceMotion`.
 
 ```swift
 var body: some View {
-    TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !peerModel.anyActive(now: Date()))) { context in
-        Map(viewport: $viewport) {
-            Puck2D(bearing: .heading)
-            routeRibbon
-            detourPolyline
-            PeerAnnotations(peers: peers, selfUserID: selfUserID, nameMap: nameMap,
-                            frame: peerModel.frame(now: context.date, project: projectPoint))
-            gemAnnotations   // extract the existing gem ForEvery into this @MapContentBuilder var
+    MapReader { proxy in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0,
+                                paused: !peerModel.shouldAnimate(now: Date()))) { context in
+            Map(viewport: $viewport) {
+                Puck2D(bearing: .heading)
+                routeRibbon
+                detourPolyline
+                PeerAnnotations(frame: peerModel.frame(now: context.date,
+                                                       project: { project($0, proxy) }))
+                gemAnnotations   // existing gem ForEvery, extracted into a @MapContentBuilder var
+            }
+            .mapStyle(settings.mapStyle.mapboxStyle)
+            .ignoresSafeArea()
         }
-        .mapStyle(settings.mapStyle.mapboxStyle)
-        .ignoresSafeArea()
     }
-    .onAppear { peerModel.reduceMotion = reduceMotion }
-    .onChange(of: reduceMotion) { peerModel.reduceMotion = $1 }
-    .onChange(of: peers) { peerModel.updateSet(peers: peers, selfUserID: selfUserID, nameMap: nameMap, now: Date()) }
+    .onAppear { syncPeers() }
+    .onChange(of: peers) { syncPeers() }
+    .onChange(of: reduceMotion) { syncPeers() }
 }
 
-/// Projects a coordinate to a screen point for declutter. Wire to the Mapbox proxy during the
-/// build; return nil until then (declutter degrades to hue+monogram — see PeerAnnotations note).
-private func projectPoint(_ c: Coordinate) -> ClusterDeclutter.Point2D? { nil }
+private func syncPeers() {
+    peerModel.updateSet(peers: peers, selfUserID: selfUserID, nameMap: nameMap,
+                        reduceMotion: reduceMotion, now: Date())
+}
+
+/// Real Mapbox v11 projection for declutter; nil when the coordinate is off-screen/unavailable.
+private func project(_ c: Coordinate, _ proxy: MapProxy) -> ClusterDeclutter.Point2D? {
+    guard let map = proxy.map else { return nil }
+    let pt = map.point(for: CLLocationCoordinate2D(latitude: c.latitude, longitude: c.longitude))
+    guard pt.x.isFinite, pt.y.isFinite else { return nil }
+    return ClusterDeclutter.Point2D(x: Double(pt.x), y: Double(pt.y))
+}
 ```
 
-Extract the existing gem `ForEvery` (lines ~68–74) into a `@MapContentBuilder private var gemAnnotations: some MapContent`.
+Extract the existing gem `ForEvery` into a `@MapContentBuilder private var gemAnnotations: some MapContent`.
 
-- [ ] **Step 2: `NavigateHUDView`** — same treatment on its `Map` (lines ~255–282): remove `previousPeerCoordinates` + its `.onChange`, add a `peerModel`, wrap the group-dot block in `PeerAnnotations` fed by `peerModel.frame`, drive `updateSet` from `.onChange(of: groupSession?.peers)`, wrap the `Map` in the same `TimelineView(.animation(paused:))`. Guard the whole block on `if let groupSession`.
+- [ ] **Step 5: `NavigateHUDView`** — the same treatment on its `Map` (the group-dot block ~lines 255–282): wrap in `MapReader` + `TimelineView(paused: !peerModel.shouldAnimate(now:))`, replace the inline group `ForEvery` with `PeerAnnotations(frame: peerModel.frame(now:project:))` guarded by `if let groupSession`, drive `syncPeers()` from `.onChange(of: groupSession?.peers)` (and `.onAppear`/`reduceMotion`), and **delete** `previousPeerCoordinates` + its `.onChange`. Also **delete `groupLeaderID`** (in `NavigateHUDView+GroupCrew.swift`, ~line 111) — leader selection now lives in the driver, so it becomes dead code SwiftLint-strict would flag. Reuse the same `project(_:_:)` helper.
 
-- [ ] **Step 3: Build the app (delegate to builder)**
+- [ ] **Step 6: Build the whole app (delegate to builder)**
 
-Dispatch `apple-platform-build-tools:builder`: "Build the Aura app scheme for the iPhone 17 simulator; report pass/fail + first error." Expected: build succeeds.
+Dispatch `apple-platform-build-tools:builder`: "Build the Aura app scheme for the iPhone 17 simulator; report pass/fail + first error." Expected: build succeeds. Resolve Mapbox `MapContent` / `MapReader` / `MapProxy.point(for:)` API mismatches until it compiles (v11 names may need minor adjustment — confirm against the linked MapboxMaps version).
 
-- [ ] **Step 4: Wire real projection** — replace `projectPoint` in both hosts with the Mapbox `point(for:)` call (v11: via the map proxy / `mapboxMap`). If the proxy is genuinely unreachable from this position, leave `nil` (degraded declutter) and record it as a device-verify follow-up. Build again.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit the whole integration**
 
 ```bash
-git add Aura/Sources/Ride/RideMapView.swift Aura/Sources/Ride/NavigateHUDView.swift
-git commit -m "feat(roh-69,roh-72): adopt PeerAnnotations in both map hosts"
+git add Aura/Sources/GroupRide/GroupRideMapOverlay.swift Aura/Sources/GroupRide/PeerAnnotations.swift \
+        Aura/Sources/Ride/RideMapView.swift Aura/Sources/Ride/NavigateHUDView.swift \
+        Aura/Sources/Ride/NavigateHUDView+GroupCrew.swift
+git commit -m "feat(roh-69,roh-72): glide + distinct identity — PeerDotView + PeerAnnotations + hosts"
 ```
 
 ---
 
-## Task 10: Full verification + device batch
+## Task 8: Full verification + device batch
 
 **Files:** none (verification only).
 
@@ -1224,9 +1288,11 @@ Dispatch `apple-platform-build-tools:builder`: "Build the Aura app + run the app
   - Dots **glide** smoothly between fixes (no per-broadcast hop); verify at foreground (2s) and after backgrounding one phone (6s).
   - After a long stop / dead-zone, the reappearing dot **snaps** (no glide across the gap).
   - Two riders are **instantly tell-apart-able** even when close and even sharing a first initial (distinct hue + monogram; discs spread when stacked; tags don't occlude).
-  - **Heading** is obvious (bold outlined pointer, calm rotation — flag if fidgety → fall back to bolder static cone per spec §7).
-  - **Reduce Motion** on: dots still glide (linear), pulse + pointer-spin suppressed.
-  - No hitching (Release build); confirm the TimelineView doesn't fight map pan/zoom/rotate (if it does, switch to the display-tick fallback, spec §3.5).
+  - **Heading** is obvious (bold outlined pointer, calm deadbanded rotation — flag if still fidgety → fall back to bolder static cone per spec §7).
+  - **Identity vs status:** `.stopped` (pause glyph, no pulse) vs `.riding` vs `.dropped` (ghost + no-signal glyph) vs `.awaiting` (hollow) each read at a glance — compare against today's amber-disc baseline; if a status is weaker, escalate its treatment (per UX review).
+  - **Reduce Motion** on: dots still glide (linear); pulse off; pointer snaps to 45° steps (no continuous spin).
+  - **Declutter live:** two close riders' discs spread apart and their tags don't occlude (confirms the Mapbox projection is wired, not the degraded nil path).
+  - No hitching (Release build); confirm the `TimelineView`+`MapReader` doesn't fight map pan/zoom/rotate (if it does, switch to the display-tick fallback, spec §3.5).
   - Solo ride unaffected.
 
 - [ ] **Step 5: Final commit if any lint/build fixes were needed**
@@ -1239,8 +1305,9 @@ git add -A && git commit -m "chore(roh-69,roh-72): lint + build fixes; record de
 
 ## Self-review notes (coverage)
 
-- ROH-69 interpolation §3 → Tasks 1, 8, 9. Snap/duration/bearing/first-fix/heartbeat all in Task 1 tests.
-- ROH-72 identity §4 → Tasks 2 (palette), 3 (monogram), 6 (hues+gate), 7 (dot). Overlap §4.4 → Task 4 + Task 8/9 projection. Cap §4.7 → Task 5. RM §4.6 → Tasks 7/8/9.
+- ROH-69 interpolation §3 → Task 1 (pure math + tests) + Task 7 (clock/driver/hosts). Snap/duration/bearing/first-fix/heartbeat/coincident all in Task 1 tests.
+- ROH-72 identity §4 → Tasks 2 (palette), 3 (monogram, incl. the Sam/Sara acceptance test), 6 (hues + ΔE/CVD gate), 7 (dot + driver). Overlap/declutter §4.4 → Task 4 (hysteresis) + Task 7 real Mapbox projection. Cap §4.7 → Task 5. RM §4.6 → Task 7 (driver un-gates pulse, coarse-snaps pointer).
 - ROH-66 boundary §6 → no presence/transport files touched (Global Constraints); coherence via `recordedAt` in Task 1.
-- Device-first acceptance §7 → Task 10 batch.
-- **Known integration risk carried into build:** Mapbox v11 screen projection from the content builder (Task 8 note / Task 9 Step 4) and TimelineView-vs-gesture (Task 10) — both have defined degraded/fallback paths so a task can't hard-block.
+- Device-first acceptance §7 → Task 8 batch.
+- **Reviewer-flagged holes now closed:** compile-order blocker (Tasks 7–9 merged into one build); RiderMonogram distinctness (Task 3 iterates + index fallback); palette CVD failure (Task 6 set revised + iterate-to-green loop); declutter-ships-inert (Task 7 wires real `MapReader`/`point(for:)`, not a nil punt); movement-gated pulse (driver `shouldAnimate` keeps the clock alive for riding peers); RM pointer still spinning + no deadband (driver `displayedBearing`).
+- **Residual build risk with a defined fallback:** `TimelineView`+`MapReader` vs map gestures (Task 8 device step → display-tick fallback, spec §3.5); exact MapboxMaps v11 API names (Task 7 Step 6 resolves at compile).
