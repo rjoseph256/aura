@@ -21,6 +21,9 @@ struct RideMapView: View {
     /// The active detour route geometry, if any. When non-empty, the recorded track dims
     /// (see `routeRibbon`) so the bright detour polyline reads as the thing to follow.
     var detourRoute: [Coordinate] = []
+    /// Mirrors the live camera for the +/- zoom pill (ROH-57); nil in previews. Written every
+    /// frame by `.onCameraChanged`, read only at tap time (see `MapZoomCameraBox`).
+    var cameraBox: MapZoomCameraBox?
 
     @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -51,6 +54,15 @@ struct RideMapView: View {
                     gemAnnotations
                 }
                 .mapStyle(settings.mapStyle.mapboxStyle)
+                // Mirror the live camera into the zoom box. Must precede `.ignoresSafeArea()`
+                // (a type-erasing View modifier) to stay in the Map-only modifier chain.
+                .onCameraChanged { ctx in
+                    guard let cameraBox else { return }
+                    cameraBox.zoom = ctx.cameraState.zoom
+                    cameraBox.center = ctx.cameraState.center
+                    cameraBox.bearing = ctx.cameraState.bearing
+                    cameraBox.pitch = ctx.cameraState.pitch
+                }
                 .ignoresSafeArea()
             }
         }

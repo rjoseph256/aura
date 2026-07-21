@@ -59,6 +59,9 @@ struct NavigateHUDView: View {
     // MARK: Map
 
     @State private var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
+    /// Live camera for the +/- zoom pill (ROH-57). Written every frame by `.onCameraChanged`;
+    /// read only at tap time, so it never re-renders the HUD (see `MapZoomCameraBox`).
+    @State private var cameraBox = MapZoomCameraBox()
     /// Drives peer-dot interpolation, identity, and declutter (ROH-69 / ROH-72). A plain class
     /// held in `@State`; the `TimelineView` clock and `.onChange(of: peers)` drive repaints. Stays
     /// empty (a no-op) whenever `groupSession` is nil.
@@ -258,6 +261,14 @@ struct NavigateHUDView: View {
                                                            project: { project($0, proxy) }))
                 }
                 .mapStyle(settings.mapStyle.mapboxStyle)
+                // Mirror the live camera into the zoom box. Must stay in the Map modifier chain
+                // (before any type-erasing View modifier) or the Map-only API is dropped.
+                .onCameraChanged { ctx in
+                    cameraBox.zoom = ctx.cameraState.zoom
+                    cameraBox.center = ctx.cameraState.center
+                    cameraBox.bearing = ctx.cameraState.bearing
+                    cameraBox.pitch = ctx.cameraState.pitch
+                }
             }
         }
         .onAppear { syncPeers() }
@@ -360,6 +371,31 @@ struct NavigateHUDView: View {
 }
 
 private extension NavigateHUDView {
+    /// Steps the map zoom for a +/- tap (ROH-57). While following the puck it re-follows at the
+    /// new zoom (staying locked on the rider); once the rider has panned off, it zooms around the
+    /// current center instead of snapping back — recenter is the separate control for that. Snaps
+    /// under Reduce Motion, otherwise a quick 0.3s flick (a smaller camera move than recenter's
+    /// re-frame, so a hair snappier on purpose).
+    func zoom(_ direction: MapZoomStep.Direction) {
+        guard cameraBox.zoom.isFinite else { return }
+        let target = MapZoomStep.stepped(from: cameraBox.zoom, direction)
+        let next: Viewport
+        if viewport.followPuck != nil {
+            next = .followPuck(zoom: target, bearing: .heading)
+        } else if let center = cameraBox.center {
+            next = .camera(center: center, zoom: target, bearing: cameraBox.bearing, pitch: cameraBox.pitch)
+        } else {
+            // Panned off the puck but no camera frame yet (pre-first-`onCameraChanged`): do
+            // nothing rather than snap back to the puck, which zoom must never do.
+            return
+        }
+        if reduceMotion {
+            viewport = next
+        } else {
+            withViewportAnimation(.easeOut(duration: 0.3)) { viewport = next }
+        }
+    }
+
     /// The bottom cockpit: a crew-roster + map-controls row floating above the quarter-screen
     /// instrument panel (hero speed + to-go + ETA). The roster (only in a live group ride)
     /// shares that row with the controls as a pill to their left, its bottom edge aligned
@@ -381,8 +417,13 @@ private extension NavigateHUDView {
                     isFollowing: viewport.followPuck != nil,
                     isMuted: isMuted,
                     onRecenter: { recenter() },
-                    onMarkSpot: nil,
+                    // Navigate has no mark-this-spot feature, so omit the button entirely rather
+                    // than show it permanently disabled — that also keeps the taller (zoom pill)
+                    // cluster clear of the turn card on a short screen (ROH-57).
+                    showMarkSpot: false,
                     onToggleMute: { toggleMute() },
+                    onZoomIn: { zoom(.zoomIn) },
+                    onZoomOut: { zoom(.zoomOut) },
                     onEndRide: { onEndTapped() },
                     isEndDisabled: groupSession?.isEnding == true)
             }
