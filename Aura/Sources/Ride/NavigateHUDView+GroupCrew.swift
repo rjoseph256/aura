@@ -106,14 +106,6 @@ extension NavigateHUDView {
         .accessibilityElement(children: .contain)
     }
 
-    /// The furthest-along peer, so only one name tag renders on the map (declutters
-    /// multi-peer rides) — mirrors `RideMapView`'s solo group-map leader logic.
-    var groupLeaderID: UUID? {
-        groupSession?.peers.filter { $0.coordinate != nil }
-            .max { ($0.progressMeters ?? -.infinity) < ($1.progressMeters ?? -.infinity) }?
-            .userID
-    }
-
     // MARK: - Group End / Leave
 
     /// True only when this HUD is hosting a live group ride AND the rider is that ride's

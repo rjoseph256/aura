@@ -22,6 +22,14 @@ enum AuraTheme {
     static let onWarning     = rgb(AuraPalette.inkOnAmber)
     static let border        = Color.white.opacity(AuraPalette.borderWhite)
 
+    // MARK: - Rider identity palette (ROH-72)
+    /// Index-aligned with `AuraPalette.riderHues`; `PeerPalette.assign` returns the index.
+    static let riderPalette: [Color] = AuraPalette.riderHues.map { rgb($0) }
+    static func riderColor(_ index: Int) -> Color {
+        guard !riderPalette.isEmpty else { return accent }
+        return riderPalette[((index % riderPalette.count) + riderPalette.count) % riderPalette.count]
+    }
+
     // MARK: - Contrast-aware resolvers
     // Scoped to high-value over-map / sunlight spots. Named apart from the constants above
     // so a call site can't silently fall back to the standard value by omitting the argument.

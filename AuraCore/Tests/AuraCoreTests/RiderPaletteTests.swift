@@ -37,6 +37,15 @@ struct RiderPaletteTests {
         }
     }
 
+    /// Exact inequality isn't enough — a rider hue perceptually adjacent to a reserved token
+    /// would still collide two meanings on the map. Enforce a ΔE gap from both.
+    @Test func riderHuesStayPerceptuallyClearOfReservedTokens() {
+        for h in AuraPalette.riderHues {
+            #expect(deltaE(h, AuraPalette.mint) >= 15)   // route/accent
+            #expect(deltaE(h, AuraPalette.amber) >= 15)  // warning/stopped
+        }
+    }
+
     @Test func riderHuesReadOnDarkBackground() {
         for h in AuraPalette.riderHues {
             #expect(WCAGContrast.ratio(h, AuraPalette.nearBlack) >= 3.0)

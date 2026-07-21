@@ -72,6 +72,24 @@ struct PeerInterpolatorTests {
         #expect(abs(PeerInterpolator.angularLerp(10, 350, 0.5) - 0) < 1e-9)
     }
 
+    @Test func bearingHoldsLastOnCoincidentCommit() {
+        var i = PeerInterpolator()
+        i.commit(fix: c(0, 0), recordedAt: t0, now: t0)
+        i.commit(fix: c(0, 0.0002), recordedAt: t0 + 2, now: t0 + 2)   // moving east → bearing ≈ 90
+        let b1 = i.bearing(at: t0 + 4)
+        #expect(b1 != nil)
+        i.commit(fix: c(0, 0.0002), recordedAt: t0 + 4, now: t0 + 4)   // heartbeat (same point)
+        #expect(i.bearing(at: t0 + 4) == b1)   // holds last heading, doesn't reset/clear
+    }
+
+    @Test func isActiveTrueDuringTweenFalseAfter() {
+        var i = PeerInterpolator()
+        i.commit(fix: c(0, 0), recordedAt: t0, now: t0)
+        i.commit(fix: c(0, 0.0002), recordedAt: t0 + 2, now: t0 + 2)   // 2s tween
+        #expect(i.isActive(at: t0 + 3))            // mid-tween
+        #expect(i.isActive(at: t0 + 5) == false)   // settled
+    }
+
     @Test func collectionCommitsPerPeerAndPrunesLeavers() {
         let a = UUID(), b = UUID()
         var set = PeerInterpolators()

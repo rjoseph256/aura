@@ -23,18 +23,11 @@ struct RideMapView: View {
     var detourRoute: [Coordinate] = []
 
     @Environment(SettingsStore.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var viewport: Viewport
-    /// Each peer's previous fix, so a heading cone can be derived on-device between
-    /// consecutive updates (the wire carries no bearing — see `PeerBearing`).
-    @State private var previousPeerCoordinates: [UUID: Coordinate] = [:]
-
-    /// Only the leader (furthest along) gets a name tag on the map, so peer dots don't
-    /// clutter the view — the full roster lives elsewhere.
-    private var leaderID: UUID? {
-        peers.filter { $0.coordinate != nil }
-            .max { ($0.progressMeters ?? -.infinity) < ($1.progressMeters ?? -.infinity) }?
-            .userID
-    }
+    /// Drives peer-dot interpolation, identity, and declutter (ROH-69 / ROH-72). A plain class
+    /// held in `@State`; the `TimelineView` clock and `.onChange(of: peers)` drive repaints.
+    @State private var peerModel = PeerAnnotationDriver()
 
     private var trackCoordinates: [CLLocationCoordinate2D] {
         track.map { CLLocationCoordinate2D(latitude: $0.coordinate.latitude,
@@ -46,41 +39,47 @@ struct RideMapView: View {
     }
 
     var body: some View {
-        Map(viewport: $viewport) {
-            Puck2D(bearing: .heading)
-            routeRibbon
-            detourPolyline
-            ForEvery(GroupMapDots.visiblePeers(peers: peers, selfUserID: selfUserID),
-                     id: \.userID) { peer in
-                if let coordinate = peer.coordinate {
-                    MapViewAnnotation(coordinate: CLLocationCoordinate2D(latitude: coordinate.latitude,
-                                                                         longitude: coordinate.longitude)) {
-                        PeerDotView(displayName: nameMap[peer.userID] ?? peer.displayName,
-                                   status: peer.status,
-                                   isSelf: false,
-                                   bearing: PeerBearing.heading(from: previousPeerCoordinates[peer.userID],
-                                                                to: coordinate),
-                                   showsNameTag: peer.userID == leaderID)
-                    }
-                    .allowOverlapWithPuck(true)
+        MapReader { proxy in
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0,
+                                    paused: !peerModel.shouldAnimate(now: Date()))) { context in
+                Map(viewport: $viewport) {
+                    Puck2D(bearing: .heading)
+                    routeRibbon
+                    detourPolyline
+                    PeerAnnotations(frame: peerModel.frame(now: context.date,
+                                                           project: { project($0, proxy) }))
+                    gemAnnotations
                 }
-            }
-            ForEvery(gems, id: \.id) { gem in
-                MapViewAnnotation(coordinate: CLLocationCoordinate2D(latitude: gem.coordinate.latitude,
-                                                                     longitude: gem.coordinate.longitude)) {
-                    GemPinView(gem: gem, isSeen: seenGemIDs.contains(gem.id)) { onSelectGem(gem) }
-                }
-                .allowOverlapWithPuck(true)
+                .mapStyle(settings.mapStyle.mapboxStyle)
+                .ignoresSafeArea()
             }
         }
-        .mapStyle(settings.mapStyle.mapboxStyle)
-        .ignoresSafeArea()
-        .onChange(of: peers) { _, newPeers in
-            for peer in newPeers {
-                if let coordinate = peer.coordinate {
-                    previousPeerCoordinates[peer.userID] = coordinate
-                }
+        .onAppear { syncPeers() }
+        .onChange(of: peers) { syncPeers() }
+        .onChange(of: reduceMotion) { syncPeers() }
+    }
+
+    private func syncPeers() {
+        peerModel.updateSet(peers: peers, selfUserID: selfUserID, nameMap: nameMap,
+                            reduceMotion: reduceMotion, now: Date())
+    }
+
+    /// Real Mapbox projection for declutter; nil when the coordinate is off-screen/unavailable.
+    private func project(_ c: Coordinate, _ proxy: MapProxy) -> ClusterDeclutter.Point2D? {
+        guard let map = proxy.map else { return nil }
+        let pt = map.point(for: CLLocationCoordinate2D(latitude: c.latitude, longitude: c.longitude))
+        guard pt.x.isFinite, pt.y.isFinite else { return nil }
+        return ClusterDeclutter.Point2D(x: Double(pt.x), y: Double(pt.y))
+    }
+
+    @MapContentBuilder
+    private var gemAnnotations: some MapContent {
+        ForEvery(gems, id: \.id) { gem in
+            MapViewAnnotation(coordinate: CLLocationCoordinate2D(latitude: gem.coordinate.latitude,
+                                                                 longitude: gem.coordinate.longitude)) {
+                GemPinView(gem: gem, isSeen: seenGemIDs.contains(gem.id)) { onSelectGem(gem) }
             }
+            .allowOverlapWithPuck(true)
         }
     }
 

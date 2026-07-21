@@ -1,60 +1,119 @@
 import SwiftUI
 import AuraCore
 
-/// A single peer's live marker on the group-ride map: a status-colored disc with the
-/// rider's initial, a heading cone when a bearing is known, a soft live pulse (static
-/// ring when Reduce Motion is on), and an optional name tag for decluttering.
+/// A single peer's live marker on the group-ride map: an upright round identity head (a stable
+/// per-rider hue + a disambiguated monogram), a bold outlined heading pointer that retracts to a
+/// plain disc when no bearing is known, a status glyph (pause / no-signal), a clock-driven live
+/// pulse, and an optional name tag. Identity (hue + monogram) is preserved across every status so
+/// riders stay tell-apart-able; status rides on high-area cues (opacity + glyph + pulse-presence).
+/// All animation inputs are injected (`bearing` already deadbanded, `pulsePhase` clock-driven), so
+/// the view holds no animation `@State`.
 struct PeerDotView: View {
+    let monogram: String
     let displayName: String
     let status: PeerStatus
+    let identityColor: Color
     let isSelf: Bool
-    /// Degrees clockwise from north; nil draws no cone (no recent movement to infer from).
+    /// Degrees clockwise from north; nil retracts the pointer to a plain disc.
     let bearing: Double?
+    /// 0…1 pulse phase; 0 means no pulse (driver passes 0 under Reduce Motion / when not riding).
+    let pulsePhase: Double
     let showsNameTag: Bool
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var isPulsing = false
-
     private static let discDiameter: CGFloat = 22
-    private static let coneLength: CGFloat = 16
+    private static let pointerLength: CGFloat = 14
 
-    private var discColor: Color {
+    private var headColor: Color {
         if isSelf { return AuraTheme.textPrimary }
         switch status {
-        case .riding:   return AuraTheme.accent
-        case .stopped:  return AuraTheme.warning
-        case .dropped:  return AuraTheme.textSecondary
-        case .awaiting: return AuraTheme.textSecondary
+        case .riding, .stopped, .awaiting: return identityColor      // identity hue preserved
+        case .dropped: return identityColor.opacity(0.45)            // ghost
         }
     }
-
-    private var initial: String {
-        String(displayName.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased()
-    }
+    private var isHollow: Bool { status == .awaiting }
+    private var showsPointer: Bool { bearing != nil && status == .riding }
 
     var body: some View {
         VStack(spacing: AuraTheme.Spacing.xs) {
-            if showsNameTag {
-                nameTag
-            }
+            if showsNameTag { nameTag }
             ZStack {
                 pulseRing
-                cone
-                disc
+                pointer
+                head
+                statusBadge
             }
-            .frame(width: Self.discDiameter + Self.coneLength, height: Self.discDiameter + Self.coneLength)
-        }
-        // The pulse animation is attached to the ring itself, NOT wrapped around the state
-        // change in a `withAnimation`. `withAnimation` applies to the whole transaction, so a
-        // `repeatForever` there leaks into every other animatable change in the same update
-        // and oscillates unrelated layout forever — it made the cockpit speed readout, the
-        // roster sheet and the map controls wave at this dot's 2.2s pulse period.
-        .onAppear {
-            guard !reduceMotion else { return }
-            isPulsing = true
+            .frame(width: Self.discDiameter + Self.pointerLength,
+                   height: Self.discDiameter + Self.pointerLength)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("\(displayName), \(statusAccessibilityLabel)"))
+    }
+
+    // Pulse is a pure function of the injected phase — no @State, so it survives status morphs.
+    // pulsePhase 0 (driver decides: not riding, or Reduce Motion) → a calm static ring.
+    @ViewBuilder private var pulseRing: some View {
+        if status == .riding && pulsePhase > 0 {
+            let grow = 6 + 12 * pulsePhase
+            Circle().stroke(headColor.opacity(0.5 * (1 - pulsePhase)), lineWidth: 2)
+                .frame(width: Self.discDiameter + grow, height: Self.discDiameter + grow)
+        } else if status == .riding {
+            Circle().stroke(headColor.opacity(0.4), lineWidth: 2)     // static ring (RM / paused)
+                .frame(width: Self.discDiameter + 8, height: Self.discDiameter + 8)
+        }
+    }
+
+    // Bold, dark-outlined pointer; rotates with the already-deadbanded/coarsened bearing the driver
+    // supplies. Only the pointer rotates — the head (monogram) never spins, so it stays legible.
+    @ViewBuilder private var pointer: some View {
+        if showsPointer, let bearing {
+            Triangle()
+                .fill(headColor)
+                .overlay(Triangle().stroke(AuraTheme.background, lineWidth: 1.5))
+                .frame(width: 12, height: Self.pointerLength)
+                .offset(y: -(Self.discDiameter / 2 + Self.pointerLength / 2 - 2))
+                .rotationEffect(.degrees(bearing))
+        }
+    }
+
+    private var head: some View {
+        ZStack {
+            Circle().fill(isHollow ? Color.clear : headColor)
+                .frame(width: Self.discDiameter, height: Self.discDiameter)
+            Circle().strokeBorder(isHollow ? headColor : AuraTheme.background, lineWidth: 1.5)
+                .frame(width: Self.discDiameter, height: Self.discDiameter)
+            Text(monogram)
+                .font(.system(size: monogram.count > 1 ? 8 : 10, weight: .bold, design: .rounded))
+                .foregroundStyle(isHollow ? headColor : AuraTheme.onAccent)
+        }
+    }
+
+    // High-area, glanceable status glyph (pause / no-signal), overlaid on the head corner.
+    @ViewBuilder private var statusBadge: some View {
+        switch status {
+        case .stopped:
+            badge(systemName: "pause.fill", tint: AuraTheme.warning)
+        case .dropped:
+            badge(systemName: "wifi.slash", tint: AuraTheme.textSecondary)
+        case .riding, .awaiting:
+            EmptyView()
+        }
+    }
+    private func badge(systemName: String, tint: Color) -> some View {
+        Image(systemName: systemName)
+            .font(.system(size: 9, weight: .black))
+            .foregroundStyle(tint)
+            .padding(2)
+            .background(Circle().fill(AuraTheme.background))
+            .offset(x: Self.discDiameter / 2 - 2, y: -Self.discDiameter / 2 + 2)
+    }
+
+    private var nameTag: some View {
+        Text(displayName)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(AuraTheme.textPrimary)
+            .padding(.horizontal, AuraTheme.Spacing.xs)
+            .padding(.vertical, 2)
+            .background(AuraTheme.surface.opacity(0.85), in: Capsule())
     }
 
     private var statusAccessibilityLabel: String {
@@ -65,56 +124,6 @@ struct PeerDotView: View {
         case .dropped: return "no signal"
         case .awaiting: return "waiting to start"
         }
-    }
-
-    @ViewBuilder
-    private var pulseRing: some View {
-        if reduceMotion {
-            Circle()
-                .stroke(discColor.opacity(0.4), lineWidth: 2)
-                .frame(width: Self.discDiameter + 10, height: Self.discDiameter + 10)
-        } else {
-            Circle()
-                .stroke(discColor.opacity(isPulsing ? 0 : 0.5), lineWidth: 2)
-                .frame(width: Self.discDiameter + (isPulsing ? 18 : 6),
-                       height: Self.discDiameter + (isPulsing ? 18 : 6))
-                .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true),
-                           value: isPulsing)
-        }
-    }
-
-    @ViewBuilder
-    private var cone: some View {
-        if let bearing {
-            Triangle()
-                .fill(discColor.opacity(0.55))
-                .frame(width: 10, height: Self.coneLength)
-                .offset(y: -(Self.discDiameter / 2 + Self.coneLength / 2 - 2))
-                .rotationEffect(.degrees(bearing))
-        }
-    }
-
-    private var disc: some View {
-        ZStack {
-            Circle()
-                .fill(discColor)
-                .frame(width: Self.discDiameter, height: Self.discDiameter)
-            Circle()
-                .strokeBorder(AuraTheme.background, lineWidth: 1.5)
-                .frame(width: Self.discDiameter, height: Self.discDiameter)
-            Text(initial)
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .foregroundStyle(isSelf || status == .stopped ? AuraTheme.background : AuraTheme.onAccent)
-        }
-    }
-
-    private var nameTag: some View {
-        Text(displayName)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(AuraTheme.textPrimary)
-            .padding(.horizontal, AuraTheme.Spacing.xs)
-            .padding(.vertical, 2)
-            .background(AuraTheme.surface.opacity(0.85), in: Capsule())
     }
 }
 
