@@ -29,7 +29,7 @@ struct PeerInterpolatorTests {
         var i = PeerInterpolator()
         i.commit(fix: c(0, 0), recordedAt: t0 + 10, now: t0 + 10)
         i.commit(fix: c(9, 9), recordedAt: t0 + 10, now: t0 + 11) // same recordedAt → ignore
-        i.commit(fix: c(9, 9), recordedAt: t0 + 5,  now: t0 + 12) // older → ignore
+        i.commit(fix: c(9, 9), recordedAt: t0 + 5, now: t0 + 12) // older → ignore
         #expect(i.position(at: t0 + 20) == c(0, 0))
     }
 
@@ -54,7 +54,7 @@ struct PeerInterpolatorTests {
         // fixes are 2s apart in recordedAt but arrive 0.05s apart in wall time.
         // Implied speed must use recordedAt gap (2s), not arrival gap.
         var i = PeerInterpolator(config: .init(maxSpeed: 25))
-        i.commit(fix: c(0, 0),      recordedAt: t0,     now: t0 + 10.00)
+        i.commit(fix: c(0, 0), recordedAt: t0, now: t0 + 10.00)
         i.commit(fix: c(0, 0.0003), recordedAt: t0 + 2, now: t0 + 10.05) // ~33m over 2s ≈ 16 m/s
         #expect(i.didSnap == false)
     }
