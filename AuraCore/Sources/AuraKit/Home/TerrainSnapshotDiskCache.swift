@@ -23,4 +23,31 @@ public struct TerrainSnapshotDiskCache: Sendable {
         let base = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("TerrainSnapshots", isDirectory: true)
     }
+
+    public static let defaultMaxBytes = 25 * 1024 * 1024
+
+    private func pngFiles() -> [URL] {
+        (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey]))?
+            .filter { $0.pathExtension == "png" } ?? []
+    }
+
+    public func totalBytes() -> Int {
+        pngFiles().reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+    }
+
+    public func prune(toMaxBytes maxBytes: Int) {
+        struct Entry { let url: URL; let size: Int; let modified: Date }
+        let files = pngFiles().map { url -> Entry in
+            let v = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            return Entry(url: url, size: v?.fileSize ?? 0, modified: v?.contentModificationDate ?? .distantPast)
+        }
+        var total = files.reduce(0) { $0 + $1.size }
+        guard total > maxBytes else { return }
+        for entry in files.sorted(by: { $0.modified < $1.modified }) {
+            if total <= maxBytes { break }
+            try? FileManager.default.removeItem(at: entry.url)
+            total -= entry.size
+        }
+    }
 }

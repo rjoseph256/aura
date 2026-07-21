@@ -25,7 +25,25 @@ import AuraCore
     // this literal changes and the test fails.
     @Test func cacheKeyIsDeterministicLiteral() {
         #expect(req(40.44, -79.99, "mapbox://styles/aura/t", w: 390, h: 700).cacheKey
-                == "terrain-4044--7999-390x700-s1075307649")
+                == "terrain-4044--7999-z125-390x700-s1075307649")
+    }
+
+    @Test func cacheKeyIncludesZoomBucket() {
+        let c = Coordinate(latitude: 40.44, longitude: -79.99)
+        let base = TerrainSnapshotRequest(center: c, styleURI: "aura-terrain-v5", width: 390, height: 844)
+        let zoomed = TerrainSnapshotRequest(center: c, styleURI: "aura-terrain-v5", width: 390, height: 844, zoom: 15)
+        #expect(base.cacheKey != zoomed.cacheKey)
+        #expect(base.zoom == HomeMapCamera.defaultZoom)
+    }
+
+    @Test func preciseQuantizationDistinguishesNearbyCenters() {
+        let a = Coordinate(latitude: 40.4400, longitude: -79.9959)
+        let b = Coordinate(latitude: 40.4413, longitude: -79.9959) // ~150 m north
+        #expect(TerrainSnapshotRequest(center: a, styleURI: "s", width: 100, height: 100).cacheKey
+             == TerrainSnapshotRequest(center: b, styleURI: "s", width: 100, height: 100).cacheKey)
+        let q = TerrainSnapshotRequest.preciseQuantizationDegrees
+        #expect(TerrainSnapshotRequest(center: a, styleURI: "s", width: 100, height: 100, quantizationDegrees: q).cacheKey
+             != TerrainSnapshotRequest(center: b, styleURI: "s", width: 100, height: 100, quantizationDegrees: q).cacheKey)
     }
     @Test func usesRiderCoordinateWhenAvailable() {
         let rider = Coordinate(latitude: 37.77, longitude: -122.41)

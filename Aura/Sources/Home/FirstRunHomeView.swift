@@ -13,7 +13,7 @@ struct FirstRunHomeView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            HomeBackdrop(renderer: renderer, riderCoordinate: nil, placeName: "Pittsburgh")
+            HomeBackdrop(renderer: renderer, camera: HomeMapCamera.initial(forRider: nil), placeName: "Pittsburgh")
 
             VStack(spacing: AuraTheme.Spacing.md) {
                 Text("Aura needs your location to map your hills")

@@ -7,24 +7,30 @@ import AuraCore
 /// ~1 km grid so GPS jitter reuses the cached image and only a real move re-renders (spec
 /// open question #2); the size is bucketed to 10 pt so minor layout changes don't thrash.
 public struct TerrainSnapshotRequest: Equatable, Sendable {
-    public static let quantizationDegrees = 0.01 // ~1.1 km of latitude per grid cell.
+    public static let quantizationDegrees = 0.01        // ~1.1 km (default: GPS-jitter tolerant)
+    public static let preciseQuantizationDegrees = 0.001 // ~110 m (rider-centered on-appear image)
 
     public let center: Coordinate
     public let styleURI: String
+    public let zoom: Double
     public let widthBucket: Int
     public let heightBucket: Int
     public let cacheKey: String
 
-    public init(center: Coordinate, styleURI: String, width: Double, height: Double) {
+    public init(center: Coordinate, styleURI: String, width: Double, height: Double,
+                zoom: Double = HomeMapCamera.defaultZoom,
+                quantizationDegrees: Double = TerrainSnapshotRequest.quantizationDegrees) {
         self.center = center
         self.styleURI = styleURI
-        let q = Self.quantizationDegrees
+        self.zoom = zoom
+        let q = quantizationDegrees
         let latCell = Int((center.latitude / q).rounded())
         let lngCell = Int((center.longitude / q).rounded())
         self.widthBucket = Int((width / 10).rounded()) * 10
         self.heightBucket = Int((height / 10).rounded()) * 10
+        let zoomBucket = Int((zoom * 10).rounded())
         let styleHash = Self.fnv1a(styleURI)
-        self.cacheKey = "terrain-\(latCell)-\(lngCell)-\(widthBucket)x\(heightBucket)-s\(styleHash)"
+        self.cacheKey = "terrain-\(latCell)-\(lngCell)-z\(zoomBucket)-\(widthBucket)x\(heightBucket)-s\(styleHash)"
     }
 
     /// Stable 32-bit FNV-1a hash as a string. Deterministic across launches and platforms.

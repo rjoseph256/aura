@@ -11,11 +11,13 @@ import AuraKit
 /// resolution rather than stretching a stale `scaledToFill` image.
 struct HomeBackdrop: View {
     let renderer: TerrainSnapshotRendering
-    let riderCoordinate: Coordinate?
+    let camera: HomeMapCamera
+    var precise: Bool = false
     let placeName: String?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
     @State private var settled = false
 
@@ -38,7 +40,7 @@ struct HomeBackdrop: View {
             .task(id: req?.cacheKey) {
                 guard let req else { return }
                 settled = false
-                image = await renderer.image(for: req, size: geo.size)
+                image = await renderer.image(for: req, size: geo.size, scale: displayScale)
                 if reduceMotion {
                     settled = true
                 } else {
@@ -54,12 +56,14 @@ struct HomeBackdrop: View {
     private func request(for size: CGSize) -> TerrainSnapshotRequest? {
         guard size.width > 0, size.height > 0 else { return nil }
         return TerrainSnapshotRequest(
-            center: TerrainSnapshotRequest.center(forRider: riderCoordinate),
+            center: camera.center,
             // The authored-style identity signals the snapshotter to load the bundled JSON, and
             // its version bakes into the cache key so a restyle invalidates stale snapshots.
             styleURI: TerrainStyle.authoredStyleIdentity,
-            width: size.width,
-            height: size.height)
+            width: size.width, height: size.height,
+            zoom: camera.zoom,
+            quantizationDegrees: precise ? TerrainSnapshotRequest.preciseQuantizationDegrees
+                                         : TerrainSnapshotRequest.quantizationDegrees)
     }
 
     // Top + bottom scrims keep the greeting and launch band legible over terrain. They

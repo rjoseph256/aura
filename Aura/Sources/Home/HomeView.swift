@@ -13,12 +13,20 @@ struct HomeView: View {
     @Environment(LocationService.self) private var location
     @Environment(WeatherStore.self) private var weather
 
+    @Environment(\.scenePhase) private var scenePhase
+
     @State private var query = ""
     @State private var summaries: [RideSummary] = []
     @State private var didLoad = false
     @State private var renameTarget: SavedPlace?
     @State private var renameText = ""
     @State private var searchExpanded = false
+    @State private var mapModel = HomeMapModel(initial: .initial(forRider: nil))
+    @State private var didResolveInitialCenter = false
+    @State private var flyToTarget: Coordinate?
+    /// The search-picked destination, rendered as a persistent dropped pin on the live map.
+    /// Cleared on a real camera reset (ride completed / cold launch) — see `resolveCenter`.
+    @State private var focusedPlace: Place?
     /// Kept in sync (via onChange/onAppear) so the dashboard sheet shows only at Home root and
     /// when not searching — a pushed screen (Explore, preview, join) is never covered by the
     /// sheet, and search never stacks with it. Using @State (not a derived binding) so the
@@ -57,6 +65,13 @@ struct HomeView: View {
             }
         }
         .task { await loadRides() }
+        // One-shot cold-launch center resolve → rider (authorized) or curated fallback.
+        .task {
+            if !didResolveInitialCenter {
+                didResolveInitialCenter = true
+                await resolveCenter(reset: false)
+            }
+        }
         // Fetch weather for the greeting, and again if authorization changes. Gated on real
         // authorization so we never show weather for the location fallback when permission is
         // absent (spec: no permission → weather hidden). Silent-hides on any failure.
@@ -69,8 +84,29 @@ struct HomeView: View {
         // Refetch when CloudKit merges a remote ride, so the glance + last-ride stay live even
         // with the sheet at peek (the subscription is on the always-mounted container).
         .onChange(of: rideStore.syncRevision) { Task { await loadRides() } }
-        .onChange(of: router.path) { syncSheet() }
+        .onChange(of: router.path) {
+            syncSheet()
+            if router.path.isEmpty {
+                mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .becameTopActive) // no reset
+            } else {
+                mapModel.freezeIdleFromLive()
+                mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .resignedTop)
+            }
+        }
         .onChange(of: searchExpanded) { syncSheet() }
+        .onChange(of: scenePhase) {
+            if scenePhase != .active {
+                mapModel.freezeIdleFromLive()
+                mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .background)
+            }
+        }
+        // Real post-ride reset: the ride HUD sets router.isRideActive; its true→false edge is a
+        // ride ending.
+        .onChange(of: router.isRideActive) { wasActive, isActive in
+            if wasActive && !isActive, HomeMapCamera.shouldReset(on: .rideCompleted) {
+                Task { await resolveCenter(reset: true) }
+            }
+        }
         // Align the selected detent with the sheet's *scaled* peek detent (the @State literal
         // is only correct at default Dynamic Type); keeps the selection binding valid at all sizes.
         .onAppear { syncSheet(); selectedDetent = .height(peekHeight) }
@@ -89,30 +125,40 @@ struct HomeView: View {
 
     private var populated: some View {
         ZStack {
-            HomeBackdrop(renderer: renderer, riderCoordinate: nil, placeName: nil)
+            HomeMapCanvas(renderer: renderer, model: mapModel, savedPlaces: savedPlaces.places,
+                          onSelectSaved: { saved in
+                              mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .activate)
+                              flyToTarget = saved.place.coordinate
+                              // Keep the "Ride here" card + focus in sync with whichever pin was
+                              // tapped — otherwise a different saved pin's tap would fly the map
+                              // while leaving a stale/mismatched card up for a previous place.
+                              focusedPlace = saved.place
+                          },
+                          flyTo: $flyToTarget, focusedPlace: focusedPlace, bottomInset: peekHeight)
 
             VStack(spacing: 0) {
                 header.padding(.top, AuraTheme.Spacing.lg)
-                Spacer(minLength: 0)
-                if !searchExpanded {
-                    HomeLaunchBand(
-                        onWhereTo: { searchExpanded = true },
-                        onExplore: { router.push(.freeRide) },
-                        onJoin: { router.push(.joinRide) },
-                        onSaved: {
-                            if searchExpanded { searchExpanded = false }
-                            selectedDetent = .large
-                            revealSavedNonce += 1
-                        },
-                        hasSaved: !savedPlaces.places.isEmpty)
-                        .padding(.bottom, peekHeight + AuraTheme.Spacing.md) // sit above the peek sheet
+                if location.authorization != .authorized {
+                    HomeLocationHint()
+                        .padding(.horizontal, AuraTheme.Spacing.xxl)
+                        .padding(.top, AuraTheme.Spacing.sm)
                 }
+                Spacer(minLength: 0)
+                if !searchExpanded { launchSlot }
             }
 
             if searchExpanded {
                 SearchOverlay(
                     query: $query,
-                    onPick: { place in router.remember(place); router.push(.preview(place)) },
+                    onPick: { place in
+                        // Picking a place flies the Home map to it (PO decision 2026-07-20),
+                        // rather than opening route preview.
+                        router.remember(place)
+                        searchExpanded = false
+                        mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .activate)
+                        flyToTarget = place.coordinate
+                        focusedPlace = place
+                    },
                     onCollapse: { searchExpanded = false })
             }
         }
@@ -131,19 +177,6 @@ struct HomeView: View {
         } body: {
             sheetBody
         }
-    }
-
-    private func loadRides() async {
-        summaries = (try? rideStore.summaries()) ?? []
-        didLoad = true
-    }
-
-    /// Refreshes greeting weather only when location is actually authorized — otherwise
-    /// `location.current()` returns a city fallback and we'd show weather for a place the
-    /// rider isn't at. Failures inside `refresh` are already swallowed (weather hides).
-    private func refreshWeather() async {
-        guard location.authorization == .authorized else { return }
-        await weather.refresh(near: location.current(for: .coarse), now: Date())
     }
 
     private var header: some View {
@@ -214,17 +247,6 @@ struct HomeView: View {
         .accessibilitySortPriority(-1)
     }
 
-    private var greeting: String {
-        switch Calendar.current.component(.hour, from: Date()) {
-        case 5..<12: return "Good morning"
-        case 12..<17: return "Good afternoon"
-        case 17..<22: return "Good evening"
-        default: return "Late ride?"
-        }
-    }
-
-    private var visibleRecents: [Place] { router.recents.filter { !savedPlaces.isSaved($0) } }
-
     @ViewBuilder private var sheetBody: some View {
         VStack(spacing: AuraTheme.Spacing.xxxl) {
             if !savedPlaces.places.isEmpty { savedSection }
@@ -239,7 +261,7 @@ struct HomeView: View {
             listCard {
                 ForEach(savedPlaces.places) { saved in
                     SavedPlaceRow(saved: saved,
-                                  onTap: { router.push(.preview(saved.place)) },
+                                  onTap: { leaveHome(pushing: .preview(saved.place)) },
                                   onRename: { renameText = saved.name; renameTarget = saved },
                                   onSetHome: { savedPlaces.setHome(id: saved.id) },
                                   onRemoveHome: { savedPlaces.removeHome(id: saved.id) },
@@ -257,7 +279,7 @@ struct HomeView: View {
             sectionHeader("Recents")
             listCard {
                 ForEach(visibleRecents) { place in
-                    RecentRow(place: place) { router.push(.preview(place)) }
+                    RecentRow(place: place) { leaveHome(pushing: .preview(place)) }
                     if place.id != visibleRecents.last?.id { rowDivider }
                 }
             }
@@ -279,4 +301,95 @@ struct HomeView: View {
             .foregroundStyle(AuraTheme.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+// MARK: - Data & lifecycle helpers
+// Extracted into an extension so the main `HomeView` body stays within SwiftLint's
+// type_body_length limit; behavior is unchanged.
+private extension HomeView {
+    func loadRides() async {
+        summaries = (try? rideStore.summaries()) ?? []
+        didLoad = true
+    }
+
+    /// "Ride here" on the focused-place card: clears the pin and hands off to route preview via
+    /// `leaveHome` (single-renderer-safe teardown), same as any other saved/recent pick.
+    func rideToFocusedPlace() {
+        let target = focusedPlace
+        focusedPlace = nil
+        if let target { leaveHome(pushing: .preview(target)) }
+    }
+
+    /// The launch band's slot: a focused (flown-to) place takes it over with a "Ride here"
+    /// card instead of stacking alongside the band, so there is always exactly one bottom
+    /// action surface.
+    @ViewBuilder
+    var launchSlot: some View {
+        if let focusedPlace {
+            FocusedPlaceCard(
+                place: focusedPlace,
+                onRideHere: { rideToFocusedPlace() },
+                onDismiss: { self.focusedPlace = nil })
+                .padding(.bottom, peekHeight + AuraTheme.Spacing.md) // sit above the peek sheet
+        } else {
+            HomeLaunchBand(
+                onWhereTo: { searchExpanded = true },
+                onExplore: { leaveHome(pushing: .freeRide) },
+                onJoin: { leaveHome(pushing: .joinRide) },
+                onSaved: {
+                    if searchExpanded { searchExpanded = false }
+                    selectedDetent = .large
+                    revealSavedNonce += 1
+                },
+                hasSaved: !savedPlaces.places.isEmpty)
+                .padding(.bottom, peekHeight + AuraTheme.Spacing.md) // sit above the peek sheet
+        }
+    }
+
+    /// Leaves Home for a pushed route that will mount its own map (ride HUD, join flow). Commits
+    /// `.idle` (tearing down the live map THIS update, no animation on that edge) before pushing
+    /// on the NEXT runloop tick, so SwiftUI removes `HomeLiveMap` before the destination's map
+    /// mounts — never two live maps at once (single-renderer invariant).
+    func leaveHome(pushing route: AppRoute) {
+        mapModel.freezeIdleFromLive()
+        mapModel.phase = .idle
+        DispatchQueue.main.async { router.push(route) }
+    }
+
+    /// One-shot center resolve → rider (authorized) or curated fallback. Writes the model's cameras.
+    func resolveCenter(reset: Bool) async {
+        let camera: HomeMapCamera
+        if location.authorization == .authorized {
+            camera = HomeMapCamera.initial(forRider: await location.current(for: .coarse))
+        } else {
+            camera = HomeMapCamera.initial(forRider: nil)
+        }
+        if reset {
+            mapModel.reset(to: camera)
+            focusedPlace = nil
+        } else {
+            mapModel.idleCamera = camera
+            mapModel.liveCamera = camera
+        }
+    }
+
+    /// Refreshes greeting weather only when location is actually authorized — otherwise
+    /// `location.current(for:)` returns a city fallback and we'd show weather for a place the
+    /// rider isn't at. Uses the coarse (low-power ambient) fix — the greeting doesn't need a
+    /// precise locate. Failures inside `refresh` are already swallowed (weather hides).
+    func refreshWeather() async {
+        guard location.authorization == .authorized else { return }
+        await weather.refresh(near: location.current(for: .coarse), now: Date())
+    }
+
+    var greeting: String {
+        switch Calendar.current.component(.hour, from: Date()) {
+        case 5..<12: return "Good morning"
+        case 12..<17: return "Good afternoon"
+        case 17..<22: return "Good evening"
+        default: return "Late ride?"
+        }
+    }
+
+    var visibleRecents: [Place] { router.recents.filter { !savedPlaces.isSaved($0) } }
 }
