@@ -8,6 +8,10 @@ struct RideSummaryView: View {
     /// than letting it silently vanish from History.
     var saveFailed: Bool = false
 
+    /// Injected by the ride-end pushed route to return Home via `popToRoot()`. `nil` for the
+    /// History sheet, which dismisses itself via `@Environment(\.dismiss)`.
+    var onDone: (() -> Void)?
+
     @Environment(\.dismiss) private var dismiss
     @Environment(SettingsStore.self) private var settings
     @Environment(RideStore.self) private var store
@@ -79,7 +83,9 @@ struct RideSummaryView: View {
                     .padding(.top, AuraTheme.Spacing.md)
                 }
 
-                Button("Done") { dismiss() }
+                Button("Done") {
+                    if let onDone { onDone() } else { dismiss() }
+                }
                     .buttonStyle(.ctaPrimary)
                     .padding(.top, AuraTheme.Spacing.xs)
             }

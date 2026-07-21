@@ -7,7 +7,7 @@ import AuraKit
 /// shows the quarter-screen `ExploreInstrumentPanel` + a recenter/end `ControlCluster` over
 /// the terrain map, and offers an always-visible back-out: a just-started ride (below the
 /// discard floor) is discarded with no summary; once it is worth a summary, back opens the
-/// End confirmation. Ending routes through the coordinator's finish → summary sheet.
+/// End confirmation. Ending routes through the coordinator's finish → pushed summary route.
 struct RideHUDView: View {
     @Environment(AppRouter.self) private var router
     @Environment(RideStore.self) private var rideStore
@@ -61,7 +61,6 @@ struct RideHUDView: View {
     }
 
     var body: some View {
-        @Bindable var coordinator = coordinator
         ZStack(alignment: .bottom) {
             RideMapView(track: coordinator.track,
                         gems: gems?.visiblePins ?? [],
@@ -127,10 +126,6 @@ struct RideHUDView: View {
                isPresented: $showSavedPlacesFull) {
             Button("OK", role: .cancel) {}
         }
-        // Returning from the summary drops to the home dashboard, mirroring NavigateHUDView.
-        .sheet(item: $coordinator.finishedRide, onDismiss: { router.popToRoot() }, content: { ride in
-            RideSummaryView(ride: ride, saveFailed: coordinator.saveFailed)
-        })
         .sheet(isPresented: $showPermission) {
             LocationPermissionView(onOpenSettings: RideSettingsLink.open)
         }
@@ -178,7 +173,9 @@ struct RideHUDView: View {
             router.isRideActive = recording
         }
         .onChange(of: coordinator.finishedRide) { _, ride in
-            if ride != nil { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+            guard let ride else { return }
+            WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+            router.showRideSummary(ride, saveFailed: coordinator.saveFailed)
         }
         .onDisappear {
             router.isRideActive = false

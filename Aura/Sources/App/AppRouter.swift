@@ -18,6 +18,13 @@ final class AppRouter {
     func pop() { if !path.isEmpty { path.removeLast() } }
     func popToRoot() { path.removeAll() }
 
+    /// Present the finished-ride summary as a pushed route by COLLAPSING the whole path to a
+    /// single entry, so only Home sits beneath it (ROH-85). The collapse (and its single-entry
+    /// invariant) lives in the pure, unit-tested `RideSummaryRouting.collapsed`. One path write.
+    func showRideSummary(_ ride: Ride, saveFailed: Bool) {
+        path = RideSummaryRouting.collapsed(ride: ride, saveFailed: saveFailed)
+    }
+
     /// Routes an `aura://…` deep link onto the nav path. A recording ride takes precedence:
     /// a URL must never abandon it, so every link is dropped while `isRideActive`. Unknown
     /// links are dropped too, because the parser returns nil for them. The link→path mapping
