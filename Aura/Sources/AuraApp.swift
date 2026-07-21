@@ -105,6 +105,18 @@ private struct RootView: View {
                         HistoryView()
                     case .settings:
                         SettingsView()
+                    case let .rideSummary(payload):
+                        // Pushed (not a sheet) so returning Home via popToRoot animates
+                        // summary → Home with no HUD to flash (ROH-85). Chrome hidden + swipe
+                        // back off so the summary is a terminal screen exited only via Done
+                        // (with the path collapsed to one entry, a VoiceOver .escape also lands
+                        // on Home). A foreground deep link while this is up replaces the path
+                        // (isRideActive is false) — accepted, same as the old sheet.
+                        RideSummaryView(ride: payload.ride, saveFailed: payload.saveFailed,
+                                        onDone: { router.popToRoot() })
+                            .toolbar(.hidden, for: .navigationBar)
+                            .navigationBarBackButtonHidden(true)
+                            .swipeBackEnabled(false)
                     }
                 }
         }
