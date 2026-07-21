@@ -9,7 +9,7 @@ public final class LocationService: NSObject, LocationStreaming {
     public private(set) var authorization: LocationAuthorization = .notDetermined
     public private(set) var signal: SignalQuality = .good
 
-    @ObservationIgnored let manager = CLLocationManager()
+    @ObservationIgnored let manager: any LocationManaging
 
     /// The current location tier. Drives which manager configuration is active and
     /// whether the background session/indicator is armed. Read by the RootView controller
@@ -28,7 +28,7 @@ public final class LocationService: NSObject, LocationStreaming {
 
     /// A dedicated manager for one-shot `current()` fixes, kept separate from the ambient
     /// `manager` so a one-shot and the continuous ambient monitor never share delegate state.
-    @ObservationIgnored let oneShotManager = CLLocationManager()
+    @ObservationIgnored let oneShotManager: any LocationManaging
 
     /// Most recent ambient (coarse, Home-foreground) fix. Drives weather refresh and the
     /// `.coarse` branch of `current()`. Nil until the ambient monitor delivers.
@@ -52,7 +52,17 @@ public final class LocationService: NSObject, LocationStreaming {
     #if os(iOS)
     @ObservationIgnored private var backgroundSession: CLBackgroundActivitySession?
     #endif
-    public override init() {
+    public override convenience init() {
+        self.init(manager: CLLocationManager(), oneShotManager: CLLocationManager())
+    }
+
+    /// Designated init with the CoreLocation seam injected. Production uses the real
+    /// `CLLocationManager`s via the no-arg `init()`; unit tests pass a `LocationManaging` fake so
+    /// no real manager — and therefore no leaked `locationd` XPC connection — is constructed under
+    /// `swift test` on the headless CI host (ROH-88).
+    init(manager: any LocationManaging, oneShotManager: any LocationManaging) {
+        self.manager = manager
+        self.oneShotManager = oneShotManager
         super.init()
         manager.delegate = self
         oneShotManager.delegate = self

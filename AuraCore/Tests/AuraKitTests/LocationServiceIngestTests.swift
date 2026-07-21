@@ -5,8 +5,13 @@ import CoreLocation
 
 @MainActor
 struct LocationServiceIngestTests {
+    /// Fake-backed service so the test never builds a real `CLLocationManager` (ROH-88).
+    private func makeService() -> LocationService {
+        LocationService(manager: FakeLocationManager(), oneShotManager: FakeLocationManager())
+    }
+
     @Test func capturesValidDopplerSpeed() {
-        let svc = LocationService()
+        let svc = makeService()
         let loc = CLLocation(coordinate: .init(latitude: 40.44, longitude: -80.0),
                              altitude: 100, horizontalAccuracy: 5, verticalAccuracy: 5,
                              course: 0, speed: 8.0, timestamp: Date())
@@ -15,7 +20,7 @@ struct LocationServiceIngestTests {
     }
 
     @Test func dropsInvalidSpeedToNil() {
-        let svc = LocationService()
+        let svc = makeService()
         let loc = CLLocation(coordinate: .init(latitude: 40.44, longitude: -80.0),
                              altitude: 100, horizontalAccuracy: 5, verticalAccuracy: 5,
                              course: 0, speed: -1, timestamp: Date())
@@ -28,7 +33,7 @@ struct LocationServiceIngestTests {
     // to nil. This pins the `>= 0` guard so a later refactor to `> 0` can't silently
     // break stopped-rider decay-to-zero on the dial.
     @Test func capturesZeroSpeed() {
-        let svc = LocationService()
+        let svc = makeService()
         let loc = CLLocation(coordinate: .init(latitude: 40.44, longitude: -80.0),
                              altitude: 100, horizontalAccuracy: 5, verticalAccuracy: 5,
                              course: 0, speed: 0, timestamp: Date())
