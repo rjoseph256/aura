@@ -123,7 +123,7 @@ struct HomeView: View {
                               mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .activate)
                               flyToTarget = saved.place.coordinate
                           },
-                          flyTo: flyToTarget)
+                          flyTo: $flyToTarget)
 
             VStack(spacing: 0) {
                 header.padding(.top, AuraTheme.Spacing.lg)
@@ -261,7 +261,7 @@ struct HomeView: View {
             listCard {
                 ForEach(savedPlaces.places) { saved in
                     SavedPlaceRow(saved: saved,
-                                  onTap: { router.push(.preview(saved.place)) },
+                                  onTap: { leaveHome(pushing: .preview(saved.place)) },
                                   onRename: { renameText = saved.name; renameTarget = saved },
                                   onSetHome: { savedPlaces.setHome(id: saved.id) },
                                   onRemoveHome: { savedPlaces.removeHome(id: saved.id) },
@@ -279,7 +279,7 @@ struct HomeView: View {
             sectionHeader("Recents")
             listCard {
                 ForEach(visibleRecents) { place in
-                    RecentRow(place: place) { router.push(.preview(place)) }
+                    RecentRow(place: place) { leaveHome(pushing: .preview(place)) }
                     if place.id != visibleRecents.last?.id { rowDivider }
                 }
             }

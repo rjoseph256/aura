@@ -9,24 +9,41 @@ struct HomeLiveMap: View {
     @Bindable var model: HomeMapModel
     var savedPlaces: [SavedPlace] = []
     var onSelectSaved: (SavedPlace) -> Void = { _ in }
-    var flyTo: Coordinate?
+    @Binding var flyTo: Coordinate?
 
     @Environment(LocationService.self) private var location
     @State private var viewport: Viewport
     /// True while OUR animation (recenter/flyTo) drives the camera, so its `onCameraChanged`
     /// callbacks don't get counted as a user pan (which would re-show the recenter button).
     @State private var programmatic = false
+    /// True when `init` framed the viewport directly on `flyTo` (mount-with-target). Lets the
+    /// first `.onChange(of: flyTo, initial: true)` firing just consume the target instead of
+    /// re-animating to where the map already is.
+    @State private var didSeedFromFlyTo: Bool
 
     init(model: HomeMapModel, savedPlaces: [SavedPlace] = [],
-         onSelectSaved: @escaping (SavedPlace) -> Void = { _ in }, flyTo: Coordinate? = nil) {
+         onSelectSaved: @escaping (SavedPlace) -> Void = { _ in },
+         flyTo: Binding<Coordinate?> = .constant(nil)) {
         self.model = model
         self.savedPlaces = savedPlaces
         self.onSelectSaved = onSelectSaved
-        self.flyTo = flyTo
+        _flyTo = flyTo
+        // Seed from the fly-to target when mounting WITH one already set (search/saved picked
+        // before the map activated) so the map opens framed on the target deterministically —
+        // not on the rider, which `model.liveCamera` would otherwise seed. Otherwise seed from
+        // the rider camera as before.
+        let seedCamera: HomeMapCamera
+        if let target = flyTo.wrappedValue {
+            seedCamera = HomeMapCamera(center: target, zoom: HomeMapCamera.defaultZoom)
+            _didSeedFromFlyTo = State(initialValue: true)
+        } else {
+            seedCamera = model.liveCamera
+            _didSeedFromFlyTo = State(initialValue: false)
+        }
         _viewport = State(initialValue: .camera(
-            center: CLLocationCoordinate2D(latitude: model.liveCamera.center.latitude,
-                                           longitude: model.liveCamera.center.longitude),
-            zoom: model.liveCamera.zoom))
+            center: CLLocationCoordinate2D(latitude: seedCamera.center.latitude,
+                                           longitude: seedCamera.center.longitude),
+            zoom: seedCamera.zoom))
     }
 
     var body: some View {
@@ -65,11 +82,20 @@ struct HomeLiveMap: View {
             guard !programmatic, !model.movedOffRider else { return }
             animate(to: cam)
         }
-        .onChange(of: flyTo) { _, target in
-            if let target {
+        // `initial: true` so a mount-with-target (search/saved picked before the map was live)
+        // is handled on the very first evaluation, not just later changes. `flyTo` is a
+        // consumable command: it is always reset to `nil` after being acted on, so re-picking
+        // the same coordinate (nil → coordinate again) re-fires this.
+        .onChange(of: flyTo, initial: true) { _, target in
+            guard let target else { return }
+            if didSeedFromFlyTo {
+                // `init` already framed the viewport on this target — nothing to animate.
+                didSeedFromFlyTo = false
+            } else {
                 animate(to: HomeMapCamera(center: target, zoom: HomeMapCamera.defaultZoom))
-                model.movedOffRider = true
             }
+            model.movedOffRider = true
+            flyTo = nil // consume
         }
         .overlay(alignment: .trailing) {
             if model.movedOffRider { recenterButton.padding(.trailing, AuraTheme.Spacing.lg) }

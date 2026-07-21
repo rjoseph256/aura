@@ -11,7 +11,7 @@ struct HomeMapCanvas: View {
     @Bindable var model: HomeMapModel
     var savedPlaces: [SavedPlace] = []
     var onSelectSaved: (SavedPlace) -> Void = { _ in }
-    var flyTo: Coordinate?
+    @Binding var flyTo: Coordinate?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -21,7 +21,7 @@ struct HomeMapCanvas: View {
                 .allowsHitTesting(model.phase == .idle)
 
             if model.phase == .live {
-                HomeLiveMap(model: model, savedPlaces: savedPlaces, onSelectSaved: onSelectSaved, flyTo: flyTo)
+                HomeLiveMap(model: model, savedPlaces: savedPlaces, onSelectSaved: onSelectSaved, flyTo: $flyTo)
                     // Animate the APPEARANCE (idle→live) only; removal is instant.
                     .transition(.asymmetric(insertion: reduceMotion ? .identity : .opacity, removal: .identity))
             }
