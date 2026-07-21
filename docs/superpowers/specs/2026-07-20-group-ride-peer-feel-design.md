@@ -68,250 +68,334 @@ logic go in AuraCore next to `PeerBearing`/`PeerStatusReducer`.
 
 ## 3. ROH-69 — smooth interpolation
 
-### 3.1 Model: chase-to-target with eased arrival (not render-delay buffer)
+> **Reconciled after adversarial review.** The interpolator is driven by each fix's
+> **`recordedAt`** (the payload timestamp, already stored as `RidePeer.lastUpdate`), **not**
+> by view wall-clock arrival time. `recordedAt` is sender-truthful, ~monotonic, and the exact
+> basis presence/`droppedTimeout` already use — so snap, duration, and the ROH-66 boundary all
+> stay coherent, and out-of-order/duplicate/heartbeat/unchanged fixes are filtered by one
+> `recordedAt` guard instead of five ad-hoc ones. Wall-clock is used only to *start* a tween;
+> its *size* comes from `recordedAt` spacing.
 
-On each new fix, tween the *rendered* position from where the dot currently is → the new
-fix, over an interval-aware duration, easing out so a late packet **arrives and holds**
-(ease to a stop), never extrapolating past the last fix. This matches the issue's stated
-direction ("interpolate over roughly the expected inter-update interval so the dot arrives
-just as the next fix lands"), is the simplest thing to make **pure and deterministic**, and
-adds no render latency. (A render-delay/buffer model is smoother under jitter but renders
-~1 interval in the past and carries more state — rejected as over-engineered for ≤7 dots at
-bike speed.)
+### 3.1 Model: chase-to-target, linear-normal / ease-late
+
+On each new fix, tween the *rendered* position from where the dot currently is → the new fix,
+over a duration equal to the observed fix spacing (§3.4). **Normal (on-time) segments use
+linear** timing — a constant-speed rider must read as constant glide, not decelerate-into-
+every-fix (uniform ease-out manufactures a stop-and-go ripple at the fix cadence). **Ease-out
+is applied only to a late/last segment** (when the tween runs past its expected duration with
+no new fix): the dot then decelerates to a stop rather than freezing mid-glide or overshooting.
+Never extrapolate past the last fix.
+
+Inherent latency: like *any* interpolation-not-extrapolation model (buffer or chase), the dot
+reaches fix N ≈ when fix N+1 arrives, so peer dots trail true position by ~one fix interval
+(the rider's own `Puck2D` stays live). Accepted — chase-to-target is chosen for minimal state
+and pure-testability, not for latency.
 
 ### 3.2 `PeerInterpolator` (new, pure, AuraCore) — one per peer
 
-A value type holding the active tween and the arrival-cadence estimate. Time is **injected**
-(`now: Date`), never read internally — same discipline as `RideSession`.
+A value type holding the active tween and the last fix's timestamp. All time is **injected**.
 
-State: `from: Coordinate`, `to: Coordinate`, `startTime: Date`, `duration: TimeInterval`,
-`fromBearing: Double?`, `toBearing: Double?`, `lastArrival: Date`, `arrivalEWMA:
-TimeInterval`, `snapped: Bool`.
+State: `from, to: Coordinate`, `startWall: Date` (tween start, wall-clock), `duration:
+TimeInterval` (from `recordedAt` spacing), `fromBearing, toBearing: Double?`,
+`lastRecordedAt: Date`, `lastGap: TimeInterval`, `settled: Bool`.
 
-API:
+API (all `now` = wall-clock render/commit time; `recordedAt` = fix timestamp):
 
-- `mutating func commit(fix: Coordinate, at now: Date)` — called when a new fix arrives:
-  1. `elapsedSinceArrival = now - lastArrival`; update `arrivalEWMA` (EWMA, α≈0.4),
-     clamp to `[minInterval, maxInterval]` (see §3.4).
-  2. `newFrom = position(at: now)` (freeze the current rendered point as the tween origin).
-  3. Decide **snap** (§3.3). If snap: `from = to = fix`, `duration = 0`, `snapped = true`,
-     bearings jump. Else: `from = newFrom`, `to = fix`, `startTime = now`,
-     `duration = arrivalEWMA`, `fromBearing = current bearing`,
-     `toBearing = heading(newFrom → fix)` (nil if coincident → hold last).
-  4. `lastArrival = now`.
-- `func position(at now: Date) -> Coordinate` — `t = clamp((now-startTime)/duration, 0, 1)`
-  (t=1 when duration 0); `lerp(from, to, easeOut(t))`. Lerp is planar on lat/lon
-  (fine at the sub-100m deltas between fixes; documented). Clamped → never overshoots.
-- `func bearing(at now: Date) -> Double?` — shortest-arc angular lerp from `fromBearing`
-  → `toBearing` over the same `t`; holds last known when `toBearing == nil` (stopped) so the
-  pointer never spins to a random direction. nil only until the first real segment exists.
-- `func isActive(at now: Date) -> Bool` — `now - startTime < duration` (a tween is running).
-  Drives the frame-clock pause (§3.5).
+- `mutating func commit(fix: Coordinate, recordedAt: Date, now: Date)`:
+  1. **First fix** (`lastRecordedAt == nil`): `from = to = fix`, `duration = 0`,
+     `lastRecordedAt = recordedAt`; appear in place. Return.
+  2. **Stale/dup/unchanged guard:** if `recordedAt <= lastRecordedAt`, **return unchanged**
+     (drops reordered older fixes and the many `onChange(of: peers)` firings caused by a
+     *different* peer moving or by a `status`/`progress`-only change — see §3.6). A heartbeat
+     that republishes the same point advances `recordedAt` but has zero distance → step 4
+     gives it `duration = 0`, so it never drives the clock.
+  3. `gap = recordedAt - lastRecordedAt`; `newFrom = position(at: now)` (freeze current point).
+  4. Decide **snap** (§3.3). Snap → `from = to = fix`, `duration = 0`. Coincident
+     (`distance(newFrom→fix) ≈ 0`) → `from = to = fix`, `duration = 0` (no idle animation).
+     Else → `from = newFrom`, `to = fix`, `duration = clamp(gap)` (§3.4), `startWall = now`,
+     `fromBearing = bearing(at: now)`, `toBearing = heading(newFrom→fix)`.
+  5. `lastRecordedAt = recordedAt`; `lastGap = gap`.
+- `func position(at now: Date) -> Coordinate` — `t = duration>0 ? clamp((now-startWall)/duration,0,1) : 1`;
+  `lerp(from, to, curve(t))` where `curve` = **linear** while `t ≤ 1`; the *view* applies
+  ease-out decay only when a segment is overdue (no commit past `duration`). Planar lerp on
+  lat/lon — correct at the sub-100 m deltas between fixes; the large-gap case is snapped.
+- `func bearing(at now: Date) -> Double?` — **shortest-arc** angular lerp `fromBearing→toBearing`
+  over `t` (must handle the 0/360 seam: 350→10 yields +20, not −340). Holds last heading when
+  `toBearing == nil` (coincident/stopped) so the pointer never spins to a random direction; nil
+  only before the first real segment.
+- `func isActive(at now: Date) -> Bool` — `duration > 0 && now - startWall < duration`.
 
-`easeOut`: `1 - pow(1 - t, 2)` (quadratic) — decelerates into the target so an on-time fix
-reads as continuous motion and a late fix reads as slowing to a stop.
+### 3.3 Snap (don't glide across a gap) — keyed on `recordedAt`
 
-### 3.3 Snap (don't glide across a gap)
+`commit` snaps instead of tweening when **either**, using the `recordedAt` `gap`:
 
-`commit` snaps instead of tweening when **either**:
+- **Silence:** `gap > snapSilenceThreshold` (= `droppedTimeout`, 40s). A peer who went silent
+  long enough to be `.dropped` and then reappears **jumps**; a dead-zone gap is never glided
+  across. Because both this and `.dropped` read `recordedAt`, they trip on the same event (§6).
+- **Implausible speed:** `distance(from→fix) / gap > maxPlausibleSpeed` (~25 m/s). Uses the
+  *sender-truthful* `gap`, so batched broadcasts arriving 0.1 s apart (arrival-delta ≈ 0)
+  **do not** false-snap normal motion — the denominator is the real fix spacing.
 
-- **Silence:** `elapsedSinceArrival > snapSilenceThreshold` — aligned to `droppedTimeout`
-  (40s). A peer who went `.dropped` and reappears jumps to their new position rather than
-  sliding across the dead interval. (§6 explains why this stays coherent with ROH-66.)
-- **Implausible speed:** `distance(from→fix) / elapsedSinceArrival > maxPlausibleSpeed`
-  (~25 m/s ≈ 90 km/h, generous for cycling + GPS noise). Catches a big jump inside a short
-  window (GPS teleport / re-acquire).
+Thresholds are defaulted constructor params (tests drive them; app wires from `LiveShareCadence`).
 
-Both thresholds are constructor parameters (defaulted), so tests drive them and the app wires
-them from `LiveShareCadence`.
+### 3.4 Duration = observed fix spacing (no EWMA lag)
 
-### 3.4 Interval-aware duration
-
-Duration = EWMA of observed inter-arrival Δt, **not** a hardcoded 2s — so it self-adapts when
-a rider backgrounds (6s) or goes stationary (15s cadence) without the receiver needing to
-know the sender's lifecycle. Clamped to `[minInterval ≈ 0.5s, maxInterval ≈ 8s]`: the floor
-stops a burst of near-simultaneous fixes from making the dot lunge; the ceiling stops one
-long gap from making the dot crawl for minutes (the 246s desk-gap case) — beyond the ceiling
-we're in snap territory anyway. Seeded to `foregroundInterval` (2s) for a peer's first tween.
+`duration = clamp(gap, minInterval ≈ 0.5s, maxInterval ≈ 8s)` — the **last observed
+`recordedAt` gap**, used directly. This adapts *instantly* to a cadence change (6 s→2 s on
+foregrounding shortens the very next tween; an EWMA would stay high and make the dot chase at
+a fraction of real speed). Floor stops a lunge on a tiny gap; ceiling caps a long gap (beyond
+it we snap anyway).
 
 ### 3.5 Frame clock
 
-`TimelineView(.animation(minimumInterval: 1/30, paused:))` wraps the `Map { }` content.
-Each frame reads `interpolator.position(at: context.date)` / `.bearing(at:)` for every
-visible peer and feeds the interpolated **geographic coordinate** to
-`MapViewAnnotation(coordinate:)` and the interpolated bearing to `PeerDotView`.
+`TimelineView(.animation(minimumInterval: 1/30, paused:))` wraps the `Map { }` content. Each
+frame reads interpolated **geographic coordinate** + bearing per visible peer and feeds them to
+`MapViewAnnotation(coordinate:)` / `PeerDotView`.
 
-- **Why geographic, not a view-space offset:** the HUD map follows heading
-  (`.followPuck(bearing: .heading)`), so a point offset would skew as the map rotates. The
-  interpolated lat/lon is the only correct anchor.
-- **`paused` = `reduceMotion || noPeerActive`** where
-  `noPeerActive = !peers.contains { interp[$0].isActive(at: now) }`. When the last tween
-  settles the clock stops; a new fix mutates `@State` via `.onChange(of: peers)`, re-evaluates
-  the body, flips `paused` false, and TimelineView resumes. Zero idle cost when nobody moves
-  and zero added cost under Reduce Motion.
-- **Per-frame cost:** the only heavy non-peer MapContent is `RouteSplit.splitIndex` (a scan
-  over the growing track). **Memoise** it into `@State` updated in
-  `.onChange(of: track)`/`.onChange(of: selfProgress)` so a 30fps body re-eval only rebuilds
-  the ≤7 peer annotations (value types Mapbox diffs cheaply), not the split. `id: \.userID`
-  keeps annotation identity stable across frames.
+- **Why geographic, not a view-space offset:** the HUD map follows heading, so a point offset
+  would skew as the map rotates — interpolated lat/lon is the only correct anchor.
+- **`paused` = `noPeerActive`** only (**not** gated on Reduce Motion — see §4.6; RM keeps a
+  gentle glide, it just suppresses pulse + pointer rotation). When the last tween settles the
+  clock stops; the next fix mutates `@State` (§3.6) → body re-eval → `paused` flips false →
+  TimelineView resumes. Idle cost is zero when nobody is mid-tween.
+- **One final settle frame:** when a tween completes, commit its target coordinate into the
+  memoised display state so the dot rests exactly on the fix (no ~2% short freeze) before the
+  clock pauses.
+- **Per-frame cost — hoist everything derived, not just the route split.** All of these are
+  computed **once per peer-set change** into `@State`, never inside the 30fps closure:
+  `RouteSplit.splitIndex` (memoise on `track`/`selfProgress`), `leaderID` (O(n) max-scan),
+  `GroupMapDots.visiblePeers` (filter+cap), `PeerPalette.assign` (order-dependent — must never
+  recompute mid-render), disambiguated monograms (§4.5), and `nameTag`/overlap decisions (§4.4).
+  The 30fps closure then only rebuilds ≤7 `MapViewAnnotation`s (value types Mapbox diffs
+  cheaply). `id: \.userID` keeps annotation identity stable.
+- **Gesture/viewport fallback (not just a checkbox).** If re-evaluating `Map { }` at 30fps
+  fights the `$viewport` binding or user pan/zoom/rotate on device, fall back to a lighter
+  driver: a small `@Observable` display-tick published at 30fps **only while `anyActive`**
+  (a `Task` loop with injected sleep), read by the annotations, leaving the rest of the Map
+  body out of the per-frame path. Decided during the build from on-device behaviour; the pure
+  interpolation math is identical either way.
 
-### 3.6 Where interpolation state lives
+### 3.6 Where interpolation state lives — and the commit trigger
 
-A **view-local** `@State private var interpolators: PeerInterpolators` (a small struct
-wrapping `[UUID: PeerInterpolator]` with `commit(peers:at:)`, `positions(at:)`,
-`anyActive(at:)`, and prune-on-leave). **Not** in `GroupRideSession` — putting per-frame
-state in the heavy `@Observable` session would widen its observation scope and repaint the
-whole HUD. Both hosts (`NavigateHUDView`, `RideMapView`) get the same wiring; extract a
-shared `PeerAnnotations` sub-view so the TimelineView + interpolation lives in one place, not
-copy-pasted. This replaces the existing `previousPeerCoordinates` bearing bookkeeping (the
-interpolator now owns bearing).
+A **view-local** `@State private var interpolators: PeerInterpolators` (a small struct over
+`[UUID: PeerInterpolator]` with `commit(peers:now:)`, `display(at:)`, `anyActive(at:)`,
+prune-on-leave). **Not** in `GroupRideSession` (per-frame state there would widen observation
+and repaint the whole HUD).
+
+- **Commit is per-peer and coordinate-guarded.** `onChange(of: peers)` fires on *any* field of
+  *any* peer (`RidePeer` is whole-struct `Equatable`: a `status`/`progress`/`motion` change on
+  peer A re-delivers the whole array). `commit(peers:now:)` therefore calls each peer's
+  interpolator, and the §3.2 step-2 `recordedAt` guard makes it a **no-op for any peer whose
+  fix hasn't advanced** — so peer A moving never resets peer B's tween/`lastGap`, and the
+  `.dropped` status-flip at 40 s (a field change with the *same* `recordedAt`) never resets the
+  silence clock. This one guard is what makes snap-on-silence and ROH-66 forward-compat actually
+  hold (§6).
+- Both hosts share a single extracted `PeerAnnotations` sub-view (TimelineView + interpolators +
+  memoised derivations live in one place). Replaces the old `previousPeerCoordinates` bookkeeping
+  (the interpolator now owns bearing).
 
 ---
 
 ## 4. ROH-72 — distinct identity + legible heading
 
-### 4.1 Two-channel encoding (identity ⟂ status)
+> **Reconciled after adversarial review.** Identity is carried by **three redundant channels**
+> (hue **and** a disambiguated monogram **and** — as reinforcement — a pointer), so it survives
+> colour-blindness and status changes. Status is carried by **high-area, glanceable** signals
+> (opacity + a small glyph badge + pulse-presence), **not** four ~2 pt ring-dash patterns.
+> Amber and lime are reserved (they already mean warning/route), never rider hues.
 
-Today one channel (disc fill) carries status, which is why per-rider colour has nowhere to
-go. Split them:
+### 4.1 Two independent axes: identity (who) ⟂ status (state)
 
-| Channel | Carries | Encoding |
-|---|---|---|
-| **Disc fill (hue)** | **rider identity** | stable per-rider colour from a curated *muted-terrain* palette |
-| **Ring + saturation + pulse + pointer** | **status** | see below |
+Today one channel (disc fill) carries status, so per-rider identity has nowhere to go. Separate
+them, and critically **do not let a status treatment destroy the identity hue**:
 
-Status treatments (all keep the rider's hue so identity survives):
+**Identity (constant for a rider all ride, robust to CVD):**
+- **Hue** — stable per-rider fill from a curated palette (§4.2). Primary, but never the *only*
+  identity cue.
+- **Monogram** — a disambiguated 1–2-char label (§4.5) so two riders who share a first initial
+  are still distinct *without* relying on colour. This is the direct fix for the literal
+  reported case (two close riders, same first letter).
 
-- `.riding` — full-strength hue fill, **pulsing** ring in-hue, **heading pointer** shown.
-- `.stopped` — hue fill **dimmed/desaturated**, **static** ring (no pulse), no pointer.
-  Visibly "paused at the café," distinct from dropped.
-- `.dropped` — hue drained toward grey at low opacity ("ghost"), **dashed static** ring, no
-  pulse, no pointer. Reads as "lost signal."
-- `.awaiting` — **hollow** (hue stroke, no fill), dotted ring. "In the ride, not yet moving."
+**Status (glanceable, high-area — reads in <1 s while pedalling):**
+- `.riding` — full-opacity hue disc, subtle pulse (clock-driven, §4.6), **heading pointer** shown.
+- `.stopped` — **full hue kept** (identity preserved), pulse off, a small **pause glyph** badge.
+  "Paused at the café."
+- `.dropped` — hue at reduced opacity (**ghost**) + a **no-signal glyph** badge, pulse off, no
+  pointer. "Lost them."
+- `.awaiting` — hollow (hue stroke, no fill). "In the ride, not moving yet."
 
-Self is unchanged (drawn as the Mapbox `Puck2D`, never a peer dot).
+Status distinctions ride on **opacity + a shape glyph + pulse-presence** (all high-area /
+glanceable), not on stroke-dash geometry. The rider's hue and monogram are unchanged across all
+four states, so identity never collapses into status. Self is unchanged (Mapbox `Puck2D`).
 
 ### 4.2 Stable per-rider colour — `PeerPalette` (new, pure, AuraCore)
 
-`PeerPalette.assign(userIDs: [UUID]) -> [UUID: Int]` returns a **palette index** (not a
-`Color` — AuraCore stays UI-free), consumed by the app which maps index →
-`AuraTheme.riderPalette[index]`.
+`PeerPalette.assign(userIDs: [UUID]) -> [UUID: Int]` returns a **palette index** (not a `Color`;
+AuraCore stays UI-free), mapped app-side to `AuraTheme.riderPalette[index]`.
 
-- **Stable across rides:** primary assignment hashes `userID` → `index = hash % paletteCount`
-  (deterministic; a rider keeps their colour ride to ride).
-- **Distinct within a ride:** a deterministic de-collision pass — iterate userIDs in sorted
-  order; if a hash index is already taken, probe to the next free slot. So the common
-  (no-collision) case is hash-stable, and only genuine collisions perturb, deterministically.
-  With ≤7 peers and ≥8 palette entries there is always a free slot.
-- Pure and fully unit-testable (stability, determinism, no within-ride dupes, > paletteCount
-  peers degrade gracefully by wrapping).
+- **Stable across rides:** `index = hash(userID) % paletteCount` (a rider keeps their colour).
+- **Distinct within a ride:** deterministic de-collision — iterate userIDs sorted; if a hash
+  slot is taken, probe to the next free slot. Common case is hash-stable; only real collisions
+  perturb. ≤7 peers with ≥8 entries → always a free slot; > paletteCount wraps gracefully.
+- Pure, fully unit-testable (stability, determinism, no within-ride dupes, overflow wrap).
 
-**The palette itself** (muted terrain hues, added as pure `AuraPalette` RGB tokens so the
-existing `WCAGContrast` tests guard them, then surfaced as `AuraTheme.riderPalette: [Color]`):
-lime/mint stays reserved for the route line & accent to avoid confusion; rider hues are a
-curated set of desaturated, earthy tones that read as one Aura family against dark terrain
-(e.g. amber, teal, clay/terracotta, slate-violet, moss, dusty-blue, rust). **Exact hues +
-the pointer geometry are a design task for the build**, driven by `impeccable` + Aura design
-judgment and checked for mutual distinguishability and on-map contrast (incl. Increase
-Contrast). Count ≈ 8–10.
+**The palette (`AuraPalette` RGB tokens guarded by the existing `WCAGContrast`/ΔE tests, surfaced
+as `AuraTheme.riderPalette`):** a **small** curated set (start at **4–6**, matching the modal
+2–4-rider ride) of tones that read as one Aura family on dark terrain. **Hard constraints, in the
+spec, not deferred:** (a) **lime/mint and amber are excluded** — lime is the route/accent, amber
+is `.warning`/`.stopped`, so reusing either would collide two meanings on one colour; (b) every
+pair must clear a **ΔE distinctness bar at 22 pt** *and* remain distinguishable under
+**deuteranopia/protanopia** (simulated), since ~8 % of male riders are red-green CVD; (c) hold
+contrast on the terrain style incl. Increase-Contrast. Because identity is *also* carried by the
+monogram (§4.5), colour can be restrained (Aura-quiet) without being the sole load-bearer. Exact
+hues are tuned at build time with `impeccable`, but must pass (a)–(c) as an acceptance gate.
 
-### 4.3 Directional-dot marker (heading intrinsic to the shape)
+### 4.3 Directional marker — pointing dot with an upright head
 
-Replace the separate faint cone: the marker itself points. A rounded "nav teardrop / kite" —
-a circular body (per-rider hue fill + centered initial + status ring) with a pointed apex in
-the heading direction, echoing the self-puck's heading arrow so the visual language is
-consistent.
+The marker is directional (per PO), but the identity head stays **upright and legible** (the
+adversarial review showed a whole-marker teardrop that rotates while its monogram counter-
+rotates is a fidgety mess at 22 pt). Design: a **round identity head** (hue fill + monogram +
+status treatment), **upright, non-rotating**, with an **integrated heading pointer** (a bold,
+dark-**outlined**, opaque tail/apex) that rotates around the head to show bearing — echoing the
+self-puck's heading arrow. So the *marker* is intrinsically directional, but only the *pointer*
+rotates; the monogram never spins.
 
-- **Rotation** = `interpolator.bearing(at:)`, applied as an explicit per-frame
-  `.rotationEffect` value (driven by the §3.5 clock, angular-lerped) — smooth, and testable,
-  rather than relying on SwiftUI implicit animation. The **initial/text counter-rotates** so
-  it stays upright while the silhouette points.
-- **Degradation without identity loss:** when there's no bearing (stopped/awaiting/dropped),
-  the point **retracts to a plain disc**. This is one marker view whose "pointiness"
-  (0…1) and rotation are driven values — a morphing `@Animatable` shape and/or ternary
-  *modifiers* on a **single** view, never `if/else` swapping two root views (which would
-  reset the pulse `@State` and restart the animation every status change — an identity trap
-  the SwiftUI-performance skill flags).
-- Contrast: the pointer/silhouette carries a thin dark outline so it reads on any terrain,
-  fixing the original "invisible cone" complaint via size + contrast + opacity.
+- **Rotation** = `interpolator.bearing(at:)`, an explicit per-frame value (§3.5), **deadbanded**:
+  no re-render under ~10° change and suppressed below a min speed, so a near-stationary or GPS-
+  noisy rider's pointer doesn't jitter.
+- **Degrade, don't swap:** with no bearing (stopped/awaiting/dropped) the pointer **retracts to a
+  plain disc** via a morphing `@Animatable` "pointiness" (0…1) and/or ternary *modifiers* on a
+  **single** persistent view — never `if/else` swapping two roots (which resets pulse state).
+- Contrast: the pointer's dark outline + full opacity fixes the original "invisible cone" via
+  size + contrast, independent of the (dark) map behind it.
 
-### 4.4 Overlap handling — colour + name tags (geometric spreading deferred)
+### 4.4 Overlap handling — hue + monogram + de-occluded tags (disc spreading deferred)
 
-Scope decision (confirmed with PO): distinct colours + initials + a proximity-aware name tag
-+ stable z-order. **No geometric spider/cluster spreading this pass** — that needs live
-screen-space projection each frame and interacts poorly with interpolation; it becomes its
-own follow-up ticket, and we log-note the deferral.
+Real group spacing is tight (drafting riders sit ~5–30 m apart), so the disambiguation must work
+when discs overlap. **Geometric disc spider/cluster spreading stays deferred** (needs live
+screen-space projection each frame, interacts poorly with interpolation → own follow-up ticket,
+logged). What *is* in scope so the reported case is actually solved:
 
-- **Name tags:** extend `GroupMapDots` with
-  `nameTagIDs(peers:leaderID:proximityMeters:) -> Set<UUID>` (pure) — leader always tagged,
-  **plus** any peer within `proximityMeters` (≈60m) of another peer, so a clump gets labelled
-  and spread-out riders stay clean. `showsNameTag` becomes membership in that set.
-- **Z-order:** render `visiblePeers` in the existing deterministic `userID` order so the same
-  dot is consistently on top (no flicker-fighting between overlapping dots).
+- **Distinct hue + monogram** make even two stacked discs tell-apart-able (top disc's colour +
+  label differ), and z-order is the deterministic `userID` order so the same dot stays on top
+  (no flicker).
+- **Name tags that never occlude each other.** The tag decision is **screen-space** (project each
+  visible peer to a point; tag the leader always, plus any peer whose projected point is within a
+  px threshold of another), with **hysteresis** (show < X px, hide > 1.5·X px) so tags don't
+  flicker as riders cross a boundary — fixing the "fixed 60 m barely declutters / flickers" flaw.
+  When two tags *would* overlap, they **stack with a deterministic vertical offset** (never draw
+  on top of each other). Projection is app-side; the pure part is a small
+  `TagLayout.resolve(points:) -> offsets` helper (unit-tested on synthetic points).
 
-### 4.5 Annotation budget
+### 4.5 Disambiguated monogram — `RiderMonogram` (new, pure, AuraCore)
 
-Add a defensive cap: `GroupMapDots.visiblePeers` takes `maxDots` (default **7**, matching
-≤8-rider rides) and `.prefix`es after the filter, with a doc note + a one-line log if ever
-exceeded. Bounds the per-frame cost of §3.5 regardless of a runaway roster.
+`RiderMonogram.assign(names: [UUID: String]) -> [UUID: String]`: normally the first grapheme
+(today's behaviour), but when two riders in the ride share a first initial it lengthens *only the
+colliding ones* to the shortest distinguishing form (first + last initial, else first two
+letters), deterministically. Colour-independent, so it disambiguates for CVD riders and when discs
+overlap. Pure, unit-tested (unique initials unchanged; collisions widen minimally; stable order).
+
+### 4.6 Reduce Motion — glide, don't snap
+
+Under Reduce Motion the dots **still glide** — a 22 pt dot sliding across the map is not a
+vestibular trigger, and a *snap* is a harsher motion event than a smooth translate. RM suppresses
+only the **pulse** and the **pointer rotation** (the potentially-agitating repetitive/rotational
+motion), keeping a gentle **linear** position tween. Concretely: the frame clock is **not** paused
+for RM (§3.5); the pulse is clock-driven so it simply isn't emitted under RM; pointer rotation
+falls back to a stepped value. This gives RM riders the ROH-69 benefit instead of withholding it.
+
+The pulse is driven by the **frame-clock phase** (a function of `context.date`), not `@State` +
+`.onAppear` — so it survives status/identity morphs on the persistent marker view (never stranded
+by a one-shot `.onAppear`) and is naturally absent when the clock is paused or RM is on.
+
+### 4.7 Annotation budget
+
+`GroupMapDots.visiblePeers` takes `maxDots` (default **7**, matching ≤8-rider rides) and caps
+**leader-preserving** (keep the leader + the nearest peers, not arbitrary `userID` order, so the
+always-tagged leader can't be dropped), with a doc note + one-line log if exceeded. Bounds the
+§3.5 per-frame cost against a runaway roster.
 
 ---
 
 ## 5. Files touched
 
 **AuraCore (pure, new — with tests):**
-- `PeerInterpolator.swift` — the tween + cadence estimator (§3.2–3.4).
+- `PeerInterpolator.swift` — `recordedAt`-keyed tween: commit-guard, snap, duration, linear
+  position, shortest-arc bearing (§3.2–3.4).
 - `PeerPalette.swift` — stable, de-colliding index assignment (§4.2).
-- `GroupMapDots.swift` — add `nameTagIDs(...)` + `maxDots` cap (§4.4–4.5).
+- `RiderMonogram.swift` — collision-widening monogram assignment (§4.5).
+- `GroupMapDots.swift` — leader-preserving `maxDots` cap (§4.7); `TagLayout.resolve` stacking
+  helper (§4.4).
 - (Reuse `PeerBearing`, `Coordinate`, `LiveShareCadence`.)
 
-**AuraCore tests:** `PeerInterpolatorTests`, `PeerPaletteTests`, extend `GroupMapDotsTests`.
+**AuraCore tests:** `PeerInterpolatorTests` (first-fix appear-in-place, stale/dup/unchanged
+guard no-ops, snap-on-silence via `recordedAt` gap, no false-snap on bunched arrivals, linear
+position, 0/360 seam bearing, coincident→no idle activity), `PeerPaletteTests`,
+`RiderMonogramTests`, `TagLayoutTests`, extended `GroupMapDotsTests`.
 
 **App target:**
-- New `PeerAnnotations` sub-view — owns the TimelineView clock + `@State` interpolators +
-  memoised route split, shared by both hosts.
-- `PeerDotView` — two-channel identity/status encoding + directional morphing marker (§4.1,
-  §4.3).
-- `AuraTheme` / `AuraPalette` — add the rider palette tokens + `riderPalette` array.
-- `NavigateHUDView`, `RideMapView` — swap the inline peer `ForEvery` for `PeerAnnotations`;
-  drop `previousPeerCoordinates`.
+- New `PeerAnnotations` sub-view — owns the TimelineView clock (+ the display-tick fallback,
+  §3.5), `@State` interpolators, and **all** memoised per-set derivations (route split, leader,
+  visible peers, palette, monograms, tag layout). Shared by both hosts.
+- `PeerDotView` — identity(hue+monogram)/status(opacity+glyph+pulse) encoding + upright-head
+  directional marker with a rotating outlined pointer (§4.1, §4.3); clock-driven pulse (§4.6).
+- `AuraTheme` / `AuraPalette` — add rider palette tokens (lime/amber excluded) + `riderPalette`;
+  ΔE/CVD-gated.
+- `NavigateHUDView`, `RideMapView` — swap the inline peer `ForEvery` for `PeerAnnotations`; drop
+  `previousPeerCoordinates`.
 
-**No transport, schema, presence-derivation, or cadence changes.** Solo path unaffected
-(`peers` empty → TimelineView paused, zero new work).
+**No transport, schema, presence-derivation, or cadence changes.** `LivePresenceState.apply` is
+**not** modified (reorder/stale handling lives in the render-only interpolator, keeping presence
+semantics — and the ROH-66 boundary — untouched). Solo path unaffected (`peers` empty →
+`anyActive` false → clock paused, zero new work).
 
 ---
 
 ## 6. ROH-66 boundary (explicit)
 
 We **do not** build the heartbeat, change when `.stopped`/`.dropped` fire, or add a keepalive.
-Coherence is maintained purely on the render side:
+Coherence holds because interpolation and presence are now keyed on the **same clock**
+(`recordedAt`):
 
-- **Late-packet easing** just holds the dot at its last target (no extrapolation) — nothing to
-  do with presence firing.
-- **Snap-on-silence** reads the *existing* `droppedTimeout` (40s) numeric boundary as its
-  threshold. It does not change that boundary; it just refuses to glide across it.
+- **Late-packet easing** just holds the dot at its last target (no extrapolation).
+- **Snap-on-silence** compares the **`recordedAt` gap** to the *existing* `droppedTimeout` (40s).
+  Presence's `.dropped` uses `now − recordedAt` against the same 40s; both trip on the same
+  event, so a re-appearing dropped rider both *renders as* dropped and *snaps* rather than
+  gliding across the gap. (The earlier arrival-time design broke this — see the reconciliation
+  note in §3.)
 - **Status treatments** (§4.1) give `.stopped` vs `.dropped` visibly distinct dots using the
-  **existing** enum — delivering ROH-66's "keep 'waiting at the café' distinct from 'lost
-  them'" value on the *visual* side without touching presence semantics.
-- **Forward-compatible:** when ROH-66 later republishes the last point as a heartbeat, those
-  carry the **same** coordinate → zero movement → no snap, the dot simply holds; a real move
-  after re-acquire still snaps if implausible. No rework required.
+  **existing** enum — delivering ROH-66's "keep 'waiting at the café' distinct from 'lost them'"
+  value visually, without touching presence semantics.
+- **Forward-compatible with heartbeats:** a heartbeat republishes the last point with a *fresh*
+  `recordedAt` but the **same coordinate**. The §3.2 commit sees distance ≈ 0 → `duration = 0`
+  (no movement, no idle animation), and because `lastRecordedAt` only advances on the guard, the
+  dot simply holds. A real move after re-acquire still snaps if the `recordedAt` gap or implied
+  speed is implausible. No rework required — and, crucially, the coordinate-guard (§3.6) is what
+  makes this true; without it, heartbeats/dropped-flips would reset the silence clock and
+  structurally disable snap-on-silence.
 
 ---
 
 ## 7. Risks & device-verification
 
-- **TimelineView wrapping `Map`** must not recreate the map or drop viewport/gestures — Map
-  view identity stays stable (same call site), only content updates. **Verify on device.**
-- **30fps body re-eval** over Mapbox content — memoised route split keeps it to ≤7 dots;
-  **verify no hitching** on a real ride (Release build).
-- **Planar lerp** between fixes — correct at sub-100m deltas; snap covers the large-gap case.
-- **Palette distinguishability + on-map contrast** (incl. Increase Contrast) — design-review
-  the hues on the actual terrain style before shipping.
-- **Acceptance is a two-phone ride** (§1): glide + tell-apart + heading obvious. Reduce Motion
-  path re-verified (snaps, no clock).
+- **TimelineView wrapping `Map`** must not recreate the map or drop viewport/gestures — Map view
+  identity stays stable, only content updates. **Verify on device**; if it fights pan/zoom/rotate,
+  use the §3.5 display-tick fallback (defined, not just a checkbox).
+- **30fps body re-eval** — all derived work is hoisted (§3.5), leaving ≤7 annotations per frame;
+  **verify no hitching** on a real ride (Release build, Instruments SwiftUI lanes if needed).
+- **Directional marker legibility** — the rotating outlined pointer with an upright head +
+  deadband is the reconciliation of "directional dot" (PO) with "don't spin a 22 pt marker"
+  (review). **On-device is the arbiter**; documented fallback is a bolder static-disc + outlined
+  cone if the pointer still reads as fidgety.
+- **Palette ΔE + CVD + on-map contrast** is a **blocking acceptance gate** (§4.2), not a nicety —
+  simulate deuteranopia/protanopia on the actual terrain style; the monogram (§4.5) is the
+  colour-independent backstop.
+- **Planar lerp** — correct at sub-100 m deltas; snap covers the large-gap case.
+- **Acceptance is a two-phone ride** (§1): dots glide, two riders instantly tell-apart-able even
+  when close and sharing a first initial, heading obvious. **Reduce Motion re-verified** — dots
+  still *glide* (linear), only pulse + pointer-rotation suppressed.
 
 ## 8. Out of scope
 
-Geometric collision spreading (spider/cluster); ROH-66 heartbeat & presence-semantics
-changes; ROH-16 peer-focus tap; peer-focus framing; any wire/schema change.
+Geometric collision **disc** spreading (spider/cluster → follow-up ticket, logged); ROH-66
+heartbeat & presence-semantics changes; ROH-16 peer-focus tap/framing; any wire/schema change.
