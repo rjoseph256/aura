@@ -12,6 +12,10 @@ struct HomeMapCanvas: View {
     var savedPlaces: [SavedPlace] = []
     var onSelectSaved: (SavedPlace) -> Void = { _ in }
     @Binding var flyTo: Coordinate?
+    /// The picked search destination, if any — see `HomeLiveMap.focusedPlace`.
+    var focusedPlace: Place?
+    /// The dashboard sheet's peek height, so the live map can inset its camera padding above it.
+    var bottomInset: CGFloat = 0
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -21,7 +25,8 @@ struct HomeMapCanvas: View {
                 .allowsHitTesting(model.phase == .idle)
 
             if model.phase == .live {
-                HomeLiveMap(model: model, savedPlaces: savedPlaces, onSelectSaved: onSelectSaved, flyTo: $flyTo)
+                HomeLiveMap(model: model, savedPlaces: savedPlaces, onSelectSaved: onSelectSaved, flyTo: $flyTo,
+                            focusedPlace: focusedPlace, bottomInset: bottomInset)
                     // Animate the APPEARANCE (idle→live) only; removal is instant.
                     .transition(.asymmetric(insertion: reduceMotion ? .identity : .opacity, removal: .identity))
             }

@@ -10,6 +10,16 @@ struct HomeLiveMap: View {
     var savedPlaces: [SavedPlace] = []
     var onSelectSaved: (SavedPlace) -> Void = { _ in }
     @Binding var flyTo: Coordinate?
+    /// The picked search destination, if any — rendered as a persistent dropped pin (distinct
+    /// from the star `SavedPinView`) so the rider can see where the fly-to landed. Unlike
+    /// `flyTo`, this is NOT consumed after the animation: it stays until `HomeView` clears it
+    /// (ride completed / cold launch).
+    var focusedPlace: Place?
+    /// Height of the dashboard sheet's peek (its visible overlap at the bottom of the screen),
+    /// so every camera this map frames insets its bottom padding by that much — otherwise a
+    /// centered rider/target sits low, behind/near the sheet, instead of in the visible area
+    /// above it.
+    var bottomInset: CGFloat = 0
 
     @Environment(LocationService.self) private var location
     @State private var viewport: Viewport
@@ -23,11 +33,14 @@ struct HomeLiveMap: View {
 
     init(model: HomeMapModel, savedPlaces: [SavedPlace] = [],
          onSelectSaved: @escaping (SavedPlace) -> Void = { _ in },
-         flyTo: Binding<Coordinate?> = .constant(nil)) {
+         flyTo: Binding<Coordinate?> = .constant(nil),
+         focusedPlace: Place? = nil, bottomInset: CGFloat = 0) {
         self.model = model
         self.savedPlaces = savedPlaces
         self.onSelectSaved = onSelectSaved
         _flyTo = flyTo
+        self.focusedPlace = focusedPlace
+        self.bottomInset = bottomInset
         // Seed from the fly-to target when mounting WITH one already set (search/saved picked
         // before the map activated) so the map opens framed on the target deterministically —
         // not on the rider, which `model.liveCamera` would otherwise seed. Otherwise seed from
@@ -43,7 +56,7 @@ struct HomeLiveMap: View {
         _viewport = State(initialValue: .camera(
             center: CLLocationCoordinate2D(latitude: seedCamera.center.latitude,
                                            longitude: seedCamera.center.longitude),
-            zoom: seedCamera.zoom))
+            zoom: seedCamera.zoom).padding(.bottom, bottomInset))
     }
 
     var body: some View {
@@ -53,6 +66,13 @@ struct HomeLiveMap: View {
                 MapViewAnnotation(coordinate: CLLocationCoordinate2D(
                     latitude: saved.place.coordinate.latitude, longitude: saved.place.coordinate.longitude)) {
                     SavedPinView(name: saved.name) { onSelectSaved(saved) }
+                }
+                .allowOverlapWithPuck(true)
+            }
+            if let focusedPlace {
+                MapViewAnnotation(coordinate: CLLocationCoordinate2D(
+                    latitude: focusedPlace.coordinate.latitude, longitude: focusedPlace.coordinate.longitude)) {
+                    DestinationPinView(name: focusedPlace.name)
                 }
                 .allowOverlapWithPuck(true)
             }
@@ -110,7 +130,7 @@ struct HomeLiveMap: View {
         withViewportAnimation(.easeOut(duration: 0.4)) {
             viewport = .camera(center: CLLocationCoordinate2D(latitude: cam.center.latitude,
                                                               longitude: cam.center.longitude),
-                               zoom: cam.zoom)
+                               zoom: cam.zoom).padding(.bottom, bottomInset)
         } completion: { _ in
             programmatic = false
             onComplete?()
@@ -141,6 +161,18 @@ struct SavedPinView: View {
                 .padding(6).background(AuraTheme.surface, in: Circle())
         }
         .accessibilityLabel("Saved place: \(name)")
+    }
+}
+
+/// The dropped pin for a search-picked destination — distinct from the star `SavedPinView` so
+/// the rider can tell a fly-to target apart from an already-saved place. Not tappable: it is a
+/// marker, not an entry point (unlike `SavedPinView`, which opens the place preview).
+struct DestinationPinView: View {
+    let name: String
+    var body: some View {
+        Image(systemName: "mappin.circle.fill").font(.title2).foregroundStyle(AuraTheme.accent)
+            .background(AuraTheme.surface, in: Circle())
+            .accessibilityLabel("Destination: \(name)")
     }
 }
 

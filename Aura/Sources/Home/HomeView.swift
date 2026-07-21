@@ -24,6 +24,9 @@ struct HomeView: View {
     @State private var mapModel = HomeMapModel(initial: .initial(forRider: nil))
     @State private var didResolveInitialCenter = false
     @State private var flyToTarget: Coordinate?
+    /// The search-picked destination, rendered as a persistent dropped pin on the live map.
+    /// Cleared on a real camera reset (ride completed / cold launch) — see `resolveCenter`.
+    @State private var focusedPlace: Place?
     /// Kept in sync (via onChange/onAppear) so the dashboard sheet shows only at Home root and
     /// when not searching — a pushed screen (Explore, preview, join) is never covered by the
     /// sheet, and search never stacks with it. Using @State (not a derived binding) so the
@@ -123,7 +126,7 @@ struct HomeView: View {
                               mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .activate)
                               flyToTarget = saved.place.coordinate
                           },
-                          flyTo: $flyToTarget)
+                          flyTo: $flyToTarget, focusedPlace: focusedPlace, bottomInset: peekHeight)
 
             VStack(spacing: 0) {
                 header.padding(.top, AuraTheme.Spacing.lg)
@@ -158,6 +161,7 @@ struct HomeView: View {
                         searchExpanded = false
                         mapModel.phase = HomeMapReducer.next(mapModel.phase, on: .activate)
                         flyToTarget = place.coordinate
+                        focusedPlace = place
                     },
                     onCollapse: { searchExpanded = false })
             }
@@ -330,7 +334,13 @@ private extension HomeView {
         } else {
             camera = HomeMapCamera.initial(forRider: nil)
         }
-        if reset { mapModel.reset(to: camera) } else { mapModel.idleCamera = camera; mapModel.liveCamera = camera }
+        if reset {
+            mapModel.reset(to: camera)
+            focusedPlace = nil
+        } else {
+            mapModel.idleCamera = camera
+            mapModel.liveCamera = camera
+        }
     }
 
     /// Refreshes greeting weather only when location is actually authorized — otherwise
