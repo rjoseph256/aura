@@ -7,7 +7,7 @@ import AuraKit
 /// shows the quarter-screen `ExploreInstrumentPanel` + a recenter/end `ControlCluster` over
 /// the terrain map, and offers an always-visible back-out: a just-started ride (below the
 /// discard floor) is discarded with no summary; once it is worth a summary, back opens the
-/// End confirmation. Ending routes through the coordinator's finish → summary sheet.
+/// End confirmation. Ending routes through the coordinator's finish → pushed summary route.
 struct RideHUDView: View {
     @Environment(AppRouter.self) private var router
     @Environment(RideStore.self) private var rideStore

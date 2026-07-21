@@ -20,8 +20,9 @@ public final class RideSessionCoordinator {
     public var currentSpeedMetersPerSecond: Double { recorder.currentSpeedMetersPerSecond }
     public var isRecording: Bool { recorder.isRecording }
     public private(set) var elapsed: TimeInterval = 0
-    /// Set by `finish()`, bound by the HUD's summary `.sheet(item:)`. Not reset here:
-    /// the HUD is torn down on return to `.plan`, so the coordinator goes with it.
+    /// Set by `finish()`; observed by the HUD's `onChange(of:)`, which pushes the summary route
+    /// (ROH-85). Not reset here: the HUD is torn down when the path collapses to the summary, so
+    /// the coordinator goes with it.
     public var finishedRide: Ride?
     public private(set) var saveFailed = false
 
