@@ -23,7 +23,8 @@ let package = Package(
         .target(name: "AuraKit", dependencies: ["AuraCore"],
                 resources: [.process("Resources/gems.json"),
                             .process("Resources/golden-ride.gpx")]),
-        .testTarget(name: "AuraKitTests", dependencies: ["AuraKit"]),
+        .testTarget(name: "AuraKitTests", dependencies: ["AuraKit"],
+                    resources: [.copy("Resources/terrain-rgb-fixture.png")]),
     ],
     swiftLanguageModes: [.v6]
 )
