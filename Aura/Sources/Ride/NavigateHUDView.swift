@@ -44,8 +44,11 @@ struct NavigateHUDView: View {
     // MARK: Guidance
 
     /// Owns the guidance event stream and the turn-card state. Backed by Mapbox here;
-    /// a `ScriptedGuidanceSession` drives the same model in tests.
-    @State private var guidance = GuidanceViewModel(session: MapboxGuidanceSession())
+    /// a `ScriptedGuidanceSession` drives the same model in tests — and, under the
+    /// DEBUG golden-ride harness, an empty scripted session replaces the engine
+    /// entirely (no network, no telemetry, no arrival racing the manual End; the
+    /// turn card renders its unavailable state, which nothing asserts).
+    @State private var guidance: GuidanceViewModel
 
     // MARK: Voice
 
@@ -75,6 +78,18 @@ struct NavigateHUDView: View {
             kind: .navigate, destinationName: destination?.name,
             screen: ScreenWakeController(), activity: RideLiveActivityController.shared,
             workout: WorkoutWriter.shared))
+        #if DEBUG
+        if SimulatedRideConfig.current != nil {
+            _guidance = State(initialValue:
+                GuidanceViewModel(session: ScriptedGuidanceSession(script: [])))
+        } else {
+            _guidance = State(initialValue:
+                GuidanceViewModel(session: MapboxGuidanceSession()))
+        }
+        #else
+        _guidance = State(initialValue:
+            GuidanceViewModel(session: MapboxGuidanceSession()))
+        #endif
     }
 
     // MARK: Body
@@ -124,6 +139,9 @@ struct NavigateHUDView: View {
             GPSSignalChip(signal: location.signal)
                 .padding(.top, 8).padding(.leading, 16)
         }
+        .simulatedRideProbe(distanceMeters: coordinator.stats.distanceMeters,
+                            elapsed: coordinator.elapsed,
+                            elevationGainMeters: coordinator.stats.elevationGainMeters)
         // Rerouting cue — centered below the turn card
         .overlay(alignment: .top) {
             if guidance.isRerouting {
@@ -182,9 +200,19 @@ struct NavigateHUDView: View {
             guidance.onSpeak = { speakInstruction($0) }
             guidance.onArrive = { endRide() }
 
+            var rideLocation: any LocationStreaming = location
+            var rideAuthorization = location.authorization
+            #if DEBUG
+            // Golden-ride harness (ROH-93): same seam swap as the free-ride HUD, via
+            // the shared helper, so both paths feed identical simulated input.
+            if let override = SimulatedRideSupport.rideOverride() {
+                rideLocation = override.location
+                rideAuthorization = override.authorization
+            }
+            #endif
             let outcome = coordinator.start(
-                location: location, saving: rideStore, units: settings.units,
-                authorization: location.authorization, saveToHealth: settings.saveToHealth,
+                location: rideLocation, saving: rideStore, units: settings.units,
+                authorization: rideAuthorization, saveToHealth: settings.saveToHealth,
                 groupSink: groupSession?.locationSink)
             guard outcome == .started else {
                 showPermission = true
