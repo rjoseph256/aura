@@ -14,7 +14,7 @@
 - The AuraCore package builds on the macOS host in CI — iOS-only CoreLocation APIs must stay `#if`-guarded. (Nothing in this plan touches CL directly.)
 - Never construct a bare `LocationService()` in a test (ROH-88).
 - New AuraKit test suites touching SwiftData adopt `@Suite(.swiftDataSerialized)`.
-- `swiftlint lint --strict` must pass (0.64.1; line length 120).
+- `swiftlint lint --strict` must pass (0.64.1; line_length warns at 140, identifier min length 1 — single-letter locals are fine).
 - All app-side harness hooks compiled under `#if DEBUG`.
 - Package tests: `cd AuraCore && swift test --no-parallel`.
 - App project is generated: `cd Aura && xcodegen generate` after any `project.yml` change. The worktree has `Aura/Resources/MapboxAccessToken` already (do not commit it).
@@ -365,10 +365,11 @@ column, non-empty thumbnail) are the contract.
 
 Run: `cd AuraCore && swift test --no-parallel --filter GoldenRidePlaybackTests`
 Expected: PASS immediately (this layer tests existing package plumbing; the test is new,
-the code is not). To prove the test has teeth before trusting it, temporarily change
-`multiplier: 10_000` to feed an empty track — `SimulatedLocationProvider(track: GPXTrack(points: []), speedMultiplier: 1)`
-— run, observe FAIL on `expectedPointCount`, then restore. (The real regression drill is
-Task 8.)
+the code is not). To prove the test has teeth before trusting it, temporarily replace the
+provider line with
+`let provider = SimulatedLocationProvider(track: GPXTrack(points: []), speedMultiplier: 1)`,
+run, observe FAIL on `expectedPointCount`, then restore the original line. (The real
+regression drill is Task 7.)
 
 - [ ] **Step 3: Full package suite**
 
@@ -535,6 +536,9 @@ Expected: PASS (3 tests).
                     rideAuthorization = .authorized
                     liveProvider = EmptyGemProvider()
                 } catch {
+                    // Defensive-only: the fixture is always bundled, so this branch is
+                    // unreachable in practice and has no test; it exists so a packaging
+                    // regression fails loudly in Debug instead of silently riding on GPS.
                     assertionFailure("Simulated ride fixture failed to load: \(error)")
                 }
             }
@@ -601,9 +605,13 @@ Back-button identifier — in `var backButton`, after `.accessibilityLabel(...)`
 ```
 
 `Aura/Sources/History/HistoryView.swift` — on the `RideRow(...)` call inside the list
-`ForEach`, directly after `RideRow(summary: summary, units: settings.units)`:
+`ForEach`, directly after `RideRow(summary: summary, units: settings.units)` add BOTH
+modifiers (combine first — RideRow is four leaf texts, and a container identifier would
+otherwise propagate to every leaf, breaking the exactly-one-row count; combining also
+matches the app's composed-element VoiceOver pattern, one utterance per row):
 
 ```swift
+                    .accessibilityElement(children: .combine)
                     .accessibilityIdentifier(RideTestID.historyRow)
 ```
 
@@ -649,6 +657,9 @@ In `Aura/project.yml`:
 ```
 
 3. Delete the file: `git rm Aura/Resources/sample-ride-pittsburgh.gpx`.
+4. In `Aura/UITests/SavedPlacesUITests.swift`, reword the stale header comment: the
+   UI-test CI job is no longer wholly deferred — `RideE2EUITests` runs in CI; the other
+   seven suites remain local/on-demand. Adjust the sentence to say exactly that.
 
 - [ ] **Step 2: Screen objects**
 
@@ -666,11 +677,13 @@ struct RideScreen {
     func probeValues() -> RideTestProbe.Values? { RideTestProbe.parse(probe.label) }
 
     /// Polls the probe until recorded distance reaches `meters` (or fails at `timeout`).
+    /// Real sleep between polls — waitForExistence on an already-present element returns
+    /// instantly and would busy-spin the a11y server.
     func waitForDistance(atLeast meters: Int, timeout: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if let values = probeValues(), values.distanceMeters >= meters { return true }
-            _ = probe.waitForExistence(timeout: 1)   // ~1 s poll cadence
+            Thread.sleep(forTimeInterval: 1)
         }
         return false
     }
@@ -730,8 +743,9 @@ final class RideE2EUITests: XCTestCase {
         XCTAssertTrue(ride.probe.waitForExistence(timeout: 15),
                       "HUD probe missing — simulated-ride hook did not engage")
 
-        // Playback ≈ nominal/multiplier ≈ 15 s; allow generous slack for CI.
-        let floor = Int(0.8 * GoldenRideFixture.expectedDistanceMeters)
+        // Playback ≈ nominal/multiplier ≈ 15 s; allow generous slack for CI. 0.85× keeps
+        // the guaranteed-reached minimum inside BOTH unit bands asserted on the summary.
+        let floor = Int(0.85 * GoldenRideFixture.expectedDistanceMeters)
         XCTAssertTrue(ride.waitForDistance(atLeast: floor, timeout: 90),
                       "distance never reached \(floor) m — last probe: \(ride.probe.label)")
 
@@ -742,11 +756,14 @@ final class RideE2EUITests: XCTestCase {
         var advanced = false
         while Date() < deadline {
             if let now = ride.probeValues()?.elapsed, now > elapsedBefore { advanced = true; break }
-            _ = ride.probe.waitForExistence(timeout: 1)
+            Thread.sleep(forTimeInterval: 1)
         }
         XCTAssertTrue(advanced, "elapsed ticker frozen at \(elapsedBefore)s")
 
-        // Climb recorded (silent-flat guard at the wiring layer).
+        // Climb recorded (silent-flat guard at the wiring layer). NOTE: this is the spec's
+        // "elevation gain nonzero" commitment, delivered at the HUD probe — RideSummaryView
+        // has no numeric gain readout (gain renders only inside the profile chart), so the
+        // summary itself is asserted for title + hero distance only.
         let gain = try XCTUnwrap(ride.probeValues()).elevationGainMeters
         XCTAssertGreaterThanOrEqual(gain, 40, "elevation gain flat: \(gain) m")
 
@@ -763,7 +780,7 @@ final class RideE2EUITests: XCTestCase {
         let value = try XCTUnwrap(Self.leadingNumber(in: label),
                                   "no number in hero label: \(label)")
         if label.contains("kilometer") {
-            XCTAssertTrue((2.4...3.4).contains(value), "km out of band: \(label)")
+            XCTAssertTrue((2.3...3.4).contains(value), "km out of band: \(label)")
         } else {
             XCTAssertTrue((1.4...2.2).contains(value), "miles out of band: \(label)")
         }
@@ -840,7 +857,8 @@ Replace the `app-build` job's `Build app` step (and extend the job) so it reads:
 
 ```yaml
   app-build:
-    name: App build + golden ride (xcodebuild)
+    # Keep the original display name — branch protection / required checks key on it.
+    name: App build (xcodebuild)
     runs-on: macos-15
     timeout-minutes: 40
     steps:
@@ -900,12 +918,16 @@ Replace the `app-build` job's `Build app` step (and extend the job) so it reads:
             -only-testing:AuraUITests/RideE2EUITests \
             -retry-tests-on-failure -test-iterations 2 \
             CODE_SIGNING_ALLOWED=NO
-      - name: Shutdown simulators
-        if: always()
-        run: xcrun simctl shutdown all || true
 ```
 
+(No simulator-teardown step: GitHub runners are ephemeral VMs discarded after the job.)
+
 (Comment block at the top of ci.yml stays; do not touch the other jobs.)
+
+- [ ] **Step 1b: gitignore DerivedData**
+
+Add a line `DerivedData/` to the repo-root `.gitignore` (both CI and the script below
+write `Aura/DerivedData/`, which must never be committed).
 
 - [ ] **Step 2: Local runner script**
 
@@ -954,7 +976,7 @@ Expected: golden ride passes end-to-end via the script.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add .github/workflows/ci.yml scripts/golden-ride.sh
+git add .github/workflows/ci.yml scripts/golden-ride.sh .gitignore
 git commit -m "ci(roh-92): golden-ride E2E lane in app-build + local runner script"
 ```
 
@@ -964,7 +986,7 @@ git commit -m "ci(roh-92): golden-ride E2E lane in app-build + local runner scri
 
 **Files:** temporary edits only — nothing new committed except the drill note in the PR body later.
 
-- [ ] **Step 1: Drill Layer 1** — in `AuraCore/Sources/AuraKit/RideSession/RideRecorder.swift`, find `func record(` and make it drop every other point (e.g. guard on `track.count % 2 == 0` before appending). Run `cd AuraCore && swift test --no-parallel --filter GoldenRidePlaybackTests`. Expected: FAIL on point count + distance. Save the failure output. `git checkout -- AuraCore/Sources/AuraKit/RideSession/RideRecorder.swift`.
+- [ ] **Step 1: Drill Layer 1** — in `AuraCore/Sources/AuraKit/RideRecorder.swift` (note: NOT under `RideSession/`), in `func record(`, insert `guard track.count % 2 == 0 else { return }` before the append (this drops every point after the first — track sticks at count 1). Run `cd AuraCore && swift test --no-parallel --filter GoldenRidePlaybackTests`. Expected: FAIL on point count + distance. Save the failure output. `git checkout -- AuraCore/Sources/AuraKit/RideRecorder.swift`.
 
 - [ ] **Step 2: Drill Layer 2** — in `Aura/Sources/Ride/RideHUDView.swift`, comment out the `router.showRideSummary(ride, saveFailed: coordinator.saveFailed)` line in the `finishedRide` onChange. Run `scripts/golden-ride.sh`. Expected: FAIL — "Summary never appeared". Save the failure output. Revert the edit.
 

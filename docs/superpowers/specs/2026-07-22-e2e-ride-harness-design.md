@@ -170,13 +170,17 @@ rows marked "not caught" are the honest boundary.
   drift, per the snapshot-test precedent) plus gain > 0 as a hard floor;
   `saveFailed == false`; persisted `RideRecord` denormalized columns equal
   the computed stats; `summaries()` returns the ride with a thumbnail.
-- Layer 2 assertions (sanity, not precision): HUD distance stat becomes
-  nonzero and reaches ≥ ~80% of nominal within a generous timeout; HUD
-  elapsed stat advances between two polls (catches a frozen ticker); End
-  ride → summary appears with distance in a wide band and elevation gain
-  nonzero; Done returns Home; History shows the ride row (exactly one, since
-  the store is fresh in-memory per launch) and tolerates the ephemeral-store
-  banner. Explicitly **not** asserted: WidgetRefresh, saveFailed branch,
+- Layer 2 assertions (sanity, not precision): a DEBUG-only hidden HUD probe
+  (machine-readable `d=…;e=…;g=…` line, present only in simulated rides)
+  reports distance reaching ≥ ~85% of nominal within a generous timeout,
+  elapsed advancing between polls (catches a frozen ticker), and elevation
+  gain nonzero — the gain commitment lives at the probe because
+  `RideSummaryView` has no numeric gain readout (gain renders only inside
+  the profile chart, which stays unasserted); End ride → summary appears
+  with the hero distance in a wide band; Done returns Home; History shows
+  the ride row (exactly one, since the store is fresh in-memory per launch;
+  the row is combined into one accessibility element) and tolerates the
+  ephemeral-store banner. Explicitly **not** asserted: WidgetRefresh, saveFailed branch,
   back-out discard, Live Activity, HealthKit, speed dial, map content.
 - Identifier contract: accessibility identifiers for the HUD stats and
   summary stats live in one shared constants enum in AuraKit, referenced by
