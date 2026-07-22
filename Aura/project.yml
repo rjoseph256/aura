@@ -81,10 +81,9 @@ targets:
         SWIFT_VERSION: "6.0"
         SWIFT_APPROACHABLE_CONCURRENCY: YES
         SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
-        # The app ships no AppIcon set. Once the first asset catalog exists
-        # (GemPhotos.xcassets), actool fails on the default APPICON_NAME=AppIcon
-        # unless it is cleared. Empty = no app-icon compilation step.
-        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        # App icon lives in Resources/Assets.xcassets/AppIcon.appiconset
+        # (single 1024×1024 universal image; the system generates all sizes).
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
   # Live Activity / Dynamic Island host. WidgetKit extension that renders the
   # in-progress-ride Live Activity. Depends only on the pure AuraKit/AuraCore layers
