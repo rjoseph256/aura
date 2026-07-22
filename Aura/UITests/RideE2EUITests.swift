@@ -61,18 +61,66 @@ final class RideE2EUITests: XCTestCase {
         // Summary (path collapse) with a sane hero distance.
         let summary = SummaryScreen(app: app)
         XCTAssertTrue(summary.title.waitForExistence(timeout: 15), "Summary never appeared")
-        XCTAssertTrue(summary.heroDistance.exists)
-        let label = summary.heroDistance.label   // e.g. "Distance, 1.8 miles" or "…2.9 kilometers"
-        let value = try XCTUnwrap(Self.leadingNumber(in: label),
-                                  "no number in hero label: \(label)")
-        if label.contains("kilometer") {
-            XCTAssertTrue((2.3...3.4).contains(value), "km out of band: \(label)")
-        } else {
-            XCTAssertTrue((1.4...2.2).contains(value), "miles out of band: \(label)")
-        }
+        try Self.assertHeroDistanceInBand(summary)
 
         // Done → Home, then the ride is in History (fresh in-memory store → exactly 1 row).
         summary.doneButton.tap()
+        XCTAssertTrue(home.exploreButton.waitForExistence(timeout: 15), "Done did not return Home")
+        home.goToHistory()
+        let history = HistoryScreen(app: app)
+        XCTAssertTrue(history.title.waitForExistence(timeout: 10))
+        XCTAssertTrue(history.rideRows.firstMatch.waitForExistence(timeout: 10),
+                      "finished ride missing from History")
+        XCTAssertEqual(history.rideRows.count, 1)
+    }
+
+    /// ROH-93: the navigate-mode golden ride. Enters via the -openURL preview deep link
+    /// (search is out of scope — spec Non-goals), rides the same fixture through
+    /// NavigateHUDView, ends via the manual End control (no Mapbox arrival), and
+    /// asserts the same summary + History wiring whose navigate seam regressed in
+    /// ROH-85.
+    @MainActor
+    func testNavigateGoldenRideEndsToSummaryAndHistory() throws {
+        let app = XCUIApplication()
+        let previewLink = "aura://preview?lat=\(GoldenRideFixture.startLatitude)" +
+            "&lng=\(GoldenRideFixture.startLongitude)&name=Golden%20Loop"
+        app.launchArguments += ["-auraDidCompleteOnboarding", "YES",
+                                "-auraSimulatedRide", "golden",
+                                "-auraSimulatedRideMultiplier", "30",
+                                "-auraInMemoryRideStore",
+                                "-openURL", previewLink]
+        app.launch()
+        dismissLocationAlertIfPresent()
+
+        // Preview: the fixture route auto-selects; the CTA enables one runloop later.
+        let preview = PreviewScreen(app: app)
+        XCTAssertTrue(preview.waitForStartEnabled(timeout: 15),
+                      "Start RIDE never enabled — fixture route did not load/select")
+        preview.startRide.tap()
+
+        // Navigate HUD: the simulated hook engaged and records through this path.
+        let ride = RideScreen(app: app)
+        XCTAssertTrue(ride.probe.waitForExistence(timeout: 15),
+                      "HUD probe missing — simulated-ride hook did not engage in navigate")
+        let floor = Int(0.85 * GoldenRideFixture.expectedDistanceMeters)
+        XCTAssertTrue(ride.waitForDistance(atLeast: floor, timeout: 90),
+                      "distance never reached \(floor) m — last probe: \(ride.probe.label)")
+        // One-line stats sanity: a diverged navigate provider would record flat gain.
+        // Free ride owns the fuller recorder assertions (ticker, precision bands).
+        let gain = try XCTUnwrap(ride.probeValues()).elevationGainMeters
+        XCTAssertGreaterThanOrEqual(gain, 40, "elevation gain flat: \(gain) m")
+
+        // Manual End via the control cluster (no arrival in this harness).
+        ride.endButton.tap()
+        XCTAssertTrue(ride.endAlert.waitForExistence(timeout: 10), "End alert never appeared")
+        ride.endAlert.buttons["End ride"].tap()
+
+        // Summary (the ROH-85 seam) → Done → Home → History (fresh store → 1 row).
+        let summary = SummaryScreen(app: app)
+        XCTAssertTrue(summary.title.waitForExistence(timeout: 15), "Summary never appeared")
+        try Self.assertHeroDistanceInBand(summary)
+        summary.doneButton.tap()
+        let home = HomeScreen(app: app)
         XCTAssertTrue(home.exploreButton.waitForExistence(timeout: 15), "Done did not return Home")
         home.goToHistory()
         let history = HistoryScreen(app: app)
@@ -88,6 +136,26 @@ final class RideE2EUITests: XCTestCase {
         let scanner = Scanner(string: label)
         _ = scanner.scanUpToCharacters(from: .decimalDigits)
         return scanner.scanDouble()
+    }
+
+    /// Hero-distance sanity band shared by both golden rides. NOTE: a fixture
+    /// re-record must update GoldenRideFixture's literals AND these bands together.
+    @MainActor
+    private static func assertHeroDistanceInBand(_ summary: SummaryScreen,
+                                                 file: StaticString = #filePath,
+                                                 line: UInt = #line) throws {
+        XCTAssertTrue(summary.heroDistance.exists, "hero distance missing",
+                      file: file, line: line)
+        let label = summary.heroDistance.label   // e.g. "Distance, 1.8 miles"
+        let value = try XCTUnwrap(leadingNumber(in: label),
+                                  "no number in hero label: \(label)", file: file, line: line)
+        if label.contains("kilometer") {
+            XCTAssertTrue((2.3...3.4).contains(value), "km out of band: \(label)",
+                          file: file, line: line)
+        } else {
+            XCTAssertTrue((1.4...2.2).contains(value), "miles out of band: \(label)",
+                          file: file, line: line)
+        }
     }
 
     /// Defensive only: the ambient tier is skipped in simulated mode, but Mapbox's own

@@ -44,8 +44,11 @@ struct NavigateHUDView: View {
     // MARK: Guidance
 
     /// Owns the guidance event stream and the turn-card state. Backed by Mapbox here;
-    /// a `ScriptedGuidanceSession` drives the same model in tests.
-    @State private var guidance = GuidanceViewModel(session: MapboxGuidanceSession())
+    /// a `ScriptedGuidanceSession` drives the same model in tests — and, under the
+    /// DEBUG golden-ride harness, an empty scripted session replaces the engine
+    /// entirely (no network, no telemetry, no arrival racing the manual End; the
+    /// turn card renders its unavailable state, which nothing asserts).
+    @State private var guidance: GuidanceViewModel
 
     // MARK: Voice
 
@@ -75,6 +78,18 @@ struct NavigateHUDView: View {
             kind: .navigate, destinationName: destination?.name,
             screen: ScreenWakeController(), activity: RideLiveActivityController.shared,
             workout: WorkoutWriter.shared))
+        #if DEBUG
+        if SimulatedRideConfig.current != nil {
+            _guidance = State(initialValue:
+                GuidanceViewModel(session: ScriptedGuidanceSession(script: [])))
+        } else {
+            _guidance = State(initialValue:
+                GuidanceViewModel(session: MapboxGuidanceSession()))
+        }
+        #else
+        _guidance = State(initialValue:
+            GuidanceViewModel(session: MapboxGuidanceSession()))
+        #endif
     }
 
     // MARK: Body
@@ -124,6 +139,9 @@ struct NavigateHUDView: View {
             GPSSignalChip(signal: location.signal)
                 .padding(.top, 8).padding(.leading, 16)
         }
+        .simulatedRideProbe(distanceMeters: coordinator.stats.distanceMeters,
+                            elapsed: coordinator.elapsed,
+                            elevationGainMeters: coordinator.stats.elevationGainMeters)
         // Rerouting cue — centered below the turn card
         .overlay(alignment: .top) {
             if guidance.isRerouting {
@@ -182,9 +200,19 @@ struct NavigateHUDView: View {
             guidance.onSpeak = { speakInstruction($0) }
             guidance.onArrive = { endRide() }
 
+            var rideLocation: any LocationStreaming = location
+            var rideAuthorization = location.authorization
+            #if DEBUG
+            // Golden-ride harness (ROH-93): same seam swap as the free-ride HUD, via
+            // the shared helper, so both paths feed identical simulated input.
+            if let override = SimulatedRideSupport.rideOverride() {
+                rideLocation = override.location
+                rideAuthorization = override.authorization
+            }
+            #endif
             let outcome = coordinator.start(
-                location: location, saving: rideStore, units: settings.units,
-                authorization: location.authorization, saveToHealth: settings.saveToHealth,
+                location: rideLocation, saving: rideStore, units: settings.units,
+                authorization: rideAuthorization, saveToHealth: settings.saveToHealth,
                 groupSink: groupSession?.locationSink)
             guard outcome == .started else {
                 showPermission = true
@@ -276,46 +304,6 @@ struct NavigateHUDView: View {
         .onChange(of: reduceMotion) { syncPeers() }
     }
 
-    private func syncPeers() {
-        guard let groupSession else {
-            peerModel.updateSet(peers: [], selfUserID: nil, nameMap: [:],
-                                reduceMotion: reduceMotion, now: Date())
-            return
-        }
-        peerModel.updateSet(peers: groupSession.peers, selfUserID: groupSession.selfUserID,
-                            nameMap: groupSession.nameMap, reduceMotion: reduceMotion, now: Date())
-    }
-
-    /// Real Mapbox projection for declutter; nil when the coordinate is off-screen/unavailable.
-    private func project(_ c: Coordinate, _ proxy: MapProxy) -> ClusterDeclutter.Point2D? {
-        guard let map = proxy.map else { return nil }
-        let pt = map.point(for: CLLocationCoordinate2D(latitude: c.latitude, longitude: c.longitude))
-        guard pt.x.isFinite, pt.y.isFinite else { return nil }
-        return ClusterDeclutter.Point2D(x: Double(pt.x), y: Double(pt.y))
-    }
-
-    // MARK: Cluster actions
-
-    /// Re-engages puck-following after the rider has panned the map. Snaps under Reduce
-    /// Motion, flies otherwise.
-    private func recenter() {
-        if reduceMotion {
-            viewport = .followPuck(zoom: 16, bearing: .heading)
-        } else {
-            withViewportAnimation(.easeOut(duration: 0.4)) {
-                viewport = .followPuck(zoom: 16, bearing: .heading)
-            }
-        }
-    }
-
-    /// Toggles voice mute; muting also cuts off any in-flight prompt.
-    private func toggleMute() {
-        isMuted.toggle()
-        if isMuted {
-            speechSynthesizer.stopSpeaking(at: .immediate)
-        }
-    }
-
     // MARK: End-tap routing (solo vs group)
 
     /// Solo path (groupSession nil) is unchanged: open the solo End alert. On the group
@@ -348,18 +336,63 @@ struct NavigateHUDView: View {
         speechSynthesizer.stopSpeaking(at: .immediate)
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
+}
+
+/// Cockpit chrome + actions, in an extension so the main type body stays under SwiftLint's
+/// `type_body_length` (the pattern `RideHUDView` uses). Same-file `private` members of
+/// `NavigateHUDView` remain reachable here.
+private extension NavigateHUDView {
+    /// Real Mapbox projection for declutter; nil when the coordinate is off-screen/unavailable.
+    func project(_ c: Coordinate, _ proxy: MapProxy) -> ClusterDeclutter.Point2D? {
+        guard let map = proxy.map else { return nil }
+        let pt = map.point(for: CLLocationCoordinate2D(latitude: c.latitude, longitude: c.longitude))
+        guard pt.x.isFinite, pt.y.isFinite else { return nil }
+        return ClusterDeclutter.Point2D(x: Double(pt.x), y: Double(pt.y))
+    }
+
+    func syncPeers() {
+        guard let groupSession else {
+            peerModel.updateSet(peers: [], selfUserID: nil, nameMap: [:],
+                                reduceMotion: reduceMotion, now: Date())
+            return
+        }
+        peerModel.updateSet(peers: groupSession.peers, selfUserID: groupSession.selfUserID,
+                            nameMap: groupSession.nameMap, reduceMotion: reduceMotion, now: Date())
+    }
+
+    // MARK: Cluster actions
+
+    /// Re-engages puck-following after the rider has panned the map. Snaps under Reduce
+    /// Motion, flies otherwise.
+    func recenter() {
+        if reduceMotion {
+            viewport = .followPuck(zoom: 16, bearing: .heading)
+        } else {
+            withViewportAnimation(.easeOut(duration: 0.4)) {
+                viewport = .followPuck(zoom: 16, bearing: .heading)
+            }
+        }
+    }
+
+    /// Toggles voice mute; muting also cuts off any in-flight prompt.
+    func toggleMute() {
+        isMuted.toggle()
+        if isMuted {
+            speechSynthesizer.stopSpeaking(at: .immediate)
+        }
+    }
 
     // MARK: Voice
 
     /// Configures the audio session so spoken turn prompts duck the rider's music
     /// politely instead of stopping it. `.voicePrompt` is the navigation-prompt mode.
-    private func configureAudioSession() {
+    func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .voicePrompt, options: [.duckOthers, .mixWithOthers])
         try? session.setActive(true)
     }
 
-    private func speakInstruction(_ text: String) {
+    func speakInstruction(_ text: String) {
         guard settings.voiceEnabled, !isMuted, !text.isEmpty else { return }
         speechSynthesizer.stopSpeaking(at: .word)
         let utterance = AVSpeechUtterance(string: text)
@@ -368,9 +401,7 @@ struct NavigateHUDView: View {
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         speechSynthesizer.speak(utterance)
     }
-}
 
-private extension NavigateHUDView {
     /// Steps the map zoom for a +/- tap (ROH-57). While following the puck it re-follows at the
     /// new zoom (staying locked on the rider); once the rider has panned off, it zooms around the
     /// current center instead of snapping back — recenter is the separate control for that. Snaps

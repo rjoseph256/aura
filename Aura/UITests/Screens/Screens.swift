@@ -66,6 +66,7 @@ struct RideScreen {
     let app: XCUIApplication
     var probe: XCUIElement { app.staticTexts[RideTestID.hudProbe] }
     var backButton: XCUIElement { app.buttons[RideTestID.hudBack] }
+    var endButton: XCUIElement { app.buttons[RideTestID.hudEnd] }
     var endAlert: XCUIElement { app.alerts["End ride?"] }
 
     func probeValues() -> RideTestProbe.Values? { RideTestProbe.parse(probe.label) }
@@ -94,9 +95,29 @@ struct SummaryScreen {
     var doneButton: XCUIElement { app.buttons["Done"] }
 }
 
+@MainActor
+struct PreviewScreen {
+    let app: XCUIApplication
+    var startRide: XCUIElement { app.buttons[RideTestID.previewStart] }
+
+    /// Polls until the CTA is enabled. The button exists (disabled) in every preview
+    /// phase, and the fixture route auto-selects one runloop after the view's .task —
+    /// so a bare waitForExistence would tap a disabled button. Real sleep between
+    /// polls, same rationale as RideScreen.waitForDistance.
+    func waitForStartEnabled(timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if startRide.exists && startRide.isEnabled { return true }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        return false
+    }
+}
+
 extension XCUIApplication {
     @MainActor static func launched() -> XCUIApplication {
         let app = XCUIApplication()
+        app.launchArguments += [ephemeralStoreFlag]
         app.launch()
         return app
     }
@@ -106,7 +127,14 @@ extension XCUIApplication {
     @MainActor static func launched(onboarded: Bool) -> XCUIApplication {
         let app = XCUIApplication()
         if onboarded { app.launchArguments += ["-auraDidCompleteOnboarding", "YES"] }
+        app.launchArguments += [ephemeralStoreFlag]
         app.launch()
         return app
     }
+
+    /// ROH-95: every UI-test launch uses the ephemeral in-memory ride store. The
+    /// unsigned (CODE_SIGNING_ALLOWED=NO) test build has no iCloud entitlements, and
+    /// any launch that opens the CloudKit-mirrored SwiftData store SIGTRAPs later on
+    /// CoreData's background CloudKit setup. No suite asserts cross-launch persistence.
+    static let ephemeralStoreFlag = "-auraInMemoryRideStore"
 }

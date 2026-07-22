@@ -87,18 +87,9 @@ struct RideHUDView: View {
             GPSSignalChip(signal: location.signal)
                 .padding(.top, 8).padding(.trailing, 16)
         }
-        #if DEBUG
-        .overlay(alignment: .bottomLeading) {
-            if SimulatedRideConfig.current != nil {
-                Text(RideTestProbe.line(distanceMeters: coordinator.stats.distanceMeters,
-                                        elapsed: coordinator.elapsed,
-                                        elevationGainMeters: coordinator.stats.elevationGainMeters))
-                    .font(.system(size: 8))
-                    .opacity(0.02)   // invisible to riders, present in the a11y tree
-                    .accessibilityIdentifier(RideTestID.hudProbe)
-            }
-        }
-        #endif
+        .simulatedRideProbe(distanceMeters: coordinator.stats.distanceMeters,
+                            elapsed: coordinator.elapsed,
+                            elevationGainMeters: coordinator.stats.elevationGainMeters)
         // The active layer: at most one self-dismissing peek card for a newly surfaced gem.
         // Sits up top, just below the back button, so it never covers the speedometer cluster.
         .overlay(alignment: .top) {
@@ -172,20 +163,13 @@ struct RideHUDView: View {
             var rideLocation: any LocationStreaming = location
             var rideAuthorization = location.authorization
             #if DEBUG
-            // Golden-ride harness (ROH-92): simulated rides swap the location seam for the
-            // bundled fixture, bypass the permission gate (no CoreLocation involved), and
-            // drop the live Overpass gem source (unmocked network → nondeterministic cards).
-            if let sim = SimulatedRideConfig.current {
-                do {
-                    rideLocation = try GoldenRideFixture.simulatedProvider(multiplier: sim.speedMultiplier)
-                    rideAuthorization = .authorized
-                    liveProvider = EmptyGemProvider()
-                } catch {
-                    // Defensive-only: the fixture is always bundled, so this branch is
-                    // unreachable in practice and has no test; it exists so a packaging
-                    // regression fails loudly in Debug instead of silently riding on GPS.
-                    assertionFailure("Simulated ride fixture failed to load: \(error)")
-                }
+            // Golden-ride harness (ROH-92): simulated rides swap the location seam for
+            // the bundled fixture, bypass the permission gate, and drop the live
+            // Overpass gem source (unmocked network → nondeterministic cards).
+            if let override = SimulatedRideSupport.rideOverride() {
+                rideLocation = override.location
+                rideAuthorization = override.authorization
+                liveProvider = EmptyGemProvider()
             }
             #endif
             let store = gems ?? GemDiscoveryStore(

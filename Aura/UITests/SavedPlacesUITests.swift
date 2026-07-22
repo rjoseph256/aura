@@ -9,6 +9,7 @@ final class SavedPlacesUITests: XCTestCase {
         // Seed past first-run (so Home shows the populated dashboard) and deep-link to a preview.
         app.launchArguments += [
             "-auraDidCompleteOnboarding", "YES",
+            XCUIApplication.ephemeralStoreFlag,
             "-openURL", "aura://preview?lat=40.4406&lng=-79.9959&name=Save%20Target"]
         app.launch()
 

@@ -28,6 +28,7 @@ final class HomeUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments += [
             "-auraDidCompleteOnboarding", "YES",
+            XCUIApplication.ephemeralStoreFlag,
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge"
         ]
         app.launch()
