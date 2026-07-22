@@ -6,6 +6,8 @@ import Foundation
 public enum RideTestID {
     public static let hudProbe = "ride.hud.probe"
     public static let hudBack = "ride.hud.back"
+    public static let hudEnd = "ride.hud.end"
+    public static let previewStart = "preview.start"
     public static let summaryDistance = "summary.distance"
     public static let historyRow = "history.row"
 }

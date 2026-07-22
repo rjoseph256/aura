@@ -243,6 +243,7 @@ struct RoutePreviewView: View {
             }
             .buttonStyle(.ctaPrimary)
             .disabled(selected == nil)
+            .accessibilityIdentifier(RideTestID.previewStart)
 
             Button("Ride together") {
                 if let selected {

@@ -1,5 +1,6 @@
 import SwiftUI
 import AuraCore
+import AuraKit
 
 /// The ride HUD's persistent control cluster: an optional +/- zoom pill, recenter, an optional
 /// mark-this-spot, an optional mute, and end-ride. The circular buttons use `HUDControlButton`;
@@ -94,6 +95,7 @@ struct ControlCluster: View {
             .buttonStyle(.hudControl(role: .destructive, metrics: .ride))
             .disabled(isEndDisabled)
             .accessibilityLabel("End ride")
+            .accessibilityIdentifier(RideTestID.hudEnd)
         }
     }
 }
