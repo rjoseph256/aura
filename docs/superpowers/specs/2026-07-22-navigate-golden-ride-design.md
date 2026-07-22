@@ -65,10 +65,11 @@ Launch with the ROH-92 sim args plus
 `-openURL` hook (RootView `.task`, production-inert) routes it through the
 real `AppRouter.handle(url:)` → path `[.preview]`. Tapping **Start RIDE**
 yields `[.preview, .navigate]` — the nested stack shape whose collapse
-regressed in ROH-85. The lat/lng are built **from a new
-`GoldenRideFixture.startCoordinate` constant** (exposed alongside the truth
-literals), so the link can't silently drift from the fixture; the test
-target links AuraKit already.
+regressed in ROH-85. The lat/lng are built **from new frozen
+`GoldenRideFixture.startLatitude`/`startLongitude` literals** (exposed and
+pinned to the parsed track alongside the other truth constants), so the
+link can't silently drift from the fixture; the test target links AuraKit
+already.
 
 Accepted residue: a `.preview` deep link calls `remember(place)`, which
 persists one "Golden Loop" recents entry to `UserDefaults.standard` on the
@@ -176,8 +177,8 @@ Flow and assertions:
 
 1. Launch with onboarding-done + sim args + in-memory store + the
    `-openURL` preview link (URL built from
-   `GoldenRideFixture.startCoordinate`); tolerant springboard-alert
-   dismissal as today.
+   `GoldenRideFixture.startLatitude`/`startLongitude`); tolerant
+   springboard-alert dismissal as today.
 2. **Poll `PreviewScreen.startRide.isEnabled`** (not bare existence — the
    button exists in every phase and only enables once the fixture route is
    auto-selected one runloop after `.task` runs).
@@ -205,9 +206,11 @@ New screen object: `PreviewScreen` (startRide). `RideScreen` gains
 `XCUIApplication.launched()` and `launched(onboarded:)` append
 `-auraInMemoryRideStore`, **and the two call sites that construct
 `XCUIApplication()` directly — `SavedPlacesUITests` and `HomeUITests`'
-`testAX5` — are converted to the helper** (reviewer finding: patching the
-helpers alone leaves those launches on the CloudKit-mirrored store, and
-`SavedPlacesUITests` opens the store on launch). Plain `launched()`
+`testAX5` — get the flag added to their launch-argument arrays** (they
+append custom args before launching, which the launch-and-return helper
+cannot accommodate; patching the helpers alone would leave those launches
+on the CloudKit-mirrored store, and `SavedPlacesUITests` opens the store
+on launch). Plain `launched()`
 currently has no callers; it gets the flag anyway so no future caller can
 reintroduce the trap.
 

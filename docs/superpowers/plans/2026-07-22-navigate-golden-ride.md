@@ -14,6 +14,8 @@
 - Every app-side harness hook is `#if DEBUG`; release builds must contain **no reference** to `ScriptedGuidanceSession` or probe rendering.
 - Package builds on the macOS host too (CI): no iOS-only API outside existing guards.
 - Builds/tests are delegated to the `apple-platform-build-tools:builder` agent; the app scheme is `Aura`, sim is `iPhone 17`, package tests run `swift test` in `AuraCore/`.
+- `Aura/Aura.xcodeproj` is **generated, not checked in**: run `xcodegen` in `Aura/` before any xcodebuild step, and ALWAYS after creating/deleting an app-target file (`project.yml` uses source globs). `scripts/golden-ride.sh` runs xcodegen itself.
+- `scripts/golden-ride.sh` is the canonical E2E invocation: it runs xcodegen, resolves+boots a sim UDID, pre-grants location, then `xcodebuild build-for-testing` + `test-without-building -project Aura.xcodeproj -scheme Aura -configuration Debug -destination "id=$UDID" -derivedDataPath DerivedData -only-testing:AuraUITests/RideE2EUITests CODE_SIGNING_ALLOWED=NO`. Never run `test-without-building` against sources edited since the last `build-for-testing`.
 - Do NOT modify: `golden-ride.gpx`, the existing frozen truth literals, `scripts/golden-ride.sh`, Layer 1 tests, the free-ride test's assertions (beyond the stated helper extraction).
 - Commit after every task; messages follow the repo's `type(roh-93): subject` convention.
 
@@ -163,7 +165,7 @@ Add the identifier after the label:
             .accessibilityIdentifier(RideTestID.hudEnd)
 ```
 
-If `ControlCluster.swift` does not already `import AuraKit`, add it.
+Add `import AuraKit` to `ControlCluster.swift` — it currently imports only SwiftUI + AuraCore, and `RideTestID` lives in AuraKit, so this import is required.
 
 - [ ] **Step 3: Tag Start RIDE**
 
@@ -306,11 +308,11 @@ Replace the `.task` DEBUG block (currently `if let sim = SimulatedRideConfig.cur
             #endif
 ```
 
-The surrounding `var liveProvider / var rideLocation / var rideAuthorization` lines and everything else stay as they are. Net behavior is identical (on a fixture-load throw, the helper asserts and returns nil, leaving all three variables untouched — same as today's throw-before-assign ordering).
+The surrounding `var liveProvider / var rideLocation / var rideAuthorization` lines and everything else stay as they are. Net behavior is identical except one deliberate addition: the probe now carries `.allowsHitTesting(false)` (the original overlay lacked it; spec §5 requires it so the probe can never intercept a tap). On a fixture-load throw, the helper asserts and returns nil, leaving all three variables untouched — same as today's throw-before-assign ordering.
 
 - [ ] **Step 3: Build gate**
 
-Builder: build `Aura` (Debug, iPhone 17 sim) + `scripts/lint.sh`.
+Builder: `xcodegen` in `Aura/` (a file was CREATED — mandatory), then build `Aura` (Debug, iPhone 17 sim) + `scripts/lint.sh`.
 Expected: build succeeds, lint clean.
 
 - [ ] **Step 4: Commit**
@@ -625,8 +627,7 @@ and add the helper (next to `leadingNumber(in:)`):
 
 - [ ] **Step 2: Run the free-ride test to prove the refactor is behavior-neutral**
 
-Builder: `scripts/golden-ride.sh` runs the whole class; or
-`xcodebuild test-without-building … -only-testing:AuraUITests/RideE2EUITests/testGoldenRideRecordsToSummaryAndHistory`.
+Builder: `scripts/golden-ride.sh` (it re-runs xcodegen and REBUILDS before testing — required, since test sources just changed; the whole class currently holds only the free-ride method).
 Expected: PASS.
 
 - [ ] **Step 3: Add the navigate test**
@@ -691,8 +692,8 @@ Expected: PASS.
 
 - [ ] **Step 4: Run the new test — expect PASS end-to-end**
 
-Builder: `xcodebuild test-without-building … -only-testing:AuraUITests/RideE2EUITests/testNavigateGoldenRideEndsToSummaryAndHistory` (same destination/flags as `scripts/golden-ride.sh`).
-Expected: PASS. If it fails, debug before proceeding — this step is the point of the feature.
+Builder: `scripts/golden-ride.sh` again (rebuilds — the test source changed since Step 2's build; runs BOTH methods).
+Expected: 2 tests PASS. If the navigate method fails, debug before proceeding — this step is the point of the feature.
 
 - [ ] **Step 5: Commit**
 
@@ -753,7 +754,15 @@ Builder: `scripts/golden-ride.sh` (runs build-for-testing + the whole `RideE2EUI
 
 - [ ] **Step 3: Legacy suites under the unsigned build (ROH-95 verification)**
 
-Builder: `xcodebuild test-without-building … -only-testing:AuraUITests` (whole bundle) or the seven classes explicitly. Expected: previously-failing local suites now green; record any residual failures verbatim (they go on the ROH-95 issue, not silently ignored).
+Reuses Step 2's artifacts: the sim is already booted + location-granted and `build-for-testing` output is current in `DerivedData`. Builder runs (from `Aura/`, with Step 2's `$UDID`):
+
+```bash
+xcodebuild test-without-building -project Aura.xcodeproj -scheme Aura -configuration Debug \
+  -destination "id=$UDID" -derivedDataPath DerivedData \
+  -only-testing:AuraUITests CODE_SIGNING_ALLOWED=NO
+```
+
+Expected: previously-failing local suites now green; record any residual failures verbatim (they go on the ROH-95 issue, not silently ignored).
 
 - [ ] **Step 4: Regression drill (a) — the gate catches the seam**
 
