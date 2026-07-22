@@ -1,6 +1,7 @@
 # Route-planning elevation gate (ROH-94) — design
 
-Status: approved by Rohun 2026-07-22 (approach A of A/B/C)
+Status: approved design 2026-07-22 (approach A of A/B/C); revised after
+3-reviewer adversarial spec review (efficacy / architecture / test-design)
 Issue: [ROH-94](https://linear.app/rohun/issue/ROH-94/route-planning-elevation-gate-terrain-rgb-regression-class)
 Predecessors: ROH-92 golden-ride harness (PR #83), ROH-93 navigate golden ride (PR #84)
 
@@ -19,140 +20,255 @@ Everything at risk lives in the app target
 which has no unit-test bundle. The downstream pieces (`ElevationSampling`,
 `RouteMetrics.elevationGain`, `RouteRanker`) are in the AuraCore package and
 already unit-tested. The untested code is: Web Mercator tile/pixel placement,
-the PNG-to-RGBA8 decode, the RGB-to-meters formula, and the end-to-end wiring
-from samples through gain to ranking.
+the PNG-to-RGBA8 decode, the RGB-to-meters formula, and the provider's own
+sampling orchestration (placement → tile fetch → ordered read → drop-on-miss)
+that wires samples through gain to ranking.
 
 Two facts make a package-level gate practical:
 
 1. The AuraCore package declares `.iOS(.v17), .macOS(.v14)`, and both
-   CoreGraphics and ImageIO exist on macOS. A real PNG decode over a canned
-   terrain-rgb tile runs on the macOS CI host with no `#if os` guards.
-2. The decode/placement code has no dependency on MapboxMaps or URLSession
-   beyond the fetch itself. It is structurally pure and can move.
+   CoreGraphics and ImageIO exist on macOS. A real PNG decode runs on the
+   macOS CI host with no `#if os` guards.
+2. The decode/placement/orchestration code has no dependency on MapboxMaps or
+   URLSession beyond the fetch itself. It is structurally pure and can move.
 
 ## Decision
 
-Extract the pure Terrain-RGB core into AuraCore and gate it there with a
-committed real tile fixture, plus an end-to-end ranking gate over fixture
-routes. The app provider keeps only the network fetch and the actor cache.
-Only URLSession stays ungated, which is the part that should stay out of CI.
+Extract the pure Terrain-RGB core — placement math, tile decode, and the
+sampling orchestration — into the package and gate it there with a committed
+**generated** terrain-rgb fixture tile, plus an end-to-end ranking gate over
+fixture routes. The app provider keeps only the token guard, the URLSession
+fetch, and the actor cache, all delegating to the extracted core.
+
+Layering (the package's convention is deliberate and this design follows it):
+
+- `AuraCore` target is Foundation-only today. Only the pure Web Mercator
+  placement math goes there, beside `ElevationSampling`.
+- `AuraKit` already hosts all Apple-framework code (CoreGraphics in
+  `Plotting`, resources, `Bundle.module` precedent) and `RouteMetrics`. The
+  CG/ImageIO tile decode and the sampler go there.
+- Both test suites live in `AuraKitTests`, which can import `AuraKit` and
+  (transitively) `AuraCore`. Placement-math frozen-literal checks live in
+  `AuraCoreTests` beside `ElevationSamplingTests`.
 
 Alternatives rejected:
 
 - Seam-level fake only (no extraction): never exercises the decoder, which is
-  where the original regression lived; it would mostly re-test `RouteRanker`
-  and `RouteMetrics`, which are already covered.
+  where the original regression lived.
 - App-target unit-test bundle with URLProtocol-stubbed tiles: highest
-  fidelity (covers the actor cache in place) but new CI infrastructure, an
-  app build per test run, and the issue asked for a package-level shape.
+  fidelity (covers the actor cache in place) but new CI infrastructure and an
+  app build per test run; the issue asked for a package-level shape.
+- A test-local provider that *mirrors* the production sampling pipeline
+  (first draft of this spec): review showed a mirror cannot catch drift in
+  production's own orchestration (transposed px/py, out-of-order appends,
+  changed drop behavior). Hence the sampler extraction below — production
+  and test must execute the same code, differing only in tile source.
+- Committing a real Mapbox terrain-rgb tile: this repo is public, and
+  Mapbox's terms do not allow persistent redistribution of tile content.
+  A generated fixture also makes truth literals exactly derivable and
+  re-recording tokenless. See §2 for the residual-fidelity mitigation.
 
 ## 1. Extraction
 
-New file `AuraCore/Sources/AuraCore/Routing/TerrainRGBTile.swift`:
+### AuraCore (Foundation-only)
 
-- `TerrainRGBTile` — value type holding a decoded RGBA8 buffer and side
-  length (256).
-  - `init?(pngData: Data)` — the ImageIO/CoreGraphics decode moved verbatim
-    from `TerrainTileCache.fetchDecoded` (CGImageSource → CGContext render
-    into a known RGBA8 layout), minus URLSession. Returns `nil` on any decode
-    failure; it never fabricates a flat tile.
-  - `elevation(px:py:)` — the `-10000 + (r*65536 + g*256 + b) * 0.1` formula
-    moved from `TerrainTileCache.elevation`, with the same bounds guard.
-- `TerrainRGBPlacement` — namespace for the Web Mercator math.
-  - `placement(lat:lon:z:) -> Placement` (the `tileX/tileY/px/py` struct)
-    moved verbatim from `MapboxTerrainRGBElevationProvider.placement`,
-    with the `Placement` struct moving alongside it.
+`AuraCore/Sources/AuraCore/Routing/TerrainRGBPlacement.swift`:
 
-App-side refactor (behavior preserving, no caller outside the provider
-changes):
+- `TerrainTileID: Hashable, Sendable` — `z/x/y` (public; replaces the
+  app-private `TileKey`).
+- `TerrainRGBPlacement.placement(lat:lon:z:) -> Placement` — the Web
+  Mercator math moved from the app provider, with the `Placement` struct
+  (`tileX/tileY/px/py`) moved alongside and made public.
 
-- `MapboxTerrainRGBElevationProvider.placement` delegates to
-  `TerrainRGBPlacement`.
-- `TerrainTileCache` stores `TerrainRGBTile?` per key instead of a raw byte
-  buffer. `warm` fetches `Data` over URLSession, then constructs
-  `TerrainRGBTile(pngData:)`. `elevation` delegates to the tile value.
-- Public API of the provider, its defaults (spacing 150 m, samples 16–96,
-  zoom 14), and its best-effort error behavior are unchanged.
+### AuraKit (CG/ImageIO allowed)
+
+`AuraCore/Sources/AuraKit/Routing/TerrainRGBTile.swift`:
+
+- `TerrainRGBTile: Sendable` (explicit conformance — public structs get no
+  implicit `Sendable` synthesis) holding a decoded RGBA8 buffer and side
+  length.
+  - `init?(pngData: Data)` — the ImageIO/CoreGraphics decode moved from
+    `TerrainTileCache.fetchDecoded`, **hardened**, not verbatim:
+    - fails (`nil`) unless the source image is exactly `side × side`
+      (256×256) — `ctx.draw` would otherwise silently rescale a wrong-size
+      tile into plausible garbage;
+    - fails unless `CGImageSourceGetStatus == .statusComplete` — ImageIO can
+      render a partial image for a truncated PNG, leaving undrawn all-zero
+      rows (elevation −10000 m), which is exactly the flat fabrication this
+      gate forbids;
+    - the render must be color-conversion-free: draw into the source image's
+      own colorspace (fall back to sRGB only for untagged input) so DEM byte
+      values are never color-matched (a ±1 shift in R is ±6553.6 m);
+    - buffer access is made pointer-safe (`withUnsafeMutableBytes` around
+      context creation + draw) instead of the current escaping `&buf`.
+  - `elevation(px:py:)` — the `-10000 + (r*65536 + g*256 + b) * 0.1` formula,
+    with the bounds guard tightened to `(0..<side).contains(px/py)` (the old
+    `off + 2 < count` guard accepts out-of-range px and reads the wrong row).
+- The app-side comments about default MainActor isolation do not apply in
+  the package (no default-isolation setting there); comments are rewritten
+  for the package's concurrency world, not copied.
+
+`AuraCore/Sources/AuraKit/Routing/TerrainRGBSampler.swift`:
+
+- `TerrainRGBSampler.elevations(along:zoom:spacingMeters:minSamples:maxSamples:tile:) async -> [Double]`
+  — the provider's orchestration moved verbatim in behavior: proportional
+  count → sample indices → placements → dedupe unique tile IDs → fetch each
+  unique tile once concurrently via the injected
+  `tile: @Sendable (TerrainTileID) async -> TerrainRGBTile?` lookup → read
+  samples **in order**, dropping any sample whose tile or pixel is
+  unavailable. This is the single copy of the pipeline; production and tests
+  both call it.
+
+### App target (thin shell)
+
+`MapboxTerrainRGBElevationProvider` keeps: the empty-token early return, its
+defaults (spacing 150 m, samples 16–96, zoom 14), and a call into
+`TerrainRGBSampler` with a `TerrainTileCache`-backed lookup. `TerrainTileCache`
+keeps URLSession fetch + `TerrainRGBTile(pngData:)` and **must preserve the
+double-optional negative-result caching** (`[TerrainTileID: TerrainRGBTile?]`
+with `guard tiles[key] == nil`) so failed tiles are not re-fetched. Public API
+and behavior of the provider are unchanged; `import MapboxMaps` stays (token
+read); the app already links AuraKit, so no project change.
 
 ## 2. Fixture
 
-One real `mapbox.terrain-rgb` z14 tile covering hilly Pittsburgh, chosen so a
-single tile contains both strong relief (South Side slopes) and the flat
-Monongahela riverbank. Downloaded once during implementation with the
-gitignored token, then committed as
-`AuraCore/Tests/AuraCoreTests/Resources/terrain-rgb-fixture.pngraw`
-(expected ~15–60 KB). The test file records the tile's z/x/y and fetch date
-in a comment. `Package.swift` adds a `resources:` clause to `AuraCoreTests`.
+A **generated** terrain-rgb PNG, committed as
+`AuraCore/Tests/AuraKitTests/Resources/terrain-rgb-fixture.png` with a
+`.copy` resources clause (byte-exactness guaranteed; `AuraKitTests` gains its
+first `resources:` entry). Nothing Mapbox-owned enters the repo.
 
-Frozen-literal policy applies: expected elevations and gains are recorded
-once from a verified run and pasted as literals. Tests never recompute truth
-values at run time. If the fixture is ever re-recorded, all literals are
-re-recorded with it in the same commit.
+- The DEM is a deterministic analytic surface defined in the record helper:
+  a flat low "riverbank" band (constant elevation) plus asymmetric hillsides
+  with total relief well above 50 m, designed so chosen check-pixels are
+  transpose-distinct (`elevation(px,py) ≠ elevation(py,px)`) — a row/column
+  transposition in the offset math cannot slip through.
+- The tile is assigned the real z14 x/y of a Pittsburgh South Side tile, so
+  fixture routes use realistic lat/lon and the placement math is exercised
+  with real-world numbers.
+- Record mechanism follows the ROH-92 convention: a
+  `TERRAIN_FIXTURE_RECORD=1`-gated test in `AuraKitTests` regenerates the
+  PNG (raw RGB bytes via CGImageDestination — a different code path than the
+  CGContext-render decode, so encode and decode bugs do not cancel) and
+  prints paste-ready truth literals derived **from the DEM function**, not
+  from the decoder under test.
+- Frozen-literal policy applies: literals are recorded once and pasted; any
+  intentional change to fixture, sampling, or formula re-records fixture and
+  all literals in the same commit.
+- Residual-fidelity mitigation: at record time, a one-off manual cross-check
+  decodes one live Mapbox tile (token from the gitignored file, nothing
+  committed) and compares a few pixels against Mapbox's public formula;
+  the result is quoted in the PR. This validates the decoder against the
+  real encoder without redistributing Mapbox data.
 
-## 3. Decoder gate — `TerrainRGBTileTests`
+## 3. Decoder gate — `TerrainRGBTileTests` (AuraKitTests)
 
-Swift Testing suite in `AuraCoreTests`:
+- Decode the fixture; `#require` non-nil.
+- Frozen-literal elevations at 4 transpose-distinct pixels, ±0.5 m (the
+  format quantizes at 0.1 m; ±0.5 m is neither loose nor brittle).
+- Non-flat assertion: max − min across the tile exceeds 50 m.
+- Rejection tests, each expecting `nil`: random bytes, empty data, truncated
+  PNG, and a **valid but wrong-size** PNG (e.g. 512×512) — the silent-rescale
+  case.
+- Colorspace identity: `#require` the fixture's source colorspace is sRGB or
+  untagged, pinning the no-color-management invariant the literals depend on.
 
-- Decode the fixture tile; `#require` it is non-nil.
-- Frozen-literal elevations at ~4 chosen pixels, `±0.5 m` tolerance. Pixels
-  are chosen during implementation to span the tile's relief (riverbank low,
-  hillside high).
-- Non-flat assertion: max − min elevation across the full tile exceeds 50 m.
-  Pittsburgh relief inside this tile is well above that, so the threshold
-  only fires when the decode goes flat.
-- Garbage input (random bytes, truncated PNG, empty data) → `init?` returns
-  `nil`. A silent all-zero tile is the regression we are gating, so failure
-  must be `nil`, never a flat buffer.
-- `TerrainRGBPlacement` frozen-literal checks: known lat/lon (Pittsburgh
-  landmarks) → expected tile x/y and pixel, at z14.
+Placement checks — `TerrainRGBPlacementTests` (AuraCoreTests): frozen-literal
+tile x/y and pixel for known Pittsburgh landmarks at z14.
 
-## 4. Ranking gate — `RoutePlanningElevationGateTests`
+## 4. Ranking gate — `RoutePlanningElevationGateTests` (AuraKitTests)
 
-Swift Testing suite in `AuraCoreTests`, exercising the same path production
-takes from geometry to label, with the network swapped for the fixture:
+Runs the extracted production pipeline end to end with the network swapped
+for the fixture:
 
-- `FixtureTileElevationProvider: ElevationProvider` (test-local): holds the
-  decoded fixture tile; `elevations(along:)` uses
-  `ElevationSampling.proportionalCount` + `sampleIndices` +
-  `TerrainRGBPlacement` + `TerrainRGBTile.elevation`, mirroring the
-  production provider's read path. Coordinates outside the fixture tile drop
-  the sample, mirroring best-effort behavior.
-- Three hand-authored polylines inside the tile bounds: one along the flat
-  riverbank, two crossing the slopes with visibly different climb.
+- Tile lookup: a closure returning the decoded fixture tile for its
+  `TerrainTileID`, `nil` otherwise (drop-on-miss mirrors production because
+  it *is* production code via `TerrainRGBSampler`).
+- Three hand-authored polylines inside the tile bounds, each with ≥ 32
+  vertices so the downsampling branch of `sampleIndices` actually executes:
+  - `hillA` — monotonic climb up the ridge (gain ≈ relief; any
+    sign-reversal or reordering of elevations collapses its gain to ~0, so
+    reversal cannot pass);
+  - `riverbank` — along the flat band (gain exactly 0 by DEM construction);
+  - `hillB` — a different climb with a distinct frozen gain.
+  - Honesty note: in-tile routes are ~≤ 2.6 km, so `proportionalCount`
+    min-clamps to 16 samples; the proportional branch stays covered by
+    `ElevationSamplingTests`. Zoom is pinned to 14 to match the provider
+    default.
+- `CandidateRoute` choreography (required — `RouteRanker` assigns mostPaths
+  first and dedups winners, so unpinned inputs can leave "Flattest"
+  unassigned): candidates ordered `[hillA, riverbank, hillB]`; `hillA` gets
+  the strictly lowest `walkFraction` (wins mostPaths), `hillB` the strictly
+  lowest duration (wins fastest), so flattest must go to the minimum-gain
+  candidate.
 - Assertions:
-  - Every route's elevations are non-empty.
-  - Gains (`RouteMetrics.elevationGain`) are not all zero and not all equal.
-  - Frozen-literal expected gain per route with a ±15% relative tolerance
-    (sampling is deterministic, so this is generous headroom for future
-    intentional sampling tweaks without being loose enough to pass flat).
-  - `RouteRanker.labeled` over the three candidates assigns "Flattest" to
-    the riverbank route.
+  - every route's elevations are non-empty;
+  - gains are not all zero and not all equal;
+  - frozen-literal expected gain per route, **±0.5 m absolute** (sampling
+    and fixture are deterministic; intentional tweaks are re-record events,
+    not tolerance headroom);
+  - `RouteRanker.labeled` assigns `.flattest` to `sourceIndex` 1
+    (riverbank).
 
-The not-all-zero plus label assertion is the line that fails if the decoder
-ever silently goes flat again.
+The flat-regression kill line: if the decoder or sampler silently goes flat,
+gains collapse to 0, the not-all-zero assertion and all three gain literals
+fail. Offset and uniform-scale errors are the decoder gate's job (pixel
+literals), not this suite's.
 
 ## 5. Error handling and CI
 
 - No network access in any test; the fixture is the only tile source.
 - No `#if os` guards needed: CoreGraphics and ImageIO are available on both
   declared platforms. (`corelocation-macos-ci-guards` does not bite here.)
-- The existing `swift test` CI job picks up both new suites with no workflow
+- The existing `swift test` CI job picks up the new suites with no workflow
   changes. The app-build CI job proves the refactored provider compiles
   against the extracted core.
+- Truth literals are recorded from a run on the CI toolchain (macos-15,
+  latest-stable Xcode) to pin any residual ImageIO variance where CI runs.
 - SwiftLint must stay clean (`swiftlint --strict`).
 
-## 6. Testing the change itself
+## 6. Coverage honesty — what this gate would and would not catch
 
-- Regression drill before merge: temporarily break the decode (e.g. zero the
-  formula's multiplier) and confirm both the decoder gate and the ranking
-  gate fail; revert and quote the drill output in the PR.
-- Both harness specs' "not caught — ROH-94" rows get updated to point at
-  this gate, and the ROADMAP testing section notes the new coverage.
+| Regression class | Caught by |
+|---|---|
+| Silently flat/garbage decode (the original Terrain-RGB class) | Decoder gate + ranking gate |
+| RGB formula, byte-order, colorspace, wrong-size/partial-image regressions | Decoder gate |
+| Placement math regressions | Placement frozen literals |
+| Sampling orchestration drift (order, dedupe, drop, px/py wiring) | Ranking gate via shared `TerrainRGBSampler` |
+| Samples → gain → "Flattest" label wiring | Ranking gate |
+| Empty-token early return (`elevations == []` → gain 0) | **Not caught** — app-side guard; device verification |
+| URLSession fetch, HTTP status handling | **Not caught** — deliberately out of CI |
+| `TerrainTileCache` warm dedupe / negative-result caching | **Not caught** — app-side actor; compile-gated only |
+| Provider left unwired at a call site (`MapboxRoutingProvider` default, `RoutePreviewView`, `MapboxDetourRouting`) | **Not caught** — same symptom as the original class; device verification |
+| Real Mapbox encoder drift vs the generated fixture | **Not caught** in CI — one-time live cross-check at record time (§2) |
 
-## 7. Out of scope
+The first draft of this spec claimed "only URLSession stays ungated"; review
+showed that was false. This table is the honest boundary.
+
+## 7. Testing the change itself
+
+Regression drill before merge, one break per gated class, reverted after
+proof and quoted in the PR:
+
+1. Force the decode to produce an all-zero buffer (the historical failure
+   shape) → decoder gate and ranking gate both fail.
+2. Break the placement `y` formula → placement literals fail.
+3. Zero the RGB formula multiplier → decoder pixel literals fail.
+
+## 8. Definition of done
+
+- Both suites green locally (`swift test` in `AuraCore/`); CI green on the
+  PR; `swiftlint --strict` clean.
+- Regression drill output quoted in the PR.
+- Sibling harness specs: **append** to their "Not caught — ROH-94" rows
+  ("gated since ROH-94, see this spec") — the dated specs stay point-in-time
+  records. ROADMAP §Testing closes the Terrain-RGB cautionary tale with a
+  pointer here.
+- Linear: ROH-94 → In Review at PR, Done after merge (board flow).
+
+## 9. Out of scope
 
 - No app-target unit-test bundle, no URLProtocol stubbing.
 - No change to provider behavior, ranking semantics, tile zoom, or sampling
   defaults.
-- No gating of the URLSession fetch path or the actor cache's concurrency
-  (covered indirectly by app build + device use).
+- No gating of the URLSession fetch, token guard, or the actor cache
+  (rows in §6).
