@@ -667,10 +667,18 @@ turn haptics (the `TurnHapticEngine` edge-trigger and the `GuidanceViewModel` ha
 a `HapticPlaying` spy). The app target gained its first automated UI coverage in
 `AuraUITests` (PR #22, 2026-07-01): seven XCUITest tests across launch, tab navigation,
 the join-ride flow, and Settings, run sim-first. A CI job for them is deferred; they run
-locally and on demand until the suite earns its own CI iteration. Below that suite, the
-Mapbox-backed providers and the live CoreLocation stream are still built in CI but
-untested, and Wave 0's free-ride record-to-summary flow remains a one-off simulator
-smoke test rather than an automated one.
+locally and on demand until the suite earns its own CI iteration. The free-ride
+record-to-summary loop is now gated end to end (ROH-92): a package-level golden-ride
+playback test (`GoldenRidePlaybackTests`) drives the real GPX →
+`SimulatedLocationProvider` → coordinator → store chain against frozen fixture truth, and
+`AuraUITests/RideE2EUITests` rides the same fixture through the real app — Home → HUD →
+End → summary → History — in CI (the `app-build` job now runs build-for-testing plus that
+one UI test; `scripts/golden-ride.sh` is the local one-liner). The lane's flake policy:
+one automatic retry; if it fails twice on unrelated PRs it gets demoted to non-required
+and a fix issue filed. Honest boundaries: the harness bypasses live CoreLocation ingestion
+(`LocationService.points()` — ROH-83/ROH-88 territory, still covered by unit seams +
+device verification), the navigate/group summary seams (ROH-93), and the route-planning
+elevation path (ROH-94). The Mapbox-backed providers remain built-but-untested in CI.
 
 Near-term testing work, sequenced with the waves above: the app-target CI build and SwiftLint
 landed in Wave 1, and the schema migration test landed with the persistence rebuild (Wave 1).
