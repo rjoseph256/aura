@@ -260,6 +260,26 @@ struct RoutePreviewView: View {
 
     private func loadRoutes() async {
         phase = .loading
+        #if DEBUG
+        // Golden-ride harness (ROH-93): a simulated ride previews the bundled fixture
+        // as its one route — no Directions network, no location.current() stall.
+        // Setting `selected` drives the production onChange → fitCamera path; the
+        // .loading→.loaded machine and auto-select-from-a-real-fetch stay ungated by
+        // design (spec §2).
+        if SimulatedRideConfig.current != nil {
+            do {
+                let route = try GoldenRideFixture.route()
+                routes = [route]
+                selected = route
+                phase = .loaded
+                return
+            } catch {
+                // Defensive-only: the fixture is always bundled. Fail loudly in Debug,
+                // then fall through to the real fetch rather than wedging the preview.
+                assertionFailure("Golden-ride fixture route failed to load: \(error)")
+            }
+        }
+        #endif
         let origin = await location.current()
         let request = RouteRequest(origin: origin, destination: destination.coordinate)
         do {
