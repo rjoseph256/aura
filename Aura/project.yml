@@ -35,7 +35,6 @@ targets:
         excludes:
           - Info.plist
           - MapboxAccessToken
-          - sample-ride-pittsburgh.gpx
           - Fonts
           - Aura.entitlements
       # Bundled Saira Condensed faces (OFL) — classified as resources and
@@ -45,10 +44,6 @@ targets:
       # so the bundled pk.… token ships in the .app (XcodeGen won't classify
       # an extension-less file as a resource on its own).
       - path: Resources/MapboxAccessToken
-        buildPhase: resources
-      # Sample GPX that drives the simulated free ride — force it into the
-      # resources copy phase so Bundle.main can load it at runtime.
-      - path: Resources/sample-ride-pittsburgh.gpx
         buildPhase: resources
     dependencies:
       # Embeds the Live Activity / widget extension into the app bundle.
@@ -129,6 +124,8 @@ targets:
       - path: UITests
     dependencies:
       - target: Aura
+      - package: AuraCore
+        product: AuraKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rohunjoseph.aura.uitests

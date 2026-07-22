@@ -19,6 +19,7 @@ build-device/
 build-sim/
 build-device.log
 build-sim.log
+DerivedData/
 
 # Python bytecode (gem authoring tools)
 __pycache__/

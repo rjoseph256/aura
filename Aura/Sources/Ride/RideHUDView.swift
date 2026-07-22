@@ -87,6 +87,18 @@ struct RideHUDView: View {
             GPSSignalChip(signal: location.signal)
                 .padding(.top, 8).padding(.trailing, 16)
         }
+        #if DEBUG
+        .overlay(alignment: .bottomLeading) {
+            if SimulatedRideConfig.current != nil {
+                Text(RideTestProbe.line(distanceMeters: coordinator.stats.distanceMeters,
+                                        elapsed: coordinator.elapsed,
+                                        elevationGainMeters: coordinator.stats.elevationGainMeters))
+                    .font(.system(size: 8))
+                    .opacity(0.02)   // invisible to riders, present in the a11y tree
+                    .accessibilityIdentifier(RideTestID.hudProbe)
+            }
+        }
+        #endif
         // The active layer: at most one self-dismissing peek card for a newly surfaced gem.
         // Sits up top, just below the back button, so it never covers the speedometer cluster.
         .overlay(alignment: .top) {
@@ -156,10 +168,30 @@ struct RideHUDView: View {
         // Auto-start recording on appear (parity with navigate). A denied permission surfaces
         // the explainer; the back button (at zero distance) discards cleanly.
         .task {
+            var liveProvider: any GemProviding = LiveGemProvider()
+            var rideLocation: any LocationStreaming = location
+            var rideAuthorization = location.authorization
+            #if DEBUG
+            // Golden-ride harness (ROH-92): simulated rides swap the location seam for the
+            // bundled fixture, bypass the permission gate (no CoreLocation involved), and
+            // drop the live Overpass gem source (unmocked network → nondeterministic cards).
+            if let sim = SimulatedRideConfig.current {
+                do {
+                    rideLocation = try GoldenRideFixture.simulatedProvider(multiplier: sim.speedMultiplier)
+                    rideAuthorization = .authorized
+                    liveProvider = EmptyGemProvider()
+                } catch {
+                    // Defensive-only: the fixture is always bundled, so this branch is
+                    // unreachable in practice and has no test; it exists so a packaging
+                    // regression fails loudly in Debug instead of silently riding on GPS.
+                    assertionFailure("Simulated ride fixture failed to load: \(error)")
+                }
+            }
+            #endif
             let store = gems ?? GemDiscoveryStore(
                 provider: CompositeGemProvider(
                     local: [PersonalGemProvider(reading: savedPlaces), CuratedGemProvider()],
-                    live: LiveGemProvider()),
+                    live: liveProvider),
                 seen: SeenGemStore(container: rideStore.container),
                 haptics: GemHapticPlayer())
             // Arbiter (R7): a detour in flight suppresses the gem peek card + Tier-3 haptic
@@ -168,8 +200,8 @@ struct RideHUDView: View {
             guidance.units = settings.units
             gems = store
             let outcome = coordinator.start(
-                location: location, saving: rideStore, units: settings.units,
-                authorization: location.authorization, saveToHealth: settings.saveToHealth,
+                location: rideLocation, saving: rideStore, units: settings.units,
+                authorization: rideAuthorization, saveToHealth: settings.saveToHealth,
                 discoverySink: store)
             if outcome == .permissionDenied { showPermission = true }
         }
@@ -260,6 +292,7 @@ private extension RideHUDView {
         }
         .buttonStyle(.hudControl)
         .accessibilityLabel(canDiscard ? "Discard ride" : "End ride")
+        .accessibilityIdentifier(RideTestID.hudBack)
     }
 
     func backTapped() {
@@ -329,3 +362,10 @@ private extension RideHUDView {
         }
     }
 }
+
+#if DEBUG
+/// Harness stand-in for LiveGemProvider: contributes nothing, touches no network.
+private struct EmptyGemProvider: GemProviding {
+    func gems(near coordinate: Coordinate) async -> [Gem] { [] }
+}
+#endif

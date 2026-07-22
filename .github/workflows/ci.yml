@@ -34,8 +34,10 @@ jobs:
         run: swift test --no-parallel
 
   app-build:
+    # Keep the original display name — branch protection / required checks key on it.
     name: App build (xcodebuild)
     runs-on: macos-15
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: maxim-lobanov/setup-xcode@v1
@@ -54,13 +56,44 @@ jobs:
       - name: Generate project
         working-directory: Aura
         run: xcodegen generate
-      - name: Build app (also builds the embedded AuraWidgets extension)
+      - name: Select and boot simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list -j devices available | jq -r '
+            .devices | to_entries
+            | map(select(.key | contains("iOS")))
+            | sort_by(.key) | last | .value
+            | map(select(.isAvailable and (.name | startswith("iPhone"))))
+            | last | .udid')
+          test -n "$UDID" && test "$UDID" != "null"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl privacy "$UDID" grant location com.rohunjoseph.aura || true
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+      - name: Build for testing (also builds the embedded AuraWidgets extension)
         working-directory: Aura
         run: |
-          xcodebuild build \
+          xcodebuild build-for-testing \
             -project Aura.xcodeproj \
             -scheme Aura \
-            -destination 'generic/platform=iOS Simulator' \
+            -configuration Debug \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath DerivedData \
+            CODE_SIGNING_ALLOWED=NO
+      # Golden-ride E2E (ROH-92). Skipped for fork PRs: no Mapbox secrets there, so the
+      # build above already failed anyway — the guard just makes intent explicit.
+      - name: Golden ride E2E
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        working-directory: Aura
+        run: |
+          xcodebuild test-without-building \
+            -project Aura.xcodeproj \
+            -scheme Aura \
+            -configuration Debug \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath DerivedData \
+            -only-testing:AuraUITests/RideE2EUITests \
+            -retry-tests-on-failure -test-iterations 2 \
             CODE_SIGNING_ALLOWED=NO
 
   lint:
