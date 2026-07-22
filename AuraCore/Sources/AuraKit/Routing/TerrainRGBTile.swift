@@ -23,9 +23,11 @@ public struct TerrainRGBTile: Sendable {
 
     public init?(pngData: Data) {
         let side = Self.side
-        // Both status checks matter: the source-level status can report
-        // .statusComplete for complete-but-truncated in-memory data; the
-        // per-image status is what flags a partially decodable PNG.
+        // Both status checks are kept as a cheap first line of defense, but
+        // empirically do NOT reliably flag truncated in-memory PNGs: both
+        // CGImageSourceGetStatus and CGImageSourceGetStatusAtIndex report
+        // .statusComplete for a 50%-truncated PNG on this code path. The
+        // post-draw all-zero check below is the real defense.
         guard let src = CGImageSourceCreateWithData(pngData as CFData, nil),
               CGImageSourceGetStatus(src) == .statusComplete,
               CGImageSourceGetStatusAtIndex(src, 0) == .statusComplete,
@@ -55,7 +57,10 @@ public struct TerrainRGBTile: Sendable {
         // Detect partially-decoded images: if the buffer is entirely zeros,
         // ImageIO yielded a partial/undrawn image (a truncated PNG with valid
         // header but incomplete data). Check that at least one RGB component
-        // is non-zero across the entire tile.
+        // is non-zero across the entire tile. Deliberate tradeoff: a hypothetical
+        // legitimate all-zero tile (uniform −10000 m, the encoding floor; only
+        // plausible as a no-data tile) would be rejected — we accept this because
+        // refusing no-data beats fabricating flat elevation.
         let hasNonZeroPixels = (0..<(side * side)).contains { i in
             let off = i * 4
             return buf[off] != 0 || buf[off + 1] != 0 || buf[off + 2] != 0

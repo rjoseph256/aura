@@ -94,9 +94,12 @@ Alternatives rejected:
       tile into plausible garbage;
     - fails unless both `CGImageSourceGetStatus` and
       `CGImageSourceGetStatusAtIndex(_, 0)` are `.statusComplete` (the
-      source-level status can be complete for truncated in-memory data; the
-      per-image status flags the partial PNG) — ImageIO can otherwise render
-      a partial image, leaving undrawn all-zero rows (elevation −10000 m),
+      source-level status can be complete for truncated in-memory data; these
+      status checks are kept as cheap guards but empirically do not catch
+      prefix-truncated in-memory PNGs, so the decode additionally rejects any
+      tile whose drawn buffer is entirely zero—all-pixels −10000 m—which is
+      what actually catches partial decodes) — this prevents ImageIO's ability
+      to render a partial image with undrawn all-zero rows (elevation −10000 m),
       which is exactly the flat fabrication this gate forbids;
     - the render must be color-conversion-free: draw into the source image's
       own colorspace (fall back to sRGB only for untagged input) so DEM byte
