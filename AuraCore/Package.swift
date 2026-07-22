@@ -21,7 +21,8 @@ let package = Package(
             ]
         ),
         .target(name: "AuraKit", dependencies: ["AuraCore"],
-                resources: [.process("Resources/gems.json")]),
+                resources: [.process("Resources/gems.json"),
+                            .process("Resources/golden-ride.gpx")]),
         .testTarget(name: "AuraKitTests", dependencies: ["AuraKit"]),
     ],
     swiftLanguageModes: [.v6]
