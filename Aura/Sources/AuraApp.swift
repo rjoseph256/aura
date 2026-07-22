@@ -44,6 +44,13 @@ struct AuraApp: App {
     /// Builds the app's persistent SwiftData-backed RideStore. Falls back to an
     /// in-memory store if the on-disk container can't be created, so the app still runs.
     @MainActor static func makeRideStore() -> RideStore {
+        #if DEBUG
+        // Golden-ride harness (ROH-92): a fresh in-memory store per launch keeps the
+        // History assertion deterministic across local runs and CI sims.
+        if SimulatedRideConfig.currentForcesInMemoryStore, let store = try? RideStore.inMemory() {
+            return store
+        }
+        #endif
         do {
             return try RideStore.persistent()
         } catch {
@@ -168,6 +175,11 @@ private struct RootView: View {
     /// `.inactive` — Control Center, a notification banner, a permission alert — must NOT tear
     /// down the ambient monitor. Ambient is released only on a real `.background`.
     private func syncLocationActivity() {
+        #if DEBUG
+        // Golden-ride harness: never engage the ambient CoreLocation tier while a ride is
+        // simulated, so no permission prompt can interrupt the UI test mid-navigation.
+        if SimulatedRideConfig.current != nil { return }
+        #endif
         let isHomeForeground = router.path.isEmpty && scenePhase != .background
         switch LocationAccuracyMode.desired(isRideActive: router.isRideActive,
                                             isHomeForeground: isHomeForeground,

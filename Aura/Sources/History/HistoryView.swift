@@ -56,6 +56,8 @@ struct HistoryView: View {
         List {
             ForEach(Array(summaries.enumerated()), id: \.element.id) { index, summary in
                 RideRow(summary: summary, units: settings.units)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityIdentifier(RideTestID.historyRow)
                     .contentShape(Rectangle())
                     .onTapGesture { selected = try? store.ride(id: summary.id) }
                     .listRowBackground(Color.clear)

@@ -162,6 +162,7 @@ struct RideSummaryView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Distance, \(fmt.distanceValue(stats.distanceMeters)) \(fmt.distanceUnitSpoken)")
+        .accessibilityIdentifier(RideTestID.summaryDistance)
     }
 
     /// The three supporting stats in an even row that reflows to a vertical stack at
