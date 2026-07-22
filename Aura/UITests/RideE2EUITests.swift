@@ -6,7 +6,8 @@ import AuraKit
 /// the summary and History wiring. Numbers are sanity bands only — Layer 1
 /// (GoldenRidePlaybackTests) owns precision.
 final class RideE2EUITests: XCTestCase {
-    override func setUpWithError() throws {
+    override func setUp() {
+        super.setUp()
         continueAfterFailure = false
     }
 
