@@ -53,7 +53,7 @@ remains ungated and is filed as
 | Recorder/stats/persist chain breaks (points dropped, stats zeroed, mapper columns wrong, save dropped) | Layer 1 (numeric), Layer 2 (row exists) |
 | Free-ride HUD wiring breaks (auto-start, End alert, finish → summary collapse, History) | Layer 2 |
 | Fixture/parse regressions (GPX parsing, playback scheduling) | Layer 1 |
-| Terrain-RGB class in route planning | **Not caught** — ROH-94 |
+| Terrain-RGB class in route planning | **Not caught** — ROH-94 (decode/placement/sampling gated since ROH-94, see 2026-07-22-route-elevation-gate-design.md; token guard, fetch, cache, and call-site wiring remain not caught) |
 | Live CoreLocation ingestion (`LocationService.points()`, signal classification, fix filter — where ROH-83/ROH-88 actually lived) | **Not caught** — both layers bypass `LocationService` by design; this stays covered by its unit seams + device verification |
 | Navigate/group summary seams (ROH-85 class) | **Not caught** in v1 — ROH-93 |
 | Summary dismiss *flash* (transient animation artifacts) | **Not caught** (not assertable in XCUITest cheaply) |

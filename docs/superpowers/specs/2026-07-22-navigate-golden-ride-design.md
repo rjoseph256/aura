@@ -51,7 +51,7 @@ also has zero E2E coverage of the preview → Go entry wiring.
 | Preview "Start RIDE" → `.navigate` push wiring | Yes |
 | Navigate HUD auto-start / simulated `coordinator.start` wiring (incl. stats: distance floor + nonzero gain) | Yes (probe) |
 | Deep link `aura://preview` → preview push | Yes (incidental) |
-| Route fetch (`MapboxRoutingProvider`), ranking, `.loading→.loaded` phase machine, auto-select from a real fetch | No — bypassed by design (ROH-94 adjacent) |
+| Route fetch (`MapboxRoutingProvider`), ranking, `.loading→.loaded` phase machine, auto-select from a real fetch | No — bypassed by design (ROH-94 adjacent; the planning pipeline's elevation→ranking path is gated at package level since ROH-94, see 2026-07-22-route-elevation-gate-design.md — fetch/phase machine remain uncovered) |
 | Guidance engine, turn card, reroute, arrival | No — scripted-empty by design |
 | Search box → preview wiring | No — deep-link entry skips it |
 | Voice, haptics, Live Activity, widgets, map content | No — unchanged from ROH-92 policy |

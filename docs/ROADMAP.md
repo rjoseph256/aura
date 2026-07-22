@@ -692,4 +692,4 @@ pattern new tests follow from here. UI work is still verified by running the
 app on the simulator and checking the actual screens, since a clean build is not enough to
 catch a feature that silently does nothing (the Terrain-RGB elevation switch is the
 cautionary tale: the first implementation compiled fine and returned a flat value
-everywhere).
+everywhere). The route-planning side of the Terrain-RGB lesson is gated as of ROH-94: package tests decode a generated fixture tile and fail if the planning pipeline's elevation ever goes flat (docs/superpowers/specs/2026-07-22-route-elevation-gate-design.md).
