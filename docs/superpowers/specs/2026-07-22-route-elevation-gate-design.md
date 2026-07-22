@@ -92,10 +92,12 @@ Alternatives rejected:
     - fails (`nil`) unless the source image is exactly `side × side`
       (256×256) — `ctx.draw` would otherwise silently rescale a wrong-size
       tile into plausible garbage;
-    - fails unless `CGImageSourceGetStatus == .statusComplete` — ImageIO can
-      render a partial image for a truncated PNG, leaving undrawn all-zero
-      rows (elevation −10000 m), which is exactly the flat fabrication this
-      gate forbids;
+    - fails unless both `CGImageSourceGetStatus` and
+      `CGImageSourceGetStatusAtIndex(_, 0)` are `.statusComplete` (the
+      source-level status can be complete for truncated in-memory data; the
+      per-image status flags the partial PNG) — ImageIO can otherwise render
+      a partial image, leaving undrawn all-zero rows (elevation −10000 m),
+      which is exactly the flat fabrication this gate forbids;
     - the render must be color-conversion-free: draw into the source image's
       own colorspace (fall back to sRGB only for untagged input) so DEM byte
       values are never color-matched (a ±1 shift in R is ±6553.6 m);

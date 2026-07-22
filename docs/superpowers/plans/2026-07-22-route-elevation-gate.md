@@ -121,16 +121,12 @@ struct TerrainRGBPlacementTests {
         #expect(p.py == <py>)
     }
 
-    @Test func pixelClampsAtTileEdge() {
-        // A longitude exactly on a tile boundary must clamp px into 0...255, never 256.
-        let n = 16384.0 // 2^14
-        let lonOnBoundary = (Double(9000) / n) * 360.0 - 180.0
-        let p = TerrainRGBPlacement.placement(lat: 40.4, lon: lonOnBoundary, z: 14)
-        #expect((0...255).contains(p.px))
-        #expect((0...255).contains(p.py))
-    }
 }
 ```
+
+(No clamp-boundary test: review showed `Int((xf - floor(xf)) * 256.0)` is
+strictly < 256, so the clamp path is unreachable and such a test is a
+tautology. The three landmark literals are the gate.)
 
 - [ ] **Step 3: Run the test to verify it fails to compile**
 
@@ -187,7 +183,7 @@ public enum TerrainRGBPlacement {
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `cd AuraCore && swift test --filter TerrainRGBPlacementTests`
-Expected: PASS (4 tests). If a placement literal mismatches, the Swift math and the Python formula disagree — investigate before touching literals (they are the independent truth).
+Expected: PASS (3 tests). If a placement literal mismatches, the Swift math and the Python formula disagree — investigate before touching literals (they are the independent truth).
 
 - [ ] **Step 6: Commit**
 
@@ -256,7 +252,8 @@ enum TerrainRGBPNG {
                                   provider: provider, decode: nil,
                                   shouldInterpolate: false, intent: .defaultIntent) else { return nil }
         let out = NSMutableData()
-        guard let dest = CGImageDestinationCreateWithData(out, UTType.png.identifier as CFString, 1, nil) else {
+        guard let dest = CGImageDestinationCreateWithData(out as CFMutableData, UTType.png.identifier as CFString,
+                                                          1, nil) else {
             return nil
         }
         CGImageDestinationAddImage(dest, image, nil)
@@ -369,8 +366,12 @@ public struct TerrainRGBTile: Sendable {
 
     public init?(pngData: Data) {
         let side = Self.side
+        // Both status checks matter: the source-level status can report
+        // .statusComplete for complete-but-truncated in-memory data; the
+        // per-image status is what flags a partially decodable PNG.
         guard let src = CGImageSourceCreateWithData(pngData as CFData, nil),
               CGImageSourceGetStatus(src) == .statusComplete,
+              CGImageSourceGetStatusAtIndex(src, 0) == .statusComplete,
               let img = CGImageSourceCreateImageAtIndex(src, 0, nil),
               img.width == side, img.height == side else { return nil }
         // Draw in the source's own colorspace (fall back to sRGB for untagged
@@ -411,7 +412,7 @@ public struct TerrainRGBTile: Sendable {
 - [ ] **Step 5: Run to verify pass**
 
 Run: `cd AuraCore && swift test --filter TerrainRGBTileTests`
-Expected: PASS (6 tests). If `rejectsTruncatedPNG` fails because ImageIO reports the truncated source `.statusComplete` with a valid image, increase truncation (`png.prefix(1024)`) — the guard chain (status, then dimensions) must reject it one way or the other; a truncated file must never decode.
+Expected: PASS (6 tests). If `rejectsTruncatedPNG` fails, the defect is in the decoder's guard chain (the per-image `CGImageSourceGetStatusAtIndex` check exists precisely for partial PNGs) — harden the decoder; do NOT weaken the test input to something the header parse rejects.
 
 - [ ] **Step 6: Commit**
 
@@ -447,9 +448,28 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
     - `static let hillAPixels: [(px: Double, py: Double)]`, `riverbankPixels`, `hillBPixels` (33 entries each)
     - `static func route(_ pixels: [(px: Double, py: Double)]) -> [Coordinate]`
 
-- [ ] **Step 1: Write `TerrainFixture` support**
+- [ ] **Step 1: Create the resource placeholder and declare it (build-order prerequisite)**
 
-`AuraCore/Tests/AuraKitTests/Support/TerrainFixture.swift` — substitute the SouthSideAnchor tile x/y recorded in Task 1 Step 1 for `<tileX>`/`<tileY>`:
+`Bundle.module` is only synthesized once the test target declares resources, and SwiftPM rejects a declared resource that is missing from disk — so the resource must exist (as a placeholder) BEFORE the support code or the record helper can build. The record run later overwrites it.
+
+```bash
+mkdir -p AuraCore/Tests/AuraKitTests/Resources && : > AuraCore/Tests/AuraKitTests/Resources/terrain-rgb-fixture.png
+```
+
+Then in `AuraCore/Package.swift`, change the `AuraKitTests` target to:
+
+```swift
+        .testTarget(name: "AuraKitTests", dependencies: ["AuraKit"],
+                    resources: [.copy("Resources/terrain-rgb-fixture.png")]),
+```
+
+(`.copy`, not `.process`: the fixture's bytes are the truth; nothing may touch them.)
+
+Verify the target still builds: `cd AuraCore && swift build --build-tests` → succeeds.
+
+- [ ] **Step 2: Write `TerrainFixture` support**
+
+`AuraCore/Tests/AuraKitTests/Support/TerrainFixture.swift` — substitute the SouthSideAnchor tile x/y for `<tileX>`/`<tileY>`. The recorded values live in the committed `southSideAnchorPlacement` test in `AuraCore/Tests/AuraCoreTests/TerrainRGBPlacementTests.swift` (Task 1); if in doubt, re-run Task 1 Step 1's Python one-liner — the `SouthSideAnchor` line's first two numbers are `<tileX>`/`<tileY>`:
 
 ```swift
 import Foundation
@@ -466,8 +486,10 @@ import AuraCore
 ///   otherwise                  → 240 + 0.5·py + 0.8·px
 /// Relief ≈ 351 m; transpose-distinct off the diagonal (0.8 ≠ 0.5).
 ///
-/// Truth literals are derived FROM THIS FUNCTION (independent of the decoder
-/// and sampler under test) via the TERRAIN_FIXTURE_RECORD=1 helper. Re-record
+/// Truth literals are derived FROM THIS FUNCTION — independent of
+/// `TerrainRGBTile` and `TerrainRGBSampler`, the components under test (they
+/// do pass through the separately unit-tested `ElevationSampling` and
+/// `RouteMetrics`) — via the TERRAIN_FIXTURE_RECORD=1 helper. Re-record
 /// procedure: any intentional change to this DEM, the routes, sampling, or the
 /// formula regenerates the PNG and re-pastes every literal in the same commit.
 enum TerrainFixture {
@@ -517,12 +539,13 @@ enum TerrainFixture {
 }
 ```
 
-- [ ] **Step 2: Add the record helper and fixture-gate tests**
+- [ ] **Step 3: Add the record helper and fixture-gate tests**
 
-Append to `AuraCore/Tests/AuraKitTests/TerrainRGBTileTests.swift`. The `<...>` literals get pasted from the record run in Step 4; write the tests first with placeholder `-1` values so the suite compiles but fails (that is the TDD "failing test" state):
+Append to `AuraCore/Tests/AuraKitTests/TerrainRGBTileTests.swift`. The `<...>` literals get pasted from the record run in Step 5; write the tests first with placeholder `-1.0` values:
 
 ```swift
 import ImageIO   // (top of file, with the existing imports)
+import CoreGraphics
 import AuraCore
 
 /// Gate over the COMMITTED fixture tile (ROH-94). Literals recorded via
@@ -601,30 +624,35 @@ struct TerrainFixtureDecodeTests {
 }
 ```
 
-- [ ] **Step 3: Declare the test resource**
-
-In `AuraCore/Package.swift`, change the `AuraKitTests` target to:
-
-```swift
-        .testTarget(name: "AuraKitTests", dependencies: ["AuraKit"],
-                    resources: [.copy("Resources/terrain-rgb-fixture.png")]),
-```
-
-(`.copy`, not `.process`: the fixture's bytes are the truth; nothing may touch them.)
-
-- [ ] **Step 4: Record the fixture and literals**
-
-Run: `cd AuraCore && TERRAIN_FIXTURE_RECORD=1 swift test --filter recordTerrainFixture`
-Expected: PASS, printing the written path plus `pixel(10,200) = 348.0`, `pixel(200,10) = 405.0`, `pixel(50,116) = 220.0`, `pixel(250,250) = 565.0`, and three `gain=` lines (expected: hillA 179.2, riverbank 0.0, hillB 32.0, each with `sampleCount=16`). If a printed value differs from these plan predictions, stop and reconcile (the DEM function or route pixels deviate from the plan) before pasting anything.
-
-Paste the four printed pixel values over the `<literal>` placeholders in `fixtureDecodesWithFrozenPixelLiterals`, and the tile x/y into the suite doc comment. Note the three gains — Task 5 pastes them.
-
-- [ ] **Step 5: Run the fixture gate**
+- [ ] **Step 4: Run to verify the red state**
 
 Run: `cd AuraCore && swift test --filter TerrainFixtureDecodeTests`
-Expected: PASS (3 tests; the record helper is env-disabled).
+Expected: FAIL — `decodedTile()`'s `#require` fails (the placeholder PNG is empty, so `TerrainRGBTile(pngData:)` is nil). This is the honest red state: the gate demonstrably fails until a real fixture exists.
 
-- [ ] **Step 6: One-time live cross-check (spec §2 residual-fidelity mitigation — nothing committed)**
+- [ ] **Step 5: Record the fixture and literals**
+
+Run: `cd AuraCore && TERRAIN_FIXTURE_RECORD=1 swift test --filter recordTerrainFixture`
+Expected: PASS, overwriting the placeholder PNG and printing the written path plus `pixel(10,200) = 348.0`, `pixel(200,10) = 405.0`, `pixel(50,116) = 220.0`, `pixel(250,250) = 565.0`, and three `gain=` lines (expected: hillA 179.2, riverbank 0.0, hillB 32.0, each with `sampleCount=16`). If a printed value differs from these plan predictions, stop and reconcile (the DEM function or route pixels deviate from the plan) before pasting anything.
+
+Spec §5 note (deviation, acknowledged): literals are recorded locally, not on the CI runner. That is sound here because every literal is analytically derived (placement from the independent Python formula, pixels and gains from the DEM function via pure Foundation math) — none passes through ImageIO — and the PR's own CI run is the decode-on-CI-toolchain validation.
+
+Paste the four printed pixel values over the `<literal>` placeholders in `fixtureDecodesWithFrozenPixelLiterals`, and the tile x/y into the suite doc comment. Persist the full record output for later tasks (fresh subagents cannot see this session):
+
+```bash
+cd AuraCore && TERRAIN_FIXTURE_RECORD=1 swift test --filter recordTerrainFixture 2>&1 | grep -E "pixel\(|gain=|wrote " > "$CLAUDE_SCRATCHPAD/roh94-recorded-values.md" 2>/dev/null || true
+```
+
+(If `$CLAUDE_SCRATCHPAD` is unset, use the scratchpad directory path given in your task prompt; Tasks 5 and 9 read `roh94-recorded-values.md` from there.)
+
+- [ ] **Step 6: Verify no placeholders remain, then run the gate green**
+
+```bash
+grep -n "literal>\|tileX>\|tileY>\|-1\.0" AuraCore/Tests/AuraKitTests/TerrainRGBTileTests.swift AuraCore/Tests/AuraKitTests/Support/TerrainFixture.swift; echo "exit: $?"
+```
+Expected: no matches (`exit: 1`). Then run: `cd AuraCore && swift test --filter TerrainFixtureDecodeTests`
+Expected: PASS — 4 tests, 1 skipped (the env-disabled record helper reports as skipped).
+
+- [ ] **Step 7: One-time live cross-check (spec §2 residual-fidelity mitigation — nothing committed)**
 
 Copy the token from the main checkout if not already present, fetch ONE live tile for the fixture's z/x/y, and decode it with the shipped decoder via a scratch test run — confirming the real Mapbox encoder's output decodes to plausible Pittsburgh elevations (roughly 200–450 m):
 
@@ -640,16 +668,19 @@ Then add a TEMPORARY test (delete before commit) in `TerrainRGBTileTests.swift`:
     @Test func liveTileCrossCheckTEMP() throws {
         let data = try Data(contentsOf: URL(fileURLWithPath: "/tmp/live-terrain-tile.png"))
         let tile = try #require(TerrainRGBTile(pngData: data))
-        let e = try #require(tile.elevation(px: 128, py: 128))
-        print("LIVE CROSS-CHECK: center elevation = \(e) m")
-        #expect(e > 150.0 && e < 600.0)
+        // A few pixels (spec §2), all expected in plausible Pittsburgh range.
+        for (px, py) in [(64, 64), (128, 128), (200, 40)] {
+            let e = try #require(tile.elevation(px: px, py: py))
+            print("LIVE CROSS-CHECK: elevation(\(px),\(py)) = \(e) m")
+            #expect(e > 150.0 && e < 600.0)
+        }
     }
 ```
 
 Run: `cd AuraCore && swift test --filter liveTileCrossCheckTEMP`
-Expected: PASS with a printed plausible elevation. Save the printed line for the PR body, then DELETE the temporary test and `/tmp/live-terrain-tile.png`. Verify deletion: `git diff --stat` must show no live-tile test remaining.
+Expected: PASS with three printed plausible elevations. Append the printed lines to `roh94-recorded-values.md` in the scratchpad (Task 9 quotes them in the PR body), then DELETE the temporary test and `/tmp/live-terrain-tile.png`. Verify deletion: `git diff --stat` must show no live-tile test remaining.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add AuraCore/Tests/AuraKitTests/Support/TerrainFixture.swift AuraCore/Tests/AuraKitTests/TerrainRGBTileTests.swift AuraCore/Tests/AuraKitTests/Resources/terrain-rgb-fixture.png AuraCore/Package.swift
@@ -678,8 +709,8 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```swift
 public enum TerrainRGBSampler {
     public static func elevations(along coordinates: [Coordinate], zoom: Int,
-                                  spacingMeters: Double, minSamples: Int, maxSamples: Int,
-                                  tile: @Sendable (TerrainTileID) async -> TerrainRGBTile?) async -> [Double]
+                                  spacingMeters: Double = 150, minSamples: Int = 16, maxSamples: Int = 96,
+                                  tile: @escaping @Sendable (TerrainTileID) async -> TerrainRGBTile?) async -> [Double]
 }
 ```
 
@@ -772,8 +803,8 @@ import AuraCore
 public enum TerrainRGBSampler {
 
     public static func elevations(along coordinates: [Coordinate], zoom: Int,
-                                  spacingMeters: Double, minSamples: Int, maxSamples: Int,
-                                  tile: @Sendable (TerrainTileID) async -> TerrainRGBTile?) async -> [Double] {
+                                  spacingMeters: Double = 150, minSamples: Int = 16, maxSamples: Int = 96,
+                                  tile: @escaping @Sendable (TerrainTileID) async -> TerrainRGBTile?) async -> [Double] {
         let count = ElevationSampling.proportionalCount(coordinates: coordinates, spacingMeters: spacingMeters,
                                                         minCount: minSamples, maxCount: maxSamples)
         let indices = ElevationSampling.sampleIndices(total: coordinates.count, count: count)
@@ -811,6 +842,8 @@ public enum TerrainRGBSampler {
 }
 ```
 
+(Signature notes: `tile:` must be `@escaping` — `TaskGroup.addTask` captures it in an escaping closure. The `spacingMeters`/`minSamples`/`maxSamples` defaults mirror the provider's and keep SwiftLint's `function_parameter_count` rule satisfied under `--strict` via `ignores_default_parameters`.)
+
 - [ ] **Step 4: Run to verify pass**
 
 Run: `cd AuraCore && swift test --filter TerrainRGBSamplerTests`
@@ -841,7 +874,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Write the failing gate**
 
-Use the three gains recorded in Task 3 Step 4 (expected: hillA 179.2, riverbank 0.0, hillB 32.0) for the `<gain*>` placeholders:
+Use the three recorded gains for the `<gain*>` placeholders (expected: hillA 179.2, riverbank 0.0, hillB 32.0). They are persisted in `roh94-recorded-values.md` in the scratchpad directory (written by Task 3). If that file is missing, re-run `cd AuraCore && TERRAIN_FIXTURE_RECORD=1 swift test --filter recordTerrainFixture` and use its printed `gain=` lines — then confirm `git status --porcelain` shows the committed fixture PNG unchanged (the regeneration must be byte-identical; if it is not, STOP — the DEM or encoder drifted).
 
 ```swift
 import Foundation
@@ -1032,11 +1065,11 @@ public actor TerrainTileCache {
     }
 
     /// Downloads a terrain-rgb tile and decodes it via the package's hardened
-    /// `TerrainRGBTile`. Keep this a `nonisolated static func` (it must stay
-    /// off the main actor): the decode is CPU-bound, and under the app's
-    /// default MainActor isolation an instance method here would hop onto the
-    /// main actor and could jank map rendering.
-    private static func fetchDecoded(_ id: TerrainTileID, token: String) async -> TerrainRGBTile? {
+    /// `TerrainRGBTile`. Explicitly `nonisolated` (it must stay off the main
+    /// actor): the decode is CPU-bound, and under the app's default MainActor
+    /// isolation a member here could otherwise hop onto the main actor and
+    /// jank map rendering.
+    nonisolated private static func fetchDecoded(_ id: TerrainTileID, token: String) async -> TerrainRGBTile? {
         let urlStr = "https://api.mapbox.com/v4/mapbox.terrain-rgb/\(id.z)/\(id.x)/\(id.y).pngraw?access_token=\(token)"
         guard let url = URL(string: urlStr) else { return nil }
         do {
@@ -1115,9 +1148,19 @@ to
 | Terrain-RGB class in route planning | **Not caught** — ROH-94 (decode/placement/sampling gated since ROH-94, see 2026-07-22-route-elevation-gate-design.md; token guard, fetch, cache, and call-site wiring remain not caught) |
 ```
 
-- [ ] **Step 2: Append to the navigate spec's equivalent row**
+- [ ] **Step 2: Append to the navigate spec's ROH-94-adjacent row**
 
-Locate the Terrain-RGB "not caught" row in `docs/superpowers/specs/2026-07-22-navigate-golden-ride-design.md` (`grep -n "ROH-94" docs/superpowers/specs/2026-07-22-navigate-golden-ride-design.md`) and append the same parenthetical.
+The navigate spec has no Terrain-RGB row; its ROH-94 reference is the route-fetch bypass row at line 54. Change exactly this row:
+
+```
+| Route fetch (`MapboxRoutingProvider`), ranking, `.loading→.loaded` phase machine, auto-select from a real fetch | No — bypassed by design (ROH-94 adjacent) |
+```
+
+to
+
+```
+| Route fetch (`MapboxRoutingProvider`), ranking, `.loading→.loaded` phase machine, auto-select from a real fetch | No — bypassed by design (ROH-94 adjacent; the planning pipeline's elevation→ranking path is gated at package level since ROH-94, see 2026-07-22-route-elevation-gate-design.md — fetch/phase machine remain uncovered) |
+```
 
 - [ ] **Step 3: Update ROADMAP**
 
@@ -1134,12 +1177,18 @@ Match the surrounding prose style; if the section is a table, add a row instead,
 ```bash
 swiftlint --strict 2>&1 | tail -5
 ```
-Expected: no violations (exit 0). Fix any new-file violations (likely candidates: line length in comments) without weakening the code.
+Expected: no violations (exit 0). If violations surface in Task 1–6 Swift files, fix them without weakening the code and commit those fixes as their own commit BEFORE the docs commit:
+
+```bash
+git add -u && git commit -m "style(roh-94): swiftlint --strict fixes
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+```
 
 Run: `cd AuraCore && swift test --no-parallel`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Commit the docs**
 
 ```bash
 git add docs/superpowers/specs/2026-07-22-e2e-ride-harness-design.md docs/superpowers/specs/2026-07-22-navigate-golden-ride-design.md docs/ROADMAP.md
@@ -1147,6 +1196,8 @@ git commit -m "docs(roh-94): close the Terrain-RGB not-caught rows and ROADMAP t
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
+
+Then confirm a clean tree: `git status --porcelain` → empty.
 
 ---
 
@@ -1193,16 +1244,27 @@ In `TerrainRGBTile.elevation(px:py:)`, temporarily change the return to:
 Run: `cd AuraCore && swift test --no-parallel --filter "TerrainRGBTileTests|TerrainFixtureDecodeTests" 2>&1 | tail -10`
 Expected: FAILURES in `decodesEncodedElevationsExactly` and the fixture pixel literals. Save the output. Revert: `git checkout AuraCore/Sources/AuraKit/Routing/TerrainRGBTile.swift`
 
-- [ ] **Step 4: Confirm clean tree and green suite**
+- [ ] **Step 4: Drill D — ranking-label wiring (beyond the spec's three, closes the one assertion no other drill exercises)**
+
+In `AuraCore/Sources/AuraCore/Routing/RouteRanker.swift`, temporarily change `indexOfMin`'s loop to:
+
+```swift
+        for i in items.indices where key(items[i]) > key(items[best]) { best = i }  // DRILL D (max, not min)
+```
+
+Run: `cd AuraCore && swift test --no-parallel --filter RoutePlanningElevationGateTests 2>&1 | tail -10`
+Expected: FAILURE in `flattestLabelGoesToTheRiverbankRoute` (labels land on the wrong candidates). Save the output. Revert: `git checkout AuraCore/Sources/AuraCore/Routing/RouteRanker.swift`
+
+- [ ] **Step 5: Confirm clean tree and green suite**
 
 ```bash
 git status --porcelain
 ```
 Expected: empty. Then: `cd AuraCore && swift test --no-parallel` → PASS.
 
-- [ ] **Step 5: Record the drill outputs**
+- [ ] **Step 6: Record the drill outputs**
 
-Write the three saved failure tails into the scratchpad (`drill-outputs.md`) for the PR body. Do not commit them to the repo.
+Write the four saved failure tails into the scratchpad (`drill-outputs.md`) for the PR body. Do not commit them to the repo.
 
 ---
 
@@ -1216,7 +1278,7 @@ Follow the repo's default integration flow (memory: push branch + GitHub PR + me
 git push -u origin claude/route-elevation-gate-terrain-rgb-617af5
 ```
 
-Then create the PR with `gh pr create` — title `ROH-94: route-planning elevation gate (Terrain-RGB regression class)`, body containing: a summary of the extraction + gates, the three drill output excerpts (Task 8), the live cross-check line (Task 3 Step 6), a link to the spec, and the standard Claude Code attribution footer.
+Then create the PR with `gh pr create` — title `ROH-94: route-planning elevation gate (Terrain-RGB regression class)`, body containing: a summary of the extraction + gates, the four drill output excerpts (scratchpad `drill-outputs.md`), the live cross-check lines (scratchpad `roh94-recorded-values.md`), a link to the spec, and the standard Claude Code attribution footer.
 
 - [ ] **Step 2: Move ROH-94 to In Review** (Linear MCP; the orchestrator does this, not a subagent).
 
@@ -1225,11 +1287,11 @@ Then create the PR with `gh pr create` — title `ROH-94: route-planning elevati
 ```bash
 gh pr checks --watch
 ```
-Expected: `AuraCore tests (swift test)` and `App build (xcodebuild)` both pass. Then `gh pr merge --merge`, `git checkout main && git pull` in the main checkout, and ROH-94 → Done.
+Expected: all four CI checks pass — `AuraCore tests (swift test)`, `App build (xcodebuild)`, `SwiftLint (--strict)`, `DB tests (pgTAP)` (the last is untouched by this change but still required). Then `gh pr merge --merge`, `git checkout main && git pull` in the main checkout, and ROH-94 → Done.
 
 ---
 
-## Self-review notes (performed at plan-writing time)
+## Self-review notes (performed at plan-writing time; plan revised after 2-reviewer adversarial review — compile fixes (`@escaping`, `CFMutableData`), Task 3 resource-first reordering, per-image PNG status guard, scratchpad handoffs, exact doc-row texts, Drill D)
 
 - Spec coverage: §1 extraction → Tasks 1/2/4/6; §2 fixture + record helper + live cross-check → Task 3; §3 decoder gate + placement checks → Tasks 2/3 + Task 1; §4 ranking gate incl. choreography and honesty note → Task 5; §5 CI/lint → Tasks 5–7; §6 honesty rows → Task 7; §7 drills → Task 8; §8 DoD → Tasks 7–9.
 - Type consistency: `TerrainTileID(z:x:y:)`, `TerrainRGBPlacement.placement(lat:lon:z:)`, `TerrainRGBTile(pngData:)`/`elevation(px:py:)`/`side`, `TerrainRGBSampler.elevations(along:zoom:spacingMeters:minSamples:maxSamples:tile:)` are identical in every task that mentions them.
