@@ -1,7 +1,7 @@
 import XCTest
 
-/// Save-from-preview lands on the dashboard. Runs locally/on-demand — the
-/// UI-test CI job is still deferred (see the AuraUITests plan).
+/// Save-from-preview lands on the dashboard. Runs locally/on-demand — only
+/// `RideE2EUITests` runs in CI; this and the other six suites stay local/on-demand.
 final class SavedPlacesUITests: XCTestCase {
     @MainActor
     func testSaveFromPreviewAppearsInSavedSection() throws {

@@ -1,4 +1,5 @@
 import XCTest
+import AuraKit
 
 @MainActor
 struct HomeScreen {
@@ -37,6 +38,9 @@ struct HistoryScreen {
     let app: XCUIApplication
     // "Rides" nav title on the pushed History screen; present whether the list has rows or is empty.
     var title: XCUIElement { app.navigationBars["Rides"] }
+    var rideRows: XCUIElementQuery {
+        app.descendants(matching: .any).matching(identifier: RideTestID.historyRow)
+    }
 }
 
 @MainActor
@@ -55,6 +59,39 @@ struct JoinRideScreen {
     // accessibility-hidden (custom VoiceOver composition), so it is not queried here.
     var joinButton: XCUIElement { app.buttons["Join"] }
     var cancelButton: XCUIElement { app.buttons["Cancel"] }
+}
+
+@MainActor
+struct RideScreen {
+    let app: XCUIApplication
+    var probe: XCUIElement { app.staticTexts[RideTestID.hudProbe] }
+    var backButton: XCUIElement { app.buttons[RideTestID.hudBack] }
+    var endAlert: XCUIElement { app.alerts["End ride?"] }
+
+    func probeValues() -> RideTestProbe.Values? { RideTestProbe.parse(probe.label) }
+
+    /// Polls the probe until recorded distance reaches `meters` (or fails at `timeout`).
+    /// Real sleep between polls — waitForExistence on an already-present element returns
+    /// instantly and would busy-spin the a11y server.
+    func waitForDistance(atLeast meters: Int, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let values = probeValues(), values.distanceMeters >= meters { return true }
+            Thread.sleep(forTimeInterval: 1)
+        }
+        return false
+    }
+}
+
+@MainActor
+struct SummaryScreen {
+    let app: XCUIApplication
+    var title: XCUIElement { app.staticTexts["Nice ride"] }
+    // Element type of a combined SwiftUI a11y element varies by runtime — query any type.
+    var heroDistance: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: RideTestID.summaryDistance).firstMatch
+    }
+    var doneButton: XCUIElement { app.buttons["Done"] }
 }
 
 extension XCUIApplication {
