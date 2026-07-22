@@ -16,11 +16,36 @@ public enum GoldenRideFixture {
     public static let expectedMovingTimeSeconds = 445.0
     public static let nominalDurationSeconds = 445.0
 
+    /// First trackpoint, frozen like the other truth literals so the navigate E2E's
+    /// deep-link URL is built from the fixture instead of a drift-prone hardcoded
+    /// pair. Re-record procedure: update these with the other literals.
+    public static let startLatitude = 40.48
+    public static let startLongitude = -79.76
+
     public static func track() throws -> GPXTrack {
         guard let url = Bundle.module.url(forResource: "golden-ride", withExtension: "gpx") else {
             throw FixtureError.missingResource
         }
         return try GPXParser.parse(String(contentsOf: url, encoding: .utf8))
+    }
+
+    /// The fixture as a preview-able Route (ROH-93): geometry from the track, metadata
+    /// from the frozen truth literals — never recomputed at runtime, so a calculator
+    /// regression cannot re-derive them into passing.
+    public static func route() throws -> Route {
+        let points = try track().points
+        guard let first = points.first, let last = points.last else {
+            throw FixtureError.missingResource
+        }
+        return Route(origin: first.coordinate,
+                     destination: last.coordinate,
+                     waypoints: [],
+                     geometry: points.map(\.coordinate),
+                     profile: .mostPaths,
+                     distanceMeters: expectedDistanceMeters,
+                     estimatedDurationSeconds: nominalDurationSeconds,
+                     elevationGainMeters: expectedElevationGainMeters,
+                     elevationProfile: points.compactMap(\.elevation))
     }
 
     @MainActor
