@@ -228,7 +228,7 @@ literals), not this suite's.
   changes. The app-build CI job proves the refactored provider compiles
   against the extracted core.
 - Truth literals are recorded from a run on the CI toolchain (macos-15,
-  latest-stable Xcode) to pin any residual ImageIO variance where CI runs.
+  latest-stable Xcode) to pin any residual ImageIO variance where CI runs. (As built: literals were recorded locally — sound because every literal is analytically derived and never passes through ImageIO; the PR's own CI run is the decode-on-CI-toolchain validation.)
 - SwiftLint must stay clean (`swiftlint --strict`).
 
 ## 6. Coverage honesty — what this gate would and would not catch
@@ -242,7 +242,7 @@ literals), not this suite's.
 | Samples → gain → "Flattest" label wiring | Ranking gate |
 | Empty-token early return (`elevations == []` → gain 0) | **Not caught** — app-side guard; device verification |
 | URLSession fetch, HTTP status handling | **Not caught** — deliberately out of CI |
-| `TerrainTileCache` warm dedupe / negative-result caching | **Not caught** — app-side actor; compile-gated only |
+| `TerrainTileCache` warm dedupe / negative-result caching | **Not caught** — app-side actor; compile-gated only (since the extraction, the dedupe half lives in the gated sampler — `looksUpEachUniqueTileOnce`; negative caching, the fetch, and the shell's parameter plumbing remain uncovered) |
 | Provider left unwired at a call site (`MapboxRoutingProvider` default, `RoutePreviewView`, `MapboxDetourRouting`) | **Not caught** — same symptom as the original class; device verification |
 | Real Mapbox encoder drift vs the generated fixture | **Not caught** in CI — one-time live cross-check at record time (§2) |
 
