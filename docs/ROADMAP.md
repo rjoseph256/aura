@@ -681,7 +681,8 @@ The lane's flake policy:
 one automatic retry; if it fails twice on unrelated PRs it gets demoted to non-required
 and a fix issue filed. Honest boundaries: the harness bypasses live CoreLocation ingestion
 (`LocationService.points()` — ROH-83/ROH-88 territory, still covered by unit seams +
-device verification), the navigate/group summary seams (ROH-93), and the route-planning
+device verification), the group-ride summary seam, the plan/search stage and route fetch
+(the navigate ride enters via deep link and a fixture route), and the route-planning
 elevation path (ROH-94). The Mapbox-backed providers remain built-but-untested in CI.
 
 Near-term testing work, sequenced with the waves above: the app-target CI build and SwiftLint
