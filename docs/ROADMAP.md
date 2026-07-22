@@ -673,7 +673,11 @@ playback test (`GoldenRidePlaybackTests`) drives the real GPX →
 `SimulatedLocationProvider` → coordinator → store chain against frozen fixture truth, and
 `AuraUITests/RideE2EUITests` rides the same fixture through the real app — Home → HUD →
 End → summary → History — in CI (the `app-build` job now runs build-for-testing plus that
-one UI test; `scripts/golden-ride.sh` is the local one-liner). The lane's flake policy:
+one UI test; `scripts/golden-ride.sh` is the local one-liner). ROH-93 added the navigate-mode golden ride: the same fixture enters via the
+`aura://preview` deep link, rides `NavigateHUDView` with an empty scripted
+guidance session, and ends via the manual End control — so both HUDs'
+finish → summary seams are now gated (the seam class that regressed in ROH-85).
+The lane's flake policy:
 one automatic retry; if it fails twice on unrelated PRs it gets demoted to non-required
 and a fix issue filed. Honest boundaries: the harness bypasses live CoreLocation ingestion
 (`LocationService.points()` — ROH-83/ROH-88 territory, still covered by unit seams +

@@ -37,7 +37,9 @@ jobs:
     # Keep the original display name — branch protection / required checks key on it.
     name: App build (xcodebuild)
     runs-on: macos-15
-    timeout-minutes: 40
+    # 50: cold SPM + Mapbox build + boot + TWO golden-ride methods, each retried once
+    # worst-case (ROH-93 added the navigate method).
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - uses: maxim-lobanov/setup-xcode@v1
