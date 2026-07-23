@@ -1,0 +1,22 @@
+-- Follow-up to 0019: make the maintenance-RPC lockdown actually effective on
+-- hosted Supabase.
+--
+-- 0019 ran `revoke execute ... from public`, assuming anon/authenticated reached
+-- these functions via PostgreSQL's default PUBLIC execute grant. On hosted
+-- Supabase that assumption is wrong: `ALTER DEFAULT PRIVILEGES IN SCHEMA public
+-- GRANT EXECUTE ON FUNCTIONS TO anon, authenticated, service_role` materializes
+-- EXPLICIT per-role grants at function-create time, so revoking PUBLIC leaves
+-- anon/authenticated/service_role able to call the function through PostgREST.
+-- (Verified on the live project: the ACL still granted anon=X after 0019.)
+--
+-- Revoke from the actual API-reachable roles. Only the owner (postgres, which
+-- pg_cron runs the scheduled job as) needs — and retains — EXECUTE. `public` is
+-- included so the statement is self-contained regardless of 0019.
+--
+-- Note: every other SECURITY DEFINER function in this schema carries the same
+-- explicit anon grant, so anon can *call* them too — but each one derives
+-- auth.uid() and enforces its own authorization, so an anon call fails closed.
+-- sweep/reap are the only functions with no internal auth check, which is why
+-- they alone need this role-level lockdown.
+revoke execute on function public.sweep_stale_rides() from public, anon, authenticated, service_role;
+revoke execute on function public.reap_expired_rides() from public, anon, authenticated, service_role;
