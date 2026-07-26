@@ -8,27 +8,56 @@ public enum PolylineNormalizer {
     /// isn't stretched at city scale), fit *uniformly* into `size` minus `inset` on all
     /// sides, north-up (Y flipped). Returns `[]` for fewer than 2 points or empty size.
     public static func points(_ coords: [Coordinate], in size: CGSize, inset: CGFloat) -> [CGPoint] {
-        guard coords.count > 1, size.width > 0, size.height > 0 else { return [] }
+        guard let transform = Transform(coords: coords, in: size, inset: inset) else { return [] }
+        return coords.map(transform.apply)
+    }
 
-        let meanLat = coords.reduce(0) { $0 + $1.latitude } / Double(coords.count)
-        let k = cos(meanLat * .pi / 180)
-        let xs = coords.map { $0.longitude * k }
-        let ys = coords.map { $0.latitude }
+    /// Several runs fitted through ONE shared transform, so a paused ride's segments keep
+    /// their real separation and scale instead of each filling the box (same reasoning as
+    /// `Sparkline`'s shared `range`). Runs of fewer than two coordinates stroke nothing and
+    /// are dropped. Single-segment input is byte-identical to the flat function above.
+    public static func points(segments: [[Coordinate]], in size: CGSize,
+                              inset: CGFloat) -> [[CGPoint]] {
+        let runs = segments.filter { $0.count > 1 }
+        guard let transform = Transform(coords: runs.flatMap { $0 }, in: size, inset: inset)
+        else { return [] }
+        return runs.map { $0.map(transform.apply) }
+    }
 
-        let minX = xs.min()!, maxX = xs.max()!
-        let minY = ys.min()!, maxY = ys.max()!
-        let spanX = max(maxX - minX, 1e-12), spanY = max(maxY - minY, 1e-12)
+    /// The projection + fit, extracted so the flat and segmented entry points cannot drift.
+    private struct Transform {
+        let k: Double, minX: Double, maxY: Double, scale: Double, offX: CGFloat, offY: CGFloat
 
-        let availW = max(size.width - inset * 2, 1)
-        let availH = max(size.height - inset * 2, 1)
-        let scale = min(availW / spanX, availH / spanY)          // uniform → preserve aspect
-        let drawnW = spanX * scale, drawnH = spanY * scale
-        let offX = inset + (availW - drawnW) / 2
-        let offY = inset + (availH - drawnH) / 2
+        init?(coords: [Coordinate], in size: CGSize, inset: CGFloat) {
+            guard coords.count > 1, size.width > 0, size.height > 0 else { return nil }
 
-        return (0..<coords.count).map { i in
-            CGPoint(x: offX + (xs[i] - minX) * scale,
-                    y: offY + (maxY - ys[i]) * scale)            // flip Y so north is up
+            let meanLat = coords.reduce(0) { $0 + $1.latitude } / Double(coords.count)
+            // Local, not `self.k`: capturing a partially-initialized `self` in the closures
+            // below is a compile error.
+            let kk = cos(meanLat * .pi / 180)
+            let xs = coords.map { $0.longitude * kk }
+            let ys = coords.map { $0.latitude }
+
+            let lowX = xs.min()!, maxX = xs.max()!
+            let minY = ys.min()!, highY = ys.max()!
+            let spanX = max(maxX - lowX, 1e-12), spanY = max(highY - minY, 1e-12)
+
+            let availW = max(size.width - inset * 2, 1)
+            let availH = max(size.height - inset * 2, 1)
+            let s = min(availW / spanX, availH / spanY)   // uniform → preserve aspect
+            let drawnW = spanX * s, drawnH = spanY * s
+
+            k = kk
+            minX = lowX
+            maxY = highY
+            scale = s
+            offX = inset + (availW - drawnW) / 2
+            offY = inset + (availH - drawnH) / 2
+        }
+
+        func apply(_ c: Coordinate) -> CGPoint {
+            CGPoint(x: offX + (c.longitude * k - minX) * scale,
+                    y: offY + (maxY - c.latitude) * scale)   // flip Y so north is up
         }
     }
 }
