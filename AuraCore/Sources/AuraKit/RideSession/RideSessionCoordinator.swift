@@ -15,7 +15,7 @@ import AuraCore
 public final class RideSessionCoordinator {
     // Read by the HUDs.
     public var stats: RideStats { recorder.stats }
-    public var track: [TrackPoint] { recorder.track }
+    public var segments: [RideSegment] { recorder.segments }
     /// Smoothed live speed for the HUD dial (current speed, not the ride average).
     public var currentSpeedMetersPerSecond: Double { recorder.currentSpeedMetersPerSecond }
     public var isRecording: Bool { recorder.isRecording }

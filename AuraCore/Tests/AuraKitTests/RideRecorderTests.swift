@@ -20,13 +20,34 @@ final class RideRecorderTests: XCTestCase {
         recorder.start(at: Date(timeIntervalSince1970: 0))
         points.forEach { recorder.record($0) }
         XCTAssertEqual(recorder.stats, RideStatsCalculator.stats(from: points))
-        XCTAssertEqual(recorder.track, points)
+        XCTAssertEqual(recorder.segments, [RideSegment(points: points)])
+        XCTAssertEqual(recorder.flattenedPoints, points)
     }
 
     func test_ignoresPointsWhenNotRecording() {
         let recorder = RideRecorder()
         recorder.record(pt(40.44, ele: 250, t: 0)) // before start
-        XCTAssertTrue(recorder.track.isEmpty)
+        XCTAssertTrue(recorder.flattenedPoints.isEmpty)
+        XCTAssertEqual(recorder.stats, .zero)
+    }
+
+    /// An unpaused ride is exactly one open segment from `start` onward — including before
+    /// the first fix arrives, so `record` always has somewhere to append.
+    func test_start_opensExactlyOneSegment() {
+        let recorder = RideRecorder(kind: .freeRide)
+        recorder.start(at: Date(timeIntervalSince1970: 0))
+        XCTAssertEqual(recorder.segments.count, 1)
+        XCTAssertTrue(recorder.flattenedPoints.isEmpty)
+    }
+
+    /// Restarting must not leave the previous ride's segment behind.
+    func test_restart_resetsToOneEmptySegment() {
+        let recorder = RideRecorder(kind: .freeRide)
+        recorder.start(at: Date(timeIntervalSince1970: 0))
+        recorder.record(pt(40.44, ele: 250, t: 0))
+        recorder.start(at: Date(timeIntervalSince1970: 500))
+        XCTAssertEqual(recorder.segments.count, 1)
+        XCTAssertTrue(recorder.flattenedPoints.isEmpty)
         XCTAssertEqual(recorder.stats, .zero)
     }
 
@@ -41,6 +62,17 @@ final class RideRecorderTests: XCTestCase {
         XCTAssertEqual(ride.endedAt, Date(timeIntervalSince1970: 200))
         XCTAssertEqual(ride.stats, recorder.stats)
         XCTAssertEqual(ride.flattenedPoints.count, 2)
+        XCTAssertEqual(ride.segments.count, 1)
         XCTAssertFalse(recorder.isRecording)
+    }
+
+    /// Canonical form: a ride that never got a fix ends with ZERO segments, matching what
+    /// `Ride(track: [])` produces and what a save/load round trip returns. Without the
+    /// trailing-empty drop, `segments.count` changes across persistence on an `Equatable` type.
+    func test_end_withNoFixes_producesZeroSegments() {
+        let recorder = RideRecorder(kind: .freeRide)
+        recorder.start(at: Date(timeIntervalSince1970: 0))
+        let ride = recorder.end(at: Date(timeIntervalSince1970: 60))
+        XCTAssertTrue(ride.segments.isEmpty)
     }
 }

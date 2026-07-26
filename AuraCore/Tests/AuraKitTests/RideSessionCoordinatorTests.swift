@@ -76,7 +76,8 @@ struct RideSessionCoordinatorTests {
         let provider = ScriptedLocationProvider([point(40.40, 0), point(40.41, 10), point(40.42, 20)])
         c.start(location: provider, saving: try RideStore.inMemory(), units: .metric, authorization: .authorized)
         await c.streamTask?.value
-        #expect(c.track.count == 3)
+        #expect(c.segments.count == 1)
+        #expect(c.segments.first?.points.count == 3)
         #expect(c.stats.distanceMeters > 0)
         c.cancel()
     }

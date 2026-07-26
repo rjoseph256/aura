@@ -8,7 +8,9 @@ import AuraKit
 /// the route ribbon into a dimmed "behind" segment and a bright "ahead" segment relative to
 /// the rider's own progress. Both are no-ops for the solo path (`peers` empty, default args).
 struct RideMapView: View {
-    let track: [TrackPoint]
+    /// The recorded ride, split at pauses. One polyline per segment, so the map never
+    /// strokes the chord across a stop.
+    let segments: [RideSegment]
     var peers: [RidePeer] = []
     /// The rider's own id, so they aren't drawn as a peer dot on top of the location puck.
     /// nil on the solo path, which passes no peers at all.
@@ -32,9 +34,10 @@ struct RideMapView: View {
     /// held in `@State`; the `TimelineView` clock and `.onChange(of: peers)` drive repaints.
     @State private var peerModel = PeerAnnotationDriver()
 
-    private var trackCoordinates: [CLLocationCoordinate2D] {
-        track.map { CLLocationCoordinate2D(latitude: $0.coordinate.latitude,
-                                           longitude: $0.coordinate.longitude) }
+    private var ribbonPieces: [TrackRibbon.Piece] {
+        // Solo rides (no peers) draw one bright ribbon; group rides dim what's already
+        // ridden at the rider's own progress.
+        TrackRibbon.pieces(segments: segments, splitAtMeters: peers.isEmpty ? nil : selfProgress)
     }
 
     private var detourRouteCoordinates: [CLLocationCoordinate2D] {
@@ -101,34 +104,17 @@ struct RideMapView: View {
     /// quarter opacity so the bright `detourPolyline` reads as the thing to follow.
     @MapContentBuilder
     private var routeRibbon: some MapContent {
-        if track.count > 1 {
-            if peers.isEmpty {
-                PolylineAnnotationGroup {
-                    PolylineAnnotation(lineCoordinates: trackCoordinates)
-                        .lineColor(StyleColor(detourRoute.isEmpty
-                            ? AuraTheme.routeUIColor
-                            : UIColor(AuraTheme.routeLine.opacity(0.25))))
-                        .lineWidth(6)
-                }
-            } else {
-                let splitIndex = RouteSplit.splitIndex(geometry: track.map(\.coordinate),
-                                                       atMeters: selfProgress)
-                let behind = Array(trackCoordinates.prefix(splitIndex))
-                let ahead = Array(trackCoordinates.suffix(from: min(splitIndex, trackCoordinates.count - 1)))
-                PolylineAnnotationGroup {
-                    if behind.count > 1 {
-                        PolylineAnnotation(lineCoordinates: behind)
-                            .lineColor(StyleColor(UIColor(AuraTheme.routeLine.opacity(0.25))))
-                            .lineWidth(6)
-                    }
-                    if ahead.count > 1 {
-                        PolylineAnnotation(lineCoordinates: ahead)
-                            .lineColor(StyleColor(detourRoute.isEmpty
-                                ? AuraTheme.routeUIColor
-                                : UIColor(AuraTheme.routeLine.opacity(0.25))))
-                            .lineWidth(6)
-                    }
-                }
+        // Keep the emptiness guard: an empty group still creates a Mapbox annotation manager
+        // (a style source + layer) per map mount, where today there was none.
+        if !ribbonPieces.isEmpty {
+            PolylineAnnotationGroup(Array(ribbonPieces.enumerated()), id: \.offset) { item in
+                PolylineAnnotation(lineCoordinates: item.element.coordinates.map {
+                    CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+                })
+                .lineColor(StyleColor(item.element.isBehind || !detourRoute.isEmpty
+                    ? UIColor(AuraTheme.routeLine.opacity(0.25))
+                    : AuraTheme.routeUIColor))
+                .lineWidth(6)
             }
         }
     }
@@ -167,7 +153,7 @@ struct RideMapView: View {
                                           longitude: -122.4210 + Double(meters) * 0.00002),
                   elevation: nil, timestamp: Date())
     }
-    return RideMapView(track: track, peers: peers,
+    return RideMapView(segments: [RideSegment(points: track)], peers: peers,
                        nameMap: [:], selfProgress: 550, viewport: $viewport)
         .environment(SettingsStore())
 }
