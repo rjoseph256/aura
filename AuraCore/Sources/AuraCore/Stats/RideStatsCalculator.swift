@@ -2,7 +2,7 @@ import Foundation
 
 public enum RideStatsCalculator {
     /// Computes ride statistics from an ordered list of GPS samples.
-    /// - movingSpeedThreshold: segments slower than this (m/s) are treated as "stopped".
+    /// - movingSpeedThreshold: legs slower than this (m/s) are treated as "stopped".
     /// - elevationNoiseThreshold: positive elevation deltas smaller than this (m) are ignored as GPS noise.
     ///
     /// Retained beside `stats(segments:)` for callers that genuinely hold one contiguous run
@@ -68,12 +68,12 @@ public enum RideStatsCalculator {
 
         for i in 1..<points.count {
             let prev = points[i - 1], curr = points[i]
-            let segDistance = Geo.distance(prev.coordinate, curr.coordinate)
+            let legDistance = Geo.distance(prev.coordinate, curr.coordinate)
             let dt = curr.timestamp.timeIntervalSince(prev.timestamp)
-            acc.distance += segDistance
+            acc.distance += legDistance
 
             if dt > 0 {
-                let speed = segDistance / dt
+                let speed = legDistance / dt
                 if speed >= movingSpeedThreshold {
                     acc.movingTime += dt
                     acc.maxSpeed = max(acc.maxSpeed, speed)
