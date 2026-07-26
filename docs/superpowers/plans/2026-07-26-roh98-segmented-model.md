@@ -1248,8 +1248,7 @@ by Task 2.
 - Consumes: `RideSegment`, `TrackRibbon.pieces(segments:splitAtMeters:)` (Task 1),
   `RideStatsCalculator.stats(segments:)` (Task 3), `Ride.init(…segments:…)` (Task 2).
 - Produces: `RideRecorder.segments: [RideSegment]`, `RideRecorder.flattenedPoints: [TrackPoint]`,
-  `RideSessionCoordinator.segments: [RideSegment]`,
-  `RideSessionCoordinator.flattenedPoints: [TrackPoint]`, `RideMapView(segments:…)`.
+  `RideSessionCoordinator.segments: [RideSegment]`, `RideMapView(segments:…)`.
 
 - [ ] **Step 1: Update the recorder tests to the new shape (they must fail)**
 
@@ -1312,7 +1311,7 @@ And in `RideSessionCoordinatorTests.swift:79`:
 
 ```swift
         #expect(c.segments.count == 1)
-        #expect(c.flattenedPoints.count == 3)
+        #expect(c.segments.first?.points.count == 3)
 ```
 
 - [ ] **Step 2: Run and confirm they fail**
@@ -1389,10 +1388,12 @@ place on a uniquely-referenced buffer — same cost as the old `track.append`.)
 
 ```swift
     public var segments: [RideSegment] { recorder.segments }
-    /// Flat sample list for readers that want one stream. **O(n) and allocating** — see
-    /// `RideRecorder.flattenedPoints`.
-    public var flattenedPoints: [TrackPoint] { recorder.flattenedPoints }
 ```
+
+**Do not add a `flattenedPoints` passthrough here.** No production code needs one — the only
+consumer of `coordinator.track` was the HUD map, which now takes segments — and a public
+O(n)-allocating property with no caller is exactly the kind of inviting hazard the review
+gate flagged. Add it in a later pass if a real caller appears. **[gate]**
 
 Then run `swift build --build-tests` and fix any consumer the compiler names. Confirm
 `grep -rn "\.track\b" AuraCore/Sources` returns nothing.
