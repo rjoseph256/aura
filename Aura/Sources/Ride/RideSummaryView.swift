@@ -30,13 +30,16 @@ struct RideSummaryView: View {
     private var stats: RideStats { ride.stats ?? .zero }
     private var fmt: RideStatsFormatter { RideStatsFormatter(units: settings.units) }
     private var metric: Bool { settings.units == .metric }
-    private var hasRoute: Bool { ride.track.count > 1 }
+    private var routeSegments: [[Coordinate]] {
+        ride.segments.map { $0.points.map(\.coordinate) }.filter { $0.count > 1 }
+    }
+    private var hasRoute: Bool { !routeSegments.isEmpty }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AuraTheme.Spacing.xl) {
                 if hasRoute {
-                    StaticRouteMap(coordinates: ride.track.map(\.coordinate))
+                    StaticRouteMap(segments: routeSegments)
                         .frame(height: 240)
                         .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous))
                         .overlay(

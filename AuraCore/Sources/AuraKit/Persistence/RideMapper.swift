@@ -4,13 +4,20 @@ import AuraCore
 public enum RideMapper {
     public static func record(from ride: Ride) throws -> RideRecord {
         let encoder = JSONEncoder()
-        let thumb = TrackSimplifier.thumbnail(from: ride.track.map(\.coordinate))
+        // Both blobs stay flat on purpose. `thumbnailData` is read by older builds syncing
+        // the same CloudKit records with a bare `try?` that falls back to blank (D3), and
+        // `trackData` gains a segmented sibling (`segmentsData`) in the V6 schema pass —
+        // changing either shape here would blank History on a mixed-version fleet.
+        // Consequence until V6: a multi-segment ride saved and reloaded comes back as one
+        // segment. Pinned by `multiSegmentRideFlattensThroughTheStoreUntilV6`.
+        let points = ride.flattenedPoints
+        let thumb = TrackSimplifier.thumbnail(from: points.map(\.coordinate))
         return RideRecord(
             id: ride.id,
             kindRaw: ride.kind.rawValue,
             startedAt: ride.startedAt,
             endedAt: ride.endedAt,
-            trackData: try encoder.encode(ride.track),
+            trackData: try encoder.encode(points),
             statsData: try ride.stats.map { try encoder.encode($0) },
             distanceMeters: ride.stats?.distanceMeters ?? 0,
             movingTimeSeconds: ride.stats?.movingTimeSeconds ?? 0,

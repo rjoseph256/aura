@@ -15,7 +15,12 @@ public struct ElevationProfileContent: Equatable, Sendable {
     public init(ride: Ride, units: DistanceUnits) {
         let stats = ride.stats ?? .zero
         let fmt = RideStatsFormatter(units: units)
-        kind = ElevationProfile.classify(track: ride.track,
+        // Flattened deliberately: the silhouette is a series of elevation samples, not a
+        // geometric walk between consecutive points. Two known consequences, accepted for
+        // Slice A: the sparkline is index-spaced, so a pause occupies no horizontal space,
+        // and the elevation step across a boundary renders as a one-step cliff. Cumulative
+        // gain (which does respect segment boundaries) arrives pre-computed in `stats`.
+        kind = ElevationProfile.classify(track: ride.flattenedPoints,
                                          gainMeters: stats.elevationGainMeters)
         climbedValue = fmt.elevationValue(stats.elevationGainMeters)
         climbedUnit = fmt.elevationUnit

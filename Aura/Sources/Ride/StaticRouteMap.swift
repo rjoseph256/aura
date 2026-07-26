@@ -8,23 +8,29 @@ import AuraKit
 /// in the rider's chosen map style. Used for the post-ride summary (and reusable
 /// for History thumbnails).
 struct StaticRouteMap: View {
-    let coordinates: [Coordinate]
+    /// One coordinate run per ride segment. Separate polylines, so a pause gap never
+    /// becomes a straight line across the map.
+    let segments: [[Coordinate]]
 
     @Environment(SettingsStore.self) private var settings
     @State private var viewport: Viewport = .styleDefault
 
-    private var clCoords: [CLLocationCoordinate2D] {
-        coordinates.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+    private var clSegments: [[CLLocationCoordinate2D]] {
+        segments
+            .filter { $0.count > 1 }
+            .map { $0.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) } }
     }
+
+    /// Every drawn point, for the camera fit. Fitting the overview *across* segments is
+    /// correct — only stroking across them is not.
+    private var allCoords: [CLLocationCoordinate2D] { clSegments.flatMap { $0 } }
 
     var body: some View {
         Map(viewport: $viewport) {
-            if clCoords.count > 1 {
-                PolylineAnnotationGroup {
-                    PolylineAnnotation(lineCoordinates: clCoords)
-                        .lineColor(StyleColor(AuraTheme.routeUIColor))
-                        .lineWidth(5)
-                }
+            PolylineAnnotationGroup(Array(clSegments.enumerated()), id: \.offset) { item in
+                PolylineAnnotation(lineCoordinates: item.element)
+                    .lineColor(StyleColor(AuraTheme.routeUIColor))
+                    .lineWidth(5)
             }
         }
         .mapStyle(settings.mapStyle.mapboxStyle)
@@ -33,9 +39,9 @@ struct StaticRouteMap: View {
     }
 
     private func fit() {
-        guard clCoords.count > 1 else { return }
+        guard allCoords.count > 1 else { return }
         viewport = .overview(
-            geometry: LineString(clCoords),
+            geometry: LineString(allCoords),
             geometryPadding: .init(top: 24, leading: 24, bottom: 24, trailing: 24),
             maxZoom: 16
         )

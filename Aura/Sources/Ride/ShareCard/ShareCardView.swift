@@ -14,7 +14,7 @@ struct ShareCardView: View {
     /// The card is a fixed PNG viewed at feed-thumbnail scale and can't honor Increase
     /// Contrast, so text over the scrim uses the high-contrast secondary value always.
     private let scrimText = Color(white: AuraPalette.textSecondaryWhiteHighContrast)
-    private var hasRoute: Bool { !content.routeCoordinates.isEmpty }
+    private var hasRoute: Bool { !content.routeSegments.isEmpty }
     private var hasElevation: Bool { !content.elevationSamples.isEmpty }
 
     var body: some View {
@@ -36,7 +36,7 @@ struct ShareCardView: View {
 
     private var routeField: some View {
         ZStack(alignment: .bottomLeading) {
-            RouteThumbnail(coordinates: content.routeCoordinates,
+            RouteThumbnail(segments: content.routeSegments,
                            lineColor: AuraTheme.routeLine, lineWidth: 3)
                 .padding(AuraTheme.Spacing.lg)
             overlayBlock

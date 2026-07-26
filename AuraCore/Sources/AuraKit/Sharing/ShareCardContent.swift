@@ -12,7 +12,10 @@ public struct ShareCardContent: Equatable, Sendable {
     public let climbedUnit: String
     public let dateText: String
     public let destinationName: String?
-    public let routeCoordinates: [Coordinate]
+    /// The route to stroke, one run per ride segment. Empty when there is nothing to draw.
+    /// Segmented rather than flattened: a share card that connected two segments would draw
+    /// a straight line across the café stop.
+    public let routeSegments: [[Coordinate]]
     public let elevationSamples: [Double]
 
     public init(ride: Ride, units: DistanceUnits,
@@ -32,12 +35,12 @@ public struct ShareCardContent: Equatable, Sendable {
         let trimmed = ride.destinationName?.trimmingCharacters(in: .whitespacesAndNewlines)
         destinationName = (trimmed?.isEmpty == false) ? trimmed : nil
 
-        routeCoordinates = ride.track.count > 1 ? ride.track.map(\.coordinate) : []
+        routeSegments = ride.segments.map { $0.points.map(\.coordinate) }.filter { $0.count > 1 }
 
         // The card draws the silhouette only for a real climb, gated on cumulative gain
         // via the shared classifier so the card and the ride summary never disagree.
         if case .profile(let samples) = ElevationProfile.classify(
-            track: ride.track, gainMeters: stats.elevationGainMeters) {
+            track: ride.flattenedPoints, gainMeters: stats.elevationGainMeters) {
             elevationSamples = samples
         } else {
             elevationSamples = []

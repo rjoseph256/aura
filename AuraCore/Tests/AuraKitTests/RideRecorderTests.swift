@@ -40,7 +40,7 @@ final class RideRecorderTests: XCTestCase {
         XCTAssertEqual(ride.startedAt, Date(timeIntervalSince1970: 100))
         XCTAssertEqual(ride.endedAt, Date(timeIntervalSince1970: 200))
         XCTAssertEqual(ride.stats, recorder.stats)
-        XCTAssertEqual(ride.track.count, 2)
+        XCTAssertEqual(ride.flattenedPoints.count, 2)
         XCTAssertFalse(recorder.isRecording)
     }
 }
