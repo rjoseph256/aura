@@ -106,8 +106,9 @@ struct RideMapView: View {
     private var routeRibbon: some MapContent {
         // Keep the emptiness guard: an empty group still creates a Mapbox annotation manager
         // (a style source + layer) per map mount, where today there was none.
-        if !ribbonPieces.isEmpty {
-            PolylineAnnotationGroup(Array(ribbonPieces.enumerated()), id: \.offset) { item in
+        let pieces = ribbonPieces
+        if !pieces.isEmpty {
+            PolylineAnnotationGroup(Array(pieces.enumerated()), id: \.offset) { item in
                 PolylineAnnotation(lineCoordinates: item.element.coordinates.map {
                     CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
                 })

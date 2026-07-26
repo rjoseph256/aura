@@ -31,6 +31,18 @@ final class RideRecorderTests: XCTestCase {
         XCTAssertEqual(recorder.stats, .zero)
     }
 
+    /// `end(at:)` does not clear `segments` (it closes over a local copy), so only the
+    /// `isRecording` guard in `record` stops a late point from appending to a finished
+    /// ride's last segment and rewriting `stats` underneath it.
+    func test_ignoresPointsAfterEnd() {
+        let recorder = RideRecorder(kind: .freeRide)
+        recorder.start(at: Date(timeIntervalSince1970: 0))
+        recorder.record(pt(40.44, ele: 250, t: 0))
+        recorder.end(at: Date(timeIntervalSince1970: 60))
+        recorder.record(pt(40.45, ele: 250, t: 120)) // after end
+        XCTAssertEqual(recorder.flattenedPoints.count, 1)
+    }
+
     /// An unpaused ride is exactly one open segment from `start` onward — including before
     /// the first fix arrives, so `record` always has somewhere to append.
     func test_start_opensExactlyOneSegment() {

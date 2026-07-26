@@ -57,6 +57,11 @@ public final class RideRecorder {
         // Drop trailing empty segments so "no points" has one encoding — zero segments —
         // matching `Ride(track: [])` and the persisted round trip. INTERIOR empties are
         // legal and must survive (spec D6); only the tail goes.
+        // Deliberately not written back to `self.segments`: the recorder is finished (the HUD
+        // that reads it is torn down at this point) and normalizing here would mutate live
+        // state as a side effect of producing a return value. This does mean
+        // `recorder.segments` and the returned `ride.segments` can disagree after a no-fix
+        // ride — harmless today since nothing reads the recorder post-`end`.
         var closed = segments
         while let last = closed.last, last.points.isEmpty { closed.removeLast() }
         return Ride(kind: kind, startedAt: startedAt ?? date, endedAt: date,
