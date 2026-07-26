@@ -1690,7 +1690,7 @@ surfaces merge unverified.
 
 **Interfaces:**
 - Consumes: `GPXParser`, `GPXTrack.segments`, `RideStatsCalculator.stats(segments:)`,
-  `ShareCardContent`, `TrackRibbon`, `WorkoutData`, `RideStore`.
+  `ShareCardContent`, `TrackRibbon`, `WorkoutData`.
 - Produces: `PausedGoldenRideFixture` with `track()`, `ride()`, `expectedSegmentCount`,
   `expectedSegmentPointCounts`, `expectedPointCount`, and both segmented and flattened
   frozen literals.
@@ -1823,8 +1823,6 @@ import Foundation
 import AuraCore
 @testable import AuraKit
 
-@MainActor
-@Suite(.swiftDataSerialized)
 struct PausedGoldenRideFixtureTests {
     private func close(_ a: Double, _ b: Double, within tolerance: Double = 0.5) -> Bool {
         abs(a - b) <= tolerance
@@ -1886,20 +1884,6 @@ struct PausedGoldenRideFixtureTests {
         #expect(WorkoutData(from: ride).route.count == PausedGoldenRideFixture.expectedPointCount)
     }
 
-    /// Pins the KNOWN-WRONG behavior, so Pass 3 flipping it is visible as a test change
-    /// rather than as silence. `RideMapper` writes only the flat `trackData` blob until
-    /// schema V6 (ROH-100) adds `segmentsData`, so a multi-segment ride collapses to one
-    /// segment across a save/load. Safe today only because no rider can create one — the
-    /// spec gates any user-reachable pause control behind V6.
-    @Test func multiSegmentRideFlattensThroughTheStoreUntilV6() throws {
-        let ride = try PausedGoldenRideFixture.ride()
-        let store = try RideStore.inMemory()
-        try store.save(ride)
-        let reloaded = try #require(try store.ride(id: ride.id))
-        #expect(reloaded.segments.count == 1)
-        #expect(reloaded.flattenedPoints.count == PausedGoldenRideFixture.expectedPointCount)
-    }
-
     /// Re-record helper, mirroring `GoldenRideFixtureTests.recordTruthLiterals`. Run with
     /// GOLDEN_RECORD=1 and paste the printed literals. Skipped otherwise.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["GOLDEN_RECORD"] != nil))
@@ -1923,9 +1907,11 @@ struct PausedGoldenRideFixtureTests {
 }
 ```
 
-(The `.swiftDataSerialized` suite trait is required because
-`multiSegmentRideFlattensThroughTheStoreUntilV6` opens a `RideStore` — see the project rule
-recorded for ROH-65. Copy the trait usage from `GoldenRidePlaybackTests.swift:10-11`.)
+(No `RideStore` is opened here, so this suite needs neither `@MainActor` nor
+`.swiftDataSerialized`. Drop both traits from the `@Suite` line and the `@MainActor`
+attribute if you carried them over — an unnecessary serialization gate just slows the suite.
+The store round-trip test that *did* need them, `multiSegmentRideFlattensThroughTheStoreUntilV6`,
+already landed in Task 2 (`RideMapperTests.swift`); **do not write it again here.**)
 
 - [ ] **Step 5: Run and confirm the literal tests fail**
 
