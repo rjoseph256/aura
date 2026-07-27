@@ -5,6 +5,9 @@ public struct GPXTrack: Equatable, Sendable {
     /// Every point in document order. Retained as a flattened accessor because replay
     /// (`GPXLocationPlayer`, `SimulatedLocationProvider`) genuinely wants one stream of
     /// fixes — the pause gap is a gap in *time*, which the schedule already honors.
+    ///
+    /// **O(n), and it allocates a fresh array on every access.** Bind it to a `let` before
+    /// use rather than reading it repeatedly.
     public var points: [TrackPoint] {
         segments.flatMap(\.points)
     }

@@ -7,6 +7,8 @@ struct GoldenRideFixtureTests {
     @Test func fixtureLoadsWithExpectedShape() throws {
         let track = try GoldenRideFixture.track()
         #expect(track.points.count == GoldenRideFixture.expectedPointCount)
+        // golden-ride.gpx contains exactly one <trkseg>.
+        #expect(track.segments.count == 1)
         #expect(track.points.first?.elevation == 240)
         // Every point parsed (lat/lon/time all present in the authored file).
         #expect(track.points.last?.timestamp.timeIntervalSince(track.points[0].timestamp)

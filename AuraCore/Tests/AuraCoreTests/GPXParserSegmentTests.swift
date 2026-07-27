@@ -65,4 +65,30 @@ final class GPXParserSegmentTests: XCTestCase {
         XCTAssertEqual(track.points.count, 1)
         XCTAssertEqual(track.segments.count, 1)
     }
+
+    /// Canonical-form invariant: an empty hand-built track and the parser's empty-document
+    /// result must be `Equatable`-equal. Zero segments is the only representation of "no
+    /// points" — a future `init(points:)` that collapsed instead to `[RideSegment(points: [])]`
+    /// would break this while every other existing test (which only checks one leg or the
+    /// other) stayed green.
+    func test_handBuiltEmptyTrack_matchesParsedEmptyTrack() throws {
+        XCTAssertEqual(GPXTrack(points: []), try GPXParser.parse("<?xml version=\"1.0\"?><gpx></gpx>"))
+    }
+
+    /// Defensive: two `<trk>` elements each containing a bare `<trkpt>` outside any
+    /// `<trkseg>` (malformed GPX). Each `<trk>` closes its own defensive segment rather than
+    /// merging into one, so no point crosses a `<trk>` boundary it never shared.
+    func test_malformedMultiTrk_eachClosesItsOwnDefensiveSegment() throws {
+        let xml = """
+        <?xml version="1.0"?>
+        <gpx version="1.1">
+        <trk>\(trkpt(40.44, "2026-06-22T14:00:00Z"))</trk>
+        <trk>\(trkpt(40.54, "2026-06-22T14:15:00Z"))</trk>
+        </gpx>
+        """
+        let track = try GPXParser.parse(xml)
+        XCTAssertEqual(track.segments.count, 2)
+        XCTAssertEqual(track.segments[0].points.count, 1)
+        XCTAssertEqual(track.segments[1].points.count, 1)
+    }
 }

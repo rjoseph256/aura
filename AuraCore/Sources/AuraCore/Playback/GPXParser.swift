@@ -61,7 +61,7 @@ public enum GPXParser {
                 guard let lat, let lon, let time else { break }
                 current?.append(TrackPoint(coordinate: Coordinate(latitude: lat, longitude: lon),
                                            elevation: ele, timestamp: time))
-            case "trkseg":
+            case "trkseg", "trk":
                 closeCurrentSegment()
             default: break
             }
