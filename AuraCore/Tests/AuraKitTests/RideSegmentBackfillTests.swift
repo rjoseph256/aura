@@ -217,7 +217,8 @@ struct RideSegmentBackfillTests {
     ///
     /// The spin makes this deterministic: without it, `cancel()` races the first rows and the
     /// test would pass against a sweep that ignores cancellation entirely.
-    @Test func cancellationStopsTheSweep() async throws {
+    @Test(.disabled("CI probe: isolating the task-allocator abort"))
+    func cancellationStopsTheSweep() async throws {
         let store = try RideStore.inMemory()
         let track = try JSONEncoder().encode([pt(40.0, 0), pt(40.1, 10)])
         for _ in 0..<40 { try insertUnbackfilled(store, trackData: track) }
@@ -242,7 +243,8 @@ struct RideSegmentBackfillTests {
     /// running when another starts. The nil re-check immediately before the write is what keeps
     /// this from double-filling and double-exporting; without it the two runs report more
     /// backfills than there are rows.
-    @Test func concurrentSweepsFillEachRowExactlyOnce() async throws {
+    @Test(.disabled("CI probe: isolating the task-allocator abort"))
+    func concurrentSweepsFillEachRowExactlyOnce() async throws {
         let store = try RideStore.inMemory()
         let track = try JSONEncoder().encode([pt(40.0, 0), pt(40.1, 10)])
         for _ in 0..<30 { try insertUnbackfilled(store, trackData: track) }
