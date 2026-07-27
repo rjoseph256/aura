@@ -243,8 +243,7 @@ struct RideSegmentBackfillTests {
     /// running when another starts. The nil re-check immediately before the write is what keeps
     /// this from double-filling and double-exporting; without it the two runs report more
     /// backfills than there are rows.
-    @Test(.disabled("CI probe: isolating the task-allocator abort"))
-    func concurrentSweepsFillEachRowExactlyOnce() async throws {
+    @Test func concurrentSweepsFillEachRowExactlyOnce() async throws {
         let store = try RideStore.inMemory()
         let track = try JSONEncoder().encode([pt(40.0, 0), pt(40.1, 10)])
         for _ in 0..<30 { try insertUnbackfilled(store, trackData: track) }
