@@ -6,7 +6,14 @@ import AuraCore
 
 /// CloudKit-compatibility guards: the mirror rejects models with unique
 /// constraints, relationships, or non-optional attributes without defaults.
-@Suite("Schema invariants (CloudKit)")
+///
+/// `.swiftDataSerialized` even though this suite builds no container: `Schema(versionedSchema:)`
+/// materializes entity descriptions, and CoreData caches those process-globally by entity name.
+/// From V6 on this suite materializes `RideSchemaV6.RideRecord` while the migration suites hold
+/// `RideSchemaV2.RideRecord` — the same name, a different class, which is the ROH-65 hazard. It
+/// crashed CI (a malloc abort, in an unrelated suite) before this trait was added; the gate's
+/// own grep does not find this file, because there is no `ModelContainer(` in it.
+@Suite("Schema invariants (CloudKit)", .swiftDataSerialized)
 struct SchemaInvariantTests {
     private var entities: [Schema.Entity] {
         // Always guard the CURRENT schema so every persisted model — including

@@ -44,6 +44,10 @@ actor SwiftDataSerialGate {
 ///
 /// It is a Swift Testing `SuiteTrait`, so an `XCTestCase` cannot adopt it — a suite that builds
 /// containers must be written in Swift Testing (see `RideStoreTests`, converted for this).
+///
+/// **Building a container is not the only trigger.** `Schema(versionedSchema:)` materializes
+/// entity descriptions on its own, so a suite that only inspects a schema needs the gate too
+/// (see `SchemaInvariantTests`). Grepping for `ModelContainer(` will not find those.
 struct SwiftDataSerialized: TestTrait, SuiteTrait, TestScoping {
     func provideScope(for test: Test, testCase: Test.Case?,
                       performing function: @Sendable () async throws -> Void) async throws {
