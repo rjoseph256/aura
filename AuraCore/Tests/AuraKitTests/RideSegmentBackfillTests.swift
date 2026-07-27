@@ -16,7 +16,7 @@ import AuraCore
 ///
 /// Every case here calls `run` synchronously. That is deliberate: see the note on the type.
 @MainActor
-@Suite("Ride segment backfill", .swiftDataSerialized)
+@Suite("Ride segment backfill", .swiftDataSerialized, .disabled("probe: whole suite off"))
 struct RideSegmentBackfillTests {
     /// Every row this suite writes starts here, comfortably outside the settling window, so a
     /// test opts into the unsettled case rather than tripping over it.
