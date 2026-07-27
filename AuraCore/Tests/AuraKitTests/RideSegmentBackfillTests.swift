@@ -215,8 +215,18 @@ struct RideSegmentBackfillTests {
     /// the rider's ride, and whatever it already wrote stays written — it saves per row, so a
     /// cancelled run is a shorter run, not a lost one.
     ///
-    /// The spin makes this deterministic: without it, `cancel()` races the first rows and the
-    /// test would pass against a sweep that ignores cancellation entirely.
+    /// The sleep makes this deterministic without racing: `Task.sleep` returns immediately on a
+    /// task that is already cancelled and wakes immediately on one cancelled while suspended, so
+    /// either ordering reaches `backfill` with cancellation already set. Without it, `cancel()`
+    /// races the first rows and the test would pass against a sweep that ignores cancellation.
+    ///
+    /// **Do not spin here.** This was `while !Task.isCancelled { await Task.yield() }`, which
+    /// aborted CI intermittently inside libswift_Concurrency's task allocator ("freed pointer was
+    /// not the last allocation") — a hot yield loop in a detached task being cancelled underneath
+    /// it. It reproduced only on the macOS 15 runner, never locally on macOS 26, and it killed the
+    /// whole test process, so the failure surfaced in whatever unrelated suite was printing.
+    /// Isolated by bisecting on CI: 5/5 green with this test disabled, 4/4 green with the other
+    /// concurrency test re-enabled, against a ~2/3 baseline failure rate.
     @Test func cancellationStopsTheSweep() async throws {
         let store = try RideStore.inMemory()
         let track = try JSONEncoder().encode([pt(40.0, 0), pt(40.1, 10)])
@@ -225,7 +235,7 @@ struct RideSegmentBackfillTests {
         let settled = settledBefore
 
         let task = Task.detached {
-            while !Task.isCancelled { await Task.yield() }   // cancellation is observable before we start
+            try? await Task.sleep(for: .seconds(60))   // returns at once once cancelled; never sleeps
             return await backfiller.backfill(settledBefore: settled)
         }
         task.cancel()
