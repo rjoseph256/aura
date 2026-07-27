@@ -31,6 +31,10 @@ jobs:
       # Serial execution is fast here (~0.5s for the whole suite) and deterministic.
       - name: Run AuraCore + AuraKit tests
         working-directory: AuraCore
+        env:
+          # TEMPORARY (backtrace probe): the suite aborts with signal 6 inside
+          # libswift_Concurrency's task allocator and the log carries no stack.
+          SWIFT_BACKTRACE: enable=yes,threads=all,interactive=no,color=no
         run: swift test --no-parallel
 
   app-build:
