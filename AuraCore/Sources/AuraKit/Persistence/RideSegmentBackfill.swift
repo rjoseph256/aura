@@ -20,11 +20,19 @@ import AuraCore
 ///   wrote — so only something re-runnable can ever finish the job, which is the precondition
 ///   for retiring `trackData`.
 ///
-/// **Call it from a detached task.** This is a `@ModelActor`, and `@ModelActor`'s synthesized
-/// `DefaultSerialModelExecutor` does **not** hop threads — it serializes work on whatever
-/// thread enqueues it. A `Task { }` started inside a SwiftUI `.task` inherits MainActor
-/// isolation, so that shape runs the whole sweep on the main thread. `Task.detached` is what
-/// actually gets it off. `AuraApp` does that, and says so.
+/// **Call it from a detached task.** `run` is synchronous and does its work on the calling
+/// thread, with a `ModelContext` it creates and owns, so a `Task.detached` puts the whole sweep
+/// on a background thread. A `Task { }` started inside a SwiftUI `.task` would inherit MainActor
+/// isolation and run it on the main thread instead.
+///
+/// **It is deliberately NOT a `@ModelActor`.** It was one, and that shape —
+/// `Task.detached { await someModelActor.method() }` — aborts inside libswift_Concurrency's task
+/// allocator ("freed pointer was not the last allocation") on the macOS 15 CI runner, killing the
+/// whole test process. Isolated by bisecting on CI over four probes: calls into the same actor
+/// from `async let` or from the caller's own task are fine; only the detached-to-actor hop fails,
+/// with or without cancellation, with or without a suspension inside the actor. Owning a plain
+/// `ModelContext` removes the custom serial executor from the picture, which is the only part of
+/// that shape we control.
 ///
 /// **What it guarantees.** It fills a nil column and nothing else, re-checking that the column
 /// is still nil immediately before writing, and it saves one row at a time so a row is dirty
@@ -41,8 +49,7 @@ import AuraCore
 /// prefer `segmentsData`. The settling window below is what keeps that narrow; closing it
 /// entirely would need a derivation marker, which is a column and therefore another CloudKit
 /// promotion. Recorded rather than pretended away.
-@ModelActor
-public actor RideSegmentBackfiller {
+public enum RideSegmentBackfill {
     private static let log = Logger(subsystem: "app.aura.kit", category: "backfill")
 
     /// Consecutive failed writes before the run gives up. A full disk fails every save, and
@@ -89,13 +96,18 @@ public actor RideSegmentBackfiller {
     ///   - settledBefore: rows that started at or after this are left for a later run.
     /// - Returns: what the run did. Never throws: a backfill that could fail its caller would
     ///   be worse than no backfill at all.
+    /// - Parameter isCancelled: checked before every row, so a caller can stop the sweep. Defaults
+    ///   to the ambient task's cancellation, which is what `AuraApp` cancels when a ride starts.
     @discardableResult
-    public func backfill(maxRows: Int = .max,
-                         settledBefore: Date = Date().addingTimeInterval(-defaultSettlingWindow)) async -> Result {
+    public static func run(container: ModelContainer,
+                           maxRows: Int = .max,
+                           settledBefore: Date = Date().addingTimeInterval(-defaultSettlingWindow),
+                           isCancelled: () -> Bool = { Task.isCancelled }) -> Result {
+        let modelContext = ModelContext(container)
         var result = Result()
         let pending: [UUID]
         do {
-            pending = try pendingRideIDs()
+            pending = try pendingRideIDs(modelContext)
         } catch {
             Self.log.error("backfill: could not list pending rides: \(error, privacy: .public)")
             return result
@@ -103,9 +115,9 @@ public actor RideSegmentBackfiller {
         guard !pending.isEmpty else { return result }
 
         var consecutiveWriteFailures = 0
-        sweep: for (index, id) in pending.enumerated() {
-            guard result.backfilled < maxRows, !Task.isCancelled else { break }
-            switch fill(id: id, settledBefore: settledBefore) {
+        sweep: for id in pending {
+            guard result.backfilled < maxRows, !isCancelled() else { break }
+            switch fill(id: id, settledBefore: settledBefore, modelContext: modelContext) {
             case .filled:
                 result.backfilled += 1
                 consecutiveWriteFailures = 0
@@ -121,10 +133,9 @@ public actor RideSegmentBackfiller {
             case .notSettledYet, .alreadyFilled:
                 break
             }
-            if index.isMultiple(of: 16) { await Task.yield() }
         }
 
-        result.remaining = (try? pendingCount()) ?? 0
+        result.remaining = (try? pendingCount(modelContext)) ?? 0
         Self.log.info("""
             backfill: \(result.backfilled) filled, \(result.unreadable) unreadable, \
             \(result.failedWrites) write failures, \(result.remaining) still pending
@@ -137,7 +148,7 @@ public actor RideSegmentBackfiller {
     /// One row at a time, by id. `#Predicate { $0.id == id }` is the only predicate shape this
     /// store already relies on (`RideStore.save`), and the encode happens *before* the row is
     /// dirtied so the write window is the save itself.
-    private func fill(id: UUID, settledBefore: Date) -> RowOutcome {
+    private static func fill(id: UUID, settledBefore: Date, modelContext: ModelContext) -> RowOutcome {
         do {
             let descriptor = FetchDescriptor<RideRecord>(predicate: #Predicate { $0.id == id })
             // Re-checked here, not just in the pending query: another sweep, or a CloudKit
@@ -171,17 +182,17 @@ public actor RideSegmentBackfiller {
         }
     }
 
-    private func pendingDescriptor() -> FetchDescriptor<RideRecord> {
+    private static func pendingDescriptor() -> FetchDescriptor<RideRecord> {
         FetchDescriptor<RideRecord>(predicate: #Predicate { $0.segmentsData == nil })
     }
 
-    private func pendingRideIDs() throws -> [UUID] {
+    private static func pendingRideIDs(_ modelContext: ModelContext) throws -> [UUID] {
         // Reading `id` does not fault either external blob, so listing the work is cheap even
         // on a long history. The rows themselves do register in this context.
         try modelContext.fetch(pendingDescriptor()).map(\.id)
     }
 
-    private func pendingCount() throws -> Int {
+    private static func pendingCount(_ modelContext: ModelContext) throws -> Int {
         try modelContext.fetchCount(pendingDescriptor())
     }
 }
