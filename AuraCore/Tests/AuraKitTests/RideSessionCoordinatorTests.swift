@@ -281,7 +281,9 @@ final class ScriptedLocationProvider: LocationStreaming {
 final class ThrowingRideSaving: RideSaving {
     struct SaveError: Error {}
     private(set) var saveCount = 0
+    private(set) var discardCount = 0
     func save(_ ride: Ride) throws { saveCount += 1; throw SaveError() }
+    func discard(id: UUID) throws { discardCount += 1; throw SaveError() }
 }
 
 @MainActor

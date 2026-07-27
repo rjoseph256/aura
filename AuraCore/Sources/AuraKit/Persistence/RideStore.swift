@@ -56,9 +56,42 @@ public final class RideStore {
         return RideStore(container: container)
     }
 
+    /// Write a ride, keyed on its id: an existing row is updated in place, anything else is
+    /// inserted. Upsert rather than insert because the ride pipeline now writes a checkpoint at
+    /// every pause boundary (spec D7) and then the finished ride at End — a blind insert would
+    /// leave History holding one copy of the ride per pause.
+    ///
+    /// **Adding a column to `RideRecord` means adding a line to the update branch below.** It
+    /// is a hand-written field copy, not a whole-row replace, and nothing enforces that it is
+    /// complete — a column left out here is silently frozen at whatever the first write put in
+    /// it. `updatePathCarriesEveryColumn` is the guard; extend it with the column.
+    ///
+    /// For V6 specifically: `segmentsData` must be copied here, or a ride that was checkpointed
+    /// at a pause keeps the segments it had at that pause while `trackData` moves on — and a
+    /// read path that prefers `segmentsData` would then show every paused ride truncated at its
+    /// first stop. Note also that this is an update path for rides written by *this* build; a
+    /// row saved by an older build is still never revisited, so D2's backfill stage stands.
     public func save(_ ride: Ride) throws {
         let context = container.mainContext
-        context.insert(try RideMapper.record(from: ride))
+        let record = try RideMapper.record(from: ride)
+        let id = ride.id
+        let descriptor = FetchDescriptor<RideRecord>(predicate: #Predicate { $0.id == id })
+        if let existing = try context.fetch(descriptor).first {
+            existing.kindRaw = record.kindRaw
+            existing.startedAt = record.startedAt
+            existing.endedAt = record.endedAt
+            existing.trackData = record.trackData
+            existing.statsData = record.statsData
+            existing.distanceMeters = record.distanceMeters
+            existing.movingTimeSeconds = record.movingTimeSeconds
+            existing.elevationGainMeters = record.elevationGainMeters
+            existing.thumbnailData = record.thumbnailData
+            existing.destinationName = record.destinationName
+            existing.routeId = record.routeId
+            existing.destinationPlaceId = record.destinationPlaceId
+        } else {
+            context.insert(record)
+        }
         try context.save()
     }
 

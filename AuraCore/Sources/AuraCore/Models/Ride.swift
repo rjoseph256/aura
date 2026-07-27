@@ -11,6 +11,15 @@ public struct Ride: Identifiable, Codable, Equatable, Sendable {
     /// stay inside one segment (spec D1/D4). A ride with no points has ZERO segments.
     public var segments: [RideSegment]
     public var stats: RideStats?
+    /// Time the rider spent paused, in seconds. Active time — the number the summary leads
+    /// with — is `elapsed - pausedSeconds` (spec D5). It lives here rather than on `RideStats`
+    /// because it is a property of the session, not of the track: `RideStats` is a pure
+    /// function of the points, which is what lets the recorder recompute it wholesale on
+    /// every fix.
+    ///
+    /// `0` is the correct reading for every ride recorded before pause existed. **Not
+    /// persisted until schema V6** (pinned by `pausedSecondsIsDroppedByTheStoreUntilV6`).
+    public var pausedSeconds: TimeInterval
     /// Human-readable destination (e.g. "The Church Brew Works") for a navigate ride,
     /// denormalized so History can show it without re-resolving the Place. nil for free rides.
     public var destinationName: String?
@@ -18,10 +27,12 @@ public struct Ride: Identifiable, Codable, Equatable, Sendable {
     public var destinationPlaceId: UUID?
 
     public init(id: UUID = UUID(), kind: Kind, startedAt: Date, endedAt: Date?,
-                segments: [RideSegment], stats: RideStats?, destinationName: String? = nil,
+                segments: [RideSegment], stats: RideStats?, pausedSeconds: TimeInterval = 0,
+                destinationName: String? = nil,
                 routeId: UUID?, destinationPlaceId: UUID?) {
         self.id = id; self.kind = kind; self.startedAt = startedAt; self.endedAt = endedAt
-        self.segments = segments; self.stats = stats; self.destinationName = destinationName
+        self.segments = segments; self.stats = stats; self.pausedSeconds = pausedSeconds
+        self.destinationName = destinationName
         self.routeId = routeId; self.destinationPlaceId = destinationPlaceId
     }
 
@@ -34,12 +45,13 @@ public struct Ride: Identifiable, Codable, Equatable, Sendable {
     /// single-valued: `RideRecorder.end` drops its trailing empty segment, so a fix-less ride
     /// and its persisted round trip agree, and `Ride`'s `Equatable` survives a save/load.
     public init(id: UUID = UUID(), kind: Kind, startedAt: Date, endedAt: Date?,
-                track: [TrackPoint], stats: RideStats?, destinationName: String? = nil,
+                track: [TrackPoint], stats: RideStats?, pausedSeconds: TimeInterval = 0,
+                destinationName: String? = nil,
                 routeId: UUID?, destinationPlaceId: UUID?) {
         self.init(id: id, kind: kind, startedAt: startedAt, endedAt: endedAt,
                   segments: track.isEmpty ? [] : [RideSegment(points: track)], stats: stats,
-                  destinationName: destinationName, routeId: routeId,
-                  destinationPlaceId: destinationPlaceId)
+                  pausedSeconds: pausedSeconds, destinationName: destinationName,
+                  routeId: routeId, destinationPlaceId: destinationPlaceId)
     }
 
     /// Every point in ride order, pause gaps closed up. Correct for consumers that treat the

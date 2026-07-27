@@ -199,6 +199,12 @@ struct NavigateHUDView: View {
             configureAudioSession()
             guidance.onSpeak = { speakInstruction($0) }
             guidance.onArrive = { endRide() }
+            // Arrival and voice are suppressed while paused: riders pause *at* the destination,
+            // inside the arrival radius, and `onArrive` ends the ride with no confirmation.
+            // Wired as a direct observer rather than an `.onChange` so guidance learns about
+            // the pause in the same turn as the tap — the turn in between is exactly when a
+            // pending arrival would fire. Set here so it is live the moment Pass 4's control is.
+            coordinator.pauseObserver = guidance
 
             var rideLocation: any LocationStreaming = location
             var rideAuthorization = location.authorization
@@ -224,6 +230,9 @@ struct NavigateHUDView: View {
             guidance.start(route: route)
         }
         .onChange(of: coordinator.isRecording) { _, recording in
+            // Stays true across a pause — a paused ride is an active ride, and this flag is
+            // the only thing stopping a deep link from tearing the HUD down into `cancel()`,
+            // which does not save (spec D6/D7).
             router.isRideActive = recording
         }
         .onChange(of: coordinator.finishedRide) { _, ride in

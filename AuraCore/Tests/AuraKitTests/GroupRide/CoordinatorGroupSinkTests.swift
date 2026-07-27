@@ -7,12 +7,13 @@ import AuraCore
 final class SpyGroupSink: GroupLocationSink {
     struct Update: Equatable {
         let coordinate: Coordinate
-        let progressMeters: Double
+        /// nil while the rider is paused: no progress is published (spec D7).
+        let progressMeters: Double?
         let speed: Double
         let at: Date
     }
     var updates: [Update] = []
-    func locationDidUpdate(coordinate: Coordinate, progressMeters: Double, speed: Double, at: Date) {
+    func locationDidUpdate(coordinate: Coordinate, progressMeters: Double?, speed: Double, at: Date) {
         updates.append(Update(coordinate: coordinate, progressMeters: progressMeters, speed: speed, at: at))
     }
 }
