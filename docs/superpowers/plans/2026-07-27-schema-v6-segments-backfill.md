@@ -2,7 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** revision 2. Revision 1 put the backfill in a custom `didMigrate` stage, as spec D2 and ROH-100 both specify. A three-reviewer adversarial gate refuted that: the stage runs synchronously inside `AuraApp.init()` before the first frame, and it cannot reach the rows its own rationale is written about. Revision 2 makes V5→V6 lightweight and moves the backfill to a resumable background sweep. PO signed off on the change of approach. Every finding and its disposition is recorded at the end of this document.
+**Status:** revision 3 — EXECUTED. Revision 2's plan was implemented, then put through a second three-reviewer gate against the finished diff; that gate's findings and dispositions are the last table in this document. Revision 2 text follows.
+
+**Status of revision 2:** Revision 1 put the backfill in a custom `didMigrate` stage, as spec D2 and ROH-100 both specify. A three-reviewer adversarial gate refuted that: the stage runs synchronously inside `AuraApp.init()` before the first frame, and it cannot reach the rows its own rationale is written about. Revision 2 makes V5→V6 lightweight and moves the backfill to a resumable background sweep. PO signed off on the change of approach. Every finding and its disposition is recorded at the end of this document.
 
 **Goal:** Persist a ride's pause boundaries and its paused total, by redeclaring `RideRecord` in a new `RideSchemaV6` with an externally-stored `segmentsData` blob and a `pausedSeconds` column, and backfilling `segmentsData` from existing flat tracks off the launch path.
 
@@ -19,7 +21,7 @@
 - **CloudKit model rules on every V6 attribute:** optional or defaulted, no `.unique`, no relationships. Machine-checked by `SchemaInvariantTests`.
 - **`segmentsData` carries `@Attribute(.externalStorage)`** — matching `trackData` (`RideSchemaV2.swift:20`). Without it a ~300 KB blob sits inline and `RideStore.summaries()` faults it on every row (ROH-64). Machine-checked, not inferred from a sidecar file's existence.
 - **`thumbnailData` stays flat** (D3).
-- **No read path may throw on a bad or empty blob.** `RideMapper.ride` runs inside a `.map` in `RideStore.allRides()`; one throw empties History for every ride the rider owns.
+- **No read path may throw on a bad or empty blob.** `RideMapper.ride` runs inside a `.map` in `RideStore.allRides()`, so one throw fails every ride at once. *(Corrected at the second gate: `allRides()` has no production caller today — History renders from `summaries()`, which cannot throw, and the detail sheet uses `try? ride(id:)`. The constraint stands for the shape of the API, not for a live blast radius.)*
 - **Nothing added here may be able to fail the `ModelContainer`.** `AuraApp.swift:56-62` catches a throwing `RideStore.persistent()` and falls back to `RideStore.inMemory()`, which shows the rider an empty History *and* lets `WidgetRefresh.reload` overwrite the App Group snapshot with the empty store. A backfill is best-effort by construction and must never reach that path.
 - **Release gate, not code:** the CloudKit **production** schema must be promoted before a V6 build ships.
 - Date defaults stay the fixed sentinel `Date(timeIntervalSince1970: 0)`.
@@ -39,7 +41,7 @@
 
 Both new attributes are optional/defaulted, which is exactly what a lightweight stage handles.
 
-**D-c. The sweep is resumable, batched, and failure-contained.** It collects the ids of nil rows in one cheap fetch, then processes them one row at a time, saving every 10 rows and yielding between batches. Per-row failures are counted, never thrown. Resumability is free: a row is pending precisely while `segmentsData` is nil, so a kill mid-sweep costs only the current batch and the next launch continues. Revision 1's `fetchOffset`-based paging was refuted — the offset counter double-counted undecodable rows across batches and skipped good rows permanently.
+**D-c. The sweep is resumable and failure-contained.** It collects the ids of nil rows in one cheap fetch, then processes them one row at a time. Per-row failures are counted, never thrown. Resumability is free: a row is pending precisely while `segmentsData` is nil, so a kill mid-sweep costs only the row in flight. Revision 1's `fetchOffset`-based paging was refuted — the offset counter double-counted undecodable rows across batches and skipped good rows permanently. *(Revised again at the second gate: batching was dropped for a save per row. A row dirty across a batch loses a concurrent writer's columns to CoreData's dirty-object conflict resolution, which was reproduced.)*
 
 **D-d. Zero points is ZERO segments, never one empty segment** (`Ride.swift:45-48`), so a backfilled fix-less ride round-trips `==` to a fresh one.
 
@@ -97,7 +99,7 @@ Tasks 1, 3 and 4 of revision 1 are merged: making `segmentsData` a required init
 **Interfaces:**
 - Produces: `RideSchemaV6.RideRecord` (twelve V2 attributes + `segmentsData: Data?` + `pausedSeconds: Double`), `typealias RideRecord = RideSchemaV6.RideRecord`, `RideSummary.pausedSeconds: Double`, `RideMigrationPlan.migrateV5toV6` (lightweight). `RideMapper` signatures unchanged.
 
-- [ ] **Step 1: Write the failing tests.** `SchemaInvariantTests` repointed to `Schema(versionedSchema: RideSchemaV6.self)`, `v5ContainsAllModels` → `v6ContainsAllModels`, plus:
+- [x] **Step 1: Write the failing tests.** `SchemaInvariantTests` repointed to `Schema(versionedSchema: RideSchemaV6.self)`, `v5ContainsAllModels` → `v6ContainsAllModels`, plus:
 
 ```swift
 /// `.externalStorage` asserted on the attribute itself. A behavioral check would not catch
@@ -132,13 +134,13 @@ Flip `multiSegmentRideFlattensThroughTheStoreUntilV6` → `multiSegmentRideSurvi
 
 Drop revision 1's `pausedSecondsIsDefaultedForCloudKit`: it asserted `isOptional || defaultValue != nil`, which `everyAttributeIsOptionalOrDefaulted` already asserts for every attribute — a tautology dressed as coverage.
 
-- [ ] **Step 2: Run and watch them fail.** `swift test --package-path AuraCore --filter "Schema invariants"` → FAIL, `cannot find 'RideSchemaV6' in scope`.
+- [x] **Step 2: Run and watch them fail.** `swift test --package-path AuraCore --filter "Schema invariants"` → FAIL, `cannot find 'RideSchemaV6' in scope`.
 
-- [ ] **Step 3: Implement.** `RideSchemaV6.swift` as in revision 1 (redeclared record with the doc comment explaining the rehash hazard, the entity-name rule, the CloudKit rules and D-g); delete the V2 typealias; register V6 with `MigrationStage.lightweight(fromVersion: RideSchemaV5.self, toVersion: RideSchemaV6.self)` and a comment recording why it is lightweight and where the backfill went; `RideMapper.record` writes `segmentsData: try encoder.encode(ride.segments)` and `pausedSeconds:`; `RideMapper.ride` prefers segments, logs and falls back on a corrupt blob, treats an empty `trackData` as zero points (D-e); `summary` gains `pausedSeconds`; `RideStore.save`'s update branch copies both columns; `RideSummary` gains `pausedSeconds` (defaulted `0` in the initializer, one production writer).
+- [x] **Step 3: Implement.** `RideSchemaV6.swift` as in revision 1 (redeclared record with the doc comment explaining the rehash hazard, the entity-name rule, the CloudKit rules and D-g); delete the V2 typealias; register V6 with `MigrationStage.lightweight(fromVersion: RideSchemaV5.self, toVersion: RideSchemaV6.self)` and a comment recording why it is lightweight and where the backfill went; `RideMapper.record` writes `segmentsData: try encoder.encode(ride.segments)` and `pausedSeconds:`; `RideMapper.ride` prefers segments, logs and falls back on a corrupt blob, treats an empty `trackData` as zero points (D-e); `summary` gains `pausedSeconds`; `RideStore.save`'s update branch copies both columns; `RideSummary` gains `pausedSeconds` (defaulted `0` in the initializer, one production writer).
 
-- [ ] **Step 4: Run.** `swift test --package-path AuraCore --filter "RideMapper|RideStore|Schema invariants"` → PASS.
+- [x] **Step 4: Run.** `swift test --package-path AuraCore --filter "RideMapper|RideStore|Schema invariants"` → PASS.
 
-- [ ] **Step 5: Commit.** `feat(roh-100): schema V6 — redeclared RideRecord, dual-written segments, paused time`
+- [x] **Step 5: Commit.** `feat(roh-100): schema V6 — redeclared RideRecord, dual-written segments, paused time`
 
 ---
 
@@ -148,13 +150,13 @@ Drop revision 1's `pausedSecondsIsDefaultedForCloudKit`: it asserted `isOptional
 
 Revision 1's migration suite asserted backfill results. Under D-b those move to Task 3, and this suite asserts what a lightweight stage must guarantee: a V5 store opens as V6, every column survives, un-backfilled rows read correctly through the degrading path, and **nothing is rewritten at launch**. Revision 1's `migratedRowReadsBackThroughTheStore` was refuted for passing against a no-op stage — under D-b a no-op is the specification, and the suite now says so explicitly.
 
-- [ ] **Step 1: Write the tests** — write a V5-shaped store (V2 `RideRecord` + V5 `SavedPlaceRecord` + V4 `SeenGemRecord`, no plan, `cloudKitDatabase: .none`), reopen through the plan on the V6 model set, then assert: rows survive with `trackData` byte-identical; `segmentsData == nil` ("the stage must not touch data — the sweep owns that, off the launch path"); `pausedSeconds == 0`; `store.ride(id:)` returns one segment with every point; `summaries()` works. Plus a row with `Data()` as its track, which must read back as an empty ride rather than throwing.
+- [x] **Step 1: Write the tests** — write a V5-shaped store (V2 `RideRecord` + V5 `SavedPlaceRecord` + V4 `SeenGemRecord`, no plan, `cloudKitDatabase: .none`), reopen through the plan on the V6 model set, then assert: rows survive with `trackData` byte-identical; `segmentsData == nil` ("the stage must not touch data — the sweep owns that, off the launch path"); `pausedSeconds == 0`; `store.ride(id:)` returns one segment with every point; `summaries()` works. Plus a row with `Data()` as its track, which must read back as an empty ride rather than throwing.
 
-- [ ] **Step 2: Run and watch it fail** — FAIL: no V6 in the plan (or, after Task 1, PASS, in which case it is a regression guard rather than a driver; note it and move on).
+- [x] **Step 2: Run and watch it fail** — FAIL: no V6 in the plan (or, after Task 1, PASS, in which case it is a regression guard rather than a driver; note it and move on).
 
-- [ ] **Step 3: Run.** `swift test --package-path AuraCore --filter "Schema V6 migration"` → PASS.
+- [x] **Step 3: Run.** `swift test --package-path AuraCore --filter "Schema V6 migration"` → PASS.
 
-- [ ] **Step 4: Commit.** `test(roh-100): pin the lightweight V5→V6 stage as lossless and inert`
+- [x] **Step 4: Commit.** `test(roh-100): pin the lightweight V5→V6 stage as lossless and inert`
 
 ---
 
@@ -182,15 +184,15 @@ public actor RideSegmentBackfiller {
 
 Constructed `RideSegmentBackfiller(modelContainer: store.container)`. `backfill` does not throw: every failure is counted and logged. `batchSize` is a save cadence, not a fetch window.
 
-- [ ] **Step 1: Write the failing tests**, covering: a nil row backfills to one segment with its points intact; empty and `Data()` tracks backfill to zero segments; **an undecodable row is skipped, counted, and does not stop the sweep — with enough rows and a small enough `batchSize` that skipped rows and pending rows interleave across several batches** (the combination revision 1's paging bug lived in, and which no revision 1 test reached); a row that already has segments is never rewritten (a real 2-segment ride stays 2 segments); running twice is idempotent (`backfilled == 0` the second time); `maxRows` leaves `remaining > 0` and a second run finishes the job (resumability); and the sweep's writes are visible through `RideStore.ride(id:)`.
+- [x] **Step 1: Write the failing tests**, covering: a nil row backfills to one segment with its points intact; empty and `Data()` tracks backfill to zero segments; **an undecodable row is skipped, counted, and does not stop the sweep — with enough rows and a small enough `batchSize` that skipped rows and pending rows interleave across several batches** (the combination revision 1's paging bug lived in, and which no revision 1 test reached); a row that already has segments is never rewritten (a real 2-segment ride stays 2 segments); running twice is idempotent (`backfilled == 0` the second time); `maxRows` leaves `remaining > 0` and a second run finishes the job (resumability); and the sweep's writes are visible through `RideStore.ride(id:)`.
 
-- [ ] **Step 2: Run and watch them fail** — `cannot find 'RideSegmentBackfiller' in scope`.
+- [x] **Step 2: Run and watch them fail** — `cannot find 'RideSegmentBackfiller' in scope`.
 
-- [ ] **Step 3: Implement.** One fetch of pending ids (cheap — external blobs are not faulted by reading `id`), then per-row fetch by `#Predicate { $0.id == id }` (the only predicate shape this codebase already proves, `RideStore.swift:78`), decode → wrap → encode → assign, `save()` every `batchSize` rows with `await Task.yield()` between batches, everything inside `do/catch` that counts and logs. Empty track → zero segments (D-d/D-e). Never touch a row whose `segmentsData` is non-nil.
+- [x] **Step 3: Implement.** One fetch of pending ids (cheap — external blobs are not faulted by reading `id`), then per-row fetch by `#Predicate { $0.id == id }` (the only predicate shape this codebase already proves, `RideStore.swift:78`), decode → wrap → encode → assign, `save()` every `batchSize` rows with `await Task.yield()` between batches, everything inside `do/catch` that counts and logs. Empty track → zero segments (D-d/D-e). Never touch a row whose `segmentsData` is non-nil.
 
-- [ ] **Step 4: Run.** `swift test --package-path AuraCore --filter RideSegmentBackfill` → PASS.
+- [x] **Step 4: Run.** `swift test --package-path AuraCore --filter RideSegmentBackfill` → PASS.
 
-- [ ] **Step 5: Commit.** `feat(roh-100): resumable background sweep backfilling segmentsData`
+- [x] **Step 5: Commit.** `feat(roh-100): resumable background sweep backfilling segmentsData`
 
 ---
 
@@ -198,11 +200,11 @@ Constructed `RideSegmentBackfiller(modelContainer: store.container)`. `backfill`
 
 **Files:** Modify `Aura/Sources/AuraApp.swift`
 
-- [ ] **Step 1: Wire it** — a `.task` on the root view (not `init`, not `scenePhase`), once per launch, skipped when `rideStore.isEphemeral`, at `.background`/`.utility` priority, result logged. It must be structurally impossible for this to affect launch or to throw into the container.
+- [x] **Step 1: Wire it** — a `.task` on the root view (not `init`, not `scenePhase`), once per launch, skipped when `rideStore.isEphemeral`, at `.background`/`.utility` priority, result logged. It must be structurally impossible for this to affect launch or to throw into the container.
 
-- [ ] **Step 2: Build the app.** Delegate to the `apple-platform-build-tools:builder` agent — build the `Aura` scheme for an iPhone simulator. Expected: BUILD SUCCEEDED.
+- [x] **Step 2: Build the app.** Delegate to the `apple-platform-build-tools:builder` agent — build the `Aura` scheme for an iPhone simulator. Expected: BUILD SUCCEEDED.
 
-- [ ] **Step 3: Commit.** `feat(roh-100): run the segment backfill after first frame`
+- [x] **Step 3: Commit.** `feat(roh-100): run the segment backfill after first frame`
 
 ---
 
@@ -210,9 +212,9 @@ Constructed `RideSegmentBackfiller(modelContainer: store.container)`. `backfill`
 
 **Files:** `RideTrackExternalStorageTests.swift`, `Support/SwiftDataSerialGate.swift`, container suites
 
-- [ ] **Step 1:** Add the segmented long-ride cold-reopen test (3000 points split across two segments): both segments survive externalization byte-for-byte, `pausedSeconds` survives, and `summaries()` still reads columns only. The `.externalStorage` *attribute* guard lives in `SchemaInvariantTests` (Task 1) — `hasExternalData(in:)` cannot prove it, because `trackData` externalizes on the same row regardless.
+- [x] **Step 1:** Add the segmented long-ride cold-reopen test (3000 points split across two segments): both segments survive externalization byte-for-byte, `pausedSeconds` survives, and `summaries()` still reads columns only. The `.externalStorage` *attribute* guard lives in `SchemaInvariantTests` (Task 1) — `hasExternalData(in:)` cannot prove it, because `trackData` externalizes on the same row regardless.
 
-- [ ] **Step 2:** Widen the gate's doc comment: from V6 on, `RideSchemaV2.RideRecord` and `RideSchemaV6.RideRecord` share the CoreData entity name `RideRecord`, the same process-global hazard `SavedPlaceRecord` hit in ROH-65. Then:
+- [x] **Step 2:** Widen the gate's doc comment: from V6 on, `RideSchemaV2.RideRecord` and `RideSchemaV6.RideRecord` share the CoreData entity name `RideRecord`, the same process-global hazard `SavedPlaceRecord` hit in ROH-65. Then:
 
 ```bash
 grep -rln "RideStore.inMemory()\|ModelContainer(" AuraCore/Tests/AuraKitTests | xargs grep -L "swiftDataSerialized"
@@ -220,19 +222,19 @@ grep -rln "RideStore.inMemory()\|ModelContainer(" AuraCore/Tests/AuraKitTests | 
 
 For each hit, add `.swiftDataSerialized`. **`RideStoreTests` is an `XCTestCase`** and cannot take a Swift Testing `SuiteTrait` — convert it to a Swift Testing suite rather than leaving the one ungated container suite in the run.
 
-- [ ] **Step 3: Run the full suite three times** (`for i in 1 2 3; do swift test --package-path AuraCore || break; done`) — this class of bug is intermittent by construction.
+- [x] **Step 3: Run the full suite three times** (`for i in 1 2 3; do swift test --package-path AuraCore || break; done`) — this class of bug is intermittent by construction.
 
-- [ ] **Step 4: Commit.** `test(roh-100): guard external storage and serialize the two RideRecord entities`
+- [x] **Step 4: Commit.** `test(roh-100): guard external storage and serialize the two RideRecord entities`
 
 ---
 
 ### Task 6: Lint, full verification, review gate, hand-off
 
-- [ ] **Step 1:** `swiftlint --strict` → clean.
-- [ ] **Step 2:** `swift test --package-path AuraCore` → all suites pass.
-- [ ] **Step 3:** App build via the builder agent → BUILD SUCCEEDED.
-- [ ] **Step 4:** Adversarial review gate — three independent reviewers, distinct lenses, refuting mandate, against the full branch diff. Reconcile before merging.
-- [ ] **Step 5:** Hand-off to the PO, in the PR body and in Linear:
+- [x] **Step 1:** `swiftlint --strict` → clean.
+- [x] **Step 2:** `swift test --package-path AuraCore` → all suites pass.
+- [x] **Step 3:** App build via the builder agent → BUILD SUCCEEDED.
+- [x] **Step 4:** Adversarial review gate — three independent reviewers, distinct lenses, refuting mandate, against the full branch diff. Reconcile before merging.
+- [x] **Step 5:** Hand-off to the PO, in the PR body and in Linear:
   - **CloudKit production schema promotion**, with the actionable detail review found missing: container `iCloud.com.rohunjoseph.aura`, CloudKit Console → Schema → Deploy Schema Changes, and the prerequisite that a V6 build must first run against the **development** environment so `CD_segmentsData` and `CD_pausedSeconds` exist to promote. Missing it stops sync for every V6 user with no in-app error surface. Filed as a Linear issue blocking first TestFlight/App Store release, not left in a PR body three passes before the builds that reach a device.
   - **Unverifiable here:** that a V5 build ignores an unknown `CD_segmentsData` and degrades to a flat track. macOS CI has no CloudKit entitlement. Needs two-device verification — and the check should include what the V5 device *pays*: the sweep dirties every historical row, so the whole history re-exports and re-downloads.
   - **Storage:** dual-write roughly doubles per-ride bytes on disk and in the rider's iCloud quota. File the `trackData` retirement issue with a named trigger; the spec calls it "a separate issue" and no such issue exists.
@@ -267,3 +269,34 @@ For each hit, add `.swiftDataSerialized`. **`RideStoreTests` is an `XCTestCase`*
 | 21 | Pause flush gets ~2× more expensive per tap (three track passes, two blobs) | **Out of scope, handed off** — Pass 4 measures the flush on device at ~9,000 points |
 | 22 | `SchemaV5MigrationTests` may now drive V5→V6 | **Verify during Task 2** — deliberately, not as a flake in Task 5's triple run |
 | 23 | Sort-order dependence of unsorted fetches | **Moot** — no offset paging remains |
+
+
+---
+
+## Second review gate — against the finished diff
+
+Three independent reviewers (skeptic / architecture / product lenses, refuting mandate) ran against the implemented branch. The headline finding is that the sweep was still running on the main thread: `@ModelActor`'s executor serializes on whatever thread enqueues it, and a `Task { }` started inside a SwiftUI `.task` inherits MainActor isolation — so the work had moved one frame later rather than off the main thread. Measured by two reviewers independently (~0.4 s stalls at the old batch size; ~110 ms of synchronous main-thread work before the first suspension).
+
+| Finding | Disposition |
+| -- | -- |
+| Sweep ran on the main thread; `Task(priority:).value` also escalated its priority | **Fixed** — `Task.detached(priority: .utility)`, not awaited. The reason is documented at both the call site and the actor |
+| A dirty row's stale snapshot wins a CoreData conflict, so the batch save reverted a concurrent writer's columns (reproduced) | **Mitigated** — per-row saves shrink the window to the save itself. Not closed: SwiftData exposes no merge policy. Documented on the type; the reachable writer is the CloudKit import context, which is part of the two-device verification |
+| `maxRows` budgeted rows *examined*, so unreadable rows starved the rows behind them forever | **Fixed** — the budget counts rows filled. Mutation-verified |
+| An empty `trackData` was stamped as an empty ride, freezing a row whose CloudKit asset had not materialized | **Fixed** — left pending; it already reads as an empty ride |
+| `segmentsData` is derived once and never re-derived, so a V5 device finishing a ride after a V6 device backfilled its partial track pins the ride to the fragment | **Mitigated** — 24 h settling window. A full fix needs a derivation marker, i.e. another column and another promotion. Documented as a known limitation |
+| Sweep was uncancellable and ran under an active ride | **Fixed** — `Task.isCancelled` per row; the app cancels it when `isRideActive` goes true |
+| Unbounded CloudKit export burst on the update launch (`maxRows` never passed) | **Fixed** — 50 rows per launch. Un-filled rows read correctly meanwhile |
+| `remaining` reported 0 while rows were permanently pending; save failures were counted as unreadable | **Fixed** — `remaining` is counted from the store; `unreadable` and `failedWrites` are separate |
+| A full disk would fail every save and grind the whole history for nothing | **Fixed** — the run stops after three consecutive write failures. No free-space precheck: accepted, the stop covers the symptom |
+| Nothing prevented two concurrent sweeps | **Mitigated** — the app holds the task and will not start a second; the nil re-check makes a race correct anyway. Test added |
+| The nil re-check, the batching, cancellation, and two tests could not fail against a broken implementation | **Fixed** — `batchSize` is gone with per-row saves; the rest are covered and each guard was verified by mutating the source and watching the test fail |
+| Every sweep test used an in-memory store — the one configuration the app skips | **Fixed** — an on-disk test with a 3000-point externalized track |
+| `allRides()` has no production caller, so "one throw empties History" was false in five places | **Fixed** — corrected in the mapper, two test files and a test name. `statsData` can still throw; said so rather than widening behavior in this pass |
+| `RideSummary.pausedSeconds` documented as read by History and the widget; nothing reads it | **Fixed** — documented as Pass 4/5, including that `WidgetSnapshot` will need its own shape change |
+| `.task` "runs once per launch" is a view-lifecycle claim | **Fixed** — the task is held in state and not restarted |
+| `Package.resolved` originHash churn | **Fixed** — reverted |
+| Pass 4 makes recovered-checkpoint ghost rides common while ROH-107 is still open | **Raised** — on ROH-107 and ROH-74 as a Pass 4 sequencing decision for the PO |
+| Pass 4/5 must decide what a pre-V6 ride's active-time headline shows, given `pausedSeconds == 0` | **Raised** — on ROH-101 |
+| Every End tap now encodes the track twice (inherent to dual-write) | **Named** in the PR rather than hidden; Pass 4 measures the flush on device |
+| The release gate was prose in a plan document | **Fixed** — filed as a release-blocking Linear issue and linked from the roadmap |
+| No `trackData` retirement issue existed | **Fixed** — filed |
