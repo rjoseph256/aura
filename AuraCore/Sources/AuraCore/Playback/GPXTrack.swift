@@ -5,20 +5,8 @@ public struct GPXTrack: Equatable, Sendable {
     /// Every point in document order. Retained as a flattened accessor because replay
     /// (`GPXLocationPlayer`, `SimulatedLocationProvider`) genuinely wants one stream of
     /// fixes — the pause gap is a gap in *time*, which the schedule already honors.
-    ///
-    /// Deliberately a manual loop, NOT `segments.flatMap(\.points)`: under concurrent
-    /// first-use from multiple threads (e.g. several `@Test` functions calling this
-    /// accessor at once), the `flatMap(_:)` + `KeyPath` combination reproducibly returned
-    /// corrupted/uninitialized `TrackPoint` data on this toolchain — verified by reverting
-    /// to `flatMap(\.points)` and watching `GoldenRideFixtureTests` /
-    /// `GoldenRideFixtureRouteTests` / `SimulatedLocationProviderTests` fail with garbage
-    /// values when run together, and disappear once reverted back to this loop. Do not
-    /// reintroduce `flatMap(\.points)` here without re-verifying under concurrent test
-    /// execution (`swift test`, not a single `--filter`).
     public var points: [TrackPoint] {
-        var result: [TrackPoint] = []
-        for segment in segments { result.append(contentsOf: segment.points) }
-        return result
+        segments.flatMap(\.points)
     }
 
     public init(segments: [RideSegment]) { self.segments = segments }
