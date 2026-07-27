@@ -52,6 +52,12 @@ public final class GuidanceViewModel {
     /// Invoked once the rider reaches the final destination; the view ends the ride.
     @ObservationIgnored public var onArrive: () -> Void = { }
 
+    /// Mirrors the ride's paused state. While true, arrival and spoken prompts are suppressed:
+    /// riders pause *at* the destination they navigated to, inside the arrival radius, and
+    /// `onArrive` ends the ride and pushes the summary with no confirmation (spec D7). The
+    /// event stream keeps being consumed, so guidance carries on when the rider resumes.
+    @ObservationIgnored public var isPaused = false
+
     @ObservationIgnored private let session: any GuidanceSession
     @ObservationIgnored private var task: Task<Void, Never>?
 
@@ -85,22 +91,22 @@ public final class GuidanceViewModel {
         for await event in stream {
             switch event {
             case .progress(let update):
-                isRerouting = false
                 sawProgress = true
-                lastUpdate = update
-                turn = TurnCardPresenter.state(for: update, units: units)
-                let cue = hapticEngine.onProgress(
-                    distanceToManeuverMeters: update.distanceToManeuverMeters,
-                    maneuverKey: update.instruction)
-                if hapticsEnabled, let cue { haptics?.play(cue) }
+                applyProgress(update)
             case .spokenInstruction(let text):
-                onSpeak(text)
+                // Nothing to announce to a rider who is standing still — and voice guidance
+                // talking over their music through a café stop is its own small insult.
+                if !isPaused { onSpeak(text) }
             case .rerouting:
                 isRerouting = true
             case .rerouted(let geometry):
                 routeGeometry = geometry
                 isRerouting = false
             case .arrivedAtDestination:
+                // Suppressed, not deferred: a rider who paused at the destination and then
+                // resumed has decided to keep riding, so firing the held arrival at them would
+                // end the ride under exactly the person who said otherwise (spec D7).
+                if isPaused { continue }
                 let cue = hapticEngine.onArrival()
                 if hapticsEnabled, let cue { haptics?.play(cue) }
                 // `onArrive` is caller-defined: navigate's HUD ends the ride (tearing down
@@ -118,5 +124,17 @@ public final class GuidanceViewModel {
         if !sawProgress {
             turn = .unavailable
         }
+    }
+
+    /// The turn card, the raw update and the once-per-maneuver haptic for one progress event.
+    /// Split out of `run` to keep that loop within the cyclomatic budget.
+    private func applyProgress(_ update: GuidanceUpdate) {
+        isRerouting = false
+        lastUpdate = update
+        turn = TurnCardPresenter.state(for: update, units: units)
+        let cue = hapticEngine.onProgress(
+            distanceToManeuverMeters: update.distanceToManeuverMeters,
+            maneuverKey: update.instruction)
+        if hapticsEnabled, let cue { haptics?.play(cue) }
     }
 }

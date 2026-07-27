@@ -4,9 +4,15 @@ import AuraCore
 /// The point handoff from the ride's single location stream into the group session.
 /// `RideSessionCoordinator` (the sole stream owner) pushes points here; the session
 /// never opens its own location stream (AsyncStream is single-consumer).
+///
+/// `progressMeters` is optional because a paused rider publishes no progress: their distance
+/// has stopped being computed, and broadcasting a frozen number beside a live coordinate makes
+/// the crew's display contradict itself — the roster reports them ever further behind while
+/// their dot sits at the front (spec D7). `nil` means "unchanged", and the session holds the
+/// last value it published.
 @MainActor
 public protocol GroupLocationSink: AnyObject {
-    func locationDidUpdate(coordinate: Coordinate, progressMeters: Double, speed: Double, at: Date)
+    func locationDidUpdate(coordinate: Coordinate, progressMeters: Double?, speed: Double, at: Date)
 }
 
 /// The live group session: owns the receiver-side `LivePresenceState` and the local
@@ -30,6 +36,9 @@ public final class RideSession: GroupLocationSink {
     private var speedSamples: [SpeedSample] = []
     private var ownMotion: MotionState = .moving
     private var lastPublish: Date = .distantPast
+    /// Most recent progress the rider published. Held across a pause, when the coordinator
+    /// sends `nil` progress (see `GroupLocationSink`).
+    private var lastProgressMeters: Double = 0
 
     /// Live-sharing health, for a non-fatal "unavailable" surface (SP3 reads it).
     public private(set) var isLive = false
@@ -97,14 +106,17 @@ public final class RideSession: GroupLocationSink {
 
     // MARK: GroupLocationSink
 
-    public func locationDidUpdate(coordinate: Coordinate, progressMeters: Double,
+    public func locationDidUpdate(coordinate: Coordinate, progressMeters: Double?,
                                   speed: Double, at: Date) {
         speedSamples.append(SpeedSample(speed: speed, at: at))
         let cutoff = at.addingTimeInterval(-cadence.stoppedDuration * 2)
         speedSamples.removeAll { $0.at < cutoff }
         ownMotion = classifier.classify(speedSamples, now: at)
+        // The wire payload has to carry a number, so a paused rider's last published progress
+        // is held rather than reset — they have not moved backwards, they have stopped moving.
+        if let progressMeters { lastProgressMeters = progressMeters }
         outbox.add(LivePositionPayload(userID: selfUserID, coordinate: coordinate,
-                                       progressMeters: progressMeters, recordedAt: at,
+                                       progressMeters: lastProgressMeters, recordedAt: at,
                                        motionState: ownMotion))
     }
 

@@ -18,7 +18,13 @@ public final class RideSessionCoordinator {
     public var segments: [RideSegment] { recorder.segments }
     /// Smoothed live speed for the HUD dial (current speed, not the ride average).
     public var currentSpeedMetersPerSecond: Double { recorder.currentSpeedMetersPerSecond }
+    /// True for the whole ride, **including while it is paused** — it is "a ride is in
+    /// progress", which is what `router.isRideActive` mirrors (spec D6). Use `isPaused` for
+    /// the paused reading.
     public var isRecording: Bool { recorder.isRecording }
+    public var isPaused: Bool { recorder.isPaused }
+    /// **Active** time: wall-clock since the start, less everything spent paused (spec D5).
+    /// The ticker keeps running while paused; this simply stops advancing.
     public private(set) var elapsed: TimeInterval = 0
     /// Set by `finish()`; observed by the HUD's `onChange(of:)`, which pushes the summary route
     /// (ROH-85). Not reset here: the HUD is torn down when the path collapses to the summary, so
@@ -48,6 +54,10 @@ public final class RideSessionCoordinator {
     private var saveToHealth = false
     private var groupSink: (any GroupLocationSink)?
     private var discoverySink: (any RideDiscoverySink)?
+    /// The ride id written by the last pause-boundary flush, while that row is still a
+    /// checkpoint. Cleared by `finish()` — after which the row is a real finished ride and
+    /// `cancel()` must leave it alone.
+    private var checkpointedRideID: UUID?
     // Internal so a test can await the stream draining; not part of the public surface.
     var streamTask: Task<Void, Never>?
     private var tickerTask: Task<Void, Never>?
@@ -105,26 +115,87 @@ public final class RideSessionCoordinator {
             guard let stream = self?.location?.points() else { return }
             for await point in stream {
                 guard let self else { return }
-                self.recorder.record(point)
+                let paused = self.recorder.isPaused
+                self.recorder.record(point)   // a no-op while paused
                 self.groupSink?.locationDidUpdate(
                     coordinate: point.coordinate,
-                    progressMeters: self.recorder.stats.distanceMeters,
+                    // Paused: the coordinate keeps the rider's dot alive to the crew, but
+                    // their distance has stopped being computed, so no progress is published
+                    // (spec D7). The zeroed live speed reads them as `.stopped`.
+                    progressMeters: paused ? nil : self.recorder.stats.distanceMeters,
                     speed: point.speedMetersPerSecond ?? self.recorder.currentSpeedMetersPerSecond,
                     at: point.timestamp)
-                self.discoverySink?.rideDidUpdateLocation(point)
+                if !paused { self.discoverySink?.rideDidUpdateLocation(point) }
                 self.guidance?.riderDidUpdate(point)
             }
         }
         tickerTask = Task { [weak self] in
-            // Terminates when finish()/cancel() cancels this task; the isRecording guard is a secondary exit.
+            // Terminates when finish()/cancel() cancels this task; the isRecording guard is a
+            // secondary exit. It must NOT be tripped by a pause — it is a `return`, so the
+            // ticker would never come back, and `isRecording` stays true while paused (D6).
             while !Task.isCancelled {
                 guard let self, self.recorder.isRecording else { return }
-                self.elapsed = Date().timeIntervalSince(self.startedAt ?? Date())
+                self.refreshElapsed()
                 self.pushActivityUpdate()
                 try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
         return .started
+    }
+
+    /// Recompute active time: wall-clock since the start, less paused time — including the
+    /// pause currently in flight, so the clock stops the moment the rider taps rather than
+    /// when the interval eventually closes.
+    private func refreshElapsed(now: Date = Date()) {
+        guard let startedAt else { return }
+        elapsed = max(0, now.timeIntervalSince(startedAt) - recorder.pausedSeconds(asOf: now))
+    }
+
+    /// Pause the ride: stop recording, release the wake lock, relax the location tier, and
+    /// flush what has been ridden so far. The ride stays *active* throughout — `isRecording`
+    /// does not move (spec D6/D7). A no-op unless a ride is running and not already paused.
+    public func pause() {
+        guard recorder.isRecording, !recorder.isPaused else { return }
+        let now = Date()
+        recorder.pause(at: now)
+        refreshElapsed(now: now)
+        screen.setKeepAwake(false)
+        location?.setRidePaused(true)
+        flushCheckpoint(at: now)
+    }
+
+    /// Resume recording: open the next segment, re-acquire the screen and the full location
+    /// tier. A no-op unless the ride is paused.
+    public func resume() {
+        guard recorder.isPaused else { return }
+        let now = Date()
+        recorder.resume(at: now)
+        refreshElapsed(now: now)
+        screen.setKeepAwake(true)
+        location?.setRidePaused(false)
+    }
+
+    /// Persist the ride as it stands at a pause boundary. Nothing else persists mid-ride, and
+    /// a pause deliberately creates the conditions for a jetsam kill — backgrounded, no
+    /// interaction, screen wake released, for tens of minutes — so losing that gamble would
+    /// cost the rider everything they rode *before* the stop (spec D7).
+    ///
+    /// Best-effort by design: the checkpoint is a safety net, so a failure here must not set
+    /// `saveFailed` (which the summary reads) or interrupt the ride. The row carries the same
+    /// id as the finished ride, so End updates it rather than adding a second copy, and
+    /// `cancel()` removes it if the ride is abandoned instead.
+    private func flushCheckpoint(at date: Date) {
+        guard let saving else { return }
+        // Nothing worth recovering: a ride the app would itself discard silently on a back-out
+        // has no business appearing in History if the pause is killed. This also covers a
+        // pause taken before the first fix, where there is no track at all.
+        guard !RideBackOutGate.canDiscard(distanceMeters: recorder.stats.distanceMeters) else { return }
+        do {
+            try saving.save(recorder.checkpoint(at: date, destinationName: destinationName))
+            checkpointedRideID = recorder.rideID
+        } catch {
+            checkpointedRideID = nil
+        }
     }
 
     /// Pushes current stats + maneuver to the Live Activity. Factored out so a test can
@@ -147,6 +218,10 @@ public final class RideSessionCoordinator {
         activity.end()
         let ride = recorder.end(at: Date(), destinationName: destinationName)
         do {
+            // An upsert on `ride.id`: if a pause already flushed this ride, the same row is
+            // updated rather than duplicated. Cleared first so a later `cancel()` — which
+            // `onDisappear` always fires — cannot delete the ride that was just saved.
+            checkpointedRideID = nil
             try saving?.save(ride)
             saveFailed = false
         } catch {
@@ -165,6 +240,13 @@ public final class RideSessionCoordinator {
     /// idempotent, so calling this after `finish()` (e.g. onDisappear after End) is a no-op.
     public func cancel() {
         guidance?.detach()
+        // An abandoned ride's pause checkpoint goes with it, or backing out leaves a ghost
+        // ride in History that the rider never saved. `finish()` clears the id first, so the
+        // `onDisappear` cancel that follows every End is a no-op here.
+        if let id = checkpointedRideID {
+            try? saving?.discard(id: id)
+            checkpointedRideID = nil
+        }
         stopStreaming()
         screen.setKeepAwake(false)
         activity.end()

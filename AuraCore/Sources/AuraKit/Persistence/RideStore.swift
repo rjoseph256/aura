@@ -56,9 +56,36 @@ public final class RideStore {
         return RideStore(container: container)
     }
 
+    /// Write a ride, keyed on its id: an existing row is updated in place, anything else is
+    /// inserted. Upsert rather than insert because the ride pipeline now writes a checkpoint at
+    /// every pause boundary (spec D7) and then the finished ride at End — a blind insert would
+    /// leave History holding one copy of the ride per pause.
+    ///
+    /// The update path rewrites the whole row from the mapped record, so a column added later
+    /// is carried without touching this method. Note for the V6 pass: this is an update path
+    /// for rides *written by this build*, not a backfill — a row saved by an older build is
+    /// still never revisited, so the migration stage stands.
     public func save(_ ride: Ride) throws {
         let context = container.mainContext
-        context.insert(try RideMapper.record(from: ride))
+        let record = try RideMapper.record(from: ride)
+        let id = ride.id
+        let descriptor = FetchDescriptor<RideRecord>(predicate: #Predicate { $0.id == id })
+        if let existing = try context.fetch(descriptor).first {
+            existing.kindRaw = record.kindRaw
+            existing.startedAt = record.startedAt
+            existing.endedAt = record.endedAt
+            existing.trackData = record.trackData
+            existing.statsData = record.statsData
+            existing.distanceMeters = record.distanceMeters
+            existing.movingTimeSeconds = record.movingTimeSeconds
+            existing.elevationGainMeters = record.elevationGainMeters
+            existing.thumbnailData = record.thumbnailData
+            existing.destinationName = record.destinationName
+            existing.routeId = record.routeId
+            existing.destinationPlaceId = record.destinationPlaceId
+        } else {
+            context.insert(record)
+        }
         try context.save()
     }
 
