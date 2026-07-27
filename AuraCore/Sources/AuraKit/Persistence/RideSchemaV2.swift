@@ -1,9 +1,14 @@
 import Foundation
 import SwiftData
 
-/// The current persisted shape. Drops `@Attribute(.unique)` (CloudKit-ready),
-/// moves the GPS track to external storage so a summary fetch never faults it,
-/// and denormalizes the summary numbers + a thumbnail polyline into columns.
+/// Drops `@Attribute(.unique)` (CloudKit-ready), moves the GPS track to external storage so a
+/// summary fetch never faults it, and denormalizes the summary numbers + a thumbnail polyline
+/// into columns.
+///
+/// **Frozen.** V3, V4 and V5 all list this exact class, so adding a property here would
+/// retroactively rehash four schema versions and leave an on-disk V5 store matching none of
+/// them. The current shape is `RideSchemaV6.RideRecord`, which redeclares it; the `RideRecord`
+/// typealias moved there with it.
 public enum RideSchemaV2: VersionedSchema {
     public static let versionIdentifier = Schema.Version(2, 0, 0)
     public static var models: [any PersistentModel.Type] { [RideRecord.self] }
@@ -43,6 +48,3 @@ public enum RideSchemaV2: VersionedSchema {
         }
     }
 }
-
-/// The rest of AuraKit refers to the current model as `RideRecord`.
-public typealias RideRecord = RideSchemaV2.RideRecord

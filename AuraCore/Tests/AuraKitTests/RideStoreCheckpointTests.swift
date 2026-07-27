@@ -50,12 +50,16 @@ struct RideStoreCheckpointTests {
                          destinationName: "First", routeId: UUID(), destinationPlaceId: UUID())
         try store.save(first)
 
+        // Two segments and a non-zero paused total, so the V6 columns differ from the first
+        // write too — this is the checkpoint-then-End shape `save`'s doc comment warns about.
         let second = Ride(id: id, kind: .navigate, startedAt: Date(timeIntervalSince1970: 500),
                           endedAt: Date(timeIntervalSince1970: 900),
-                          track: [pt(41.0, 500), pt(41.2, 600), pt(41.4, 700)],
+                          segments: [RideSegment(points: [pt(41.0, 500), pt(41.2, 600)]),
+                                     RideSegment(points: [pt(41.4, 700)])],
                           stats: RideStats(distanceMeters: 2000, movingTimeSeconds: 300,
                                            averageSpeedMetersPerSecond: 6.7,
                                            maxSpeedMetersPerSecond: 12, elevationGainMeters: 45),
+                          pausedSeconds: 120,
                           destinationName: "Second", routeId: UUID(),
                           destinationPlaceId: UUID())
         try store.save(second)
@@ -64,8 +68,10 @@ struct RideStoreCheckpointTests {
         #expect(back.kind == .navigate)
         #expect(back.startedAt == second.startedAt)
         #expect(back.endedAt == second.endedAt)
+        #expect(back.segments == second.segments, "segmentsData is copied on the update path")
         #expect(back.flattenedPoints == second.flattenedPoints)
         #expect(back.stats == second.stats)
+        #expect(back.pausedSeconds == 120)
         #expect(back.destinationName == "Second")
         #expect(back.routeId == second.routeId)
         #expect(back.destinationPlaceId == second.destinationPlaceId)
@@ -76,7 +82,9 @@ struct RideStoreCheckpointTests {
         #expect(summary.distanceMeters == 2000)
         #expect(summary.movingTimeSeconds == 300)
         #expect(summary.elevationGainMeters == 45)
-        #expect(summary.thumbnailCoordinates.count == 3, "the thumbnail was re-derived, not kept")
+        #expect(summary.pausedSeconds == 120)
+        #expect(summary.thumbnailCoordinates.count == 3,
+                "the thumbnail was re-derived, not kept — and stays flat across the pause (D3)")
     }
 
     @Test func savingTwoDifferentRidesStillKeepsBoth() throws {
@@ -101,11 +109,11 @@ struct RideStoreCheckpointTests {
         #expect(try store.allRides().isEmpty)
     }
 
-    /// Pins the KNOWN-WRONG-FOR-NOW gap, the same way `multiSegmentRideFlattensThroughTheStoreUntilV6`
-    /// pins the segment collapse: `RideRecord` has no column for paused time until schema V6
-    /// (Pass 3), so a paused ride's accounting survives in memory and is lost on reload. A V6
-    /// pass is expected to flip this assertion, not to keep it green.
-    @Test func pausedSecondsIsDroppedByTheStoreUntilV6() throws {
+    /// Was the KNOWN-WRONG-FOR-NOW pin for paused time being dropped on save; schema V6's
+    /// `pausedSeconds` column flipped it, as its old comment said a V6 pass would. This is the
+    /// number D5 computes active time from, so losing it on reload means the summary of a
+    /// reopened ride disagrees with the summary the rider saw at End.
+    @Test func pausedSecondsSurvivesTheStoreFromV6() throws {
         let store = try RideStore.inMemory()
         var ride = Ride(kind: .freeRide, startedAt: Date(timeIntervalSince1970: 0),
                         endedAt: Date(timeIntervalSince1970: 600), track: [pt(40.0, 0)],
@@ -114,6 +122,7 @@ struct RideStoreCheckpointTests {
         try store.save(ride)
 
         let back = try #require(try store.ride(id: ride.id))
-        #expect(back.pausedSeconds == 0, "known-wrong-for-now: no V6 column to carry it yet")
+        #expect(back.pausedSeconds == 300)
+        #expect(try store.summaries().first?.pausedSeconds == 300)
     }
 }

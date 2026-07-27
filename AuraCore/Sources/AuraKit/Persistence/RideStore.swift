@@ -66,11 +66,15 @@ public final class RideStore {
     /// complete — a column left out here is silently frozen at whatever the first write put in
     /// it. `updatePathCarriesEveryColumn` is the guard; extend it with the column.
     ///
-    /// For V6 specifically: `segmentsData` must be copied here, or a ride that was checkpointed
-    /// at a pause keeps the segments it had at that pause while `trackData` moves on — and a
-    /// read path that prefers `segmentsData` would then show every paused ride truncated at its
-    /// first stop. Note also that this is an update path for rides written by *this* build; a
-    /// row saved by an older build is still never revisited, so D2's backfill stage stands.
+    /// V6's `segmentsData` and `pausedSeconds` are copied below for exactly that reason: without
+    /// the first, a ride checkpointed at a pause would keep the segments it had at that pause
+    /// while `trackData` moved on, and a read path that prefers `segmentsData` would show every
+    /// paused ride truncated at its first stop.
+    ///
+    /// Note the limit of this path: it revisits rows written by *this* build. A row saved by an
+    /// older build, or synced down from a V5 device, is never rewritten here — which is why
+    /// `RideSegmentBackfiller` exists and why it has to be re-runnable rather than a one-shot
+    /// migration stage.
     public func save(_ ride: Ride) throws {
         let context = container.mainContext
         let record = try RideMapper.record(from: ride)
@@ -81,9 +85,11 @@ public final class RideStore {
             existing.startedAt = record.startedAt
             existing.endedAt = record.endedAt
             existing.trackData = record.trackData
+            existing.segmentsData = record.segmentsData
             existing.statsData = record.statsData
             existing.distanceMeters = record.distanceMeters
             existing.movingTimeSeconds = record.movingTimeSeconds
+            existing.pausedSeconds = record.pausedSeconds
             existing.elevationGainMeters = record.elevationGainMeters
             existing.thumbnailData = record.thumbnailData
             existing.destinationName = record.destinationName

@@ -95,6 +95,48 @@ struct RideTrackExternalStorageTests {
         #expect(all.first?.flattenedPoints == track)
     }
 
+    /// The V6 shape of the same guarantee: a long ride's *segmented* blob externalizes and
+    /// rehydrates with its pause boundary intact.
+    ///
+    /// Note what this test does NOT prove: `hasExternalData` cannot tell which blob produced
+    /// the sidecar, and `trackData` externalizes on this row regardless — so
+    /// `SchemaInvariantTests.segmentAndTrackBlobsAreExternallyStored` is what actually guards
+    /// `@Attribute(.externalStorage)` on `segmentsData`. What this covers is the round trip:
+    /// externalized segments come back byte-for-byte, and the cheap projection never needs them.
+    @Test func longSegmentedRideSurvivesSaveReleaseAndReopen() throws {
+        let dir = tempStoreDirectory()
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("rides.store")
+
+        let all = longTrack()
+        let before = Array(all.prefix(1500))
+        let after = Array(all.suffix(1500))
+        let rideId = UUID()
+        do {
+            let store = try makeStore(at: url)
+            try store.save(Ride(id: rideId, kind: .freeRide,
+                                startedAt: Date(timeIntervalSince1970: 0),
+                                endedAt: Date(timeIntervalSince1970: 3000),
+                                segments: [RideSegment(points: before), RideSegment(points: after)],
+                                stats: nil, pausedSeconds: 240,
+                                routeId: nil, destinationPlaceId: nil))
+        }
+        #expect(hasExternalData(in: dir))
+
+        let reopened = try makeStore(at: url)
+        let ride = try #require(try reopened.ride(id: rideId))
+        #expect(ride.segments.count == 2, "the pause boundary survives externalized storage")
+        #expect(ride.segments.first?.points == before)
+        #expect(ride.segments.last?.points == after)
+        #expect(ride.pausedSeconds == 240)
+
+        // History's projection reads columns and the small thumbnail only — no blob faults.
+        let summary = try #require(try reopened.summaries().first)
+        #expect(summary.pausedSeconds == 240)
+        #expect(summary.thumbnailCoordinates.count >= 2)
+    }
+
     /// Reads through the store's external-data sidecar directory (`.<store>_SUPPORT/
     /// _EXTERNAL_DATA/…`) rather than hardcoding its exact name, which varies by OS.
     private func hasExternalData(in dir: URL) -> Bool {
