@@ -130,6 +130,17 @@ private struct RootView: View {
         }
         .tint(AuraTheme.accent)
         .task { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+        // Schema V6's segment backfill (ROH-100). Deliberately here and not in the V5→V6
+        // migration stage: stages run inside `ModelContainer.init`, which `AuraApp.init()`
+        // calls before the first frame, where re-encoding a long ride history is a watchdog
+        // kill that repeats on every launch. This runs once per launch, after the first frame,
+        // on the backfiller's own actor, and cannot throw or block anything here. Skipped for
+        // an ephemeral store, which has nothing to backfill and does not survive the launch.
+        .task {
+            guard !rideStore.isEphemeral else { return }
+            let backfiller = RideSegmentBackfiller(modelContainer: rideStore.container)
+            await Task(priority: .utility) { await backfiller.backfill() }.value
+        }
         // UI-test support: "-openURL <url>" routes through the normal deep-link path
         // on first appearance. Inert in production (no argument, no effect).
         .task {
