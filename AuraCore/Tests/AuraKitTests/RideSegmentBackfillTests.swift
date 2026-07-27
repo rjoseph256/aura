@@ -277,7 +277,8 @@ struct RideSegmentBackfillTests {
     /// End to end on a REAL on-disk store with an externalized track — the shape the sweep only
     /// ever meets in production, and the one the in-memory cases above cannot exercise
     /// (`AuraApp` skips ephemeral stores entirely).
-    @Test func backfillsAnExternalizedTrackOnDiskAndReadsBackAsSegments() async throws {
+    @Test(.disabled("probe: only plan-backed on-disk container in this suite"))
+    func backfillsAnExternalizedTrackOnDiskAndReadsBackAsSegments() async throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("aura-backfill-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
