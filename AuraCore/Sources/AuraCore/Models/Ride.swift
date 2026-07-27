@@ -17,8 +17,9 @@ public struct Ride: Identifiable, Codable, Equatable, Sendable {
     /// function of the points, which is what lets the recorder recompute it wholesale on
     /// every fix.
     ///
-    /// `0` is the correct reading for every ride recorded before pause existed. **Not
-    /// persisted until schema V6** (pinned by `pausedSecondsIsDroppedByTheStoreUntilV6`).
+    /// `0` is the correct reading for every ride recorded before pause existed. Persisted
+    /// from schema V6 on, in its own denormalized column (pinned by
+    /// `pausedSecondsSurvivesTheStoreFromV6`).
     public var pausedSeconds: TimeInterval
     /// Human-readable destination (e.g. "The Church Brew Works") for a navigate ride,
     /// denormalized so History can show it without re-resolving the Place. nil for free rides.

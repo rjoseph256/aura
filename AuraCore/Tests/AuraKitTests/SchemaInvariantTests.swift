@@ -10,8 +10,8 @@ import AuraCore
 struct SchemaInvariantTests {
     private var entities: [Schema.Entity] {
         // Always guard the CURRENT schema so every persisted model — including
-        // SavedPlaceRecord.resurface (V5) — is machine-checked for CloudKit compatibility.
-        Schema(versionedSchema: RideSchemaV5.self).entities
+        // RideRecord.segmentsData (V6) — is machine-checked for CloudKit compatibility.
+        Schema(versionedSchema: RideSchemaV6.self).entities
     }
 
     @Test func everyAttributeIsOptionalOrDefaulted() {
@@ -34,8 +34,23 @@ struct SchemaInvariantTests {
         }
     }
 
-    @Test func v5ContainsAllModels() {
+    /// The entity name must stay `RideRecord` even though V6 redeclares the class: CloudKit
+    /// derives its record type from it, so a rename orphans every already-synced ride.
+    @Test func v6ContainsAllModelsUnderTheirExistingNames() {
         #expect(Set(entities.map(\.name)) == ["RideRecord", "SavedPlaceRecord", "SeenGemRecord"])
+    }
+
+    /// Asserted on the attribute, not on behavior: `trackData` externalizes on the same row,
+    /// so a sidecar file exists whether or not `segmentsData` kept `.externalStorage`. An
+    /// inline ~300 KB blob would be faulted by `summaries()` on every row — ROH-64.
+    @Test func segmentAndTrackBlobsAreExternallyStored() {
+        let ride = entities.first { $0.name == "RideRecord" }
+        let segments = ride?.attributes.first { $0.name == "segmentsData" }
+        #expect(segments != nil, "V6 must carry segmentsData")
+        #expect(segments?.isOptional == true, "nil is how an un-backfilled row is representable")
+        #expect(segments?.options.contains(.externalStorage) == true)
+        #expect(ride?.attributes.first { $0.name == "trackData" }?
+            .options.contains(.externalStorage) == true)
     }
 
     @Test func resurfaceDefaultsFalse() {

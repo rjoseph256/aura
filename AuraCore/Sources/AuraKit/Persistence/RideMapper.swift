@@ -1,15 +1,17 @@
 import Foundation
+import os
 import AuraCore
 
 public enum RideMapper {
+    private static let log = Logger(subsystem: "app.aura.kit", category: "persistence")
+
     public static func record(from ride: Ride) throws -> RideRecord {
         let encoder = JSONEncoder()
-        // Both blobs stay flat on purpose. `thumbnailData` is read by older builds syncing
-        // the same CloudKit records with a bare `try?` that falls back to blank (D3), and
-        // `trackData` gains a segmented sibling (`segmentsData`) in the V6 schema pass —
-        // changing either shape here would blank History on a mixed-version fleet.
-        // Consequence until V6: a multi-segment ride saved and reloaded comes back as one
-        // segment. Pinned by `multiSegmentRideFlattensThroughTheStoreUntilV6`.
+        // Dual-write (spec D2). `segmentsData` carries the segmented truth; `trackData` and
+        // `thumbnailData` stay FLAT and complete, because a V5 build syncing the same CloudKit
+        // record reads those two and nothing else — and `thumbnailData` is decoded there with
+        // a bare `try?` that falls back to blank (D3), so a shape change would silently blank
+        // History on a mixed-version fleet rather than failing loudly.
         let points = ride.flattenedPoints
         let thumb = TrackSimplifier.thumbnail(from: points.map(\.coordinate))
         return RideRecord(
@@ -18,9 +20,11 @@ public enum RideMapper {
             startedAt: ride.startedAt,
             endedAt: ride.endedAt,
             trackData: try encoder.encode(points),
+            segmentsData: try encoder.encode(ride.segments),
             statsData: try ride.stats.map { try encoder.encode($0) },
             distanceMeters: ride.stats?.distanceMeters ?? 0,
             movingTimeSeconds: ride.stats?.movingTimeSeconds ?? 0,
+            pausedSeconds: ride.pausedSeconds,
             elevationGainMeters: ride.stats?.elevationGainMeters ?? 0,
             thumbnailData: thumb.count >= 2 ? try encoder.encode(thumb) : nil,
             destinationName: ride.destinationName,
@@ -35,16 +39,43 @@ public enum RideMapper {
             kind: Ride.Kind(rawValue: record.kindRaw) ?? .freeRide,
             startedAt: record.startedAt,
             endedAt: record.endedAt,
-            track: try decoder.decode([TrackPoint].self, from: record.trackData),
+            segments: try segments(from: record, decoder: decoder),
             stats: try record.statsData.map { try decoder.decode(RideStats.self, from: $0) },
+            pausedSeconds: record.pausedSeconds,
             destinationName: record.destinationName,
             routeId: record.routeId,
             destinationPlaceId: record.destinationPlaceId)
     }
 
+    /// Prefers `segmentsData`, and degrades to wrapping the flat `trackData` when it is absent
+    /// — a row written before V6, or synced from a V5 device — **and** when it is present but
+    /// unreadable.
+    ///
+    /// Degrading rather than throwing is the point: `RideStore.allRides()` calls
+    /// `ride(from:)` inside a `.map`, so one throw is not one bad ride, it is an empty History
+    /// for every ride the rider owns. The one throw left is a `trackData` blob that is
+    /// non-empty and undecodable, which is pre-existing behavior for a corrupt track and is
+    /// deliberately not widened here into a silent blank ride.
+    private static func segments(from record: RideRecord, decoder: JSONDecoder) throws -> [RideSegment] {
+        if let data = record.segmentsData {
+            if let decoded = try? decoder.decode([RideSegment].self, from: data) { return decoded }
+            log.error("""
+                segmentsData unreadable for ride \(record.id, privacy: .public) \
+                (\(data.count) bytes); falling back to the flat track, pause boundaries lost
+                """)
+        }
+        // An EMPTY blob is an empty ride, not a corrupt one: `trackData`'s default is `Data()`,
+        // which is what CloudKit materializes for a record that never carried the key, and
+        // JSONDecoder throws on it.
+        guard !record.trackData.isEmpty else { return [] }
+        let points = try decoder.decode([TrackPoint].self, from: record.trackData)
+        // Zero points is ZERO segments, never one empty segment — `Ride`'s canonical encoding.
+        return points.isEmpty ? [] : [RideSegment(points: points)]
+    }
+
     /// Cheap projection for the list/dashboard. Reads only denormalized columns and
-    /// the small thumbnail blob; never touches `trackData`, so the external blob
-    /// never faults.
+    /// the small thumbnail blob; never touches `trackData` or `segmentsData`, so neither
+    /// external blob faults.
     public static func summary(from record: RideRecord) -> RideSummary {
         let coords: [Coordinate]
         if let data = record.thumbnailData,
@@ -61,6 +92,7 @@ public enum RideMapper {
             hasStats: record.statsData != nil,
             distanceMeters: record.distanceMeters,
             movingTimeSeconds: record.movingTimeSeconds,
+            pausedSeconds: record.pausedSeconds,
             elevationGainMeters: record.elevationGainMeters,
             destinationName: record.destinationName,
             thumbnailCoordinates: coords)
