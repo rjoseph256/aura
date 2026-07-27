@@ -35,7 +35,7 @@ struct RideStoreSummaryTests {
         let r = ride(100, distance: 10)
         try store.save(r)
         let full = try #require(try store.ride(id: r.id))
-        #expect(full.track.count == 2)
+        #expect(full.flattenedPoints.count == 2)
         #expect(full.stats?.distanceMeters == 10)
     }
 

@@ -102,12 +102,23 @@ struct ShareCardContentTests {
         assertParity(ride(track: [point(0, 0), point(1, 1)], stats: stats(climb: 0)))
     }
 
-    @Test func routeRequiresTwoPoints() {
+    @Test func routeSegments_needTwoPointsInARun() {
         let multi = ride(track: [point(0, 0), point(1, 1)], stats: stats())
-        #expect(ShareCardContent(ride: multi, units: .imperial).routeCoordinates.count == 2)
-
+        #expect(ShareCardContent(ride: multi, units: .imperial).routeSegments.count == 1)
+        #expect(ShareCardContent(ride: multi, units: .imperial).routeSegments[0].count == 2)
         let single = ride(track: [point(0, 0)], stats: stats())
-        #expect(ShareCardContent(ride: single, units: .imperial).routeCoordinates.isEmpty)
+        #expect(ShareCardContent(ride: single, units: .imperial).routeSegments.isEmpty)
+    }
+
+    @Test func routeSegments_keepSegmentsApart() {
+        let paused = Ride(kind: .freeRide, startedAt: Date(timeIntervalSince1970: 0),
+                          endedAt: nil,
+                          segments: [RideSegment(points: [point(0, 0), point(0, 1)]),
+                                     RideSegment(points: [point(5, 5), point(5, 6)])],
+                          stats: stats(), routeId: nil, destinationPlaceId: nil)
+        let content = ShareCardContent(ride: paused, units: .imperial)
+        #expect(content.routeSegments.count == 2)
+        #expect(content.routeSegments.allSatisfy { $0.count == 2 })
     }
 
     @Test func destinationTrimmedAndNilled() {

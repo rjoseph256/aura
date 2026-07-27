@@ -86,13 +86,13 @@ struct RideTrackExternalStorageTests {
         // 3. Reopen cold and read the full ride back. Every point must survive byte-for-byte.
         let reopened = try makeStore(at: url)
         let ride = try #require(try reopened.ride(id: rideId))
-        #expect(ride.track.count == track.count)
-        #expect(ride.track == track)
+        #expect(ride.flattenedPoints.count == track.count)
+        #expect(ride.flattenedPoints == track)
 
         // And the list read path (allRides) rehydrates the same track.
         let all = try reopened.allRides()
         #expect(all.count == 1)
-        #expect(all.first?.track == track)
+        #expect(all.first?.flattenedPoints == track)
     }
 
     /// Reads through the store's external-data sidecar directory (`.<store>_SUPPORT/

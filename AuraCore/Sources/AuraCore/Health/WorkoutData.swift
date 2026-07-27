@@ -23,12 +23,17 @@ public struct WorkoutData: Equatable, Sendable {
     /// timestamp to `startedAt`, then is clamped to `>= start` so a degenerate or
     /// clock-skewed ride can never produce `end < start` (which `HKWorkoutBuilder`
     /// rejects).
+    ///
+    /// Flattens deliberately: Slice A does not write `HKWorkoutEvent(type: .pause)`, so a
+    /// ride ended after a long pause is still written to Health with wall-clock duration.
+    /// Known inaccuracy, listed as out of scope in the segmented-rides spec.
     public init(from ride: Ride) {
-        let rawEnd = ride.endedAt ?? ride.track.last?.timestamp ?? ride.startedAt
+        let points = ride.flattenedPoints
+        let rawEnd = ride.endedAt ?? points.last?.timestamp ?? ride.startedAt
         self.externalID = ride.id
         self.start = ride.startedAt
         self.end = max(rawEnd, ride.startedAt)
         self.distanceMeters = ride.stats?.distanceMeters ?? 0
-        self.route = ride.track
+        self.route = points
     }
 }

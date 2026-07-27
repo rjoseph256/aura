@@ -65,7 +65,7 @@ struct RideHUDView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            RideMapView(track: coordinator.track,
+            RideMapView(segments: coordinator.segments,
                         gems: gems?.visiblePins ?? [],
                         seenGemIDs: gems?.seenIDs ?? [],
                         onSelectGem: { gem in gems?.select(gem) },

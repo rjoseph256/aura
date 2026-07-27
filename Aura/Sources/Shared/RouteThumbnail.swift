@@ -8,17 +8,34 @@ import AuraKit
 /// Far cheaper than a live Mapbox map per list row — no GL view, no tiles, no
 /// attribution — and the route's *shape* reads clearly even at thumbnail size.
 struct RouteThumbnail: View {
-    let coordinates: [Coordinate]
+    /// One coordinate run per ride segment, fitted through a single shared scale.
+    let segments: [[Coordinate]]
     var lineColor: Color = AuraTheme.routeLine
     var lineWidth: CGFloat = 2
 
+    /// Flat-track convenience for the callers that read the pre-baked, deliberately
+    /// un-segmented `thumbnailData` blob (History rows, Last Ride card, widgets).
+    init(coordinates: [Coordinate], lineColor: Color = AuraTheme.routeLine,
+         lineWidth: CGFloat = 2) {
+        self.init(segments: [coordinates], lineColor: lineColor, lineWidth: lineWidth)
+    }
+
+    init(segments: [[Coordinate]], lineColor: Color = AuraTheme.routeLine,
+         lineWidth: CGFloat = 2) {
+        self.segments = segments
+        self.lineColor = lineColor
+        self.lineWidth = lineWidth
+    }
+
     var body: some View {
         Canvas { context, size in
-            let pts = PolylineNormalizer.points(coordinates, in: size, inset: lineWidth + 3)
-            guard pts.count > 1 else { return }
+            let runs = PolylineNormalizer.points(segments: segments, in: size,
+                                                 inset: lineWidth + 3)
             var path = Path()
-            path.move(to: pts[0])
-            for p in pts.dropFirst() { path.addLine(to: p) }
+            for pts in runs where pts.count > 1 {
+                path.move(to: pts[0])
+                for p in pts.dropFirst() { path.addLine(to: p) }
+            }
             context.stroke(path, with: .color(lineColor),
                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
         }

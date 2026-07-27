@@ -8,7 +8,10 @@ import AuraCore
 @MainActor
 public final class RideRecorder {
     public private(set) var isRecording = false
-    public private(set) var track: [TrackPoint] = []
+    /// The ride so far, split at pauses. Pause does not exist yet, so this is always exactly
+    /// one open segment from `start(at:)` onward — the shape lands now so the live map, the
+    /// summary and the stats all read segments before anything can create a second one.
+    public private(set) var segments: [RideSegment] = []
     public private(set) var stats: RideStats = .zero
     public private(set) var startedAt: Date?
     /// Smoothed live speed for the HUD dial — current speed, not the ride average.
@@ -22,8 +25,12 @@ public final class RideRecorder {
 
     public init(kind: Ride.Kind = .freeRide) { self.kind = kind }
 
+    /// Every recorded point in order. **O(n) and allocating on every access** — bind to a
+    /// `let`, never read from a SwiftUI `body`.
+    public var flattenedPoints: [TrackPoint] { segments.flatMap(\.points) }
+
     public func start(at date: Date) {
-        track = []
+        segments = [RideSegment(points: [])]
         stats = .zero
         startedAt = date
         isRecording = true
@@ -33,9 +40,9 @@ public final class RideRecorder {
     }
 
     public func record(_ point: TrackPoint) {
-        guard isRecording else { return }
-        track.append(point)
-        stats = RideStatsCalculator.stats(from: track)
+        guard isRecording, !segments.isEmpty else { return }
+        segments[segments.count - 1].points.append(point)
+        stats = RideStatsCalculator.stats(segments: segments)
         // Doppler speed when present, else position-delta from the previous fix; fed to
         // the smoother at the GPS timestamp (NOT wall-clock) so sim/GPX replay is
         // deterministic.
@@ -47,8 +54,18 @@ public final class RideRecorder {
     @discardableResult
     public func end(at date: Date, destinationName: String? = nil) -> Ride {
         isRecording = false
+        // Drop trailing empty segments so "no points" has one encoding — zero segments —
+        // matching `Ride(track: [])` and the persisted round trip. INTERIOR empties are
+        // legal and must survive (spec D6); only the tail goes.
+        // Deliberately not written back to `self.segments`: the recorder is finished (the HUD
+        // that reads it is torn down at this point) and normalizing here would mutate live
+        // state as a side effect of producing a return value. This does mean
+        // `recorder.segments` and the returned `ride.segments` can disagree after a no-fix
+        // ride — harmless today since nothing reads the recorder post-`end`.
+        var closed = segments
+        while let last = closed.last, last.points.isEmpty { closed.removeLast() }
         return Ride(kind: kind, startedAt: startedAt ?? date, endedAt: date,
-                    track: track, stats: stats, destinationName: destinationName,
+                    segments: closed, stats: stats, destinationName: destinationName,
                     routeId: nil, destinationPlaceId: nil)
     }
 }

@@ -33,7 +33,7 @@ struct GoldenRidePlaybackTests {
         let ride = try #require(coordinator.finishedRide)
         #expect(coordinator.saveFailed == false)
         let stats = try #require(ride.stats)
-        #expect(ride.track.count == GoldenRideFixture.expectedPointCount)
+        #expect(ride.flattenedPoints.count == GoldenRideFixture.expectedPointCount)
         #expect(close(stats.distanceMeters, GoldenRideFixture.expectedDistanceMeters))
         #expect(close(stats.elevationGainMeters, GoldenRideFixture.expectedElevationGainMeters))
         #expect(stats.elevationGainMeters > 0)   // hard floor: silent-flat must fail

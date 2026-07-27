@@ -110,4 +110,47 @@ final class PlottingTests: XCTestCase {
         XCTAssertTrue(PolylineNormalizer.points([Coordinate(latitude: 1, longitude: 1)],
                                                 in: CGSize(width: 10, height: 10), inset: 0).isEmpty)
     }
+
+    // MARK: PolylineNormalizer — segmented, shared-scale overload
+
+    func test_segmentedPoints_singleSegment_matchesFlatFunctionExactly() {
+        let coords = [Coordinate(latitude: 40.0, longitude: -80.0),
+                      Coordinate(latitude: 40.01, longitude: -80.02),
+                      Coordinate(latitude: 40.02, longitude: -79.99)]
+        let size = CGSize(width: 120, height: 80)
+        let flat = PolylineNormalizer.points(coords, in: size, inset: 4)
+        let segmented = PolylineNormalizer.points(segments: [coords], in: size, inset: 4)
+        XCTAssertEqual(segmented.count, 1)
+        XCTAssertEqual(segmented[0], flat)   // byte-identical: no rendering change for unpaused rides
+    }
+
+    func test_segmentedPoints_shareOneScale() {
+        // Two runs far apart: normalized independently they would each fill the box and
+        // land on top of each other. One shared scale keeps their real separation.
+        let near = [Coordinate(latitude: 40.000, longitude: -80.0),
+                    Coordinate(latitude: 40.001, longitude: -80.0)]
+        let far = [Coordinate(latitude: 40.100, longitude: -80.0),
+                   Coordinate(latitude: 40.101, longitude: -80.0)]
+        let size = CGSize(width: 100, height: 100)
+        let segmented = PolylineNormalizer.points(segments: [near, far], in: size, inset: 0)
+        XCTAssertEqual(segmented.count, 2)
+        // North-up: the higher-latitude run must sit above the other.
+        XCTAssertLessThan(segmented[1][0].y, segmented[0][0].y)
+        // And neither run spans the full height on its own.
+        XCTAssertLessThan(abs(segmented[0][0].y - segmented[0][1].y), 50)
+    }
+
+    func test_segmentedPoints_dropsRunsShorterThanTwo() {
+        let coords = [Coordinate(latitude: 40.0, longitude: -80.0),
+                      Coordinate(latitude: 40.01, longitude: -80.0)]
+        let segmented = PolylineNormalizer.points(segments: [[], [coords[0]], coords],
+                                                  in: CGSize(width: 50, height: 50), inset: 0)
+        XCTAssertEqual(segmented.count, 1)
+        XCTAssertEqual(segmented[0].count, 2)
+    }
+
+    func test_segmentedPoints_emptyInput_isEmpty() {
+        XCTAssertTrue(PolylineNormalizer.points(segments: [], in: CGSize(width: 10, height: 10),
+                                                inset: 0).isEmpty)
+    }
 }
