@@ -103,7 +103,7 @@ public actor RideSegmentBackfiller {
         guard !pending.isEmpty else { return result }
 
         var consecutiveWriteFailures = 0
-        sweep: for (index, id) in pending.enumerated() {
+        sweep: for id in pending {
             guard result.backfilled < maxRows, !Task.isCancelled else { break }
             switch fill(id: id, settledBefore: settledBefore) {
             case .filled:
@@ -121,7 +121,6 @@ public actor RideSegmentBackfiller {
             case .notSettledYet, .alreadyFilled:
                 break
             }
-            if index.isMultiple(of: 16) { await Task.yield() }
         }
 
         result.remaining = (try? pendingCount()) ?? 0
