@@ -133,7 +133,7 @@ struct SchemaV6MigrationTests {
         let track = [point(40.0, 0), point(40.1, 10)]
         try writeV5Store(at: url, rows: [
             (emptyId, Data()),
-            (goodId, try JSONEncoder().encode(track)),
+            (goodId, try JSONEncoder().encode(track))
         ])
 
         let store = RideStore(container: try openV6(at: url))

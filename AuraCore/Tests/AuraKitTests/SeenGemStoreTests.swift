@@ -3,8 +3,10 @@ import Foundation
 import SwiftData
 @testable import AuraKit
 
+// `.swiftDataSerialized`: builds containers that register entity descriptions shared with the
+// versioned-schema suites (ROH-65, and RideRecord's two classes from V6 on).
 @MainActor
-@Suite struct SeenGemStoreTests {
+@Suite(.swiftDataSerialized) struct SeenGemStoreTests {
     private func inMemoryContainer() throws -> ModelContainer {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         return try ModelContainer(for: SeenGemRecord.self, configurations: config)
