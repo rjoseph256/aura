@@ -183,7 +183,7 @@ struct RideSegmentBackfillTests {
     @Test func aSecondRunFindsNothingToDo() async throws {
         let store = try RideStore.inMemory()
         try insertUnbackfilled(store, trackData: try JSONEncoder().encode([pt(40.0, 0)]))
-        
+
         #expect(RideSegmentBackfill.run(container: store.container, settledBefore: settledBefore).backfilled == 1)
         #expect(RideSegmentBackfill.run(container: store.container, settledBefore: settledBefore) == .init())
     }
@@ -195,7 +195,7 @@ struct RideSegmentBackfillTests {
         let store = try RideStore.inMemory()
         let track = try JSONEncoder().encode([pt(40.0, 0), pt(40.1, 10)])
         for _ in 0..<10 { try insertUnbackfilled(store, trackData: track) }
-        
+
         let first = RideSegmentBackfill.run(container: store.container, maxRows: 4, settledBefore: settledBefore)
         #expect(first == .init(backfilled: 4, unreadable: 0, failedWrites: 0, remaining: 6))
 
