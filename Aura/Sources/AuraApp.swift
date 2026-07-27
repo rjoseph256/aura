@@ -91,7 +91,7 @@ private struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// The V6 segment backfill sweep (ROH-100). Held so a starting ride can cancel it, and so
     /// a second `.task` invocation (a scene reconnect) does not start a second sweep.
-    @State private var backfill: Task<RideSegmentBackfiller.Result, Never>?
+    @State private var backfill: Task<RideSegmentBackfill.Result, Never>?
 
     var body: some View {
         @Bindable var router = router
@@ -138,10 +138,10 @@ private struct RootView: View {
         // the first frame, so re-encoding a long ride history there is a watchdog kill that
         // repeats on every launch.
         //
-        // **`Task.detached` is load-bearing.** `RideSegmentBackfiller` is a `@ModelActor`, and
-        // that executor runs its work on whatever thread enqueues it — a plain `Task { }` here
-        // inherits this view's MainActor isolation and would run the whole sweep on the main
-        // thread, one frame later than the migration stage it was moved out of. Detached also
+        // **`Task.detached` is load-bearing.** `RideSegmentBackfill.run` is synchronous and does
+        // its work on the calling thread with a `ModelContext` it owns, so a plain `Task { }`
+        // here would inherit this view's MainActor isolation and run the whole sweep on the main
+        // thread — one frame later than the migration stage it was moved out of. Detached also
         // keeps `.utility` from being escalated by an awaiting caller.
         //
         // Budgeted at 50 rows per launch because every filled row is a CloudKit export: a long
@@ -153,8 +153,10 @@ private struct RootView: View {
         // ride owns the device from that moment.
         .task {
             guard !rideStore.isEphemeral, backfill == nil else { return }
-            let backfiller = RideSegmentBackfiller(modelContainer: rideStore.container)
-            backfill = Task.detached(priority: .utility) { await backfiller.backfill(maxRows: 50) }
+            let container = rideStore.container
+            backfill = Task.detached(priority: .utility) {
+                RideSegmentBackfill.run(container: container, maxRows: 50)
+            }
         }
         .onChange(of: router.isRideActive) { _, active in
             if active { backfill?.cancel() }

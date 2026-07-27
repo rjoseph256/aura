@@ -4,15 +4,17 @@ import SwiftData
 import AuraCore
 @testable import AuraKit
 
-/// The off-launch half of spec D2's backfill. `RideSegmentBackfiller` fills `segmentsData` on
+/// The off-launch half of spec D2's backfill. `RideSegmentBackfill` fills `segmentsData` on
 /// rows that do not have it — rides recorded before V6, and rides that keep arriving from a V5
 /// device long after the migration ran, which is why it has to be re-runnable rather than a
 /// one-shot migration stage.
 ///
 /// The properties under test are the ones that let it run unattended on a rider's phone: it
-/// never rewrites a row that already has segments, it survives rows it cannot read, it is
-/// resumable and cancellable, unreadable rows cannot starve the budget, and it cannot throw
-/// into its caller.
+/// never rewrites a row that already has segments — including one filled underneath it by
+/// another writer — it survives rows it cannot read, it is resumable and cancellable, unreadable
+/// rows cannot starve the budget, and it cannot throw into its caller.
+///
+/// Every case here calls `run` synchronously. That is deliberate: see the note on the type.
 @MainActor
 @Suite("Ride segment backfill", .swiftDataSerialized)
 struct RideSegmentBackfillTests {
@@ -55,8 +57,7 @@ struct RideSegmentBackfillTests {
         let track = [pt(40.0, 0), pt(40.1, 10), pt(40.2, 20)]
         let id = try insertUnbackfilled(store, trackData: try JSONEncoder().encode(track))
 
-        let result = await RideSegmentBackfiller(modelContainer: store.container)
-            .backfill(settledBefore: settledBefore)
+        let result = RideSegmentBackfill.run(container: store.container, settledBefore: settledBefore)
 
         #expect(result == .init(backfilled: 1, unreadable: 0, failedWrites: 0, remaining: 0))
         #expect(try segments(in: store, id: id) == [RideSegment(points: track)])
@@ -70,8 +71,7 @@ struct RideSegmentBackfillTests {
         let store = try RideStore.inMemory()
         let id = try insertUnbackfilled(store, trackData: Data())
 
-        let result = await RideSegmentBackfiller(modelContainer: store.container)
-            .backfill(settledBefore: settledBefore)
+        let result = RideSegmentBackfill.run(container: store.container, settledBefore: settledBefore)
 
         #expect(result.backfilled == 0)
         #expect(result.remaining == 1)
@@ -86,8 +86,7 @@ struct RideSegmentBackfillTests {
         let store = try RideStore.inMemory()
         let id = try insertUnbackfilled(store, trackData: try JSONEncoder().encode([TrackPoint]()))
 
-        let result = await RideSegmentBackfiller(modelContainer: store.container)
-            .backfill(settledBefore: settledBefore)
+        let result = RideSegmentBackfill.run(container: store.container, settledBefore: settledBefore)
 
         #expect(result.backfilled == 1)
         #expect(try segments(in: store, id: id) == [])
@@ -103,8 +102,7 @@ struct RideSegmentBackfillTests {
         let fresh = try insertUnbackfilled(store, startedAt: settledBefore.addingTimeInterval(60),
                                            trackData: track)
 
-        let result = await RideSegmentBackfiller(modelContainer: store.container)
-            .backfill(settledBefore: settledBefore)
+        let result = RideSegmentBackfill.run(container: store.container, settledBefore: settledBefore)
 
         #expect(result == .init(backfilled: 1, unreadable: 0, failedWrites: 0, remaining: 1))
         #expect(try rawSegments(in: store, id: settled) != nil)
@@ -131,8 +129,7 @@ struct RideSegmentBackfillTests {
             }
         }
 
-        let result = await RideSegmentBackfiller(modelContainer: store.container)
-            .backfill(settledBefore: settledBefore)
+        let result = RideSegmentBackfill.run(container: store.container, settledBefore: settledBefore)
 
         #expect(result == .init(backfilled: 16, unreadable: 8, failedWrites: 0, remaining: 8))
         for id in goodIds {
@@ -152,8 +149,7 @@ struct RideSegmentBackfillTests {
         var goodIds: [UUID] = []
         for _ in 0..<3 { goodIds.append(try insertUnbackfilled(store, trackData: track)) }
 
-        let result = await RideSegmentBackfiller(modelContainer: store.container)
-            .backfill(maxRows: 3, settledBefore: settledBefore)
+        let result = RideSegmentBackfill.run(container: store.container, maxRows: 3, settledBefore: settledBefore)
 
         #expect(result.backfilled == 3, "the budget buys three FILLED rows, not three examined")
         for id in goodIds {
@@ -176,8 +172,7 @@ struct RideSegmentBackfillTests {
         let pending = try insertUnbackfilled(store,
                                              trackData: try JSONEncoder().encode([pt(42.0, 0)]))
 
-        let result = await RideSegmentBackfiller(modelContainer: store.container)
-            .backfill(settledBefore: settledBefore)
+        let result = RideSegmentBackfill.run(container: store.container, settledBefore: settledBefore)
 
         #expect(result.backfilled == 1, "only the pending row")
         #expect(try rawSegments(in: store, id: ride.id) == before, "existing blob untouched")
@@ -188,10 +183,9 @@ struct RideSegmentBackfillTests {
     @Test func aSecondRunFindsNothingToDo() async throws {
         let store = try RideStore.inMemory()
         try insertUnbackfilled(store, trackData: try JSONEncoder().encode([pt(40.0, 0)]))
-        let backfiller = RideSegmentBackfiller(modelContainer: store.container)
 
-        #expect(await backfiller.backfill(settledBefore: settledBefore).backfilled == 1)
-        #expect(await backfiller.backfill(settledBefore: settledBefore) == .init())
+        #expect(RideSegmentBackfill.run(container: store.container, settledBefore: settledBefore).backfilled == 1)
+        #expect(RideSegmentBackfill.run(container: store.container, settledBefore: settledBefore) == .init())
     }
 
     /// A budgeted run leaves the rest pending and the next run finishes the job. This is what
@@ -201,12 +195,11 @@ struct RideSegmentBackfillTests {
         let store = try RideStore.inMemory()
         let track = try JSONEncoder().encode([pt(40.0, 0), pt(40.1, 10)])
         for _ in 0..<10 { try insertUnbackfilled(store, trackData: track) }
-        let backfiller = RideSegmentBackfiller(modelContainer: store.container)
 
-        let first = await backfiller.backfill(maxRows: 4, settledBefore: settledBefore)
+        let first = RideSegmentBackfill.run(container: store.container, maxRows: 4, settledBefore: settledBefore)
         #expect(first == .init(backfilled: 4, unreadable: 0, failedWrites: 0, remaining: 6))
 
-        let second = await backfiller.backfill(settledBefore: settledBefore)
+        let second = RideSegmentBackfill.run(container: store.container, settledBefore: settledBefore)
         #expect(second == .init(backfilled: 6, unreadable: 0, failedWrites: 0, remaining: 0))
     }
 
@@ -215,21 +208,23 @@ struct RideSegmentBackfillTests {
     /// the rider's ride, and whatever it already wrote stays written — it saves per row, so a
     /// cancelled run is a shorter run, not a lost one.
     ///
-    /// The spin makes this deterministic: without it, `cancel()` races the first rows and the
-    /// test would pass against a sweep that ignores cancellation entirely.
-    @Test func cancellationStopsTheSweep() async throws {
+    /// `isCancelled` is injected rather than read from an ambient `Task`, so this is exact: no
+    /// racing a `cancel()` against the first rows, and no task machinery in the test at all.
+    ///
+    /// **Deliberately no `Task` here.** This test used to spawn a detached task and cancel it.
+    /// That shape — a detached task calling into what was then a `@ModelActor` — aborts inside
+    /// libswift_Concurrency's task allocator on the macOS 15 CI runner and kills the whole test
+    /// process, so the failure surfaced in whatever unrelated suite happened to be printing. It
+    /// never reproduced locally on macOS 26. See the note on `RideSegmentBackfill` for how it was
+    /// isolated and why the type is no longer an actor.
+    @Test func cancellationStopsTheSweep() throws {
         let store = try RideStore.inMemory()
         let track = try JSONEncoder().encode([pt(40.0, 0), pt(40.1, 10)])
         for _ in 0..<40 { try insertUnbackfilled(store, trackData: track) }
-        let backfiller = RideSegmentBackfiller(modelContainer: store.container)
-        let settled = settledBefore
 
-        let task = Task.detached {
-            while !Task.isCancelled { await Task.yield() }   // cancellation is observable before we start
-            return await backfiller.backfill(settledBefore: settled)
-        }
-        task.cancel()
-        let result = await task.value
+        let result = RideSegmentBackfill.run(container: store.container,
+                                             settledBefore: settledBefore,
+                                             isCancelled: { true })
 
         #expect(result.backfilled == 0, "a cancelled sweep does no work")
         #expect(result.remaining == 40)
@@ -238,24 +233,45 @@ struct RideSegmentBackfillTests {
         #expect(stillPending == result.remaining, "the reported remainder matches the store")
     }
 
-    /// Two sweeps racing on the same store — a scene reconnect, or a launch-time sweep still
-    /// running when another starts. The nil re-check immediately before the write is what keeps
-    /// this from double-filling and double-exporting; without it the two runs report more
-    /// backfills than there are rows.
-    @Test func concurrentSweepsFillEachRowExactlyOnce() async throws {
+    /// A second writer fills one of the pending rows while the sweep is mid-run — another sweep
+    /// on a scene reconnect, or a CloudKit import landing. The nil re-check immediately before
+    /// the write is what stops the sweep rewriting (and re-exporting) that row.
+    ///
+    /// The `isCancelled` hook is the injection point: it is called before every row, so the first
+    /// call is a deterministic "meanwhile, elsewhere…" without spawning anything. Two real
+    /// concurrent sweeps would test the same property, but only by reintroducing the task shape
+    /// that aborts CI — and non-deterministically at that.
+    @Test func aRowFilledMidSweepByAnotherWriterIsNotRewritten() throws {
         let store = try RideStore.inMemory()
         let track = try JSONEncoder().encode([pt(40.0, 0), pt(40.1, 10)])
-        for _ in 0..<30 { try insertUnbackfilled(store, trackData: track) }
-        let backfiller = RideSegmentBackfiller(modelContainer: store.container)
-        let settled = settledBefore
+        var ids: [UUID] = []
+        for _ in 0..<4 { ids.append(try insertUnbackfilled(store, trackData: track)) }
 
-        async let first = backfiller.backfill(settledBefore: settled)
-        async let second = backfiller.backfill(settledBefore: settled)
-        let results = await [first, second]
+        // Whatever the sweep's own encoding would be, this is deliberately different, so a
+        // rewrite is visible rather than idempotent.
+        let foreignBlob = try JSONEncoder().encode([RideSegment(points: [pt(99.0, 0)])])
+        let interloper = ModelContext(store.container)
+        var fired = false
+        let fillOneRowElsewhere: () -> Bool = {
+            guard !fired else { return false }
+            fired = true
+            let target = ids[2]
+            let descriptor = FetchDescriptor<RideRecord>(predicate: #Predicate { $0.id == target })
+            if let record = try? interloper.fetch(descriptor).first {
+                record.segmentsData = foreignBlob
+                try? interloper.save()
+            }
+            return false
+        }
 
-        #expect(results.reduce(0) { $0 + $1.backfilled } == 30,
-                "each row is filled once across both runs, never twice")
-        #expect(results.allSatisfy { $0.remaining == 0 })
+        let result = RideSegmentBackfill.run(container: store.container,
+                                             settledBefore: settledBefore,
+                                             isCancelled: fillOneRowElsewhere)
+
+        #expect(result.backfilled == 3, "the row the other writer filled is not counted or rewritten")
+        #expect(try rawSegments(in: store, id: ids[2]) == foreignBlob,
+                "the other writer's blob survives byte-for-byte")
+        #expect(result.remaining == 0)
     }
 
     /// End to end on a REAL on-disk store with an externalized track — the shape the sweep only
@@ -277,8 +293,7 @@ struct RideSegmentBackfillTests {
         let track = (0..<3000).map { pt(40.0 + Double($0) * 0.00001, TimeInterval($0)) }
         let id = try insertUnbackfilled(store, trackData: try JSONEncoder().encode(track))
 
-        let result = await RideSegmentBackfiller(modelContainer: container)
-            .backfill(settledBefore: settledBefore)
+        let result = RideSegmentBackfill.run(container: container, settledBefore: settledBefore)
 
         #expect(result.backfilled == 1)
         #expect(try rawSegments(in: store, id: id) != nil, "the blob was really written")
