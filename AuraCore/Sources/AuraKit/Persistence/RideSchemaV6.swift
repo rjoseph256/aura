@@ -24,7 +24,7 @@ import AuraCore
 /// stores, and it may need no column at all: `RideSummary.endedAt` is already `Date?` and
 /// spec D5 already describes a statless treatment for a nil `endedAt`. What blocks that today
 /// is that Pass 2's checkpoint stamps `endedAt` *because* no surface reads it — an app-side
-/// problem, not a schema one. See spec D-g in the Pass 3 plan.
+/// problem, not a schema one. See decision D-g in the Pass 3 plan.
 public enum RideSchemaV6: VersionedSchema {
     public static let versionIdentifier = Schema.Version(6, 0, 0)
     public static var models: [any PersistentModel.Type] {

@@ -89,6 +89,9 @@ private struct RootView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(LocationService.self) private var location
     @Environment(\.scenePhase) private var scenePhase
+    /// The V6 segment backfill sweep (ROH-100). Held so a starting ride can cancel it, and so
+    /// a second `.task` invocation (a scene reconnect) does not start a second sweep.
+    @State private var backfill: Task<RideSegmentBackfiller.Result, Never>?
 
     var body: some View {
         @Bindable var router = router
@@ -130,16 +133,31 @@ private struct RootView: View {
         }
         .tint(AuraTheme.accent)
         .task { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
-        // Schema V6's segment backfill (ROH-100). Deliberately here and not in the V5→V6
-        // migration stage: stages run inside `ModelContainer.init`, which `AuraApp.init()`
-        // calls before the first frame, where re-encoding a long ride history is a watchdog
-        // kill that repeats on every launch. This runs once per launch, after the first frame,
-        // on the backfiller's own actor, and cannot throw or block anything here. Skipped for
-        // an ephemeral store, which has nothing to backfill and does not survive the launch.
+        // Schema V6's segment backfill (ROH-100). Deliberately not in the V5→V6 migration
+        // stage: stages run inside `ModelContainer.init`, which `AuraApp.init()` calls before
+        // the first frame, so re-encoding a long ride history there is a watchdog kill that
+        // repeats on every launch.
+        //
+        // **`Task.detached` is load-bearing.** `RideSegmentBackfiller` is a `@ModelActor`, and
+        // that executor runs its work on whatever thread enqueues it — a plain `Task { }` here
+        // inherits this view's MainActor isolation and would run the whole sweep on the main
+        // thread, one frame later than the migration stage it was moved out of. Detached also
+        // keeps `.utility` from being escalated by an awaiting caller.
+        //
+        // Budgeted at 50 rows per launch because every filled row is a CloudKit export: a long
+        // history spreads over several launches instead of one upload burst. Un-filled rows
+        // read correctly meanwhile — the mapper wraps their flat track.
+        //
+        // Skipped for an ephemeral store, which has nothing to backfill and does not survive
+        // the launch, and cancelled when a ride starts: the sweep is resumable, and the rider's
+        // ride owns the device from that moment.
         .task {
-            guard !rideStore.isEphemeral else { return }
+            guard !rideStore.isEphemeral, backfill == nil else { return }
             let backfiller = RideSegmentBackfiller(modelContainer: rideStore.container)
-            await Task(priority: .utility) { await backfiller.backfill() }.value
+            backfill = Task.detached(priority: .utility) { await backfiller.backfill(maxRows: 50) }
+        }
+        .onChange(of: router.isRideActive) { _, active in
+            if active { backfill?.cancel() }
         }
         // UI-test support: "-openURL <url>" routes through the normal deep-link path
         // on first appearance. Inert in production (no argument, no effect).

@@ -121,7 +121,7 @@ struct SchemaV6MigrationTests {
 
     /// `trackData`'s default is `Data()` — what CloudKit materializes for a record that never
     /// carried the key — and `JSONDecoder` throws on it. `allRides()` maps over every row, so
-    /// one such row must not be able to empty the rider's whole History.
+    /// one such row must not be able to fail the fetch for every other ride with it.
     @Test func aRowWithAnEmptyTrackBlobReadsAsAnEmptyRide() throws {
         let dir = tempStoreDirectory()
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

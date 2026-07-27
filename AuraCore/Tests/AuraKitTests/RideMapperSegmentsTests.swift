@@ -6,7 +6,7 @@ import AuraCore
 
 /// Spec D2's dual-write, from the mapper's side: V6 writes the segmented blob *and* the flat
 /// one, and the read prefers segments while never letting a bad blob take a ride — or the
-/// whole History fetch — down with it.
+/// whole `allRides()` fetch — down with it.
 @MainActor
 @Suite("RideMapper segments (V6)", .swiftDataSerialized)
 struct RideMapperSegmentsTests {
@@ -66,8 +66,10 @@ struct RideMapperSegmentsTests {
         #expect(back.flattenedPoints == ride.flattenedPoints)
     }
 
-    /// `RideMapper.ride` is called inside a `.map` in `RideStore.allRides()`, so a throw here
-    /// is not one bad ride — it is an empty History for every ride the rider has.
+    /// A corrupt blob degrades to the flat track instead of throwing. `RideStore.allRides()`
+    /// maps `ride(from:)` over every row, so a throw there costs every ride at once rather than
+    /// the one bad row — it has no production caller today, which is exactly why the guard
+    /// belongs in the mapper rather than in each caller.
     @Test func readFallsBackToTheFlatTrackWhenSegmentsDataIsCorrupt() throws {
         let ride = twoSegmentRide()
         let record = try RideMapper.record(from: ride)
@@ -78,7 +80,7 @@ struct RideMapperSegmentsTests {
         #expect(back.flattenedPoints == ride.flattenedPoints, "and no point is lost")
     }
 
-    @Test func oneCorruptSegmentsBlobDoesNotEmptyTheWholeHistoryFetch() throws {
+    @Test func oneCorruptSegmentsBlobDoesNotFailTheWholeRideFetch() throws {
         let store = try RideStore.inMemory()
         let healthy = twoSegmentRide()
         try store.save(healthy)
@@ -97,7 +99,7 @@ struct RideMapperSegmentsTests {
 
     /// The shape a CloudKit record materialized without either key carries: no segmented blob
     /// and an EMPTY flat blob, which `JSONDecoder` throws on. Read as an empty ride, because a
-    /// throw here empties History for every ride the rider owns, not just this one.
+    /// throw here fails `allRides()` for every ride at once, not just this one.
     @Test func aRecordWithNoBlobsAtAllReadsAsAnEmptyRideRatherThanThrowing() throws {
         let record = try RideMapper.record(from: twoSegmentRide())
         record.segmentsData = nil

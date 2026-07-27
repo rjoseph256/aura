@@ -8,10 +8,11 @@ public enum RideMapper {
     public static func record(from ride: Ride) throws -> RideRecord {
         let encoder = JSONEncoder()
         // Dual-write (spec D2). `segmentsData` carries the segmented truth; `trackData` and
-        // `thumbnailData` stay FLAT and complete, because a V5 build syncing the same CloudKit
-        // record reads those two and nothing else — and `thumbnailData` is decoded there with
-        // a bare `try?` that falls back to blank (D3), so a shape change would silently blank
-        // History on a mixed-version fleet rather than failing loudly.
+        // `thumbnailData` keep their FLAT shape and stay complete, because those are the track
+        // blobs a V5 build reads from the same CloudKit record — it cannot see `segmentsData`
+        // at all. `thumbnailData` in particular is decoded there with a bare `try?` that falls
+        // back to blank (D3), so a shape change would silently blank History on a
+        // mixed-version fleet rather than failing loudly.
         let points = ride.flattenedPoints
         let thumb = TrackSimplifier.thumbnail(from: points.map(\.coordinate))
         return RideRecord(
@@ -51,11 +52,15 @@ public enum RideMapper {
     /// — a row written before V6, or synced from a V5 device — **and** when it is present but
     /// unreadable.
     ///
-    /// Degrading rather than throwing is the point: `RideStore.allRides()` calls
-    /// `ride(from:)` inside a `.map`, so one throw is not one bad ride, it is an empty History
-    /// for every ride the rider owns. The one throw left is a `trackData` blob that is
-    /// non-empty and undecodable, which is pre-existing behavior for a corrupt track and is
-    /// deliberately not widened here into a silent blank ride.
+    /// Degrading rather than throwing is the point. Today a throw costs one ride: History
+    /// renders from `summaries()`, which cannot throw, and the detail sheet reads
+    /// `try? store.ride(id:)`, so tapping the row would just do nothing. But `allRides()` maps
+    /// `ride(from:)` over every row (`RideStore.swift:104`) — it has no production caller yet,
+    /// and the day it gets one, one bad blob would empty the rider's whole history at once.
+    ///
+    /// Two throws remain, both pre-existing and deliberately not widened here into silent
+    /// blank rides: a `trackData` blob that is non-empty and undecodable, and an undecodable
+    /// `statsData`.
     private static func segments(from record: RideRecord, decoder: JSONDecoder) throws -> [RideSegment] {
         if let data = record.segmentsData {
             if let decoded = try? decoder.decode([RideSegment].self, from: data) { return decoded }

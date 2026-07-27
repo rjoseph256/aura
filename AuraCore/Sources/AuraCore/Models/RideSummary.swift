@@ -12,9 +12,13 @@ public struct RideSummary: Identifiable, Equatable, Sendable {
     public let hasStats: Bool
     public let distanceMeters: Double
     public let movingTimeSeconds: Double
-    /// Time the rider spent paused. Active time — the number the summary leads with — is
-    /// `endedAt - startedAt - pausedSeconds` (spec D5). Denormalized beside
-    /// `movingTimeSeconds` so History and the weekly widget read it without faulting a blob.
+    /// Time the rider spent paused. Active time — the number the summary will lead with — is
+    /// `endedAt - startedAt - pausedSeconds` (spec D5). Denormalized beside `movingTimeSeconds`
+    /// so the surfaces that come to read it never fault a blob for it.
+    ///
+    /// **No consumer yet.** Pass 3 persists it; Pass 4/5 render it. `WidgetSnapshot` does not
+    /// carry it (or `endedAt`), so the widget will need its own shape change to show active
+    /// time.
     ///
     /// `0` for every ride recorded before pause existed, and for every unpaused ride: the two
     /// are not distinguishable, which is accepted because "no pauses were recorded" is a true
