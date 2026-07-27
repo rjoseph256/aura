@@ -58,14 +58,24 @@ final class RideSegmentTests: XCTestCase {
         XCTAssertEqual(back.segments.count, 2)
     }
 
-    /// Pins the ON-DISK SHAPE, not just round-trip consistency. Schema V6 (Pass 3) persists
+    /// Pins the ON-DISK SHAPE, not just round-trip consistency, for BOTH `RideSegment`'s
+    /// `points` wrapper AND `TrackPoint`'s own encoded fields. Schema V6 (Pass 3) persists
     /// `[RideSegment]` as the `segmentsData` blob and its V5→V6 backfill must emit bytes an
     /// already-shipped V6 build can decode; a round-trip test is invariant under any
-    /// consistent shape change and would not catch a rename.
+    /// consistent shape change (e.g. a `TrackPoint` coding-key rename) and would not catch it.
+    /// One segment is populated (with elevation and speed set, not nil) so every `TrackPoint`
+    /// field appears in the literal; the other stays empty so that shape stays pinned too.
     func test_rideSegment_encodesAsPointsWrapper() throws {
+        let point = TrackPoint(coordinate: Coordinate(latitude: 40.441, longitude: -80.012),
+                                elevation: 312.5,
+                                timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+                                speedMetersPerSecond: 4.2)
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
-        let data = try encoder.encode([RideSegment(points: []), RideSegment(points: [])])
-        XCTAssertEqual(String(data: data, encoding: .utf8), #"[{"points":[]},{"points":[]}]"#)
+        let data = try encoder.encode([RideSegment(points: [point]), RideSegment(points: [])])
+        let expectedPoint = #"{"coordinate":{"latitude":40.441,"longitude":-80.012},"#
+            + #""elevation":312.5,"speedMetersPerSecond":4.2,"timestamp":721692800}"#
+        let expected = #"[{"points":["# + expectedPoint + #"]},{"points":[]}]"#
+        XCTAssertEqual(String(data: data, encoding: .utf8), expected)
     }
 }

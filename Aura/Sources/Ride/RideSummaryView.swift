@@ -33,13 +33,16 @@ struct RideSummaryView: View {
     private var routeSegments: [[Coordinate]] {
         ride.segments.map { $0.points.map(\.coordinate) }.filter { $0.count > 1 }
     }
-    private var hasRoute: Bool { !routeSegments.isEmpty }
 
     var body: some View {
+        // Bound once: `routeSegments` maps every point of every segment, and this project's
+        // rule (see Ride.swift, RideRecorder.swift, GPXTrack.swift) is to never read that kind
+        // of property twice inside a SwiftUI `body`.
+        let segs = routeSegments
         ScrollView {
             VStack(alignment: .leading, spacing: AuraTheme.Spacing.xl) {
-                if hasRoute {
-                    StaticRouteMap(segments: routeSegments)
+                if !segs.isEmpty {
+                    StaticRouteMap(segments: segs)
                         .frame(height: 240)
                         .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous))
                         .overlay(
