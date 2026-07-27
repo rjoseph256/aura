@@ -2,9 +2,12 @@
 
 Date: 2026-07-26
 Issue: [ROH-74 — Pause a ride](https://linear.app/rohun/issue/ROH-74/pause-a-ride)
-Status: revision 3 — revision 2 after a three-reviewer adversarial gate, then D6's clock rule
-and D7's location and group clauses corrected during Pass 2 after a second three-reviewer gate
-reproduced their failures. Each correction is marked inline as a revision note.
+Status: revision 4 — revision 2 after a three-reviewer adversarial gate; D6's clock rule and
+D7's location and group clauses corrected during Pass 2; **D2's migration mechanism and D5's
+headline corrected during Pass 3** (2026-07-27). Each correction is marked inline as a revision
+note. Passes 1-3 are shipped; the Pass 3 plan
+(`docs/superpowers/plans/2026-07-27-schema-v6-segments-backfill.md`) carries the reasoning and
+both of its review gates.
 
 Revision 2 reworks D5, D6, D7 and D9 and rebuilds the pass decomposition. Revision 1's
 versions of those decisions contained a fabricated failure mode, two claims contradicted
@@ -113,12 +116,31 @@ every already-synced ride becomes invisible.
 `RideStore.summaries()` fetches every row — reintroducing the ROH-64 fault that the
 external-storage attribute exists to prevent.
 
-**V5→V6 is a `.custom` stage that backfills `segmentsData`** from each row's existing
-`trackData`. It cannot be lightweight: `RideMigrationPlan.swift:5-7` already documents the
-rule — a lightweight stage cannot compute a new column from existing rows. Backfill is not
-optional, because `RideStore.save` only ever `insert`s (`RideStore.swift:59-63`); there is
-no update path, so an un-backfilled row would keep `segmentsData` nil forever and
-`trackData` could never be retired.
+**V5→V6 is a lightweight stage, and the backfill runs off the launch path.** *(Revised
+during Pass 3 — this decision was wrong as written. It originally mandated a `.custom`
+`didMigrate` stage; a three-reviewer gate refuted that before any of it was built, and the PO
+approved the change.)* Both added attributes are optional or defaulted, which is exactly what a
+lightweight stage handles. The backfill moved to `RideSegmentBackfiller`, a `@ModelActor` sweep
+the app starts from a detached task after the first frame. Three reasons, each fatal on its own:
+
+- **A stage is launch-blocking.** `didMigrate` runs inside `ModelContainer.init`, which
+  `AuraApp.init()` calls before the first frame. Measured at ~0.043 s per three-hour ride to
+  decode and re-encode, so ~16 s of CPU for a 365-ride history — a watchdog kill that repeats on
+  every launch.
+- **A stage cannot fail safely.** A throw there fails the container, and `AuraApp` catches that
+  by falling back to `RideStore.inMemory()`: the rider's History reads as empty and
+  `WidgetRefresh` then overwrites the App Group snapshot with the empty store.
+- **A stage runs once, and the population is not closed.** Rides recorded on a V5 device *after*
+  a V6 device migrates keep arriving by CloudKit import with `segmentsData` nil. Only a
+  re-runnable sweep can ever finish the job — which is the precondition for retiring `trackData`.
+
+The backfill is still mandatory for that last reason. Note the premise it was originally argued
+from is also stale: **`RideStore.save` is an upsert, not insert-only** (Pass 2 made it one for
+the pause checkpoint). It still only revisits rows *this build* wrote, so the conclusion stands.
+
+The sweep is resumable with no bookkeeping — a row is pending precisely while its `segmentsData`
+is nil — saves one row at a time, skips rides that started inside a 24 h settling window, and is
+cancelled when a ride starts.
 
 Read prefers `segmentsData`; when absent, wraps decoded `trackData` in one segment. When
 `segmentsData` is present but fails to decode, the read falls back to `trackData` rather
@@ -202,8 +224,20 @@ unknown shape.
 `movingTimeSeconds` keeps its current definition. Redefining it would make every saved ride
 incomparable in History and the weekly-goal widget.
 
-**The summary leads with active time**, with paused shown as the explanation for the gap to
-elapsed. Revision 1 showed moving and elapsed only, which meant the summary looked
+**The summary leads with active time, with elapsed as the secondary.** *(PO decision,
+2026-07-27, replacing "paused shown as the explanation for the gap to elapsed".)* Active is
+`elapsed - paused` — the number the rider was watching on the HUD when they pressed End. Moving
+time is deliberately NOT the headline: it appears on no live screen, so leading with it shows
+the rider a number they never saw.
+
+**The same pair is used everywhere a ride's duration is shown**, so one ride cannot report three
+different durations. Today the ride summary, the share card (`ShareCardContent.swift:27`), the
+widget's last-ride card and the History caption all show moving time; all four move to
+active-with-elapsed. The widget needs a `WidgetSnapshot` shape change to carry them, which lands
+with Pass 5.
+
+**On a pre-pause ride the two are equal**, because `pausedSeconds` is `0`. That is truthful — no
+pauses were recorded — and the layout stays fixed rather than conditional. Revision 1 showed moving and elapsed only, which meant the summary looked
 identical whether or not the rider had paused — moving time already excluded the café stop
 before pause existed, and elapsed is unchanged by pausing. It also meant the number the
 rider was watching when they pressed End appeared on no post-ride screen.
@@ -501,7 +535,7 @@ it produces.
 | -- | -- | -- | -- |
 | 1 | `RideSegment`, `Ride.segments`, segmented `RideRecorder.track`/`coordinator.track`, segment-aware `RideStatsCalculator`, `GPXParser` `trkseg`, paused fixture, **and every read surface forced by removing `Ride.track`** | No — CI | — |
 | 2 | Recorder state machine, `isRecording`/`isPaused` semantics and all five call sites, coordinator behaviors, speed decay, pause-boundary flush | No — CI | 1 |
-| 3 | Schema V6 (redeclared record, `.externalStorage`, custom backfill stage), `RideSummary.pausedSeconds`, `SchemaInvariantTests` repoint, CloudKit promotion gate | No — CI | 2 |
+| 3 | Schema V6 (redeclared record, `.externalStorage`, **lightweight** stage + off-launch backfill sweep), `RideSummary.pausedSeconds`, `SchemaInvariantTests` repoint, CloudKit promotion gate | No — CI | 2 |
 | 4 | Cockpit control, paused visual state, haptics, VoiceOver, nudge | **Yes** | 3 |
 | 5 | Live Activity shifted anchor, stale policy, `ContentState` migration | **Yes** | 4 |
 | 6 | E2E through the paused fixture | Sim | 4, 5 |
@@ -528,7 +562,7 @@ rather than Pass 1.
 | Pausing lets a deep link destroy the ride | D6/D7: `isRideActive` stays true; all five `isRecording` call sites audited in Pass 2 |
 | Mixed-version iCloud fleet loses ride tracks | D2 dual-write with redeclared V6 record; degraded, never empty. Manually verified on two devices |
 | CloudKit production schema not promoted before V6 ships | D2 names it a release gate |
-| `trackData` can never be retired | D2's custom backfill stage; `save` is insert-only so nothing else would ever revisit a row |
+| `trackData` can never be retired | D2's re-runnable backfill sweep. `save` is an upsert but only revisits rows this build wrote, so nothing else reaches a synced-down row. Retirement tracked as ROH-109 |
 | History regresses to a blob-faulting fetch | D2: `.externalStorage` on `segmentsData` |
 | Ride lost to jetsam during a long pause | D7 flushes closed segments at each pause boundary |
 | Speed hero pinned at pre-pause speed, and rider pinned `.moving` to the crew | D6 zeroes the smoothed speed on pause |
