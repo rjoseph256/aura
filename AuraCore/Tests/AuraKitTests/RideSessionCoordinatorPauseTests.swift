@@ -22,6 +22,20 @@ struct RideSessionCoordinatorPauseTests {
                                screen: screen, activity: activity)
     }
 
+    /// A ride with two fixes — comfortably past the discard floor, so the pause writes a real
+    /// checkpoint — left paused.
+    private func pausedRideWithACheckpoint(saving: any RideSaving) async throws
+        -> RideSessionCoordinator {
+        let location = ManualLocationProvider()
+        let c = makeCoordinator()
+        c.start(location: location, saving: saving, units: .metric, authorization: .authorized)
+        location.emit(point(40.40, 0))
+        location.emit(point(40.41, 10))
+        #expect(await waitUntil { c.stats.distanceMeters > 0 })
+        c.pause()
+        return c
+    }
+
     // MARK: isRecording call sites (spec D6)
 
     /// `RideSessionCoordinator.finish()` guards on `isRecording`. If a pause cleared it, End
@@ -122,17 +136,19 @@ struct RideSessionCoordinatorPauseTests {
         c.cancel()
     }
 
-    /// Holding the navigating tier through a forgotten two-hour pause burns the battery the
-    /// rider still needs to get home, to record points `record()` then discards.
-    @Test func pauseDropsTheLocationTierAndResumeRestoresIt() async throws {
-        let location = ManualLocationProvider()
+    /// Guidance has to learn about the pause in the same turn as the tap, not a SwiftUI
+    /// `.onChange` later: the turn in between is the one where an arrival event can still end
+    /// the ride under a rider who paused at their destination (spec D7).
+    @Test func pauseNotifiesTheObserverSynchronously() async throws {
+        let observer = SpyPauseObserver()
         let c = makeCoordinator()
-        c.start(location: location, saving: try RideStore.inMemory(),
+        c.pauseObserver = observer
+        c.start(location: ManualLocationProvider(), saving: try RideStore.inMemory(),
                 units: .metric, authorization: .authorized)
         c.pause()
-        #expect(location.ridePausedCalls == [true])
+        #expect(observer.calls == [true])
         c.resume()
-        #expect(location.ridePausedCalls == [true, false])
+        #expect(observer.calls == [true, false])
         c.cancel()
     }
 
@@ -166,10 +182,12 @@ struct RideSessionCoordinatorPauseTests {
         c.cancel()
     }
 
-    /// A live coordinate published beside a frozen `progressMeters` makes the crew's display
-    /// contradict itself: the roster reports the rider ever further behind while their dot
-    /// sits at the front. The coordinate keeps flowing; the progress number stops (spec D7).
-    @Test func theGroupSinkStopsPublishingProgressWhilePaused() async throws {
+    /// The coordinate keeps flowing while paused — a silent rider ages into `.dropped` after
+    /// 40 s, which is the opposite of what a deliberate stop should look like — while the
+    /// progress number, which is no longer being computed, is not republished. Asserted at the
+    /// sink boundary; what the crew actually renders is unchanged until Slice C (see
+    /// `GroupLocationSink`).
+    @Test func theCoordinatorPublishesNoProgressWhilePaused() async throws {
         let location = ManualLocationProvider()
         let sink = SpyGroupSink()
         let c = makeCoordinator()
@@ -186,109 +204,6 @@ struct RideSessionCoordinatorPauseTests {
         c.cancel()
     }
 
-    // MARK: The pause-boundary flush (spec D7)
-
-    /// Nothing persists mid-ride today, and a pause deliberately creates the conditions for a
-    /// jetsam kill: backgrounded, no interaction, screen wake released, for tens of minutes.
-    @Test func pauseFlushesTheClosedSegmentsToTheStore() async throws {
-        let store = try RideStore.inMemory()
-        let location = ManualLocationProvider()
-        let c = makeCoordinator()
-        c.start(location: location, saving: store, units: .metric, authorization: .authorized)
-        location.emit(point(40.40, 0))
-        location.emit(point(40.41, 10))
-        #expect(await waitUntil { c.stats.distanceMeters > 0 })
-        c.pause()
-        let flushed = try store.allRides()
-        #expect(flushed.count == 1)
-        #expect(flushed.first?.endedAt == nil)
-        #expect(flushed.first?.flattenedPoints.count == 2)
-        c.cancel()
-    }
-
-    @Test func finishingAfterAPauseUpdatesTheCheckpointInsteadOfDuplicatingIt() async throws {
-        let store = try RideStore.inMemory()
-        let location = ManualLocationProvider()
-        let c = makeCoordinator()
-        c.start(location: location, saving: store, units: .metric, authorization: .authorized)
-        location.emit(point(40.40, 0))
-        location.emit(point(40.41, 10))
-        #expect(await waitUntil { c.stats.distanceMeters > 0 })
-        c.pause()
-        c.resume()
-        location.emit(point(40.42, 20))
-        #expect(await waitUntil { c.segments.flatMap(\.points).count == 3 })
-        c.finish()
-        let rides = try store.allRides()
-        #expect(rides.count == 1)
-        #expect(rides.first?.endedAt != nil)
-        #expect(rides.first?.flattenedPoints.count == 3)
-    }
-
-    /// Backing out of a ride discards it. A checkpoint written at a pause must go with it,
-    /// or an abandoned ride is left behind in History as a ghost.
-    @Test func abandoningAPausedRideDiscardsTheCheckpoint() async throws {
-        let store = try RideStore.inMemory()
-        let location = ManualLocationProvider()
-        let c = makeCoordinator()
-        c.start(location: location, saving: store, units: .metric, authorization: .authorized)
-        location.emit(point(40.40, 0))
-        location.emit(point(40.41, 10))
-        #expect(await waitUntil { c.stats.distanceMeters > 0 })
-        c.pause()
-        #expect(try store.allRides().count == 1)
-        c.cancel()
-        #expect(try store.allRides().isEmpty)
-    }
-
-    /// `onDisappear` calls `cancel()` after every finish, including the normal End. That must
-    /// not delete the ride that was just saved.
-    @Test func cancelAfterFinishKeepsTheSavedRide() async throws {
-        let store = try RideStore.inMemory()
-        let location = ManualLocationProvider()
-        let c = makeCoordinator()
-        c.start(location: location, saving: store, units: .metric, authorization: .authorized)
-        location.emit(point(40.40, 0))
-        location.emit(point(40.41, 10))
-        #expect(await waitUntil { c.stats.distanceMeters > 0 })
-        c.pause()
-        c.finish()
-        c.cancel()
-        #expect(try store.allRides().count == 1)
-    }
-
-    @Test func aFlushFailureDoesNotBreakTheRide() async throws {
-        let saving = ThrowingRideSaving()
-        let location = ManualLocationProvider()
-        let c = makeCoordinator()
-        c.start(location: location, saving: saving, units: .metric, authorization: .authorized)
-        location.emit(point(40.40, 0))
-        location.emit(point(40.41, 10))
-        #expect(await waitUntil { c.stats.distanceMeters > 0 })
-        c.pause()
-        #expect(saving.saveCount == 1, "the flush was attempted")
-        #expect(c.isRecording)
-        #expect(c.saveFailed == false, "a checkpoint is best-effort; only the real save reports")
-        c.cancel()
-        #expect(saving.discardCount == 0, "nothing was written, so there is nothing to discard")
-    }
-
-    /// A ride the app itself would discard silently is not worth a row in History. Flushing one
-    /// would leave a mis-tap behind if the app were killed during the pause — and a rider who
-    /// pauses before the first fix has literally nothing to recover.
-    @Test func pausingAMisTapRideWritesNoCheckpoint() async throws {
-        let store = try RideStore.inMemory()
-        let location = ManualLocationProvider()
-        let c = makeCoordinator()
-        c.start(location: location, saving: store, units: .metric, authorization: .authorized)
-        location.emit(point(40.40, 0))
-        #expect(await waitUntil { c.segments.first?.points.count == 1 })
-        #expect(RideBackOutGate.canDiscard(distanceMeters: c.stats.distanceMeters),
-                "premise: one fix is under the discard floor")
-        c.pause()
-        #expect(try store.allRides().isEmpty)
-        c.cancel()
-    }
 }
 
 // MARK: - Doubles
@@ -304,7 +219,6 @@ final class ManualLocationProvider: LocationStreaming {
     private let stream: AsyncStream<TrackPoint>
     private let continuation: AsyncStream<TrackPoint>.Continuation
     private(set) var stopped = false
-    private(set) var ridePausedCalls: [Bool] = []
 
     init() {
         (stream, continuation) = AsyncStream<TrackPoint>.makeStream()
@@ -318,8 +232,31 @@ final class ManualLocationProvider: LocationStreaming {
         stopped = true
         continuation.finish()
     }
+}
 
-    func setRidePaused(_ paused: Bool) { ridePausedCalls.append(paused) }
+/// Fails the nominated saves (1-indexed) and records everything, so a test can put the store
+/// into the states a real one reaches under disk pressure or a CloudKit hiccup.
+@MainActor
+final class FlakyRideSaving: RideSaving {
+    struct SaveError: Error {}
+    private let failingSaveNumbers: Set<Int>
+    private(set) var saveCount = 0
+    private(set) var discarded: [UUID] = []
+
+    init(failingSaveNumbers: Set<Int>) { self.failingSaveNumbers = failingSaveNumbers }
+
+    func save(_ ride: Ride) throws {
+        saveCount += 1
+        if failingSaveNumbers.contains(saveCount) { throw SaveError() }
+    }
+
+    func discard(id: UUID) throws { discarded.append(id) }
+}
+
+@MainActor
+final class SpyPauseObserver: RidePauseObserving {
+    private(set) var calls: [Bool] = []
+    func rideDidSetPaused(_ paused: Bool) { calls.append(paused) }
 }
 
 @MainActor

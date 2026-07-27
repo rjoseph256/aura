@@ -1,0 +1,161 @@
+import Testing
+import Foundation
+import AuraCore
+@testable import AuraKit
+
+/// The pause-boundary flush (spec D7) and the lifecycle of the row it writes. Nothing else in
+/// the app persists mid-ride, so these tests own the rules for when that row appears, when it
+/// is updated, and when it is removed.
+@MainActor
+@Suite(.swiftDataSerialized)
+struct RideSessionCheckpointFlushTests {
+    private func point(_ lat: Double, _ t: TimeInterval) -> TrackPoint {
+        TrackPoint(coordinate: Coordinate(latitude: lat, longitude: -80),
+                   elevation: 250, timestamp: Date(timeIntervalSince1970: t))
+    }
+
+    private func makeCoordinator() -> RideSessionCoordinator {
+        RideSessionCoordinator(kind: .freeRide, destinationName: nil,
+                               screen: SpyScreenWake(), activity: SpyRideActivity())
+    }
+
+    /// A ride with two fixes — comfortably past the discard floor, so the pause writes a real
+    /// checkpoint — left paused.
+    private func pausedRideWithACheckpoint(saving: any RideSaving) async throws
+        -> RideSessionCoordinator {
+        let location = ManualLocationProvider()
+        let c = makeCoordinator()
+        c.start(location: location, saving: saving, units: .metric, authorization: .authorized)
+        location.emit(point(40.40, 0))
+        location.emit(point(40.41, 10))
+        #expect(await waitUntil { c.stats.distanceMeters > 0 })
+        c.pause()
+        return c
+    }
+
+    /// Nothing persists mid-ride today, and a pause deliberately creates the conditions for a
+    /// jetsam kill: backgrounded, no interaction, screen wake released, for tens of minutes.
+    @Test func pauseFlushesTheClosedSegmentsToTheStore() async throws {
+        let store = try RideStore.inMemory()
+        let location = ManualLocationProvider()
+        let c = makeCoordinator()
+        c.start(location: location, saving: store, units: .metric, authorization: .authorized)
+        location.emit(point(40.40, 0))
+        location.emit(point(40.41, 10))
+        #expect(await waitUntil { c.stats.distanceMeters > 0 })
+        c.pause()
+        let flushed = try store.allRides()
+        #expect(flushed.count == 1)
+        #expect(flushed.first?.flattenedPoints.count == 2)
+        c.cancel()
+    }
+
+    @Test func finishingAfterAPauseUpdatesTheCheckpointInsteadOfDuplicatingIt() async throws {
+        let store = try RideStore.inMemory()
+        let location = ManualLocationProvider()
+        let c = makeCoordinator()
+        c.start(location: location, saving: store, units: .metric, authorization: .authorized)
+        location.emit(point(40.40, 0))
+        location.emit(point(40.41, 10))
+        #expect(await waitUntil { c.stats.distanceMeters > 0 })
+        c.pause()
+        c.resume()
+        location.emit(point(40.42, 20))
+        #expect(await waitUntil { c.segments.flatMap(\.points).count == 3 })
+        c.finish()
+        let rides = try store.allRides()
+        #expect(rides.count == 1)
+        #expect(rides.first?.endedAt != nil)
+        #expect(rides.first?.flattenedPoints.count == 3)
+    }
+
+    /// Throwing the ride away takes its checkpoint with it, or an abandoned ride is left
+    /// behind in History as a ghost.
+    @Test func discardingAPausedRideRemovesTheCheckpoint() async throws {
+        let store = try RideStore.inMemory()
+        let c = try await pausedRideWithACheckpoint(saving: store)
+        #expect(try store.allRides().count == 1)
+        c.discard()
+        #expect(try store.allRides().isEmpty)
+    }
+
+    /// `cancel()` runs from `onDisappear`, which this codebase documents as unreliable on the
+    /// retained nav root. A teardown the rider did not ask for must not destroy the one
+    /// persisted copy of their ride — that is the exact loss the checkpoint exists to prevent.
+    @Test func cancelKeepsTheCheckpointForRecovery() async throws {
+        let store = try RideStore.inMemory()
+        let c = try await pausedRideWithACheckpoint(saving: store)
+        c.cancel()
+        #expect(try store.allRides().count == 1)
+    }
+
+    /// `checkpointedRideID` tracks whether a row is out there, not whether the last write
+    /// succeeded. Forgetting the id after a failed second flush would leave the first row
+    /// undeletable, and a discarded ride would stay in History forever.
+    @Test func aFailedSecondFlushStillLeavesTheFirstCheckpointDeletable() async throws {
+        let saving = FlakyRideSaving(failingSaveNumbers: [2])
+        let location = ManualLocationProvider()
+        let c = makeCoordinator()
+        c.start(location: location, saving: saving, units: .metric, authorization: .authorized)
+        location.emit(point(40.40, 0))
+        location.emit(point(40.41, 10))
+        #expect(await waitUntil { c.stats.distanceMeters > 0 })
+        c.pause()
+        c.resume()
+        location.emit(point(40.42, 20))
+        #expect(await waitUntil { c.segments.flatMap(\.points).count == 3 })
+        c.pause()                       // this flush throws
+        #expect(saving.saveCount == 2)
+        c.discard()
+        #expect(saving.discarded.count == 1, "the surviving first checkpoint is still cleaned up")
+    }
+
+    /// `onDisappear` calls `cancel()` after every finish, including the normal End. That must
+    /// not delete the ride that was just saved.
+    @Test func cancelAfterFinishKeepsTheSavedRide() async throws {
+        let store = try RideStore.inMemory()
+        let location = ManualLocationProvider()
+        let c = makeCoordinator()
+        c.start(location: location, saving: store, units: .metric, authorization: .authorized)
+        location.emit(point(40.40, 0))
+        location.emit(point(40.41, 10))
+        #expect(await waitUntil { c.stats.distanceMeters > 0 })
+        c.pause()
+        c.finish()
+        c.cancel()
+        #expect(try store.allRides().count == 1)
+    }
+
+    @Test func aFlushFailureDoesNotBreakTheRide() async throws {
+        let saving = ThrowingRideSaving()
+        let location = ManualLocationProvider()
+        let c = makeCoordinator()
+        c.start(location: location, saving: saving, units: .metric, authorization: .authorized)
+        location.emit(point(40.40, 0))
+        location.emit(point(40.41, 10))
+        #expect(await waitUntil { c.stats.distanceMeters > 0 })
+        c.pause()
+        #expect(saving.saveCount == 1, "the flush was attempted")
+        #expect(c.isRecording)
+        #expect(c.saveFailed == false, "a checkpoint is best-effort; only the real save reports")
+        c.discard()
+        #expect(saving.discardCount == 0, "nothing was written, so there is nothing to discard")
+    }
+
+    /// A ride the app itself would discard silently is not worth a row in History. Flushing one
+    /// would leave a mis-tap behind if the app were killed during the pause — and a rider who
+    /// pauses before the first fix has literally nothing to recover.
+    @Test func pausingAMisTapRideWritesNoCheckpoint() async throws {
+        let store = try RideStore.inMemory()
+        let location = ManualLocationProvider()
+        let c = makeCoordinator()
+        c.start(location: location, saving: store, units: .metric, authorization: .authorized)
+        location.emit(point(40.40, 0))
+        #expect(await waitUntil { c.segments.first?.points.count == 1 })
+        #expect(RideBackOutGate.canDiscard(distanceMeters: c.stats.distanceMeters),
+                "premise: one fix is under the discard floor")
+        c.pause()
+        #expect(try store.allRides().isEmpty)
+        c.cancel()
+    }
+}

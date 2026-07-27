@@ -275,8 +275,6 @@ final class ScriptedLocationProvider: LocationStreaming {
         }
     }
     func stop() { stopped = true }
-    /// Nothing to power down; the script is already buffered.
-    func setRidePaused(_ paused: Bool) { }
 }
 
 @MainActor

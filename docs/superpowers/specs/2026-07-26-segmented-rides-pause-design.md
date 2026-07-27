@@ -2,7 +2,9 @@
 
 Date: 2026-07-26
 Issue: [ROH-74 — Pause a ride](https://linear.app/rohun/issue/ROH-74/pause-a-ride)
-Status: revision 2, after a three-reviewer adversarial gate
+Status: revision 3 — revision 2 after a three-reviewer adversarial gate, then D6's clock rule
+and D7's location and group clauses corrected during Pass 2 after a second three-reviewer gate
+reproduced their failures. Each correction is marked inline as a revision note.
 
 Revision 2 reworks D5, D6, D7 and D9 and rebuilds the pass decomposition. Revision 1's
 versions of those decisions contained a fabricated failure mode, two claims contradicted
@@ -243,14 +245,31 @@ cockpit consumes it.
 **The ticker keeps running while paused**, and stops advancing `elapsed` because `elapsed`
 is now computed as active time, not because the loop exits.
 
-**Clocks.** Segment boundaries land on `point.timestamp` (GPS clock);
-`pause(at:)`/`resume(at:)` are called with wall-clock `Date()`. Mixing them makes
-`pausedSeconds` irreconcilable with the sum of segment spans and breaks under accelerated
-replay — `GoldenRidePlaybackTests` runs at `multiplier: 10_000`, where a wall-clock pause
-of milliseconds would span GPS-clock minutes. **`pausedSeconds` accumulates on the same
-clock as the points**: `pause(at:)` stamps from the most recent point's timestamp when one
-exists within the current segment, falling back to wall-clock only before the first fix.
-`RideRecorder.swift:39-41` already documents this rule for the speed smoother.
+**Clocks. (Revised during Pass 2 — this decision was wrong as written.)** The original rule
+was "`pausedSeconds` accumulates on the same clock as the points: `pause(at:)` stamps from the
+most recent point's timestamp, falling back to wall-clock only before the first fix." Three
+independent reviewers reproduced that it does not work, because the two clocks are not
+interchangeable in the direction that matters:
+
+- Active time is `endedAt - startedAt - pausedSeconds`, and `startedAt`/`endedAt` are
+  wall-clock. A paused total measured on the track's clock is not commensurate with them.
+- A replayed fixture carries the stamps it was recorded with. `golden-ride-paused.gpx` is
+  stamped 2026-07-22, so a pause during replay measured against the track reports the *age of
+  the fixture* — reproduced at ~2.7 years — and the clamp in the coordinator then pins the
+  live clock to `00:00` for the rest of the ride. This is the Pass 6 harness.
+- On a real ride, `lastPointTimestamp` is the last **accepted** fix, and `GPSFix.isAcceptable`
+  rejects fixes through a tunnel or an urban canyon. Stamping from it retroactively
+  reclassifies the whole GPS gap as paused the instant the rider taps, and the cockpit's
+  largest numeral jumps backwards by that much.
+- Symmetrically, a cached reacquisition fix stamped *before* the pause began made the closing
+  subtraction negative, and the `max(0,)` guarding it silently discarded the entire stop.
+
+**`pausedSeconds` is therefore measured on the same clock as `startedAt`/`endedAt` and the
+taps** — the interval runs from `pause(at:)` to `resume(at:)`/`end(at:)`, and nothing about it
+reads the track. The property this gives up is exact reconciliation with the sum of segment
+spans; that number is still derivable from the segments themselves when something wants it,
+and it was never the number the rider's clock is computed from. What it buys is a headline
+clock that is continuous at both ends of a stop and cannot be poisoned by the track's epoch.
 
 **`end(at:)` closes any open pause interval into `pausedSeconds`** before producing the
 ride. Without this, every ride ended while paused over-reports active time by the length of
@@ -278,7 +297,7 @@ duplicates the count guard for this reason.
 | -- | -- |
 | `router.isRideActive` | **Stays true.** A paused ride is an active ride |
 | Recording | Gated |
-| Location streaming | Continues at a **coarser tier**; full accuracy re-armed on resume |
+| Location streaming | Unchanged — see the revision note below |
 | Screen wake | Released, re-acquired on resume |
 | Persistence | **Closed segments flushed at each pause boundary** |
 | Group sink | Coordinate continues; progress and speed handled below |
@@ -294,11 +313,24 @@ silently destroy the entire ride.** The others are the location accuracy tier
 (`AuraApp.swift:184`), the post-ride Home reset on the true→false edge
 (`HomeView.swift:105`), and the Settings lockout (`SettingsView.swift:30,34`).
 
-**Location drops to a coarser tier.** Holding `.navigating` — `kCLDistanceFilterNone` with
-`pausesLocationUpdatesAutomatically` forced off (`LocationService.swift:101-108`) — wakes
-the app for every fix, which `record()` then discards. A two-hour forgotten pause plausibly
-costs 20%+ of the battery to record nothing, and the rider still has to get home. The
-coarser tier keeps the map roughly live and leaves Slice B's auto-resume viable.
+**Location drops to a coarser tier. (Revised during Pass 2 — deferred, not done.)** The
+premise was that holding `.navigating` — `kCLDistanceFilterNone` with
+`pausesLocationUpdatesAutomatically` forced off (`LocationService.swift:101-108`) — wakes the
+app for every fix, which `record()` then discards. Those knobs belong to the shared *ambient*
+`CLLocationManager`. **The ride's fixes do not come from it**: `points()` streams
+`CLLocationUpdate.liveUpdates()` (`LocationService.swift:151`) plus a
+`CLBackgroundActivitySession`, neither of which reads a `CLLocationManager`'s configuration —
+and the ambient manager is not even running during a ride, since the tier controller releases
+it when the HUD is pushed. Relaxing those knobs therefore changes nothing about the ride's
+power draw, and Pass 2 shipped no location change rather than a documented no-op with three
+tests asserting a fake.
+
+The battery cost is real; the lever is not where this decision assumed. A real throttle has to
+reconfigure or resubscribe the live-updates stream, and it collides head-on with the group
+clause below: a stationary rider who stops producing fixes stops publishing, and
+`LiveShareCadence.droppedTimeout` ages them to `.dropped` after 40 s — so the crew would read a
+deliberate stop as a lost rider, which is the thing Slice C exists to fix. **Sequenced after
+Slice C**, tracked as its own issue.
 
 **Closed segments are flushed at each pause boundary.** Nothing persists mid-ride today, so
 a jetsam kill already loses everything — but pause deliberately creates the conditions that
@@ -306,6 +338,24 @@ make a kill likely: backgrounded, no interaction, screen wake released, for tens
 minutes. Losing that gamble costs the distance ridden *before* the stop. One write at a
 moment when nothing else is happening makes a killed paused ride recoverable up to the
 pause. Full in-flight persistence for unpaused rides remains out of scope.
+
+**(Pass 2 notes on the flush.)** Three consequences the decision did not anticipate:
+
+- **D5's statless treatment for a nil `endedAt` does not exist.** No surface reads
+  `RideSummary.endedAt` — History, the last-ride card, `WidgetSnapshot` and the weekly ring all
+  render from the denormalized stats — so a nil-ended row displays as a finished ride anyway.
+  The checkpoint therefore stamps `endedAt` at the pause, which at least describes the ride
+  that was recorded. **A rider who backgrounds and foregrounds the app mid-pause can see their
+  in-progress ride as their "last ride" in the widget**, and a killed ride is recovered with no
+  "unfinished" marking. Building that treatment belongs with the pass that owns the summary.
+- **The flush is a full-track re-encode plus a CloudKit-mirrored write, on the main actor, in
+  the tap's own turn.** One per manual pause is acceptable. **Auto-pause (Slice B) fires at
+  every red light**, and a ~10,800-point re-encode per traffic light is not; Slice B has to
+  make this incremental or move it off the tap path.
+- **`cancel()` must not delete the checkpoint.** It runs from `onDisappear`, which this
+  codebase already documents as unreliable on the retained nav root, and a spurious teardown
+  deleting the only persisted copy is the exact loss the flush exists to prevent. Removal
+  belongs to an explicit `discard()` on the rider's own back-out path.
 
 **Group progress.** `progressMeters` comes from `recorder.stats.distanceMeters`, which
 freezes while paused, but the coordinate keeps flowing. Broadcasting a live coordinate
@@ -315,11 +365,27 @@ the roster, and `GroupMapDots` can never make them leader even when they are phy
 front. **The paused rider stops publishing progress updates entirely**, holding their last
 value, rather than publishing a frozen number as if it were current.
 
+**(Pass 2 note — this does not yet change what the crew sees.)** `GroupLocationSink` now takes
+`progressMeters: Double?` and the coordinator passes `nil` while paused, but
+`LivePositionPayload.progressMeters` is non-optional, so `RideSession` fills the gap with the
+last published value and the wire bytes are unchanged. The contradiction above is still fully
+reachable for a paused rider who *moves* (walks the bike, takes a lift). Closing it needs
+`paused` on the wire — Slice C. The risk-table row claiming this is mitigated is not yet
+earned; what Pass 2 bought is the seam that Slice C plugs into.
+
 **Group speed.** The sink falls back to `recorder.currentSpeedMetersPerSecond` whenever
 Doppler speed is nil, which is common when stationary. D6 zeroes that on pause, so the
 motion classifier sees `< 0.5 m/s` and the rider reads as `.stopped` rather than being
 pinned `.moving` by a frozen pre-pause value. This is the honest interim until Slice C
 carries an explicit paused state.
+
+**(Pass 2 note on arrival.)** The Mapbox session yields `.arrivedAtDestination` once, on the
+final-waypoint transition. Suppressing it therefore *loses* it: a rider who pauses inside the
+arrival radius and then resumes gets no second arrival and has to end the ride themselves.
+Whether that publisher re-fires is not verifiable off-device. Pass 4 has to check it and give
+arrival a visible terminal state rather than silence. The suppression is also wired through
+`RidePauseObserving` — a direct synchronous call from `pause()` — because a SwiftUI `.onChange`
+lands a turn later, and that turn is exactly when a pending arrival would fire.
 
 **Guidance `onArrive` is suppressed while paused.** `NavigateHUDView.swift:202` sets
 `guidance.onArrive = { endRide() }`, which finishes the ride and pushes the summary with no
@@ -466,8 +532,11 @@ rather than Pass 1.
 | History regresses to a blob-faulting fetch | D2: `.externalStorage` on `segmentsData` |
 | Ride lost to jetsam during a long pause | D7 flushes closed segments at each pause boundary |
 | Speed hero pinned at pre-pause speed, and rider pinned `.moving` to the crew | D6 zeroes the smoothed speed on pause |
-| Arrival ends the ride under a paused rider | D7 suppresses `onArrive` while paused |
-| Crew roster contradicts itself for a forgotten pause | D7 stops publishing progress rather than freezing it |
+| Arrival ends the ride under a paused rider | D7 suppresses `onArrive` while paused, via a synchronous observer. **Open:** a suppressed arrival is not re-emitted (Pass 4 verifies on device) |
+| Crew roster contradicts itself for a forgotten pause | **Not mitigated.** Needs `paused` on the wire — Slice C. See D7's Pass 2 note |
+| A forgotten pause drains the battery | **Not mitigated.** The tier knobs do not reach the ride's stream; see D7's Pass 2 note. Sequenced after Slice C |
+| The active clock jumps or freezes | D6's revised clock rule; monotonicity is asserted across a pause and a resume |
+| A killed or backed-out ride leaves a row that reads as finished | Partly: the flush is gated on the discard floor and `discard()` removes it. **Open:** no "unfinished" treatment exists |
 | Live HUD map keeps drawing the chord | D1: `RideRecorder.track` segmented in the same pass, not just `Ride.track` |
 | Phantom max-speed spike on resume | D6; explicitly tested, currently uncovered |
 | Epic stalls after Pass 3, cost with no benefit | Build order; Pass 4 is the commitment point |

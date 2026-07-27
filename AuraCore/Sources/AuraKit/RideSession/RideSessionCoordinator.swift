@@ -34,6 +34,12 @@ public final class RideSessionCoordinator {
 
     /// Navigate keeps this synced to its latest maneuver; free ride leaves it nil.
     public var maneuver: GuidanceUpdate?
+
+    /// Notified synchronously inside `pause()`/`resume()`. The navigate HUD sets its
+    /// `GuidanceViewModel` here; a SwiftUI `.onChange` would land a turn later, and that turn
+    /// is the one in which an arrival event can still end the ride under a rider who has just
+    /// paused at their destination (see `RidePauseObserving`).
+    @ObservationIgnored public weak var pauseObserver: (any RidePauseObserving)?
     /// True whenever a detour overlay is in flight (drives the gem card/haptic arbiter).
     public var isDetouring: Bool { guidance?.isDetouring ?? false }
     /// True only while turn-by-turn guiding.
@@ -119,9 +125,11 @@ public final class RideSessionCoordinator {
                 self.recorder.record(point)   // a no-op while paused
                 self.groupSink?.locationDidUpdate(
                     coordinate: point.coordinate,
-                    // Paused: the coordinate keeps the rider's dot alive to the crew, but
-                    // their distance has stopped being computed, so no progress is published
-                    // (spec D7). The zeroed live speed reads them as `.stopped`.
+                    // Paused: the coordinate keeps flowing, so the crew's dot stays alive and
+                    // the rider does not age into `.dropped` mid-café-stop. Progress is not
+                    // published, because it is no longer being computed — though see
+                    // `GroupLocationSink`: the wire still carries the held value, so the crew's
+                    // view is unchanged until Slice C puts `paused` on the wire.
                     progressMeters: paused ? nil : self.recorder.stats.distanceMeters,
                     speed: point.speedMetersPerSecond ?? self.recorder.currentSpeedMetersPerSecond,
                     at: point.timestamp)
@@ -151,28 +159,34 @@ public final class RideSessionCoordinator {
         elapsed = max(0, now.timeIntervalSince(startedAt) - recorder.pausedSeconds(asOf: now))
     }
 
-    /// Pause the ride: stop recording, release the wake lock, relax the location tier, and
-    /// flush what has been ridden so far. The ride stays *active* throughout — `isRecording`
-    /// does not move (spec D6/D7). A no-op unless a ride is running and not already paused.
+    /// Pause the ride: stop recording, release the wake lock, and flush what has been ridden so
+    /// far. The ride stays *active* throughout — `isRecording` does not move (spec D6/D7). A
+    /// no-op unless a ride is running and not already paused.
+    ///
+    /// The flush is the expensive part (a full-track encode and a mirrored write, in this same
+    /// turn). One per manual pause is fine; auto-pause, which fires at every red light, will
+    /// have to make it incremental or move it off the tap.
     public func pause() {
         guard recorder.isRecording, !recorder.isPaused else { return }
         let now = Date()
         recorder.pause(at: now)
+        // Before anything that can yield: an arrival draining after the pause but before
+        // guidance knows about it would end the ride under the rider.
+        pauseObserver?.rideDidSetPaused(true)
         refreshElapsed(now: now)
         screen.setKeepAwake(false)
-        location?.setRidePaused(true)
         flushCheckpoint(at: now)
     }
 
-    /// Resume recording: open the next segment, re-acquire the screen and the full location
-    /// tier. A no-op unless the ride is paused.
+    /// Resume recording: open the next segment and re-acquire the screen. A no-op unless the
+    /// ride is paused.
     public func resume() {
         guard recorder.isPaused else { return }
         let now = Date()
         recorder.resume(at: now)
+        pauseObserver?.rideDidSetPaused(false)
         refreshElapsed(now: now)
         screen.setKeepAwake(true)
-        location?.setRidePaused(false)
     }
 
     /// Persist the ride as it stands at a pause boundary. Nothing else persists mid-ride, and
@@ -183,7 +197,7 @@ public final class RideSessionCoordinator {
     /// Best-effort by design: the checkpoint is a safety net, so a failure here must not set
     /// `saveFailed` (which the summary reads) or interrupt the ride. The row carries the same
     /// id as the finished ride, so End updates it rather than adding a second copy, and
-    /// `cancel()` removes it if the ride is abandoned instead.
+    /// `discard()` removes it if the rider throws the ride away instead.
     private func flushCheckpoint(at date: Date) {
         guard let saving else { return }
         // Nothing worth recovering: a ride the app would itself discard silently on a back-out
@@ -194,7 +208,9 @@ public final class RideSessionCoordinator {
             try saving.save(recorder.checkpoint(at: date, destinationName: destinationName))
             checkpointedRideID = recorder.rideID
         } catch {
-            checkpointedRideID = nil
+            // Deliberately NOT cleared: `checkpointedRideID` tracks whether a row is out there,
+            // not whether the last write succeeded. A failed second flush leaves the first one
+            // in the store, and forgetting its id would make it undeletable.
         }
     }
 
@@ -240,16 +256,25 @@ public final class RideSessionCoordinator {
     /// idempotent, so calling this after `finish()` (e.g. onDisappear after End) is a no-op.
     public func cancel() {
         guidance?.detach()
-        // An abandoned ride's pause checkpoint goes with it, or backing out leaves a ghost
-        // ride in History that the rider never saved. `finish()` clears the id first, so the
-        // `onDisappear` cancel that follows every End is a no-op here.
+        stopStreaming()
+        screen.setKeepAwake(false)
+        activity.end()
+    }
+
+    /// The rider threw this ride away: tear down as `cancel()` does, and remove any checkpoint
+    /// a pause left in the store.
+    ///
+    /// Deliberately separate from `cancel()`. `cancel()` runs from `onDisappear`, which this
+    /// codebase already documents as unreliable on the retained nav root (`AuraApp.swift`'s
+    /// tier controller refuses to key on it) — so a delete there would let a spurious teardown
+    /// destroy the one persisted copy of a ride, which is the exact outcome the checkpoint
+    /// exists to prevent. A discard is an explicit rider action and says so.
+    public func discard() {
         if let id = checkpointedRideID {
             try? saving?.discard(id: id)
             checkpointedRideID = nil
         }
-        stopStreaming()
-        screen.setKeepAwake(false)
-        activity.end()
+        cancel()
     }
 
     private func stopStreaming() {

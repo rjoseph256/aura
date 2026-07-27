@@ -12,7 +12,7 @@ import AuraCore
 /// can drive it end-to-end in tests with no Mapbox dependency.
 @Observable
 @MainActor
-public final class GuidanceViewModel {
+public final class GuidanceViewModel: RidePauseObserving {
 
     /// Current turn-card state — the view renders this.
     public private(set) var turn: TurnCardState = .starting
@@ -52,10 +52,17 @@ public final class GuidanceViewModel {
     /// Invoked once the rider reaches the final destination; the view ends the ride.
     @ObservationIgnored public var onArrive: () -> Void = { }
 
-    /// Mirrors the ride's paused state. While true, arrival and spoken prompts are suppressed:
-    /// riders pause *at* the destination they navigated to, inside the arrival radius, and
-    /// `onArrive` ends the ride and pushes the summary with no confirmation (spec D7). The
-    /// event stream keeps being consumed, so guidance carries on when the rider resumes.
+    /// Mirrors the ride's paused state, set through `RidePauseObserving` so it lands in the
+    /// same turn as the tap. While true, arrival and spoken prompts are suppressed: riders
+    /// pause *at* the destination they navigated to, inside the arrival radius, and `onArrive`
+    /// ends the ride and pushes the summary with no confirmation (spec D7).
+    ///
+    /// Progress events keep flowing, so the turn card carries on when the rider resumes. A
+    /// suppressed **arrival**, though, is gone: the Mapbox session yields it once, on the
+    /// final-waypoint transition, so a rider who pauses inside the arrival radius and then
+    /// resumes will not get another one and must end the ride themselves. Whether that
+    /// publisher re-fires is not verifiable off-device; the pass that puts a pause button in
+    /// front of riders has to check it and give arrival a visible terminal state.
     @ObservationIgnored public var isPaused = false
 
     @ObservationIgnored private let session: any GuidanceSession
@@ -118,13 +125,18 @@ public final class GuidanceViewModel {
             }
         }
 
-        // Stream ended without ever reporting progress: guidance couldn't be
-        // established — degrade the card to a generic prompt. (An arrival exits above,
-        // so reaching here always means a failed/empty stream, never a normal finish.)
+        // Stream ended without ever reporting progress: guidance couldn't be established —
+        // degrade the card to a generic prompt. An UNSUPPRESSED arrival exits above, so
+        // reaching here means a failed/empty stream — or a stream that ended right after an
+        // arrival this model suppressed because the rider was paused, in which case the card
+        // holds its last maneuver rather than being reset to a prompt.
         if !sawProgress {
             turn = .unavailable
         }
     }
+
+    /// Set by `RideSessionCoordinator` at the moment of the tap.
+    public func rideDidSetPaused(_ paused: Bool) { isPaused = paused }
 
     /// The turn card, the raw update and the once-per-maneuver haptic for one progress event.
     /// Split out of `run` to keep that loop within the cyclomatic budget.

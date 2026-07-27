@@ -281,7 +281,10 @@ private extension RideHUDView {
 
     func backTapped() {
         if canDiscard {
-            coordinator.cancel()
+            // `discard`, not `cancel`: the rider is throwing this ride away, so any checkpoint
+            // a pause left in the store goes too. (`cancel` deliberately keeps it — it also
+            // runs from `onDisappear`, which can fire without the rider asking for anything.)
+            coordinator.discard()
             router.popToRoot()
         } else {
             showEndConfirm = true

@@ -41,20 +41,23 @@ public final class RideRecorder {
     private var smoother = SpeedSmoother()
     private var lastPoint: TrackPoint?
 
-    /// Paused time from intervals that have already closed. The in-flight interval is added
-    /// by `pausedSeconds(asOf:)`; nothing else may read this.
+    /// Paused time from stops that have already ended. The stop in progress is added by
+    /// `pausedSeconds(asOf:)`; nothing else may read this.
     private var closedPausedSeconds: TimeInterval = 0
-    /// Start of the pause interval currently being measured. Set at `pause(at:)` and cleared
-    /// when the interval closes — at the first fix after a resume, or at `end(at:)`.
-    private var openPauseStart: Date?
-    /// The `resume(at:)` that is still waiting for its first fix. While it is set the paused
-    /// total stops growing: the rider is riding again, there is just no GPS stamp yet to
-    /// close the interval with.
-    private var pendingResume: Date?
-    /// Timestamp of the most recent recorded fix, kept across resumes. Distinct from
-    /// `lastPoint`, which the speed pipeline resets at every resume; this one is the GPS clock
-    /// that pause intervals are stamped against.
-    private var lastPointTimestamp: Date?
+    /// When the stop in progress began, or nil if the rider is riding.
+    ///
+    /// **On the caller's clock — the same one `startedAt` and `endedAt` are on — never the
+    /// track's.** Active time is `endedAt - startedAt - pausedSeconds`, so paused time has to
+    /// be commensurate with those two or the subtraction is meaningless. `TrackPoint.timestamp`
+    /// is a different clock: a replayed fixture carries the stamps it was recorded with, so
+    /// measuring a stop against the track would report the fixture's age as paused time; and a
+    /// real ride's last accepted fix can be minutes stale through a tunnel, which would
+    /// retroactively reclassify those minutes as paused the instant the rider taps.
+    ///
+    /// This is a deliberate departure from spec D6, which specified the GPS clock. The gap
+    /// between two segments is still derivable from the segments themselves when something
+    /// needs it; what it cannot be is the number the rider's clock is computed from.
+    private var pauseStartedAt: Date?
 
     public init(kind: Ride.Kind = .freeRide) { self.kind = kind }
 
@@ -72,21 +75,11 @@ public final class RideRecorder {
         currentSpeedMetersPerSecond = 0
         lastPoint = nil
         closedPausedSeconds = 0
-        openPauseStart = nil
-        pendingResume = nil
-        lastPointTimestamp = nil
+        pauseStartedAt = nil
     }
 
     public func record(_ point: TrackPoint) {
         guard state == .recording, !segments.isEmpty else { return }
-        // The first fix of a resumed segment closes the pause interval on the GPS clock, so
-        // `pausedSeconds` stays reconcilable with the gap between the two segments and
-        // survives accelerated replay (spec D6). `max(0,)` absorbs a stale first fix.
-        if let start = openPauseStart {
-            closedPausedSeconds += max(0, point.timestamp.timeIntervalSince(start))
-            openPauseStart = nil
-            pendingResume = nil
-        }
         segments[segments.count - 1].points.append(point)
         stats = RideStatsCalculator.stats(segments: segments)
         // Doppler speed when present, else position-delta from the previous fix; fed to
@@ -95,16 +88,10 @@ public final class RideRecorder {
         let instant = InstantaneousSpeed.between(previous: lastPoint, current: point)
         currentSpeedMetersPerSecond = smoother.add(instant, at: point.timestamp)
         lastPoint = point
-        lastPointTimestamp = point.timestamp
     }
 
-    /// Close the current segment and stop recording, without ending the ride.
-    ///
-    /// The interval is stamped from the most recent fix rather than from `date`, because
-    /// paused time is measured on the same clock as the points (spec D6); `date` is used only
-    /// before the first fix, when there is no GPS clock yet. A pause that arrives while an
-    /// interval is already open (a resume that never got a fix) leaves that interval alone —
-    /// nothing was ridden in between, so it never really closed.
+    /// Close the current segment and stop recording, without ending the ride. Idempotent: a
+    /// second pause leaves the stop in progress alone rather than restamping it.
     public func pause(at date: Date) {
         guard state == .recording else { return }
         state = .paused
@@ -113,8 +100,7 @@ public final class RideRecorder {
         // cockpit's largest numeral for the whole stop — and reads `.moving` to the crew,
         // whose motion classifier falls back to this value (spec D6/D7).
         currentSpeedMetersPerSecond = 0
-        pendingResume = nil
-        if openPauseStart == nil { openPauseStart = lastPointTimestamp ?? date }
+        pauseStartedAt = date
     }
 
     /// Open a new segment and start recording again.
@@ -125,28 +111,46 @@ public final class RideRecorder {
     /// the dial (spec D6).
     public func resume(at date: Date) {
         guard state == .paused else { return }
+        closePause(at: date)
         state = .recording
         segments.append(RideSegment(points: []))
         smoother.reset()
         lastPoint = nil
         currentSpeedMetersPerSecond = 0
-        pendingResume = date
     }
 
-    /// Total paused time as of `now`, including the interval in flight. The live active clock
-    /// is `elapsed - pausedSeconds(asOf:)`, so this has to grow *while* the rider is stopped
-    /// rather than only when the interval closes.
+    /// Total paused time as of `now`, including the stop in progress. The live active clock is
+    /// `elapsed - pausedSeconds(asOf:)`, so this has to grow *while* the rider is stopped, and
+    /// it must be continuous at both ends of the stop — it is the largest numeral on the
+    /// cockpit, and a number that jumps backwards there is worse than one that is slightly off.
     public func pausedSeconds(asOf now: Date) -> TimeInterval {
-        guard let start = openPauseStart else { return closedPausedSeconds }
-        return closedPausedSeconds + max(0, (pendingResume ?? now).timeIntervalSince(start))
+        guard let start = pauseStartedAt else { return closedPausedSeconds }
+        return closedPausedSeconds + max(0, now.timeIntervalSince(start))
+    }
+
+    /// Bank the stop in progress. `max(0,)` guards a caller whose clock ran backwards (an NTP
+    /// correction mid-stop); it can only ever drop a stop, never invent one.
+    private func closePause(at date: Date) {
+        guard let start = pauseStartedAt else { return }
+        closedPausedSeconds += max(0, date.timeIntervalSince(start))
+        pauseStartedAt = nil
     }
 
     /// The ride so far, for the pause-boundary flush (spec D7). Carries `rideID`, so the store
-    /// updates the same row the finished ride will write, and `endedAt: nil`, because the ride
-    /// has not ended — a jetsam kill during a long pause leaves an honest unfinished ride
-    /// rather than a fabricated end time.
+    /// updates the same row the finished ride will write rather than accumulating a copy per
+    /// pause.
+    ///
+    /// `endedAt` is the pause instant, **not nil**, even though the ride has not ended. Nil
+    /// would be the more truthful encoding, but no surface in this app reads
+    /// `RideSummary.endedAt` — History, the last-ride card, the widget snapshot and the weekly
+    /// ring all render from the denormalized stats — so a nil-ended row is displayed as a
+    /// finished ride regardless. Given that, a row that says "a ride that ended when you
+    /// stopped" describes what was actually recorded, while a nil would be an unfinished-ride
+    /// claim that nothing in the app is equipped to make. Spec D5 assumes a statless treatment
+    /// for nil `endedAt` that does not exist; building it belongs with the pass that owns the
+    /// summary.
     public func checkpoint(at date: Date, destinationName: String? = nil) -> Ride {
-        Ride(id: rideID, kind: kind, startedAt: startedAt ?? date, endedAt: nil,
+        Ride(id: rideID, kind: kind, startedAt: startedAt ?? date, endedAt: date,
              segments: normalizedSegments, stats: stats,
              pausedSeconds: pausedSeconds(asOf: date), destinationName: destinationName,
              routeId: nil, destinationPlaceId: nil)
@@ -154,13 +158,11 @@ public final class RideRecorder {
 
     @discardableResult
     public func end(at date: Date, destinationName: String? = nil) -> Ride {
-        // Close any interval still open, or every ride ended while paused over-reports active
-        // time by the length of the tail (spec D6). `date` is the ride's end stamp — the same
-        // clock `endedAt`, and therefore elapsed, is measured on.
-        let paused = pausedSeconds(asOf: date)
+        // Bank a stop still in progress, or every ride ended while paused over-reports active
+        // time by the length of the tail (spec D6).
+        closePause(at: date)
+        let paused = closedPausedSeconds
         state = .idle
-        openPauseStart = nil
-        pendingResume = nil
         return Ride(id: rideID, kind: kind, startedAt: startedAt ?? date, endedAt: date,
                     segments: normalizedSegments, stats: stats, pausedSeconds: paused,
                     destinationName: destinationName, routeId: nil, destinationPlaceId: nil)

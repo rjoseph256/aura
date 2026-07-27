@@ -33,8 +33,4 @@ public final class SimulatedLocationProvider: LocationStreaming {
     }
 
     public func stop() { task?.cancel() }
-
-    /// Replay has no hardware to power down, and the schedule must keep its timing so a paused
-    /// stretch of a fixture replays as the same stretch of wall-clock. Deliberately a no-op.
-    public func setRidePaused(_ paused: Bool) { }
 }

@@ -16,12 +16,6 @@ public final class LocationService: NSObject, LocationStreaming {
     /// and tests; not observed by any view, so it is observation-ignored.
     @ObservationIgnored public private(set) var mode: LocationAccuracyMode = .idle
 
-    /// True while the ride that owns the `.navigating` tier is paused. The tier itself does
-    /// NOT change: `mode` stays `.navigating`, so every "a ride owns the manager" guard
-    /// (`stop`, `startAmbient`, `releaseNonRide`) keeps holding and the app's non-ride tier
-    /// controller keeps yielding. Only the accuracy knobs relax (spec D7).
-    @ObservationIgnored public private(set) var isRidePaused = false
-
     /// True while the ride pipeline holds the background location session. On macOS (no
     /// `CLBackgroundActivitySession`) it still tracks the ride's intent, so the teardown
     /// guarantee is unit-testable on the CI host. Only `points()` sets it; only `stop()` clears it.
@@ -105,28 +99,14 @@ public final class LocationService: NSObject, LocationStreaming {
             manager.desiredAccuracy = kCLLocationAccuracyKilometer
             manager.distanceFilter = 500
         case .navigating:
-            // A paused ride still owns the manager, but nothing it delivers is recorded, so
-            // it runs at the loosest configuration that keeps the map roughly live. The
-            // background indicator stays on: the session is still held, and hiding it while
-            // location keeps flowing would be a lie to the rider.
-            manager.desiredAccuracy = isRidePaused
-                ? kCLLocationAccuracyHundredMeters : kCLLocationAccuracyNearestTenMeters
-            manager.distanceFilter = isRidePaused ? 50 : kCLDistanceFilterNone
+            manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+            manager.distanceFilter = kCLDistanceFilterNone
         }
         #if os(iOS)
         manager.activityType = (mode == .idle) ? .other : .fitness
-        manager.pausesLocationUpdatesAutomatically = (mode != .navigating) || isRidePaused
+        manager.pausesLocationUpdatesAutomatically = (mode != .navigating)
         manager.showsBackgroundLocationIndicator = (mode == .navigating)
         #endif
-    }
-
-    /// Relax (or restore) the ride tier across a pause. A no-op unless a ride currently owns
-    /// the manager, so a late call from a torn-down ride can never coarsen an ambient monitor
-    /// something else has since taken over.
-    public func setRidePaused(_ paused: Bool) {
-        guard mode == .navigating else { return }
-        isRidePaused = paused
-        setMode(.navigating)
     }
 
     public func points() -> AsyncStream<TrackPoint> {
@@ -180,9 +160,6 @@ public final class LocationService: NSObject, LocationStreaming {
         #endif
         continuation?.finish(); continuation = nil
         sessionActive = false
-        // Cleared before the tier reset below so a pause can never outlive its ride and
-        // coarsen the next one.
-        isRidePaused = false
         // Only return the manager to idle if WE still own it as the ride. If the lifecycle
         // controller already re-armed `.ambient` (ride-end race: path pop fires startAmbient
         // before the HUD's onDisappear->cancel->stop lands), don't clobber it. The session

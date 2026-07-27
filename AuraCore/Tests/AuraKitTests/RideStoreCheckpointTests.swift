@@ -34,6 +34,51 @@ struct RideStoreCheckpointTests {
         #expect(all.first?.flattenedPoints.count == 3)
     }
 
+    /// The update branch of `save` is a hand-written field copy. This is the guard that it is
+    /// complete: every column the mapper writes differs between the two rides, so a field left
+    /// out of the copy keeps the first ride's value and fails here. **A schema pass that adds a
+    /// column adds it to this test and to the copy.**
+    @Test func updatePathCarriesEveryColumn() throws {
+        let store = try RideStore.inMemory()
+        let id = UUID()
+        let first = Ride(id: id, kind: .freeRide, startedAt: Date(timeIntervalSince1970: 0),
+                         endedAt: Date(timeIntervalSince1970: 100),
+                         track: [pt(40.0, 0), pt(40.1, 10)],
+                         stats: RideStats(distanceMeters: 10, movingTimeSeconds: 5,
+                                          averageSpeedMetersPerSecond: 2,
+                                          maxSpeedMetersPerSecond: 3, elevationGainMeters: 1),
+                         destinationName: "First", routeId: UUID(), destinationPlaceId: UUID())
+        try store.save(first)
+
+        let second = Ride(id: id, kind: .navigate, startedAt: Date(timeIntervalSince1970: 500),
+                          endedAt: Date(timeIntervalSince1970: 900),
+                          track: [pt(41.0, 500), pt(41.2, 600), pt(41.4, 700)],
+                          stats: RideStats(distanceMeters: 2000, movingTimeSeconds: 300,
+                                           averageSpeedMetersPerSecond: 6.7,
+                                           maxSpeedMetersPerSecond: 12, elevationGainMeters: 45),
+                          destinationName: "Second", routeId: UUID(),
+                          destinationPlaceId: UUID())
+        try store.save(second)
+
+        let back = try #require(try store.ride(id: id))
+        #expect(back.kind == .navigate)
+        #expect(back.startedAt == second.startedAt)
+        #expect(back.endedAt == second.endedAt)
+        #expect(back.flattenedPoints == second.flattenedPoints)
+        #expect(back.stats == second.stats)
+        #expect(back.destinationName == "Second")
+        #expect(back.routeId == second.routeId)
+        #expect(back.destinationPlaceId == second.destinationPlaceId)
+
+        // The denormalized columns and the thumbnail blob are not on `Ride`, so read them
+        // through the projection that History actually uses.
+        let summary = try #require(try store.summaries().first)
+        #expect(summary.distanceMeters == 2000)
+        #expect(summary.movingTimeSeconds == 300)
+        #expect(summary.elevationGainMeters == 45)
+        #expect(summary.thumbnailCoordinates.count == 3, "the thumbnail was re-derived, not kept")
+    }
+
     @Test func savingTwoDifferentRidesStillKeepsBoth() throws {
         let store = try RideStore.inMemory()
         try store.save(Ride(kind: .freeRide, startedAt: Date(timeIntervalSince1970: 0),

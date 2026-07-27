@@ -38,6 +38,18 @@ extension RideStore: RideSaving {
     public func discard(id: UUID) throws { try delete(id: id) }
 }
 
+/// A collaborator that has to learn about a pause **in the same turn as the tap**.
+///
+/// The navigate HUD's `GuidanceViewModel` is the one that matters: it consumes guidance events
+/// on the main actor, and an arrival can drain between the tap and a SwiftUI `.onChange` body
+/// running a turn later. That is the one window where a rider who paused at their destination
+/// would have the ride ended under them — precisely what suppressing arrival exists to prevent
+/// (spec D7). So the coordinator notifies this synchronously instead.
+@MainActor
+public protocol RidePauseObserving: AnyObject {
+    func rideDidSetPaused(_ paused: Bool)
+}
+
 /// Writes a finished ride to Apple Health as a cycling workout. The app conforms a
 /// HealthKit-backed type; the package never imports HealthKit. Fire-and-forget: the
 /// coordinator calls this and moves on, so a HealthKit failure cannot affect the save.

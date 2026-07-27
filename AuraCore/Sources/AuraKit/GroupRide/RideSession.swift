@@ -5,11 +5,15 @@ import AuraCore
 /// `RideSessionCoordinator` (the sole stream owner) pushes points here; the session
 /// never opens its own location stream (AsyncStream is single-consumer).
 ///
-/// `progressMeters` is optional because a paused rider publishes no progress: their distance
-/// has stopped being computed, and broadcasting a frozen number beside a live coordinate makes
-/// the crew's display contradict itself — the roster reports them ever further behind while
-/// their dot sits at the front (spec D7). `nil` means "unchanged", and the session holds the
-/// last value it published.
+/// `progressMeters` is optional so a paused rider can say "I have no new progress" rather than
+/// republishing a number that is no longer being computed; `nil` means unchanged.
+///
+/// **This does not yet change anything the crew sees.** `LivePositionPayload.progressMeters` is
+/// non-optional, so the session fills the gap with the last value it published — the same bytes
+/// a frozen reading would produce. So the contradiction spec D7 describes (the roster reporting
+/// a rider ever further behind while their dot sits at the front) is still fully reachable for a
+/// paused rider who moves. Closing it needs `paused` on the wire, which is Slice C. What this
+/// buys now is the shape: the one place that decides what a stopped rider publishes.
 @MainActor
 public protocol GroupLocationSink: AnyObject {
     func locationDidUpdate(coordinate: Coordinate, progressMeters: Double?, speed: Double, at: Date)

@@ -74,8 +74,7 @@ struct RideRecorderPauseTests {
         r.pause(at: at(10))
         r.pause(at: at(40))
         r.resume(at: at(70))
-        r.record(pt(40.001, 70))
-        // The second pause must not restamp the interval: 70 - 10, not 70 - 40.
+        // The second pause must not restamp the open interval: 70 - 10, not 70 - 40.
         #expect(r.pausedSeconds(asOf: at(70)) == 60)
     }
 
@@ -122,21 +121,20 @@ struct RideRecorderPauseTests {
                 "a resumed segment's first fix has no predecessor to delta against")
     }
 
-    // MARK: Paused accounting (GPS clock)
+    // MARK: Paused accounting
 
-    /// `pausedSeconds` accumulates on the same clock as the points, so it stays reconcilable
-    /// with the gap between segments and survives accelerated replay (spec D6). The wall-clock
-    /// arguments here are deliberately absurd: nothing may read them once a fix exists.
-    @Test func pausedSecondsAccumulatesOnTheGPSClock() {
+    /// Paused time is measured between the pause and the resume, on the clock the taps arrive
+    /// on — which is the clock `startedAt`/`endedAt` and therefore active time are measured on.
+    @Test func pausedSecondsMeasuresTheStopItself() {
         let r = RideRecorder()
         r.start(at: at(0))
         r.record(pt(40.000, 0))
         r.record(pt(40.001, 10))
-        r.pause(at: at(999))
-        r.resume(at: at(1234))
+        r.pause(at: at(10))
+        r.resume(at: at(310))
         r.record(pt(40.002, 310))
         let ride = r.end(at: at(400))
-        #expect(ride.pausedSeconds == 300, "310 - 10: the gap in the track, not 1234 - 999")
+        #expect(ride.pausedSeconds == 300)
     }
 
     @Test func pausedSecondsSumsAcrossTwoStops() {
@@ -152,20 +150,39 @@ struct RideRecorderPauseTests {
         #expect(r.pausedSeconds(asOf: at(100)) == 100)
     }
 
-    /// Before the first fix there is no GPS clock to stamp from, so the pause instant is the
-    /// only thing available (spec D6). The two clocks agree in production.
-    @Test func pauseBeforeTheFirstFixFallsBackToWallClock() {
+    /// The point timestamps are a *different clock* from the taps: a replayed fixture carries
+    /// the stamps it was recorded with (`golden-ride-paused.gpx` is stamped 2026-07-22) while
+    /// the taps arrive at `Date()`. Stamping pause intervals from the track would report the
+    /// age of the fixture — years — as paused time, and clamp the active clock to zero for the
+    /// rest of the ride. Paused time must not read the track at all.
+    @Test func trackTimestampsFromAnotherEpochDoNotPoisonPausedTime() {
         let r = RideRecorder()
+        let epoch: TimeInterval = 1_800_000_000     // the "fixture" clock, decades off
         r.start(at: at(0))
-        r.pause(at: at(5))
-        r.resume(at: at(9))
-        r.record(pt(40.000, 9.5))
-        #expect(r.pausedSeconds(asOf: at(9.5)) == 4.5)
+        r.record(pt(40.000, epoch))
+        r.record(pt(40.001, epoch + 10))
+        r.pause(at: at(60))
+        r.resume(at: at(90))
+        r.record(pt(40.002, epoch + 20))
+        let ride = r.end(at: at(120))
+        #expect(ride.pausedSeconds == 30)
     }
 
-    /// A pause → resume → pause with no fix in between never resumed anything: the interval
-    /// stays open rather than closing at a stamp no point ever produced.
-    @Test func resumeWithNoFixKeepsTheIntervalOpen() {
+    /// A fix that arrives stamped *before* the pause began — a cached CoreLocation reading on
+    /// reacquisition — must not erase the stop the rider actually took.
+    @Test func aStaleFixAfterResumeDoesNotEraseThePause() {
+        let r = RideRecorder()
+        r.start(at: at(0))
+        r.record(pt(40.000, 100))
+        r.pause(at: at(100))
+        r.resume(at: at(700))
+        r.record(pt(40.001, 95))    // stamped 5 s before the pause started
+        #expect(r.pausedSeconds(asOf: at(700)) == 600)
+    }
+
+    /// A pause → resume → pause with no fix in between is two real stops with a moment of
+    /// riding between them; both are counted.
+    @Test func pauseResumePauseWithNoFixCountsBothStops() {
         let r = RideRecorder()
         r.start(at: at(0))
         r.record(pt(40.000, 10))
@@ -175,7 +192,7 @@ struct RideRecorderPauseTests {
         r.record(pt(40.001, 40))   // dropped: still paused
         r.resume(at: at(50))
         r.record(pt(40.002, 50))
-        #expect(r.pausedSeconds(asOf: at(50)) == 40, "one interval, 10 → 50")
+        #expect(r.pausedSeconds(asOf: at(50)) == 30, "10 → 20 and 30 → 50")
         #expect(r.flattenedPoints.count == 2)
     }
 
@@ -209,16 +226,32 @@ struct RideRecorderPauseTests {
         #expect(r.pausedSeconds(asOf: at(70)) == 60)
     }
 
-    /// Once the rider resumes, the paused total stops growing even though the interval cannot
-    /// close until a fix arrives — otherwise the active clock stalls through the whole
-    /// time-to-first-fix.
-    @Test func livePausedSecondsHoldsBetweenResumeAndTheFirstFix() {
+    @Test func livePausedSecondsStopsGrowingAtTheResume() {
         let r = RideRecorder()
         r.start(at: at(0))
         r.record(pt(40.000, 10))
         r.pause(at: at(10))
         r.resume(at: at(40))
-        #expect(r.pausedSeconds(asOf: at(100)) == 30, "held at the resume, not still growing")
+        #expect(r.pausedSeconds(asOf: at(100)) == 30)
+    }
+
+    /// The headline clock is `elapsed - pausedSeconds`, so any jump in paused time is a jump in
+    /// the number the rider is watching. It must never move backwards, and it must not step at
+    /// the tap, the resume, or the first fix afterwards. Sampled densely across all three.
+    @Test func theActiveClockIsMonotonicAcrossAPauseAndResume() {
+        let r = RideRecorder()
+        r.start(at: at(0))
+        r.record(pt(40.000, 3))     // last fix is 7 s stale by the time the rider taps
+        r.pause(at: at(10))
+        var previous = -Double.infinity
+        for tick in stride(from: 0.0, through: 60.0, by: 0.5) {
+            if tick == 30 { r.resume(at: at(30)) }
+            if tick == 45 { r.record(pt(40.001, 45)) }
+            let active = at(tick).timeIntervalSince(at(0)) - r.pausedSeconds(asOf: at(tick))
+            #expect(active >= previous, "active time went backwards at t=\(tick)")
+            previous = active
+        }
+        #expect(previous == 40, "60 s of ride, 20 s of it paused")
     }
 
     // MARK: end()
@@ -271,7 +304,10 @@ struct RideRecorderPauseTests {
         r.record(pt(40.002, 70))
         let ride = r.end(at: at(80))
         #expect(checkpoint.id == ride.id)
-        #expect(checkpoint.endedAt == nil, "the ride has not ended; do not fabricate an end time")
+        // Ends at the pause, because no surface in this app reads `endedAt` — a nil-ended row
+        // renders as a finished ride anyway, so it may as well describe the ride that was
+        // actually recorded. See `checkpoint(at:)`.
+        #expect(checkpoint.endedAt == at(10))
         #expect(checkpoint.segments.count == 1)
         #expect(checkpoint.stats?.distanceMeters ?? 0 > 0, "the checkpoint carries the ride so far")
     }
