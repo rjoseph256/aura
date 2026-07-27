@@ -15,6 +15,14 @@ import AuraCore
 /// rows cannot starve the budget, and it cannot throw into its caller.
 ///
 /// Every case here calls `run` synchronously. That is deliberate: see the note on the type.
+///
+/// **QUARANTINED — ROH-110.** CI skips this suite in the gating job and runs it in a separate
+/// non-blocking one. It is implicated in an intermittent abort inside libswift_Concurrency's
+/// task allocator that kills the whole test process; disabling it is the only configuration
+/// measured green across independent runs. Nothing here is known to be wrong — the tests pass,
+/// including under mutation — and the root cause is not understood. Do not treat the quarantine
+/// as a verdict on these tests, and do not add SwiftData suites to the gating job assuming this
+/// is solved.
 @MainActor
 @Suite("Ride segment backfill", .swiftDataSerialized)
 struct RideSegmentBackfillTests {
