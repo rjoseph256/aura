@@ -234,15 +234,15 @@ struct RideSegmentBackfillTests {
         let backfiller = RideSegmentBackfiller(modelContainer: store.container)
         let settled = settledBefore
 
+        // PROBE 4a: detached task calling the actor, but NOT cancelled. Isolates whether the
+        // abort needs cancellation or merely the detached -> @ModelActor hop.
         let task = Task.detached {
-            try? await Task.sleep(for: .seconds(60))   // returns at once once cancelled; never sleeps
             return await backfiller.backfill(settledBefore: settled)
         }
-        task.cancel()
         let result = await task.value
 
-        #expect(result.backfilled == 0, "a cancelled sweep does no work")
-        #expect(result.remaining == 40)
+        #expect(result.backfilled == 40, "probe: uncancelled, so it should do all the work")
+        #expect(result.remaining == 0)
         let stillPending = try store.container.mainContext.fetchCount(
             FetchDescriptor<RideRecord>(predicate: #Predicate { $0.segmentsData == nil }))
         #expect(stillPending == result.remaining, "the reported remainder matches the store")
