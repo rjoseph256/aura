@@ -3,7 +3,13 @@ import Foundation
 import SwiftData
 @testable import AuraKit
 
+/// Serialized (ROH-65 gate): this suite posts a *global*
+/// `.NSPersistentStoreRemoteChange` and asserts its store observed exactly one bump. Any
+/// other suite standing up a SwiftData container concurrently can post the same notification
+/// and drive `syncRevision` to 2, which is a real intermittent failure observed on CI-like
+/// repeat runs. The gate keeps container-owning suites from overlapping.
 @MainActor
+@Suite(.swiftDataSerialized)
 struct RideStoreSyncRevisionTests {
     @Test func remoteChangeNotificationBumpsSyncRevision() async throws {
         let container = try ModelContainer(
