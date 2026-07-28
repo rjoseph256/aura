@@ -153,7 +153,7 @@ That test collapses to `!detourRoute.isEmpty`.
 call-site audit that is the point of this change.
 
 `sourceIndex` stays, for ROH-101. *Revision 2 retracts revision 1's claim that it is
-"load-bearing today"* — nothing in production reads it. `RideMapView.swift:111` keys the
+"load-bearing today"*. Nothing in production reads it. `RideMapView.swift:111` keys the
 annotation group by `\.offset`, the enumerated output position, not `sourceIndex`. Its only
 readers are `TrackRibbonTests`.
 
@@ -281,7 +281,7 @@ target is `UITests`), so compilation is genuinely the primary check on D1, and i
 every deleted symbol is referenced or it is not.
 
 *Revision 2 replaces revision 1's verification plan, which was wrong twice over.* It claimed no
-device step was needed "because there is no behavior to observe" — but that is a statement about
+device step was needed "because there is no behavior to observe", but that is a statement about
 the deleted code, and the risk lives in the surviving code's new shape. Then it spent the one
 check it did name on the zoom pill, which the type checker already guarantees (see D1) and which
 two shipping files already demonstrate. Both halves were backwards.
