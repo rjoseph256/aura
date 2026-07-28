@@ -72,8 +72,8 @@ struct RideMapView: View {
         // ride start, since recording begins in a `.task` that runs after the first body pass.
         let pieces = ribbonPieces
         if !pieces.isEmpty {
-            PolylineAnnotationGroup(Array(pieces.enumerated()), id: \.offset) { item in
-                PolylineAnnotation(lineCoordinates: item.element.coordinates.map {
+            PolylineAnnotationGroup(pieces, id: \.sourceIndex) { piece in
+                PolylineAnnotation(lineCoordinates: piece.coordinates.map {
                     CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
                 })
                 .lineColor(StyleColor(detourRoute.isEmpty

@@ -45,4 +45,16 @@ final class TrackRibbonTests: XCTestCase {
     func test_noSegments_isEmpty() {
         XCTAssertTrue(TrackRibbon.pieces(segments: []).isEmpty)
     }
+
+    /// `RideMapView` keys its `PolylineAnnotationGroup` on `sourceIndex`. Mapbox stores the
+    /// element id in a persistent map and assigns both colliding elements the same feature id,
+    /// silently — tap resolution then finds only the first. Uniqueness holds structurally today
+    /// (one piece per segment); this test is what makes a future change to that visible.
+    func test_sourceIndicesAreUnique() {
+        let pieces = TrackRibbon.pieces(
+            segments: [seg([(40.0, -80.0), (40.001, -80.0)]),
+                       seg([]),
+                       seg([(41.0, -80.0), (41.001, -80.0), (41.002, -80.0)])])
+        XCTAssertEqual(Set(pieces.map(\.sourceIndex)).count, pieces.count)
+    }
 }
