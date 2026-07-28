@@ -7,35 +7,34 @@ struct TimeoutError: Error, Equatable {}
 /// (or its thrown error) is returned. If the timeout fires first, the operation is cancelled and
 /// `TimeoutError` is thrown. Outer cancellation propagates to the operation (no leaked work).
 ///
-/// Deliberately does NOT cancel the timeout task on the success path. On this toolchain,
-/// cancelling a task that is parked inside a real `Task.sleep` as the caller unwinds corrupts
-/// the task allocator (`swift_task_dealloc` double-free → SIGABRT) — reproduced identically with
-/// both a `withThrowingTaskGroup` race and a fire-and-forget `Task.cancel()`. Instead the timeout
-/// task is left to elapse on its own; when it does it cancels an already-finished operation task,
-/// which is a no-op. Cost: a successful call leaves a background timer that lingers up to
-/// `duration` (≈ the timeout) and then no-ops — harmless. Only the `onCancel` path (outer
-/// cancellation, an unwind rather than a return) cancels the tasks, which is safe.
 /// `sleep` is injected so tests drive the race deterministically.
+///
+/// **Structured on purpose (ROH-110).** Both tasks are children of a task group, so the group
+/// cannot return until both have finished — the loser is cancelled by `cancelAll` and awaited on
+/// the way out. Nothing outlives the call.
+///
+/// This function previously raced two unstructured `Task`s and *deliberately left the timeout
+/// task uncancelled on the success path*, to dodge an abort inside the task allocator. That
+/// traded a crash for a leak and made the crash worse: every successful call left a timer parked
+/// for the full `duration` (4s for a group-ride end), which then woke up inside whatever
+/// unrelated code was running by then. In the test process — a ~4s run — those wakeups landed
+/// mid-suite and aborted it about 30% of the time, which is the bug ROH-110 was chasing through
+/// SwiftData for two sessions. The crash was never in SwiftData; the leaked timer was carrying it.
 func withTimeout<T: Sendable>(
     _ duration: Duration,
     sleep: @Sendable @escaping (Duration) async throws -> Void,
     operation: @Sendable @escaping () async throws -> T
 ) async throws -> T {
-    let operationTask = Task { try await operation() }
-    let timeoutTask = Task {
-        // A cancelled timer must NOT cancel the operation — only an elapsed one.
-        do { try await sleep(duration) } catch { return }
-        operationTask.cancel()
-    }
-    return try await withTaskCancellationHandler {
-        do {
-            return try await operationTask.value
-        } catch is CancellationError where !Task.isCancelled {
-            // The operation was cancelled by the elapsed timer (not by our caller).
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await operation() }
+        group.addTask {
+            try await sleep(duration)
             throw TimeoutError()
         }
-    } onCancel: {
-        operationTask.cancel()
-        timeoutTask.cancel()
+        // Whichever finishes first decides the call; the other is cancelled and awaited by the
+        // group before it returns. A cancelled `sleep` throws, but that result is never read.
+        defer { group.cancelAll() }
+        guard let first = try await group.next() else { throw TimeoutError() }
+        return first
     }
 }
