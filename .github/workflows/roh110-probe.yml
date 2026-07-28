@@ -1,26 +1,24 @@
 name: ROH-110 probe
 
-# A measuring instrument for ROH-110, not a gate.
+# Repro-loop harness for intermittent test-process failures. A measuring instrument, not a gate.
 #
-# The abort under investigation is intermittent (~50% of runs) and does not reproduce on the
-# dev machine, so every conclusion needs several samples. Getting those one-PR-at-a-time is
-# what made the first investigation expensive: each PR spends five jobs, including a 50-minute
-# app build and a Supabase step that has rate-limited before.
+# Use it when a crash or flake shows up on CI at some rate and you need to compare rates between
+# configurations. Buying those samples one-PR-at-a-time is expensive — each PR spends five jobs,
+# including a 50-minute app build and a Supabase step that has rate-limited before.
 #
-# This workflow triggers ONLY on `probe/**` branches, which `ci.yml` ignores (it runs on
-# pull_request and pushes to main). So `git push origin HEAD:probe/whatever` costs one macOS
-# job and nothing else. The job builds the tests once and then runs the test process N times,
-# reporting a pass/fail tally — N samples for the price of one job.
+# This triggers ONLY on `probe/**` branches, which `ci.yml` ignores (it runs on pull_request and
+# pushes to main). So `git push origin HEAD:probe/whatever` costs one macOS job and nothing else.
+# The job builds the tests once, then runs the test process N times and reports a pass/fail
+# tally — N samples for the price of one job. Roughly 20 samples in 4 minutes.
 #
 # It also dumps any crash reports macOS wrote. `SWIFT_BACKTRACE` refuses to run on the runner
 # ("backtrace-on-crash is not supported for privileged executables"), but ReportCrash still
 # writes a fully symbolicated per-thread backtrace to ~/Library/Logs/DiagnosticReports for a
-# SIGABRT. That is the stack trace the first investigation could not get.
+# SIGABRT. That is how ROH-110 was finally located, after two sessions without a stack trace.
 #
-# CAVEAT, and it is the whole reason to read the calibration line in the summary: iterations
-# here share one VM, so they are not the same kind of sample as independent refs. The tally is
-# only trustworthy as an instrument if it reproduces the known base rate. Judge it against the
-# `--no-parallel` control, not against an assumption.
+# CAVEAT: iterations share one VM, so they are NOT equivalent to independent refs. Calibrate
+# against a known base rate before trusting a tally, and confirm anything load-bearing with real
+# CI runs on separate refs.
 
 on:
   push:

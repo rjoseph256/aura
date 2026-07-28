@@ -14,9 +14,12 @@ public struct CompositeGemProvider: GemProviding {
     /// `timeout` is `nil`-defaulted rather than given a default closure literal, and the real
     /// one is built here. An `async` closure written as a *default argument* is emitted into the
     /// caller's module, and on this toolchain that copy is mis-sized: freeing its frame trips
-    /// `swift_task_dealloc`'s LIFO check and aborts the process. See ROH-110 — the same shape in
-    /// `GroupRideSession` was killing the test process, and this racing-a-timeout-then-cancelAll
-    /// path is the identical pattern.
+    /// `swift_task_dealloc`'s LIFO check and aborts the process. See ROH-110.
+    ///
+    /// The measured crash was `GroupRideSession`'s equivalent seam; this one is the same shape by
+    /// inspection — cross-module default argument, raced in a group, then `cancelAll` — and was
+    /// fixed on that basis rather than after being caught in the act. `RideHUDView` builds this
+    /// without a `timeout:`, so the app module was emitting the bad copy for every ride.
     public init(local: [any GemProviding], live: any GemProviding, dedupeMeters: Double = 25,
                 timeout: (@Sendable () async -> Void)? = nil) {
         self.local = local

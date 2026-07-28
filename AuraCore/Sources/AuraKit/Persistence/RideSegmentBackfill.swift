@@ -28,9 +28,9 @@ import AuraCore
 /// **It is NOT a `@ModelActor`, and that is now just a simplification.** It was one, and it was
 /// rewritten to this shape while chasing ROH-110, on the theory that the detached-to-actor hop
 /// caused the task-allocator abort on the macOS 15 CI runner. That theory was wrong — the abort
-/// came from `withTimeout` leaking an uncancelled timer task, and `main` kept failing after the
-/// actor was gone. The plain `ModelContext` is kept because owning a context outright is simpler
-/// than an actor here, not because the actor was dangerous.
+/// came from an `async` closure passed as a default argument (see `GroupRideSession.sleep`), and
+/// `main` kept failing after the actor was gone. The plain `ModelContext` is kept because owning
+/// a context outright is simpler than an actor here, not because the actor was dangerous.
 ///
 /// **What it guarantees.** It fills a nil column and nothing else, re-checking that the column
 /// is still nil immediately before writing, and it saves one row at a time so a row is dirty

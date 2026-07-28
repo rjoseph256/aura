@@ -30,9 +30,10 @@ jobs:
       # NSManagedObjectContext.performAndWait when SwiftData-backed suites run concurrently.
       # Serial execution is fast here (~0.5s for the whole suite) and deterministic.
       # The ROH-110 quarantine (`--skip RideSegmentBackfill`) is gone: that suite was never the
-      # cause. The abort came from `withTimeout` leaking an uncancelled timer task, which woke up
-      # mid-run and killed the process; the backfill suite only correlated because it is the
-      # slowest suite and so kept the run alive long enough for the leaked timer to fire.
+      # cause. The abort came from an `async` closure passed as a DEFAULT ARGUMENT, which is
+      # emitted into the caller's module and mis-sized there, so freeing its frame trips
+      # swift_task_dealloc. Measured 20/20 aborts before that fix and 0/20 after, with this suite
+      # running both times. See ROH-110 and the note on `GroupRideSession.sleep`.
       - name: Run AuraCore + AuraKit tests
         working-directory: AuraCore
         run: swift test --no-parallel

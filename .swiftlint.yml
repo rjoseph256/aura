@@ -39,3 +39,16 @@ file_length:
   # ceiling; splitting large views is deferred to the design-system sub-project.
   warning: 500
   error: 1200
+
+custom_rules:
+  async_closure_default_argument:
+    # ROH-110. A closure default argument is emitted into the CALLER's module. For an `async`
+    # closure, that copy is mis-sized on this toolchain, so freeing its frame trips
+    # swift_task_dealloc's LIFO check and aborts the process — it killed the test process ~30% of
+    # runs, and the same shape ships in the group-ride end and live-gem paths.
+    # Write `param: (@Sendable () async -> Void)? = nil` and build the real closure in the
+    # initializer body instead.
+    name: "async closure as a default argument"
+    regex: 'async(\s+throws)?\s*->\s*[^=,)]+=\s*\{'
+    message: "An async closure default argument is emitted in the caller's module and mis-sized there (ROH-110). Default it to nil and build the closure inside this module."
+    severity: error

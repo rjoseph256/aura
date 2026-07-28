@@ -17,9 +17,11 @@ import AuraCore
 /// Every case here calls `run` synchronously. That is deliberate: see the note on the type.
 ///
 /// This suite was quarantined for ROH-110 and is not any more. It was never at fault: the abort
-/// came from a leaked timer task in `withTimeout`, and this suite only correlated with it by
-/// being the slowest one in the run — long enough for the leaked timer to wake up before the
-/// process exited. Turning it off shortened the run and hid the crash.
+/// came from an `async` closure passed as a default argument (see `GroupRideSession.sleep`).
+/// This suite correlated with it only by being the slowest one in the run, which is the leading
+/// explanation for why turning it off looked like a cure — a shorter run gave the mis-sized
+/// frame fewer chances to be freed before the process exited. That last step is inference; the
+/// cause and the fix are measured.
 @MainActor
 @Suite("Ride segment backfill", .swiftDataSerialized)
 struct RideSegmentBackfillTests {
