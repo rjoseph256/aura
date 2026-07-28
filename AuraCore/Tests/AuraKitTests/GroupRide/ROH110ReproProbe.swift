@@ -3,16 +3,17 @@ import Foundation
 
 /// PROBE ONLY (ROH-110) — delete with the probe branch.
 ///
-/// Isolates the hypothesis that cancelling a child task parked in `Task.sleep` is what aborts
-/// libswift_Concurrency's task allocator. Touches no Aura code: if this aborts, the defect is in
-/// the toolchain/OS pair and `withTimeout` merely happened to be the caller that hit it.
+/// Round 1 refuted "cancelling a child parked in `Task.sleep` aborts": 12,000 cancellations,
+/// 0/20 processes died. Round 2 adds the two things the real `withTimeout` has and that repro
+/// did not — a `@MainActor` caller (so the child closures are `@isolated(any)`, which is the
+/// thunk named in the crash frames) and a generic element type.
 @Suite("ROH-110 repro probe")
 struct ROH110ReproProbe {
     struct Boom: Error {}
 
-    /// A: cancel a child parked in a real `Task.sleep`, via a task group. This is exactly the
-    /// shape the structured `withTimeout` produces on the operation-throws path.
-    @Test func cancelChildParkedInRealSleep() async {
+    /// D: MainActor caller, NON-generic element type.
+    @MainActor
+    @Test func mainActorNonGeneric() async {
         for _ in 0..<200 {
             try? await withThrowingTaskGroup(of: Void.self) { group in
                 group.addTask { try await Task.sleep(for: .seconds(4)) }
@@ -23,27 +24,41 @@ struct ROH110ReproProbe {
         }
     }
 
-    /// B: same, but the sleep is reached through an escaping async closure — the `sleep` seam's
-    /// shape. Distinguishes "cancelling a sleep" from "cancelling a sleep behind a closure".
-    @Test func cancelChildParkedInSleepBehindEscapingClosure() async {
-        let sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    /// E: MainActor caller, GENERIC element type — `withTimeout`'s exact shape, with the
+    /// injected escaping async sleep seam, but no Aura types.
+    @MainActor
+    @Test func mainActorGeneric() async {
         for _ in 0..<200 {
-            try? await withThrowingTaskGroup(of: Void.self) { group in
-                group.addTask { try await sleep(.seconds(4)) }
-                group.addTask { throw Boom() }
-                defer { group.cancelAll() }
-                _ = try await group.next()
-            }
+            _ = try? await race(.seconds(4),
+                                sleep: { try await Task.sleep(for: $0) },
+                                operation: { () async throws -> Int in throw Boom() })
         }
     }
 
-    /// C: the unstructured shape the original `withTimeout` used — cancel a standalone `Task`
-    /// parked in a sleep, then let the caller unwind.
-    @Test func cancelUnstructuredTaskParkedInSleep() async {
+    /// F: same generic shape but called from a NON-isolated context, to separate "generic" from
+    /// "isolated" as the culprit.
+    @Test func nonisolatedGeneric() async {
         for _ in 0..<200 {
-            let t = Task { try await Task.sleep(for: .seconds(4)) }
-            t.cancel()
-            _ = try? await t.value
+            _ = try? await race(.seconds(4),
+                                sleep: { try await Task.sleep(for: $0) },
+                                operation: { () async throws -> Int in throw Boom() })
         }
+    }
+}
+
+private func race<T: Sendable>(
+    _ duration: Duration,
+    sleep: @Sendable @escaping (Duration) async throws -> Void,
+    operation: @Sendable @escaping () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await operation() }
+        group.addTask {
+            try await sleep(duration)
+            throw ROH110ReproProbe.Boom()
+        }
+        defer { group.cancelAll() }
+        guard let first = try await group.next() else { throw ROH110ReproProbe.Boom() }
+        return first
     }
 }
