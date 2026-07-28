@@ -29,32 +29,15 @@ jobs:
       # default parallel execution intermittently SIGABRTs inside CoreData
       # NSManagedObjectContext.performAndWait when SwiftData-backed suites run concurrently.
       # Serial execution is fast here (~0.5s for the whole suite) and deterministic.
-      # --skip RideSegmentBackfill: QUARANTINED, see ROH-110. That suite is implicated in an
-      # intermittent abort inside libswift_Concurrency's task allocator ("freed pointer was not
-      # the last allocation", signal 6) which kills the whole test process, so the failure lands
-      # in whatever suite is printing at the time. Disabling it is the only configuration
-      # measured green across independent runs (4/4, vs ~50% failure with it on). It still runs
-      # in the non-blocking job below — this hides nothing, it just stops one suite taking the
-      # gate down. Remove the skip when ROH-110 is fixed.
+      # The ROH-110 quarantine (`--skip RideSegmentBackfill`) is gone: that suite was never the
+      # cause. The abort came from an `async` closure passed as a DEFAULT ARGUMENT, which is
+      # duplicated into every referencing module and can end up linked with a frame-size record
+      # from one copy and a body from another — see the note on `GroupRideSession.sleep`.
+      # Measured 20/20 aborts before that fix and 0/20 after (x4 runners), with this suite
+      # running both times.
       - name: Run AuraCore + AuraKit tests
         working-directory: AuraCore
-        run: swift test --no-parallel --skip RideSegmentBackfill
-
-  # Non-blocking on purpose (ROH-110). The suite is worth running and worth looking at; it is
-  # not worth blocking every branch on a runtime abort nobody has root-caused yet. If this job
-  # is red, read it — do not assume it is the known flake.
-  quarantined-tests:
-    name: Backfill suite (quarantined, non-blocking)
-    runs-on: macos-15
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-      - name: Run the quarantined backfill suite
-        working-directory: AuraCore
-        run: swift test --no-parallel --filter RideSegmentBackfill
+        run: swift test --no-parallel
 
   app-build:
     # Keep the original display name — branch protection / required checks key on it.

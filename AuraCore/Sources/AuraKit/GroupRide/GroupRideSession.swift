@@ -61,6 +61,26 @@ public final class GroupRideSession {
     private let endTimeout: Duration
     /// The timeout clock — injected so tests race the backend call against a controllable sleep
     /// instead of a real one.
+    ///
+    /// **`nil`-defaulted rather than carrying a default closure literal (ROH-110).** This is the
+    /// canonical note; other sites point here.
+    ///
+    /// A closure written as a *default argument* is emitted as a `weak private external`
+    /// (linkonce-ODR) symbol into every module that references the declaration — including the
+    /// module that declares it. For an `async` closure that means two things are duplicated: the
+    /// body, and the async function pointer that records how large a frame the body needs. Those
+    /// copies can disagree. Here they did: 144 bytes in `AuraKit.build/GroupRideSession.swift.o`,
+    /// 128 in each of the five test objects that called this initializer.
+    ///
+    /// Duplication alone is harmless — the linker keeps one of each and normally keeps a matched
+    /// pair. The crash needs it to keep the size record from one object and the body from
+    /// another, which is what happened in the linked test bundle: the surviving pointer said 128
+    /// while the surviving body was AuraKit's 144-byte variant. The caller then allocates 128
+    /// bytes for a frame the body writes 144 into, overrunning the task allocator's bump slab, so
+    /// the next `swift_task_dealloc` fails its LIFO check and aborts the process with
+    /// "freed pointer was not the last allocation".
+    ///
+    /// Building the closure in the initializer body emits it exactly once, in one module.
     private let sleep: @Sendable (Duration) async throws -> Void
     private var rideSession: RideSession?
     private var currentLifecycle: RideLifecycle = .foreground
@@ -102,13 +122,13 @@ public final class GroupRideSession {
     public init(backend: any GroupRideBackend, transport: any RideSessionTransport,
                 displayNameProvider: @escaping @Sendable () -> String, cadence: LiveShareCadence = .init(),
                 endTimeout: Duration = .seconds(4),
-                sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
+                sleep: (@Sendable (Duration) async throws -> Void)? = nil) {
         self.backend = backend
         self.transport = transport
         self.displayNameProvider = displayNameProvider
         self.cadence = cadence
         self.endTimeout = endTimeout
-        self.sleep = sleep
+        self.sleep = sleep ?? { try await Task.sleep(for: $0) }
     }
 
     public func create(route inputRoute: Route) async {

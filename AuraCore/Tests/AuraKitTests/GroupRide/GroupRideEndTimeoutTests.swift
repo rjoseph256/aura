@@ -6,8 +6,8 @@ import AuraCore
 @MainActor
 struct WithTimeoutTests {
     @Test func operationWinsReturnsValue() async throws {
-        // Instant operation beats the sleep → operation value returned. The sleep is bounded
-        // (not an indefinite park) so the un-cancelled success-path timer reaps promptly.
+        // Instant operation beats the sleep → operation value returned. The losing sleep is
+        // cancelled and awaited by the group before the call returns (ROH-110).
         let value = try await withTimeout(.seconds(1), sleep: { _ in
             try await Task.sleep(for: .milliseconds(200))
         }, operation: { 42 })
@@ -21,6 +21,58 @@ struct WithTimeoutTests {
                 try await Task.sleep(for: .seconds(1000))
             })
         }
+    }
+
+    /// The timer fires, and THEN the operation succeeds anyway. Its value must win.
+    ///
+    /// This is the rider-facing case: the host taps End, `endRide` is in flight when the 4s
+    /// timeout elapses, and the call completes server-side during the cancellation window.
+    /// Resolving the race by whichever child finished first would throw `TimeoutError` here, and
+    /// `GroupRideSession` would latch `endFailed`/`pendingEnd` — a "Couldn't end — Retry" chip
+    /// over a ride that really did end. Caught in adversarial review of ROH-110, where an earlier
+    /// version of this function did exactly that.
+    @Test func aSuccessLandingAfterTheTimeoutStillWins() async throws {
+        let value = try await withTimeout(.seconds(1), sleep: { _ in }, operation: {
+            () async throws -> Int in
+            // Deaf to cancellation on purpose (`Task.yield()` does not throw), so it finishes
+            // well after the instant timer has already elapsed.
+            let deadline = ContinuousClock.now.advanced(by: .milliseconds(100))
+            while ContinuousClock.now < deadline { await Task.yield() }
+            return 7
+        })
+        #expect(value == 7, "a real success is not a timeout")
+    }
+
+    /// Same shape, but the late outcome is a real error: it must reach the caller rather than
+    /// being flattened to `TimeoutError`. `GroupRideSession` routes `GroupRideError.notHost` to
+    /// its success arm, so masking it would turn "already ended" into a false failure.
+    @Test func aRealErrorLandingAfterTheTimeoutIsNotMaskedAsATimeout() async {
+        await #expect(throws: SampleError.self) {
+            try await withTimeout(.seconds(1), sleep: { _ in }, operation: {
+                () async throws -> Int in
+                let deadline = ContinuousClock.now.advanced(by: .milliseconds(100))
+                while ContinuousClock.now < deadline { await Task.yield() }
+                throw SampleError()
+            })
+        }
+    }
+
+    /// Outer cancellation must also resolve to the operation's own outcome, not to whichever
+    /// child unwound first. The timeout leg swallows its own cancellation for exactly this
+    /// reason — a cancelled timer is not an elapsed one.
+    @Test func outerCancellationStillReportsTheOperationsOwnOutcome() async throws {
+        let task = Task { () async throws -> Int in
+            try await withTimeout(.seconds(10), sleep: { try await Task.sleep(for: $0) },
+                                  operation: {
+                // Deaf to cancellation, so it has a real answer to report after the cancel.
+                let deadline = ContinuousClock.now.advanced(by: .milliseconds(100))
+                while ContinuousClock.now < deadline { await Task.yield() }
+                return 7
+            })
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        task.cancel()
+        #expect(try await task.value == 7)
     }
 
     struct SampleError: Error, Equatable {}
@@ -71,8 +123,6 @@ final class SleepControl: @unchecked Sendable {
     func sleep(_ duration: Duration) async throws {
         if fireImmediately { return }
         // Not firing: behave like a real timeout of `duration` (the fast operation beats it).
-        // Bounded (not an indefinite park) so `withTimeout`'s un-cancelled success-path timer
-        // no-ops and reaps quickly instead of lingering.
         try await Task.sleep(for: duration)
     }
 }
@@ -88,8 +138,11 @@ struct GroupRideEndTimeoutTests {
     /// A host session already advanced to `.riding`, with the given seams injected.
     private func ridingHost(
         endTimeout: Duration = .seconds(4),
-        sleep: @escaping @Sendable (Duration) async throws -> Void = { _ in }
+        // nil-defaulted, not `= { _ in }`: an async closure default argument is emitted in the
+        // caller's module and mis-sized there (ROH-110).
+        sleep: (@Sendable (Duration) async throws -> Void)? = nil
     ) async throws -> (GroupRideSession, InMemoryGroupRideBackend) {
+        let sleep = sleep ?? { _ in }
         let backend = InMemoryGroupRideBackend()
         try await backend.signIn(idToken: "t", nonce: "n", displayName: "Mike")
         let s = GroupRideSession(backend: backend, transport: InMemoryRideSessionTransport(),

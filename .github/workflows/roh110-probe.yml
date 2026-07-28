@@ -1,0 +1,118 @@
+name: ROH-110 probe
+
+# Repro-loop harness for intermittent test-process failures. A measuring instrument, not a gate.
+#
+# Use it when a crash or flake shows up on CI at some rate and you need to compare rates between
+# configurations. Buying those samples one-PR-at-a-time is expensive — each PR spends five jobs,
+# including a 50-minute app build and a Supabase step that has rate-limited before.
+#
+# This triggers ONLY on `probe/**` branches, which `ci.yml` ignores (it runs on pull_request and
+# pushes to main). So `git push origin HEAD:probe/whatever` costs one macOS job and nothing else.
+# The job builds the tests once, then runs the test process N times and reports a pass/fail
+# tally — N samples for the price of one job. Roughly 20 samples in 4 minutes.
+#
+# It also dumps any crash reports macOS wrote. `SWIFT_BACKTRACE` refuses to run on the runner
+# ("backtrace-on-crash is not supported for privileged executables"), but ReportCrash still
+# writes a fully symbolicated per-thread backtrace to ~/Library/Logs/DiagnosticReports for a
+# SIGABRT. That is how ROH-110 was finally located, after two sessions without a stack trace.
+#
+# CAVEAT: iterations share one VM, so they are NOT equivalent to independent refs. Calibrate
+# against a known base rate before trusting a tally, and confirm anything load-bearing with real
+# CI runs on separate refs.
+
+on:
+  push:
+    branches: ['probe/**']
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: 'Test-process runs per configuration'
+        default: '20'
+      args:
+        description: 'Extra args passed to every swift test invocation'
+        default: ''
+
+concurrency:
+  group: roh110-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: ROH-110 repro loop
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      ITERATIONS: ${{ github.event.inputs.iterations || '20' }}
+      EXTRA_ARGS: ${{ github.event.inputs.args || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Show toolchain and image
+        run: |
+          swift --version
+          sw_vers
+      # ReportCrash is what writes the backtrace. It is normally running, but a runner image
+      # that has it unloaded would cost a whole round trip to discover, so make it explicit.
+      - name: Make sure crash reporting is on
+        run: |
+          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.ReportCrash.Root.plist 2>/dev/null || true
+          launchctl load -w /System/Library/LaunchAgents/com.apple.ReportCrash.plist 2>/dev/null || true
+          mkdir -p ~/Library/Logs/DiagnosticReports
+          launchctl list 2>/dev/null | grep -i reportcrash || echo "ReportCrash not listed (reports may still be written)"
+
+      - name: Build tests once
+        working-directory: AuraCore
+        run: swift build --build-tests
+
+      # Each iteration is a fresh test PROCESS (the abort kills the process, so that is the
+      # unit that matters); --skip-build keeps it to a few seconds.
+      - name: Repro loop
+        id: loop
+        working-directory: AuraCore
+        run: |
+          set +e
+          fails=0
+          for i in $(seq 1 "$ITERATIONS"); do
+            out=$(swift test --no-parallel --skip-build $EXTRA_ARGS 2>&1)
+            status=$?
+            if [ $status -ne 0 ]; then
+              fails=$((fails + 1))
+              echo "--- iteration $i FAILED (exit $status) ---"
+              # The abort line and whatever was printing when it landed.
+              echo "$out" | grep -vF 'NSManagedObjectModel version checksum' | tail -6
+            fi
+          done
+          echo "=============================================="
+          echo "RESULT: $fails / $ITERATIONS iterations failed"
+          echo "=============================================="
+          echo "fails=$fails" >> "$GITHUB_OUTPUT"
+          # Fail the job when any iteration aborted, so the run's status matches the tally.
+          # Exiting 0 regardless would put a green check on a 20/20-failed probe, which is how
+          # someone later reads the opposite of what happened. A red probe branch costs nothing.
+          [ "$fails" -eq 0 ]
+
+      # The prize: a symbolicated backtrace of every thread at the moment of the abort.
+      - name: Dump crash reports
+        if: always()
+        run: |
+          dir=~/Library/Logs/DiagnosticReports
+          if [ ! -d "$dir" ] || [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
+            echo "No crash reports written."
+            exit 0
+          fi
+          ls -la "$dir"
+          # -maxdepth 1 -type f: the directory has a `Retired` subdirectory, and cat on it
+          # fails the step under `set -e` before a single report is printed.
+          find "$dir" -maxdepth 1 -type f -name '*.ips' | while read -r f; do
+            echo "################ $f"
+            cat "$f"
+            echo
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "ROH-110 probe: ${{ steps.loop.outputs.fails }} / $ITERATIONS test processes aborted." >> "$GITHUB_STEP_SUMMARY"
+          echo "Extra args: '${EXTRA_ARGS:-none}'" >> "$GITHUB_STEP_SUMMARY"

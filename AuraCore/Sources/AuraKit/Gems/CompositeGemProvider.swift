@@ -11,12 +11,20 @@ public struct CompositeGemProvider: GemProviding {
     private let dedupeMeters: Double
     private let timeout: @Sendable () async -> Void
 
+    /// `timeout` is `nil`-defaulted rather than given a default closure literal, and the real one
+    /// is built here — see the note on `GroupRideSession.sleep` for why (ROH-110).
+    ///
+    /// **Prophylactic, not a diagnosed crash.** The measured abort was `GroupRideSession`'s
+    /// equivalent seam. This one has the same shape — an `async` default-argument closure, raced
+    /// in a group, then `cancelAll` — but its duplicated copies all measured the same size (112
+    /// bytes in all three objects), so it was not miscompiled. It is changed anyway because
+    /// nothing makes the sizes agree on purpose; that they matched here is luck.
     public init(local: [any GemProviding], live: any GemProviding, dedupeMeters: Double = 25,
-                timeout: @escaping @Sendable () async -> Void = { try? await Task.sleep(for: .seconds(2)) }) {
+                timeout: (@Sendable () async -> Void)? = nil) {
         self.local = local
         self.live = live
         self.dedupeMeters = dedupeMeters
-        self.timeout = timeout
+        self.timeout = timeout ?? { try? await Task.sleep(for: .seconds(2)) }
     }
 
     public func gems(near coordinate: Coordinate) async -> [Gem] {

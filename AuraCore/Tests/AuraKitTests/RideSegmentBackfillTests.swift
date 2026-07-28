@@ -16,13 +16,15 @@ import AuraCore
 ///
 /// Every case here calls `run` synchronously. That is deliberate: see the note on the type.
 ///
-/// **QUARANTINED — ROH-110.** CI skips this suite in the gating job and runs it in a separate
-/// non-blocking one. It is implicated in an intermittent abort inside libswift_Concurrency's
-/// task allocator that kills the whole test process; disabling it is the only configuration
-/// measured green across independent runs. Nothing here is known to be wrong — the tests pass,
-/// including under mutation — and the root cause is not understood. Do not treat the quarantine
-/// as a verdict on these tests, and do not add SwiftData suites to the gating job assuming this
-/// is solved.
+/// This suite was quarantined for ROH-110 and is not any more. It was never at fault: the abort
+/// came from an `async` closure passed as a default argument (see `GroupRideSession.sleep`),
+/// reached through the group-ride end path, and nothing here goes near it.
+///
+/// Why disabling this suite once measured green is still unexplained, and is most likely noise:
+/// those were 4/4 and 3/4 samples against a ~30% per-process failure rate, which is far too few
+/// to mean much. The tempting story — that this suite is slow enough to hold the run open — does
+/// not survive measurement either: at 0.135s it is the fifth-slowest suite here, and
+/// `RideSessionCoordinatorPauseTests` takes eleven times longer.
 @MainActor
 @Suite("Ride segment backfill", .swiftDataSerialized)
 struct RideSegmentBackfillTests {
@@ -219,12 +221,11 @@ struct RideSegmentBackfillTests {
     /// `isCancelled` is injected rather than read from an ambient `Task`, so this is exact: no
     /// racing a `cancel()` against the first rows, and no task machinery in the test at all.
     ///
-    /// **Deliberately no `Task` here.** This test used to spawn a detached task and cancel it.
-    /// That shape — a detached task calling into what was then a `@ModelActor` — aborts inside
-    /// libswift_Concurrency's task allocator on the macOS 15 CI runner and kills the whole test
-    /// process, so the failure surfaced in whatever unrelated suite happened to be printing. It
-    /// never reproduced locally on macOS 26. See the note on `RideSegmentBackfill` for how it was
-    /// isolated and why the type is no longer an actor.
+    /// **No `Task` here, and none needed.** This test used to spawn a detached task and cancel
+    /// it. Injecting `isCancelled` is simply the better test — it removes a race rather than
+    /// managing one. (It was rewritten under the belief that the detached task caused the
+    /// ROH-110 abort; it did not, see the note on `RideSegmentBackfill`. The shape is kept on
+    /// its own merits.)
     @Test func cancellationStopsTheSweep() throws {
         let store = try RideStore.inMemory()
         let track = try JSONEncoder().encode([pt(40.0, 0), pt(40.1, 10)])
