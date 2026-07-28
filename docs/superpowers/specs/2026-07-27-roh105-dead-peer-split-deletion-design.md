@@ -48,12 +48,15 @@ maps do different jobs: `RideMapView` strokes the recorded track, `navigateMapVi
 planned route.
 
 *Revision 2 narrows that sentence.* The reason the dead path is unreachable is itself a product
-gap: `GroupRideEntry` has two cases and both carry a `Route` (`AppRoute.swift:47-50`), created
-only from the route preview (`RoutePreviewView.swift:250`), and only `GroupNavigateContainer`
-hosts a `GroupRideSession` (`GroupNavigateContainer.swift:14-21`). **You cannot ride with a crew
-without first picking a destination.** "Let's go ride around for an hour" is not supported. That
-gap is recorded nowhere except an inline aside at `RideHUDView.swift:33`. This change deletes the
-other artifact of that intent, so the gap needs its own issue before merge (see Follow-ups).
+gap. `GroupRideEntry.create` carries a `Route` (`AppRoute.swift:47-50`) and is built only from the
+route preview (`RoutePreviewView.swift:250`), and only `GroupNavigateContainer` hosts a
+`GroupRideSession` (`GroupNavigateContainer.swift:14-21`). **A host cannot start a crew ride
+without first picking a destination**, so "let's go ride around for an hour" is not supported.
+(`GroupRideEntry.join` carries a `JoinCode`, not a `Route`. A joiner picks nothing; the constraint
+binds the host. *Revision 2 corrects this: revision 1 claimed both cases carried a `Route`, which
+the enum refutes.*) That gap is recorded nowhere except an inline aside at `RideHUDView.swift:33`.
+This change deletes the other artifact of that intent, so the gap needs its own issue before merge
+(see Follow-ups).
 
 **The dead code was never a regression.** Reviewers walked all fifteen revisions that touched
 `RideMapView.swift`: `376e3f8` (2026-07-01, Wave 4 SP3) added the peer path speculatively, and
@@ -119,13 +122,35 @@ is inert for the same reason it was dead: nothing non-peer consumes `context.dat
 liveness comes from `@Observable` invalidation on `RideSessionCoordinator`/`RideRecorder`, not
 from the timeline clock.
 
-**The peer `#Preview` fixture moves rather than dies.** `grep -rn "RidePeer(" Aura/Sources`
-returns four lines, all inside this preview. It is the only artifact in the app sources that
-renders the hollow awaiting dot, the ghosted dropped dot, monogram disambiguation and declutter
-offsets together over a real map. `GroupNavigateContainer`'s preview supplies one `.moving` peer;
-`PeerDotView` has none. Group-ride UI is the designated flagship surface, so this fixture
-relocates to a `#Preview` on `PeerAnnotations`. `RideMapView`'s own preview keeps the synthetic
-track and drops the peers.
+**The peer `#Preview` is rebuilt on `PeerAnnotations`, not relocated.** *Revision 2 replaces this
+decision wholesale.* Revision 1 said the fixture "renders the hollow awaiting dot, the ghosted
+dropped dot, monogram disambiguation and declutter offsets together over a real map" and should
+therefore be preserved. Reviewers ran it against the real code. It renders **nothing**, and has
+since it was written:
+
+- `RidePeer.lastUpdate` defaults to nil (`PeerStatus.swift:21-23`) and the fixture never sets it,
+  so `PeerInterpolators.commit` skips every peer (`PeerInterpolator.swift:116`), `byID` stays
+  empty, `position(_:at:)` returns nil for all of them, and `frame` yields `PeerFrame(dots: [])`.
+  Measured during review: `visiblePeers` = 3, dots rendered = 0.
+- The dropped dot is doubly unreachable: "Sam" has `coordinate: nil`, and
+  `GroupMapDots.visiblePeers` filters on exactly that (`GroupMapDots.swift:20`).
+- Monogram widening never fires, because all four names have distinct initials.
+- Declutter never runs: with `project` returning nil, `canDeclutter` is false
+  (`PeerAnnotations.swift:98`) and every offset is `.zero`.
+
+The gap it was meant to cover is real even though it never covered it. `GroupNavigateContainer`'s
+preview supplies one `.moving` peer and works only because it routes through
+`session.ingest(.position(...))`, which sets `lastUpdate`; `PeerDotView` has no preview at all.
+Group-ride UI is the designated flagship surface, so the fixture is rebuilt on `PeerAnnotations`
+with `lastUpdate` set on every peer, a colliding name pair so widening fires, a dropped peer that
+keeps its last known fix (silence is what makes it dropped, not the loss of its position), and a
+deterministic stub projection so declutter runs.
+
+The `.awaiting` dot is dropped rather than staged. An awaiting peer has no coordinate by
+definition, and `visiblePeers` filters on coordinate, so it cannot reach a map at all. Forcing one
+would fake an unreachable state. `GroupRosterSheet`'s previews already cover that styling.
+
+`RideMapView`'s own preview keeps the synthetic track and drops the peers.
 
 `PeerAnnotations`, `PeerAnnotationDriver`, `ClusterDeclutter` and `GroupMapDots` keep their
 implementations. `NavigateHUDView` remains their consumer and renders peers exactly as today.
