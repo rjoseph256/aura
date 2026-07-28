@@ -46,7 +46,7 @@ jobs:
     env:
       ITERATIONS: ${{ github.event.inputs.iterations || '20' }}
       # PROBE BRANCH ONLY — revert to '' before this lands anywhere real.
-      EXTRA_ARGS: ${{ github.event.inputs.args || '--filter "ROH-110 repro probe"' }}
+      EXTRA_ARGS: ${{ github.event.inputs.args || '--filter ROH110ReproProbe' }}
     steps:
       - uses: actions/checkout@v4
       - uses: maxim-lobanov/setup-xcode@v1
