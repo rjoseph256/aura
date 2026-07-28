@@ -25,14 +25,12 @@ import AuraCore
 /// on a background thread. A `Task { }` started inside a SwiftUI `.task` would inherit MainActor
 /// isolation and run it on the main thread instead.
 ///
-/// **It is deliberately NOT a `@ModelActor`.** It was one, and that shape —
-/// `Task.detached { await someModelActor.method() }` — aborts inside libswift_Concurrency's task
-/// allocator ("freed pointer was not the last allocation") on the macOS 15 CI runner, killing the
-/// whole test process. Isolated by bisecting on CI over four probes: calls into the same actor
-/// from `async let` or from the caller's own task are fine; only the detached-to-actor hop fails,
-/// with or without cancellation, with or without a suspension inside the actor. Owning a plain
-/// `ModelContext` removes the custom serial executor from the picture, which is the only part of
-/// that shape we control.
+/// **It is NOT a `@ModelActor`, and that is now just a simplification.** It was one, and it was
+/// rewritten to this shape while chasing ROH-110, on the theory that the detached-to-actor hop
+/// caused the task-allocator abort on the macOS 15 CI runner. That theory was wrong — the abort
+/// came from `withTimeout` leaking an uncancelled timer task, and `main` kept failing after the
+/// actor was gone. The plain `ModelContext` is kept because owning a context outright is simpler
+/// than an actor here, not because the actor was dangerous.
 ///
 /// **What it guarantees.** It fills a nil column and nothing else, re-checking that the column
 /// is still nil immediately before writing, and it saves one row at a time so a row is dirty

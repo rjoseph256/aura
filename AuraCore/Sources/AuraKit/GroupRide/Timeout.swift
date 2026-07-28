@@ -20,6 +20,18 @@ struct TimeoutError: Error, Equatable {}
 /// unrelated code was running by then. In the test process — a ~4s run — those wakeups landed
 /// mid-suite and aborted it about 30% of the time, which is the bug ROH-110 was chasing through
 /// SwiftData for two sessions. The crash was never in SwiftData; the leaked timer was carrying it.
+/// PROBE (ROH-110): calls the injected escaping async closure from a NON-generic function.
+/// The crash frames point at `swift_task_dealloc` unwinding the timeout leg through a thunk
+/// typed `@isolated(any) @callee_guaranteed @async () -> (@out A)` — a generic reabstraction
+/// thunk, even though that leg returns Void. Testing whether the generic context is what
+/// mis-sizes the frame.
+private func awaitSleep(
+    _ duration: Duration,
+    _ sleep: @Sendable @escaping (Duration) async throws -> Void
+) async throws {
+    try await sleep(duration)
+}
+
 func withTimeout<T: Sendable>(
     _ duration: Duration,
     sleep: @Sendable @escaping (Duration) async throws -> Void,
@@ -28,7 +40,7 @@ func withTimeout<T: Sendable>(
     try await withThrowingTaskGroup(of: T.self) { group in
         group.addTask { try await operation() }
         group.addTask {
-            try await sleep(duration)
+            try await awaitSleep(duration, sleep)
             throw TimeoutError()
         }
         // Whichever finishes first decides the call; the other is cancelled and awaited by the

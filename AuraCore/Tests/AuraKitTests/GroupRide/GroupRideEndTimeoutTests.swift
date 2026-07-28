@@ -6,8 +6,8 @@ import AuraCore
 @MainActor
 struct WithTimeoutTests {
     @Test func operationWinsReturnsValue() async throws {
-        // Instant operation beats the sleep → operation value returned. The sleep is bounded
-        // (not an indefinite park) so the un-cancelled success-path timer reaps promptly.
+        // Instant operation beats the sleep → operation value returned. The losing sleep is
+        // cancelled and awaited by the group before the call returns (ROH-110).
         let value = try await withTimeout(.seconds(1), sleep: { _ in
             try await Task.sleep(for: .milliseconds(200))
         }, operation: { 42 })
@@ -71,8 +71,6 @@ final class SleepControl: @unchecked Sendable {
     func sleep(_ duration: Duration) async throws {
         if fireImmediately { return }
         // Not firing: behave like a real timeout of `duration` (the fast operation beats it).
-        // Bounded (not an indefinite park) so `withTimeout`'s un-cancelled success-path timer
-        // no-ops and reaps quickly instead of lingering.
         try await Task.sleep(for: duration)
     }
 }
