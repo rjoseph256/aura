@@ -60,7 +60,10 @@ public final class GroupRideSession {
     /// (surfaces `endFailed`). Injected (defaulted) so tests drive the timeout deterministically.
     private let endTimeout: Duration
     /// The timeout clock — injected so tests race the backend call against a controllable sleep
-    /// instead of a real one.
+    /// instead of a real one. `nil`-defaulted in `init` rather than carrying a default closure
+    /// literal: an `async` closure written as a default argument is emitted into the *caller's*
+    /// module, and on this toolchain that copy is mis-sized, so freeing its frame trips
+    /// `swift_task_dealloc`'s LIFO check and aborts the process (ROH-110).
     private let sleep: @Sendable (Duration) async throws -> Void
     private var rideSession: RideSession?
     private var currentLifecycle: RideLifecycle = .foreground
@@ -102,13 +105,13 @@ public final class GroupRideSession {
     public init(backend: any GroupRideBackend, transport: any RideSessionTransport,
                 displayNameProvider: @escaping @Sendable () -> String, cadence: LiveShareCadence = .init(),
                 endTimeout: Duration = .seconds(4),
-                sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
+                sleep: (@Sendable (Duration) async throws -> Void)? = nil) {
         self.backend = backend
         self.transport = transport
         self.displayNameProvider = displayNameProvider
         self.cadence = cadence
         self.endTimeout = endTimeout
-        self.sleep = sleep
+        self.sleep = sleep ?? { try await Task.sleep(for: $0) }
     }
 
     public func create(route inputRoute: Route) async {
