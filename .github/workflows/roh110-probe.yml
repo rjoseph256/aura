@@ -88,7 +88,10 @@ jobs:
           echo "RESULT: $fails / $ITERATIONS iterations failed"
           echo "=============================================="
           echo "fails=$fails" >> "$GITHUB_OUTPUT"
-          exit 0
+          # Fail the job when any iteration aborted, so the run's status matches the tally.
+          # Exiting 0 regardless would put a green check on a 20/20-failed probe, which is how
+          # someone later reads the opposite of what happened. A red probe branch costs nothing.
+          [ "$fails" -eq 0 ]
 
       # The prize: a symbolicated backtrace of every thread at the moment of the abort.
       - name: Dump crash reports

@@ -17,11 +17,14 @@ import AuraCore
 /// Every case here calls `run` synchronously. That is deliberate: see the note on the type.
 ///
 /// This suite was quarantined for ROH-110 and is not any more. It was never at fault: the abort
-/// came from an `async` closure passed as a default argument (see `GroupRideSession.sleep`).
-/// This suite correlated with it only by being the slowest one in the run, which is the leading
-/// explanation for why turning it off looked like a cure — a shorter run gave the mis-sized
-/// frame fewer chances to be freed before the process exited. That last step is inference; the
-/// cause and the fix are measured.
+/// came from an `async` closure passed as a default argument (see `GroupRideSession.sleep`),
+/// reached through the group-ride end path, and nothing here goes near it.
+///
+/// Why disabling this suite once measured green is still unexplained, and is most likely noise:
+/// those were 4/4 and 3/4 samples against a ~30% per-process failure rate, which is far too few
+/// to mean much. The tempting story — that this suite is slow enough to hold the run open — does
+/// not survive measurement either: at 0.135s it is the fifth-slowest suite here, and
+/// `RideSessionCoordinatorPauseTests` takes eleven times longer.
 @MainActor
 @Suite("Ride segment backfill", .swiftDataSerialized)
 struct RideSegmentBackfillTests {

@@ -11,15 +11,14 @@ public struct CompositeGemProvider: GemProviding {
     private let dedupeMeters: Double
     private let timeout: @Sendable () async -> Void
 
-    /// `timeout` is `nil`-defaulted rather than given a default closure literal, and the real
-    /// one is built here. An `async` closure written as a *default argument* is emitted into the
-    /// caller's module, and on this toolchain that copy is mis-sized: freeing its frame trips
-    /// `swift_task_dealloc`'s LIFO check and aborts the process. See ROH-110.
+    /// `timeout` is `nil`-defaulted rather than given a default closure literal, and the real one
+    /// is built here — see the note on `GroupRideSession.sleep` for why (ROH-110).
     ///
-    /// The measured crash was `GroupRideSession`'s equivalent seam; this one is the same shape by
-    /// inspection — cross-module default argument, raced in a group, then `cancelAll` — and was
-    /// fixed on that basis rather than after being caught in the act. `RideHUDView` builds this
-    /// without a `timeout:`, so the app module was emitting the bad copy for every ride.
+    /// **Prophylactic, not a diagnosed crash.** The measured abort was `GroupRideSession`'s
+    /// equivalent seam. This one has the same shape — an `async` default-argument closure, raced
+    /// in a group, then `cancelAll` — but its duplicated copies all measured the same size (112
+    /// bytes in all three objects), so it was not miscompiled. It is changed anyway because
+    /// nothing makes the sizes agree on purpose; that they matched here is luck.
     public init(local: [any GemProviding], live: any GemProviding, dedupeMeters: Double = 25,
                 timeout: (@Sendable () async -> Void)? = nil) {
         self.local = local

@@ -60,10 +60,27 @@ public final class GroupRideSession {
     /// (surfaces `endFailed`). Injected (defaulted) so tests drive the timeout deterministically.
     private let endTimeout: Duration
     /// The timeout clock — injected so tests race the backend call against a controllable sleep
-    /// instead of a real one. `nil`-defaulted in `init` rather than carrying a default closure
-    /// literal: an `async` closure written as a default argument is emitted into the *caller's*
-    /// module, and on this toolchain that copy is mis-sized, so freeing its frame trips
-    /// `swift_task_dealloc`'s LIFO check and aborts the process (ROH-110).
+    /// instead of a real one.
+    ///
+    /// **`nil`-defaulted rather than carrying a default closure literal (ROH-110).** This is the
+    /// canonical note; other sites point here.
+    ///
+    /// A closure written as a *default argument* is emitted as a `weak private external`
+    /// (linkonce-ODR) symbol into every module that references the declaration — including the
+    /// module that declares it. For an `async` closure that means two things are duplicated: the
+    /// body, and the async function pointer that records how large a frame the body needs. Those
+    /// copies can disagree. Here they did: 144 bytes in `AuraKit.build/GroupRideSession.swift.o`,
+    /// 128 in each of the five test objects that called this initializer.
+    ///
+    /// Duplication alone is harmless — the linker keeps one of each and normally keeps a matched
+    /// pair. The crash needs it to keep the size record from one object and the body from
+    /// another, which is what happened in the linked test bundle: the surviving pointer said 128
+    /// while the surviving body was AuraKit's 144-byte variant. The caller then allocates 128
+    /// bytes for a frame the body writes 144 into, overrunning the task allocator's bump slab, so
+    /// the next `swift_task_dealloc` fails its LIFO check and aborts the process with
+    /// "freed pointer was not the last allocation".
+    ///
+    /// Building the closure in the initializer body emits it exactly once, in one module.
     private let sleep: @Sendable (Duration) async throws -> Void
     private var rideSession: RideSession?
     private var currentLifecycle: RideLifecycle = .foreground

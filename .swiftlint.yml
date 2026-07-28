@@ -42,10 +42,12 @@ file_length:
 
 custom_rules:
   async_closure_default_argument:
-    # ROH-110. A closure default argument is emitted into the CALLER's module. For an `async`
-    # closure, that copy is mis-sized on this toolchain, so freeing its frame trips
-    # swift_task_dealloc's LIFO check and aborts the process — it killed the test process ~30% of
-    # runs, and the same shape ships in the group-ride end and live-gem paths.
+    # ROH-110. A closure default argument is duplicated (linkonce-ODR) into every module that
+    # references the declaration, including the defining one. For an `async` closure that
+    # duplicates both the body and the record of how big its frame is, those copies can disagree,
+    # and the linker can pair one copy's size with another copy's body. The caller then under-
+    # allocates the frame, overruns the task allocator's slab, and the next swift_task_dealloc
+    # aborts the process. It killed the test process ~30% of runs from a shipped code path.
     # Write `param: (@Sendable () async -> Void)? = nil` and build the real closure in the
     # initializer body instead.
     name: "async closure as a default argument"

@@ -57,6 +57,24 @@ struct WithTimeoutTests {
         }
     }
 
+    /// Outer cancellation must also resolve to the operation's own outcome, not to whichever
+    /// child unwound first. The timeout leg swallows its own cancellation for exactly this
+    /// reason — a cancelled timer is not an elapsed one.
+    @Test func outerCancellationStillReportsTheOperationsOwnOutcome() async throws {
+        let task = Task { () async throws -> Int in
+            try await withTimeout(.seconds(10), sleep: { try await Task.sleep(for: $0) },
+                                  operation: {
+                // Deaf to cancellation, so it has a real answer to report after the cancel.
+                let deadline = ContinuousClock.now.advanced(by: .milliseconds(100))
+                while ContinuousClock.now < deadline { await Task.yield() }
+                return 7
+            })
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        task.cancel()
+        #expect(try await task.value == 7)
+    }
+
     struct SampleError: Error, Equatable {}
 
     @Test func operationErrorPropagates() async {

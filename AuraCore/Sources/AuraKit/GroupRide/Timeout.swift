@@ -22,9 +22,10 @@ struct TimeoutError: Error, Equatable {}
 /// today is `Task.sleep`- or URLSession-based, and both honour cancellation.
 ///
 /// `sleep` is injected so tests drive the race deterministically. It has no default value on
-/// purpose — see the note on `GroupRideSession.sleep` (ROH-110): an `async` closure written as a
-/// *default argument* is emitted into the caller's module, and on this toolchain that copy is
-/// mis-sized, so freeing its frame aborts the process.
+/// purpose — an `async` closure written as a *default argument* is duplicated into every module
+/// that references the declaration, and those copies can disagree about the size of its async
+/// frame. See the note on `GroupRideSession.sleep` (ROH-110); that is the bug this whole file's
+/// history is about.
 ///
 /// **Structured on purpose.** The loser is cancelled by `cancelAll` and awaited on the way out,
 /// so nothing outlives the call. This replaced a version that raced two unstructured `Task`s and
@@ -44,7 +45,11 @@ func withTimeout<T: Sendable>(
     try await withThrowingTaskGroup(of: T?.self) { group in
         group.addTask { try await operation() }
         group.addTask {
-            try await sleep(duration)
+            // Swallowed on purpose: a timer CANCELLED by outer cancellation must not read as an
+            // elapsed one. Either way the operation's own outcome decides below, and
+            // `Task.isCancelled` is what tells the two apart there — so this leg never needs to
+            // throw, and must not, or it could beat a finished operation to `next()`.
+            try? await sleep(duration)
             return nil
         }
         defer { group.cancelAll() }
