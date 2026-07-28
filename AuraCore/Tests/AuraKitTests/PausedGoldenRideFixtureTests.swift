@@ -58,7 +58,7 @@ struct PausedGoldenRideFixtureTests {
         #expect(ShareCardContent(ride: ride, units: .metric).routeSegments.count == 2)
 
         // Live/summary ribbon: no piece spans the gap.
-        #expect(TrackRibbon.pieces(segments: ride.segments, splitAtMeters: nil).count == 2)
+        #expect(TrackRibbon.pieces(segments: ride.segments).count == 2)
 
         // HealthKit route flattens deliberately (spec: pause events out of scope).
         #expect(WorkoutData(from: ride).route.count == PausedGoldenRideFixture.expectedPointCount)

@@ -24,7 +24,7 @@ struct RideMapView: View {
     @Binding var viewport: Viewport
 
     private var ribbonPieces: [TrackRibbon.Piece] {
-        TrackRibbon.pieces(segments: segments, splitAtMeters: nil)
+        TrackRibbon.pieces(segments: segments)
     }
 
     private var detourRouteCoordinates: [CLLocationCoordinate2D] {

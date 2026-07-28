@@ -501,7 +501,7 @@ order: HealthKit, turn haptics, and the home and lock-screen widgets.
     D10); host-end dissolves the crew layer but solo nav continues (D9). One new DB object
     (`ride_roster` RPC, migration 0016, members-only). The route already round-trips in the
     `rides` row (no route-vend migration). Editable, gated crew display name. Pure AuraCore
-    helpers (PeerBearing, PeerDistance, DisplayName, GroupRosterViewData, RouteSplit); an
+    helpers (PeerBearing, PeerDistance, DisplayName, GroupRosterViewData); an
     `@Observable` `GroupRideSession` owner in AuraKit that owns the live event loop
     (names/toasts/dissolve) + a push-injected clock; the crew layer composed into
     `NavigateHUDView` (solo path unchanged). Local gates green: AuraCore 212 tests, app build,
