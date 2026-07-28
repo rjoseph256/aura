@@ -102,9 +102,12 @@ jobs:
             exit 0
           fi
           ls -la "$dir"
-          for f in "$dir"/*; do
+          # -maxdepth 1 -type f: the directory has a `Retired` subdirectory, and cat on it
+          # fails the step under `set -e` before a single report is printed.
+          find "$dir" -maxdepth 1 -type f -name '*.ips' | while read -r f; do
             echo "################ $f"
             cat "$f"
+            echo
           done
 
       - name: Summary
