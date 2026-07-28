@@ -1,7 +1,8 @@
 import Foundation
 
-/// Selects which peers get a dot on the group-ride map — the one home for that rule, since
-/// both call sites (`NavigateHUDView` and `RideMapView`) are in the untestable app target.
+/// Selects which peers get a dot on the group-ride map — the one home for that rule, since its
+/// only call site (`NavigateHUDView`) is in the untestable app target. `RideMapView` was a
+/// second call site until ROH-105 removed its dead peer path.
 ///
 /// The rider is already drawn by Mapbox's location puck, so their own entry must be
 /// excluded: the annotations set `allowOverlapWithPuck(true)`, so a self dot stacks a

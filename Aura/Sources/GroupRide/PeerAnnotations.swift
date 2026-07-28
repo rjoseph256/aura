@@ -4,7 +4,8 @@ import AuraCore
 
 /// The live peer dots for a group ride: smooth interpolation (ROH-69) + distinct identity /
 /// heading (ROH-72). A thin MapContent fragment — every per-frame decision is resolved into
-/// `frame` by `PeerAnnotationDriver`, so this only rebuilds ≤7 annotations. Shared by both hosts.
+/// `frame` by `PeerAnnotationDriver`, so this only rebuilds ≤7 annotations. `NavigateHUDView`
+/// is the only host; `RideMapView` carried a second, dead copy until ROH-105.
 struct PeerAnnotations: MapContent {
     let frame: PeerFrame
 
@@ -147,4 +148,51 @@ final class PeerAnnotationDriver {
         let t = now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2.2) / 1.1
         return 1 - abs(t - 1)   // 0 → 1 → 0 over 2.2 s
     }
+}
+
+/// The peer-dot states that can actually reach the map, over a real one. Rebuilt in ROH-105:
+/// the fixture this replaces (on `RideMapView`) set no `lastUpdate`, so the interpolator
+/// skipped every peer and it rendered an empty map from the day it was written.
+///
+/// Covers riding, stopped and dropped styling, the heading pointer, the liveness pulse,
+/// monogram widening (Mara / Marco collide on "M"), and declutter (they also sit ~14pt apart,
+/// inside the 26pt enter radius). The `.awaiting` dot is deliberately absent: an awaiting peer
+/// has no coordinate by definition, `GroupMapDots.visiblePeers` filters on exactly that, so it
+/// can never appear here. Its styling is covered by `GroupRosterSheet`'s previews.
+#Preview {
+    @Previewable @State var viewport: Viewport = .camera(
+        center: CLLocationCoordinate2D(latitude: 37.7746, longitude: -122.4186), zoom: 15)
+    let now = Date()
+    let driver = PeerAnnotationDriver()
+    let peers: [RidePeer] = [
+        RidePeer(userID: UUID(), displayName: "Mara",
+                 coordinate: Coordinate(latitude: 37.7752, longitude: -122.4192),
+                 progressMeters: 900, motionState: .moving,
+                 lastUpdate: now, status: .riding),
+        RidePeer(userID: UUID(), displayName: "Marco",
+                 coordinate: Coordinate(latitude: 37.7751, longitude: -122.4191),
+                 progressMeters: 880, motionState: .moving,
+                 lastUpdate: now, status: .riding),
+        RidePeer(userID: UUID(), displayName: "Devon",
+                 coordinate: Coordinate(latitude: 37.7742, longitude: -122.4182),
+                 progressMeters: 450, motionState: .stopped,
+                 lastUpdate: now, status: .stopped),
+        // A dropped peer keeps its last known fix; what makes it dropped is the silence since.
+        RidePeer(userID: UUID(), displayName: "Sam",
+                 coordinate: Coordinate(latitude: 37.7732, longitude: -122.4172),
+                 progressMeters: 200, motionState: .stopped,
+                 lastUpdate: now.addingTimeInterval(-120), status: .dropped)
+    ]
+    driver.updateSet(peers: peers, selfUserID: nil, nameMap: [:],
+                     reduceMotion: false, now: now)
+    // A linear stand-in for Mapbox's projection: ~10 points per 0.0001°, enough for the
+    // declutter radii to mean what they mean on screen. A preview has no live MapProxy, and
+    // returning nil for any peer disables declutter entirely (`canDeclutter`, above).
+    return Map(viewport: $viewport) {
+        PeerAnnotations(frame: driver.frame(now: now, project: { c in
+            ClusterDeclutter.Point2D(x: (c.longitude + 122.4200) * 100_000,
+                                     y: (37.7760 - c.latitude) * 100_000)
+        }))
+    }
+    .ignoresSafeArea()
 }
