@@ -1,4 +1,11 @@
-import ActivityKit
+// @preconcurrency: this target enables NonisolatedNonsendingByDefault (see
+// SWIFT_APPROACHABLE_CONCURRENCY in project.yml); ActivityKit is not built with it. So from
+// here its `nonisolated async` members — `update`, `end` — still read as `@concurrent`, and
+// handing them the MainActor-isolated, non-Sendable `Activity` below is a region-isolation
+// violation. Swift 6.2 does not diagnose it; 6.3 does. The calls themselves are correct —
+// driving a Live Activity from the main actor is what Apple's own guidance does. Remove this
+// once ActivityKit ships isolation annotations that make the sends provably safe. See ROH-116.
+@preconcurrency import ActivityKit
 import Foundation
 import AuraCore
 import AuraKit
