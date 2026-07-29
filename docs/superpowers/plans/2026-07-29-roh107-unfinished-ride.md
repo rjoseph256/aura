@@ -18,7 +18,7 @@ Every task's requirements implicitly include these. Values are copied verbatim f
 - **CloudKit rules, machine-checked by `SchemaInvariantTests`:** optionality or a default on every attribute, no `.unique`, no relationships. Date defaults use the fixed sentinel `Date(timeIntervalSince1970: 0)`, never `.now`.
 - **`RideStore.save`'s update branch is a hand-written field copy.** Every new `RideRecord` attribute must be added to it. Pass 3 hit this exact trap with `segmentsData`; missing it here means every paused ride stays unfinished forever.
 - **The marker is not amber.** Amber carries peer-stopped and `AuraTheme.warning` (used by `GPSSignalChip` for weak/lost GPS). Use neutral secondary weight.
-- **Marker copy describes the recording, not the rider.** It must be true both for a recovered ride and for a ride still running on another device. "No end recorded" is correct; "You never finished this ride" is not.
+- **Marker copy describes the recording, not the rider.** It must be true both for a recovered ride and for a ride still running on another device. "No end recorded" is correct; "You never finished this ride" is not. It must also never claim the ride is intact: a rider who paused at km 20, resumed, and was killed at km 60 has lost 40 km, so "everything up to that point was saved" is false and forbidden.
 - **`activeRideID` parameters carry no default.** A defaulted `nil` lets a new call site leak silently.
 - **Do not bump `WidgetSnapshot.currentVersion`.** It stays `1`. New fields are optional and decode as nil from an existing payload.
 - **`checkpointedAt` is `Date?` on `Ride`, `RideRecord`, `RideSummary`, and `WidgetSnapshot.LastRide`.** Same name at every layer.
@@ -53,7 +53,10 @@ Every task's requirements implicitly include these. Values are copied verbatim f
 - `Aura/Sources/Home/HomeView.swift:46-47,86` — filter at source, reload on the edge.
 - `Aura/Sources/History/HistoryView.swift` — marker slot, delete confirmation.
 - `Aura/Sources/Plan/LastRideCard.swift`, `Aura/Sources/Ride/RideSummaryView.swift`, `Aura/Widgets/LastRideWidget.swift` — marker.
+- `Aura/Sources/Ride/ShareCard/ShareCardContent.swift` and its card view — marker on the shared card.
+- `Aura/project.yml` — add the badge to the `AuraWidgets` source list, then `xcodegen generate`.
 - `AuraCore/Tests/AuraKitTests/SchemaInvariantTests.swift` — guard V7.
+- `AuraCore/Tests/AuraKitTests/RideStoreCheckpointTests.swift` — extend `updatePathCarriesEveryColumn`.
 
 ---
 
@@ -214,7 +217,9 @@ Delete the `public typealias RideRecord = RideSchemaV6.RideRecord` at `RideSchem
 
 - [ ] **Step 5: Register V7 in the migration plan**
 
-In `RideMigrationPlan.swift`, add `RideSchemaV7.self` to `schemas` (line 13-14) and `migrateV6toV7` to `stages` (line 18), then add the stage after `migrateV5toV6`:
+**Do not run tests between Steps 4 and 5.** Step 4 repoints the `RideRecord` typealias to V7 while `schemas` still stops at V6, and `SchemaV6MigrationTests.openV6` opens `for: RideRecord.self, migrationPlan:` — so the whole migration suite reds with `loadIssueModelContainer` until this step lands. Verified by running it. The two steps are one atomic change split for readability.
+
+In `RideMigrationPlan.swift`, add `RideSchemaV7.self` to `schemas` (line 13-14) and `migrateV6toV7` to `stages` (line 18) — **appended last, since stages are walked in order** — then add the stage after `migrateV5toV6`:
 
 ```swift
     /// V7 redeclares `RideRecord` with one optional attribute (`checkpointedAt`) added, which
@@ -257,6 +262,10 @@ In `RideStore.swift`, after `existing.pausedSeconds = record.pausedSeconds` (lin
             existing.checkpointedAt = record.checkpointedAt
 ```
 
+**Then extend the codebase's own completeness guard.** `RideStore.swift:64-67` says: *"Adding a column to `RideRecord` means adding a line to the update branch below… `updatePathCarriesEveryColumn` is the guard; extend it with the column."* `RideStoreCheckpointTests.swift:39-40` repeats it. That test's contract is that **every** column the mapper writes differs between its two rides; leaving it alone makes the repo's single self-describing guard quietly false at V7, and the next schema pass will read it and believe it.
+
+Open `AuraCore/Tests/AuraKitTests/RideStoreCheckpointTests.swift`, make the two fixture rides differ in `checkpointedAt` as they already differ in every other column, and add the corresponding assertion. The new test in Step 1 does not replace this — it is a targeted regression test for one column, and this is the guard that catches the *next* one.
+
 - [ ] **Step 8: Point `SchemaInvariantTests` at V7 and pin the new attribute**
 
 In `SchemaInvariantTests.swift`, change line 22 to `Schema(versionedSchema: RideSchemaV7.self).entities`, update the doc comment's `RideSchemaV6` references to V7, and append inside the suite:
@@ -279,7 +288,11 @@ Expected: PASS
 
 - [ ] **Step 10: Write the migration and mapper tests**
 
-Create `AuraCore/Tests/AuraKitTests/SchemaV7MigrationTests.swift`, modelled on the existing `SchemaV6MigrationTests.swift` — read that file first and mirror its container setup, including `cloudKitDatabase: .none` (macOS CI has no CloudKit entitlement) and the `.swiftDataSerialized` suite trait:
+Create `AuraCore/Tests/AuraKitTests/SchemaV7MigrationTests.swift`. **Read `SchemaV6MigrationTests.swift` first and copy its `tempStoreDirectory()` helper**; the three things below are what a naive version gets wrong, and all three were reproduced by running it:
+
+- **`@MainActor` on the suite.** `ModelContainer.mainContext` is main-actor isolated and the package is `swiftLanguageModes: [.v6]`, so a nonisolated suite touching it is a compile error, not a warning.
+- **Both containers open the full three-model set.** Every `VersionedSchema` in the plan declares three models (`RideSchemaV6.swift:30-32`). A store stamped from a one-model schema matches no version, and staged migration fails with `Cannot use staged migration with an unknown coordinator model version`. `SchemaV6MigrationTests.writeV5Store` says exactly this in its doc comment.
+- **Clean up the directory.** The store has an external-storage `_SUPPORT` sidecar; removing the containing directory takes the subtree.
 
 ```swift
 import Testing
@@ -288,19 +301,23 @@ import SwiftData
 import AuraCore
 @testable import AuraKit
 
+@MainActor
 @Suite("Schema V6 → V7", .swiftDataSerialized)
 struct SchemaV7MigrationTests {
 
     /// Every V6 row survives, and arrives with `checkpointedAt` nil — the correct reading,
     /// since every pre-V7 row was written by `finish()`.
     @Test func v6RowsMigrateWithANilCheckpoint() throws {
-        // Mirror SchemaV6MigrationTests' helper: open a store as V6, insert rows, reopen
-        // under RideMigrationPlan, then assert.
-        let url = URL.temporaryDirectory.appending(path: "v7-\(UUID().uuidString).store")
+        let dir = try tempStoreDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appending(path: "v7.store")
         let id = UUID()
+
+        // Seed on the EXACT V6 model set, so SwiftData stamps the store as V6.
         do {
             let container = try ModelContainer(
-                for: RideSchemaV6.RideRecord.self,
+                for: RideSchemaV6.RideRecord.self, RideSchemaV5.SavedPlaceRecord.self,
+                     RideSchemaV4.SeenGemRecord.self,
                 configurations: ModelConfiguration(url: url, cloudKitDatabase: .none))
             container.mainContext.insert(RideSchemaV6.RideRecord(
                 id: id, kindRaw: "freeRide", startedAt: Date(timeIntervalSince1970: 1_000),
@@ -309,8 +326,10 @@ struct SchemaV7MigrationTests {
             try container.mainContext.save()
         }
 
+        // Reopen on the live model set + the plan, so the destination resolves unambiguously.
         let migrated = try ModelContainer(
-            for: RideRecord.self, migrationPlan: RideMigrationPlan.self,
+            for: RideRecord.self, SavedPlaceRecord.self, SeenGemRecord.self,
+            migrationPlan: RideMigrationPlan.self,
             configurations: ModelConfiguration(url: url, cloudKitDatabase: .none))
         let rows = try migrated.mainContext.fetch(FetchDescriptor<RideRecord>())
         #expect(rows.count == 1)
@@ -320,7 +339,9 @@ struct SchemaV7MigrationTests {
 }
 ```
 
-Append to `AuraCore/Tests/AuraKitTests/RideMapperTests.swift`:
+Use whatever names `SavedPlaceRecord` / `SeenGemRecord` are typealiased to in this codebase; if there is no typealias, spell them `RideSchemaV5.SavedPlaceRecord` and `RideSchemaV4.SeenGemRecord` as V6's `models` does.
+
+Append to `AuraCore/Tests/AuraKitTests/RideMapperTests.swift` — **at the very end of the file**. That file opens with `final class RideMapperTests: XCTestCase` and a Swift Testing struct follows it; a `@Test` placed inside the XCTest class fails with *"Attribute 'Test' cannot be applied to a function within class"*.
 
 ```swift
 @Test func checkpointedAtRoundTripsThroughTheRecordAndTheSummary() throws {
@@ -343,9 +364,11 @@ Expected: PASS, both totals. Any pre-existing test that constructs a `Ride`, `Ri
 - [ ] **Step 12: Commit**
 
 ```bash
-git add AuraCore/Sources/AuraCore/Models AuraCore/Sources/AuraKit/Persistence AuraCore/Tests/AuraKitTests
+git add AuraCore/Sources AuraCore/Tests
 git commit -m "feat(roh-107): schema V7 adds checkpointedAt through the model layer"
 ```
+
+Stage `AuraCore/Tests` whole, not just `AuraKitTests` — Step 11 may have required fixes in `AuraCoreTests` too.
 
 ---
 
@@ -368,7 +391,7 @@ Append to `RideSessionCheckpointFlushTests.swift`:
 /// The marker is set at the pause and cleared at End. `endedAt` keeps its Pass 2 stamp
 /// throughout, so an unfinished row still carries a real duration.
 @Test func aCheckpointIsMarkedAndFinishingClearsIt() async throws {
-    let saving = SpyRideSaving()
+    let saving = RecordingRideSaving()
     let c = try await pausedRideWithACheckpoint(saving: saving)
     let checkpoint = try #require(saving.saved.last)
     #expect(checkpoint.checkpointedAt != nil)
@@ -384,7 +407,7 @@ Append to `RideSessionCheckpointFlushTests.swift`:
 /// nothing able to remove it — and the rider saw "couldn't save this ride" beside a History
 /// row marked as never ended.
 @Test func aFailedFinishKeepsTheDeletionHandle() async throws {
-    let saving = SpyRideSaving()
+    let saving = RecordingRideSaving()
     let c = try await pausedRideWithACheckpoint(saving: saving)
     saving.failNextSave = true
 
@@ -395,7 +418,28 @@ Append to `RideSessionCheckpointFlushTests.swift`:
 }
 ```
 
-Read the existing `SpyRideSaving` in this file first. If it has no failure switch, add a `var failNextSave = false` that makes `save(_:)` throw once and then reset; if the spy is named differently, use the existing name. `checkpointedRideID` is currently private — widen it to `private(set)` on the coordinator so the test can read it.
+**There is no `SpyRideSaving` in this repo, and no existing double will work.** The two `RideSaving` doubles are `FlakyRideSaving` (`RideSessionCoordinatorPauseTests.swift:240`) and `ThrowingRideSaving` (`RideSessionCoordinatorTests.swift:281`), and **neither records the saved `Ride`** — they keep counters. Both tests above read a `Ride` off the double, so write a new one at the top of `RideSessionCheckpointFlushTests.swift`:
+
+```swift
+/// Records what was saved, which neither `FlakyRideSaving` nor `ThrowingRideSaving` does —
+/// they count. These tests assert on the `Ride`'s fields, so they need the object.
+@MainActor
+final class RecordingRideSaving: RideSaving {
+    private(set) var saved: [Ride] = []
+    private(set) var discarded: [UUID] = []
+    var failNextSave = false
+
+    func save(_ ride: Ride) throws {
+        if failNextSave { failNextSave = false; throw CocoaError(.fileWriteUnknown) }
+        saved.append(ride)
+    }
+    func discard(id: UUID) throws { discarded.append(id) }
+}
+```
+
+Check `RideSaving`'s real requirements in `RideSessionSeams.swift:24-38` before writing this — it has a defaulted `discard(id:)` and the protocol may carry members not shown here. The two tests above already name it `RecordingRideSaving`.
+
+`checkpointedRideID` is currently private — widen it to `private(set)` on the coordinator so the test can read it.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -554,22 +598,24 @@ Expected: PASS
 
 Append to `AuraCore/Tests/AuraKitTests/RideSessionCoordinatorTests.swift`:
 
+**`RideSessionCoordinator.start` is not a no-argument call.** Its real signature (`RideSessionCoordinator.swift:91-97`) is `start(location:saving:units:authorization:saveToHealth:groupSink:discoverySink:)`, with the first four required. Read how the existing suites drive a ride — `RideSessionCoordinatorTests` builds one with `SpyScreenWake()` / `SpyRideActivity()`, and `RideSessionCheckpointFlushTests.pausedRideWithACheckpoint(saving:)` already encapsulates start-and-feed-fixes — and reuse whichever helper fits rather than inventing a call.
+
 ```swift
 /// `recorder.rideID` survives `end()` — it is reset only in `start(at:)` — so a passthrough
 /// that forgets the recording check hands the glance surfaces an id for a ride that finished,
 /// permanently filtering it out of Home and the widget.
 @Test func activeRideIDIsNilOnceTheRideEnds() async throws {
-    let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
-                                   screen: SpyScreenWake(), activity: SpyRideActivity())
-    #expect(c.activeRideID == nil, "no ride has started")
-    c.start()
-    #expect(c.activeRideID != nil)
+    let saving = RecordingRideSaving()
+    // Reuse the suite's existing start-a-ride helper; do not hand-roll the start(...) call.
+    let c = try await pausedRideWithACheckpoint(saving: saving)
+    #expect(c.activeRideID != nil, "a paused ride is still active")
+
     c.finish()
-    #expect(c.activeRideID == nil)
+    #expect(c.activeRideID == nil, "rideID survives end(); the isRecording check is what saves us")
 }
 ```
 
-Match the existing suite's construction helper and its way of starting a ride; read the file first rather than assuming `start()` is the entry point.
+Put this in `RideSessionCheckpointFlushTests.swift` beside the Task 2 tests, where that helper and `RecordingRideSaving` already exist, rather than in `RideSessionCoordinatorTests.swift`.
 
 - [ ] **Step 6: Run to verify it fails, then add the property**
 
@@ -585,7 +631,7 @@ On `RideSessionCoordinator`:
     public var activeRideID: UUID? { recorder.isRecording ? recorder.rideID : nil }
 ```
 
-If `recorder.rideID` is not visible at this scope, widen it to `public private(set)` on `RideRecorder` rather than adding a second stored copy.
+`recorder.rideID` is already `public private(set)` (`RideRecorder.swift:34`) and `isRecording` is already public (`:23`), so this compiles as written with no visibility change.
 
 - [ ] **Step 7: Run to verify it passes**
 
@@ -655,50 +701,44 @@ git commit -m "feat(roh-107): isUnfinished predicate and the active ride's id on
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `AuraCore/Tests/AuraKitTests/WidgetSnapshotTests.swift`:
+Append to `AuraCore/Tests/AuraKitTests/WidgetSnapshotTests.swift`.
+
+**Pass the suite's pinned calendar explicitly.** `make` defaults to `Calendar.current`, and this fixture is week-boundary-sensitive: `1_750_000_000` is a **Sunday**, so on a Sunday-first calendar (`en_US`, the macOS CI default) the earlier ride lands in the *previous* week and both ring assertions read 0 no matter how correct the implementation is. `WidgetSnapshotTests` already pins `Calendar(identifier: .gregorian)` with UTC and `firstWeekday = 2` at the top of the file — use that constant, and the two dates fall in the same Monday-start week.
 
 ```swift
 /// The exclusion is by id, not by "is it unfinished". A rider who recovered an unfinished
-/// ride on Monday and starts a ride on Wednesday of the same week has two unfinished rows;
-/// only the one they are on should leave Home. A Bool-shaped rule hides both and drops
-/// Monday's distance from the week-to-date ring for the whole of Wednesday's ride.
+/// ride earlier this week and starts a ride today has two unfinished rows; only the one they
+/// are on should leave Home. A Bool-shaped rule hides both and drops the earlier ride's
+/// distance from the week-to-date ring for the whole of today's ride.
 @Test func onlyTheActiveRideIsExcluded() {
+    // Sunday 2025-06-15. With the suite's firstWeekday = 2 calendar, the week is
+    // Mon 2025-06-09 ..< Mon 2025-06-16, so `earlier` (Sat 2025-06-14) is inside it.
     let now = Date(timeIntervalSince1970: 1_750_000_000)
-    let monday = RideSummary(id: UUID(), kind: .freeRide, startedAt: now.addingTimeInterval(-86_400),
-                             endedAt: now.addingTimeInterval(-80_000), hasStats: true,
-                             distanceMeters: 10_000, movingTimeSeconds: 1_800, pausedSeconds: 0,
-                             checkpointedAt: now.addingTimeInterval(-80_000),
-                             elevationGainMeters: 100, destinationName: nil,
-                             thumbnailCoordinates: [])
+    let earlier = RideSummary(id: UUID(), kind: .freeRide, startedAt: now.addingTimeInterval(-86_400),
+                              endedAt: now.addingTimeInterval(-80_000), hasStats: true,
+                              distanceMeters: 10_000, movingTimeSeconds: 1_800, pausedSeconds: 0,
+                              checkpointedAt: now.addingTimeInterval(-80_000),
+                              elevationGainMeters: 100, destinationName: nil,
+                              thumbnailCoordinates: [])
     let today = RideSummary(id: UUID(), kind: .freeRide, startedAt: now.addingTimeInterval(-600),
                             endedAt: now, hasStats: true,
                             distanceMeters: 5_000, movingTimeSeconds: 600, pausedSeconds: 0,
                             checkpointedAt: now, elevationGainMeters: 20, destinationName: nil,
                             thumbnailCoordinates: [])
 
-    let snapshot = WidgetSnapshot.make(summaries: [monday, today], goalMeters: 40_000,
-                                       units: .metric, now: now, activeRideID: today.id)
+    let snapshot = WidgetSnapshot.make(summaries: [earlier, today], goalMeters: 40_000,
+                                       units: .metric, now: now, activeRideID: today.id,
+                                       calendar: Self.calendar)
 
-    #expect(snapshot.lastRide?.id == monday.id, "the in-flight ride must not own the slot")
-    #expect(snapshot.week.distanceMeters == 10_000, "Monday still counts; only today is excluded")
-    #expect(snapshot.week.rideCount == 1)
-}
-
-@Test func nothingIsExcludedWhenNoRideIsActive() {
-    let now = Date(timeIntervalSince1970: 1_750_000_000)
-    let ride = RideSummary(id: UUID(), kind: .freeRide, startedAt: now.addingTimeInterval(-600),
-                           endedAt: now, hasStats: true, distanceMeters: 5_000,
-                           movingTimeSeconds: 600, pausedSeconds: 0, checkpointedAt: nil,
-                           elevationGainMeters: 20, destinationName: nil,
-                           thumbnailCoordinates: [])
-    let snapshot = WidgetSnapshot.make(summaries: [ride], goalMeters: 40_000,
-                                       units: .metric, now: now, activeRideID: nil)
-    #expect(snapshot.lastRide?.id == ride.id)
+    #expect(snapshot.lastRide?.id == earlier.id, "the in-flight ride must not own the slot")
+    #expect(snapshot.week.distanceMeters == 10_000, "the earlier ride still counts")
     #expect(snapshot.week.rideCount == 1)
 }
 ```
 
-Confirm the week arithmetic against the real calendar before relying on the literals: if `now - 86_400` falls in the previous week, shift both dates so they land in the same week, or the first test asserts nothing.
+Use whatever the pinned calendar is actually called in that file rather than `Self.calendar`. Before running, print the resolved week interval once and confirm both fixture dates are inside it — a green bar on a fixture that silently sits outside the week proves nothing.
+
+The companion "nothing is excluded when no ride is active" case is deliberately **not** written: `$0.id != nil` is vacuously true for every row, so such a test passes whether or not `make` reads the parameter at all.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -729,14 +769,21 @@ In `WidgetSnapshot.swift`, change the signature and filter once at the top:
 
 The rest of the body is unchanged.
 
-- [ ] **Step 4: Run to verify it passes**
+- [ ] **Step 4: Fix the five existing callers, then run**
+
+`activeRideID` has no default by design, so adding it breaks every existing call. There are five in `WidgetSnapshotTests.swift` (lines 30, 44, 53, 71, 85) plus `WidgetRefresh.swift:14` (Step 5). Add `activeRideID: nil` to each of the five test calls — none of them is testing the exclusion.
 
 Run: `cd AuraCore && swift test --filter WidgetSnapshotTests`
-Expected: PASS
+Expected: PASS. It will not compile until all five are updated.
 
-- [ ] **Step 5: Thread the id through `WidgetRefresh`**
+- [ ] **Step 5: Thread the id through `WidgetRefresh`, and never write an emptied snapshot**
 
-In `WidgetRefresh.swift`:
+The snapshot is a **file** in the App Group, read by a separate extension process on its own timeline — so the exclusion is not process-local, it is durable. Two consequences the naive version gets wrong:
+
+- A rider whose only ride this week is the one in flight foregrounds Aura mid-ride and the widget renders **"No rides yet · Start a ride"** with the ring at 0%, while they are stood over their bike 20 km in. Today they see their in-flight distance.
+- If iOS then kills Aura during the pause, that emptied snapshot is what the widget shows until the rider next *opens the app* — days, for the widget-only persona. That is the same multi-day window Task 5 refuses to accept for a version bump, introduced here deliberately.
+
+Both are fixed by not writing a snapshot the exclusion hollowed out. Leaving the previous one in place is strictly better: it is stale by one ride rather than actively wrong.
 
 ```swift
     static func reload(rideStore: RideStore, settings: SettingsStore,
@@ -746,6 +793,11 @@ In `WidgetRefresh.swift`:
                                            goalMeters: settings.weeklyGoalMeters,
                                            units: settings.units, now: now,
                                            activeRideID: activeRideID)
+        // The exclusion removed the rider's only ride. Writing this would replace a correct
+        // widget with the first-run empty state mid-ride — and the snapshot is a file, so a
+        // jetsam kill during the pause freezes that empty state until the app is next opened.
+        // Keeping the previous snapshot is stale by one ride instead of wrong.
+        if activeRideID != nil, snapshot.lastRide == nil, !summaries.isEmpty { return }
 ```
 
 Keep the existing body otherwise; match the real argument names in the current call.
@@ -780,15 +832,21 @@ Six pass `nil`, each with the one-line reason a reviewer can check:
             WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil)
 ```
 ```swift
-// SettingsView.swift:122,125 and HistoryView.swift:82 — unreachable during a ride
-            WidgetRefresh.reload(rideStore: store, settings: settings, activeRideID: nil)
+// HistoryView.swift:82 — History is not reachable during a ride
+        WidgetRefresh.reload(rideStore: store, settings: settings, activeRideID: nil)
 ```
 
-Use the correct store variable at each site (`rideStore` vs `store`) — `HistoryView.swift:82` uses `store`.
+**Settings is the one site where `nil` needs checking rather than assuming.** `SettingsView.swift:30,34` carry `.disabled(router.isRideActive)` — guards that only make sense if that screen can be on-screen while a ride is active. Either those guards are dead code or Settings *is* reachable mid-ride, in which case `activeRideID: nil` at `:122,125` reintroduces the exact leak this task closes, on a settings change. Determine which before writing the argument: if reachable, pass `router.activeRideID`; if genuinely unreachable, pass `nil` and delete the misleading `.disabled` guards in a separate commit.
+
+`SettingsView` binds the store as `rideStore` (`:5`); only `HistoryView:82` uses `store`. Use the right name at each site.
 
 - [ ] **Step 7: Filter Home at the source, and reload when the exclusion lifts**
 
-`HomeView` derives three things from one array — `weekStats`, `lastRide`, and `lastRide` again inside `WeeklyGlanceView` at line 169 — so filter once rather than per-read. Replace lines 46-47:
+`HomeView` derives **four** things from `summaries`: `weekStats` and `lastRide` (`:46-47`), `lastRide` again inside `WeeklyGlanceView` (`:169`), and `hasRides: !summaries.isEmpty` feeding `HomeMode.resolve` (`:50`).
+
+**Only the first three get the filter.** `mode` stays on the unfiltered array, deliberately — it answers "does this rider have any rides at all", not "what should the ring show", and filtering it would flip a rider whose only ride is the one in flight toward the first-run screen. This is a presentation filter for the ring, card and glance; it is not a "does this rider have rides" filter. Do not apply it uniformly.
+
+Replace lines 46-47:
 
 ```swift
     /// Filtered once, so the ring, the card and the glance headline cannot disagree. Excluded
@@ -861,9 +919,28 @@ Append to `WidgetSnapshotTests.swift`:
     #expect(ride.endedAt == nil)
     #expect(ride.pausedSeconds == nil)
     #expect(!ride.isUnfinished, "a payload from before this field must not read as unfinished")
-    #expect(WidgetSnapshot.currentVersion == 1, "bumping the version blanks the widget for days")
+}
+
+/// `RideSummary.isUnfinished` and `LastRide.isUnfinished` are deliberately different
+/// expressions — the widget struct needs the `pausedSeconds` provenance guard and the summary
+/// does not. Nothing else stops them drifting apart.
+@Test func theWidgetPredicateAgreesWithTheSummaryPredicate() {
+    let base = Date(timeIntervalSince1970: 1_750_000_000)
+    func summary(endedAt: Date?, checkpointedAt: Date?) -> RideSummary {
+        RideSummary(id: UUID(), kind: .freeRide, startedAt: base, endedAt: endedAt,
+                    hasStats: true, distanceMeters: 1_000, movingTimeSeconds: 300,
+                    pausedSeconds: 0, checkpointedAt: checkpointedAt,
+                    elevationGainMeters: 10, destinationName: nil, thumbnailCoordinates: [])
+    }
+    for s in [summary(endedAt: base, checkpointedAt: nil),
+              summary(endedAt: base, checkpointedAt: base),
+              summary(endedAt: nil, checkpointedAt: nil)] {
+        #expect(WidgetSnapshot.LastRide(s).isUnfinished == s.isUnfinished)
+    }
 }
 ```
+
+Dropped from this test deliberately: an `#expect(WidgetSnapshot.currentVersion == 1)` assertion. It compares a compile-time constant to a literal and can never fail — the reason the version must stay 1 belongs in the comment above, not in a green checkmark.
 
 Check how the existing suite encodes dates before trusting the numeric timestamps above — if `WidgetSnapshotStore` configures a non-default date strategy, build the fixture with the same encoder instead of a hand-written literal.
 
@@ -886,7 +963,11 @@ In `WidgetSnapshot.LastRide`, after `movingTimeSeconds`:
         public let pausedSeconds: Double?
 ```
 
-Add all three to the memberwise `init` with `= nil` defaults, assign them, and extend the `init(_ summary: RideSummary)` convenience to forward `summary.checkpointedAt`, `summary.endedAt` and `summary.pausedSeconds`. Then:
+Add all three to the memberwise `init` **without defaults**, assign them, and extend the `init(_ summary: RideSummary)` convenience to forward `summary.checkpointedAt`, `summary.endedAt` and `summary.pausedSeconds`. Update `WidgetSnapshot.sample` to pass `checkpointedAt: nil, endedAt: <a real date>, pausedSeconds: 0` so the gallery placeholder stays a finished ride.
+
+Defaults are wrong here for the same reason they are wrong on `activeRideID` (Global Constraints): `pausedSeconds` is load-bearing as a *provenance* signal in the predicate below, so a caller who passes a real `endedAt: nil` and omits `pausedSeconds` silently reports a checkpoint as finished. Make every call site state its answer.
+
+Then:
 
 ```swift
 extension WidgetSnapshot.LastRide {
@@ -917,20 +998,88 @@ git commit -m "feat(roh-107): widget snapshot carries checkpointedAt, endedAt an
 
 ---
 
-### Task 6: The marker, its copy, and where it renders
+### Task 6: Confirm before deleting a ride with no recorded end
+
+**Ordered before the marker deliberately.** This project device-verifies on a real iPhone with real ride history. If the marker landed first, there would be an installed build where History labels real rides as damaged while `.swipeActions(allowsFullSwipe: true)` still hard-deletes them to every device on a single flick — the exact trap spec D4 identifies. Landing the guard first makes it inert for one commit, which costs nothing.
+
+**Files:**
+- Modify: `Aura/Sources/History/HistoryView.swift:48,67-71`
+
+**Interfaces:**
+- Consumes: `RideSummary.isUnfinished` and `RideSummary.checkpointedAt` from Tasks 1 and 3.
+
+- [ ] **Step 1: Add the confirmation**
+
+History's delete is `.swipeActions(edge: .trailing, allowsFullSwipe: true)` with a destructive role, calling a hard delete that propagates to every device via CloudKit (`RideStore.swift:125`). Labelling a row as damaged and leaving a one-gesture irreversible destroy on it is a trap: in the common case the row is a complete, correct ride missing only its ending, and a rider who reads the marker as "broken, junk" full-swipes away a real ride.
+
+Add state to `HistoryView`:
+
+```swift
+    /// A ride awaiting delete confirmation. Only unfinished rides land here: the marker is what
+    /// makes a rider likely to delete a row they would otherwise keep, so the confirmation
+    /// answers the hazard this feature creates rather than slowing down ordinary deletes.
+    @State private var pendingDelete: RideSummary?
+```
+
+Change the swipe action to route unfinished rows through it:
+
+```swift
+                    .swipeActions(edge: .trailing, allowsFullSwipe: !summary.isUnfinished) {
+                        Button(role: .destructive) {
+                            if summary.isUnfinished { pendingDelete = summary } else { delete(summary) }
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+```
+
+`allowsFullSwipe: !summary.isUnfinished` matters as much as the dialog: a full swipe would otherwise fire the destructive button without the rider ever seeing it.
+
+Attach the dialog next to the existing `.sheet` (around line 48). **Use a derived two-way binding, not `.constant`.** SwiftUI writes `false` to an `isPresented` binding on every dismissal, including ones that run no button action; a `.constant` swallows that write, `pendingDelete` stays non-nil, and the dialog re-presents. `HomeView.swift:112-113` already has the correct shape for this optional-driven case.
+
+```swift
+        .confirmationDialog("Delete this ride?",
+                            isPresented: Binding(get: { pendingDelete != nil },
+                                                 set: { if !$0 { pendingDelete = nil } }),
+                            presenting: pendingDelete) { summary in
+            Button("Delete ride", role: .destructive) { delete(summary); pendingDelete = nil }
+            Button("Keep", role: .cancel) { pendingDelete = nil }
+        } message: { summary in
+            Text(UnfinishedRideCopy.deleteWarning(checkpointedAt: summary.checkpointedAt))
+        }
+```
+
+`UnfinishedRideCopy.deleteWarning` arrives in Task 7. Until then, inline the no-timestamp string it returns — `"Aura never recorded this ride's end. Deleting removes it from all your devices."` — and swap it for the call when Task 7 lands. Do **not** write "everything up to that point was saved": for a rider who paused at km 20, resumed, rode to km 60 and was killed while moving, that is false, and it is the precise claim spec defect 2 exists to avoid making.
+
+- [ ] **Step 2: Build**
+
+Delegate to the `apple-platform-build-tools:builder` agent: build the `Aura` scheme for an iPhone simulator. Expected: clean.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add Aura/Sources/History/HistoryView.swift
+git commit -m "feat(roh-107): confirm before deleting a ride with no recorded end"
+```
+
+---
+
+### Task 7: The marker, its copy, and where it renders
 
 **Files:**
 - Create: `AuraCore/Sources/AuraKit/Summary/UnfinishedRideCopy.swift`
 - Create: `Aura/Sources/Shared/UnfinishedRideBadge.swift`
-- Modify: `Aura/Sources/History/HistoryView.swift:183-192`
+- Modify: `Aura/project.yml` (widget target sources) — then re-run `xcodegen generate`
+- Modify: `Aura/Sources/History/HistoryView.swift:184-192`, and the dialog message from Task 6
 - Modify: `Aura/Sources/Plan/LastRideCard.swift:24-35`
-- Modify: `Aura/Sources/Ride/RideSummaryView.swift:117-143`
-- Modify: `Aura/Widgets/LastRideWidget.swift`
+- Modify: `Aura/Sources/Ride/RideSummaryView.swift:117-152`
+- Modify: `Aura/Sources/Ride/ShareCard/ShareCardContent.swift` and its card view
+- Modify: `Aura/Widgets/LastRideWidget.swift:44,97,142`
 - Test: `AuraCore/Tests/AuraKitTests/UnfinishedRideCopyTests.swift` (create)
 
 **Interfaces:**
-- Consumes: `RideSummary.isUnfinished`, `WidgetSnapshot.LastRide.isUnfinished`.
-- Produces: `UnfinishedRideCopy.label`, `UnfinishedRideCopy.detail(checkpointedAt:relativeTo:calendar:)`, `UnfinishedRideCopy.accessibilityLabel(checkpointedAt:relativeTo:calendar:)`, and the `UnfinishedRideBadge` view.
+- Consumes: `RideSummary.isUnfinished`, `RideSummary.checkpointedAt`, `WidgetSnapshot.LastRide.isUnfinished`, `Ride.checkpointedAt`.
+- Produces: `UnfinishedRideCopy.label`, `.detail(checkpointedAt:relativeTo:calendar:)`, `.accessibilityLabel(...)`, `.deleteWarning(checkpointedAt:relativeTo:calendar:)`, and the `UnfinishedRideBadge` view.
 
 - [ ] **Step 1: Write the failing copy tests**
 
@@ -945,50 +1094,62 @@ import Foundation
 @Suite("Unfinished-ride copy")
 struct UnfinishedRideCopyTests {
     private let cal = Calendar(identifier: .gregorian)
+    private let stamp = Date(timeIntervalSince1970: 1_750_000_000)
 
-    /// It must be true for a recovered ride AND for one still being recorded on another
-    /// device, because a synced second device cannot tell them apart. It must also not blame
-    /// the rider: someone who rode to the brewery and got a lift home did finish their ride,
-    /// Aura just failed to record the end.
-    @Test func theLabelDescribesTheRecordingRatherThanTheRider() {
-        #expect(UnfinishedRideCopy.label == "No end recorded")
-    }
-
-    @Test func detailNamesWhenRecordingStopped() {
-        let stamp = Date(timeIntervalSince1970: 1_750_000_000)
-        let detail = try! #require(UnfinishedRideCopy.detail(checkpointedAt: stamp,
-                                                             relativeTo: stamp, calendar: cal))
-        #expect(detail.hasPrefix("Recorded until "))
+    /// The detail line has to do the job schema V7 was bought for: separate "you forgot to
+    /// press End" from "40 km are missing". "Recorded until X" reads as "the recording ran to
+    /// the end" and does neither, so the string must say what was lost, not just when.
+    @Test func theDetailSaysWhatWasNotSaved() throws {
+        let detail = try #require(UnfinishedRideCopy.detail(checkpointedAt: stamp,
+                                                            relativeTo: stamp, calendar: cal))
+        #expect(detail.contains("wasn't saved"))
     }
 
     /// A PR #90 dev-build row has no marker timestamp, so there is nothing honest to say
     /// beyond the label.
     @Test func detailIsNilWithoutATimestamp() {
         #expect(UnfinishedRideCopy.detail(checkpointedAt: nil,
-                                          relativeTo: Date(), calendar: cal) == nil)
+                                          relativeTo: stamp, calendar: cal) == nil)
     }
 
-    /// A stop from an earlier day needs its date, or "until 2:14 PM" is ambiguous.
-    @Test func anEarlierDayCarriesItsDate() {
-        let stamp = Date(timeIntervalSince1970: 1_750_000_000)
+    /// A stop from an earlier day needs its date, or a bare "2:14 PM" is ambiguous.
+    @Test func anEarlierDayCarriesItsDate() throws {
         let later = stamp.addingTimeInterval(3 * 86_400)
-        let sameDay = try! #require(UnfinishedRideCopy.detail(checkpointedAt: stamp,
-                                                              relativeTo: stamp, calendar: cal))
-        let otherDay = try! #require(UnfinishedRideCopy.detail(checkpointedAt: stamp,
-                                                               relativeTo: later, calendar: cal))
-        #expect(sameDay != otherDay)
+        let sameDay = try #require(UnfinishedRideCopy.detail(checkpointedAt: stamp,
+                                                             relativeTo: stamp, calendar: cal))
+        let otherDay = try #require(UnfinishedRideCopy.detail(checkpointedAt: stamp,
+                                                              relativeTo: later, calendar: cal))
         #expect(otherDay.count > sameDay.count)
     }
 
+    /// The delete warning must not claim the recording is complete. A rider who paused at
+    /// km 20, resumed and was killed at km 60 loses 40 km, and this dialog is the last thing
+    /// they read before an irreversible, all-devices delete.
+    @Test func theDeleteWarningDoesNotPromiseEverythingWasSaved() {
+        let warning = UnfinishedRideCopy.deleteWarning(checkpointedAt: stamp,
+                                                       relativeTo: stamp, calendar: cal)
+        #expect(warning.contains("wasn't saved"))
+        #expect(!warning.lowercased().contains("everything"))
+        #expect(warning.contains("all your devices"))
+    }
+
+    @Test func theDeleteWarningWorksWithoutATimestamp() {
+        let warning = UnfinishedRideCopy.deleteWarning(checkpointedAt: nil,
+                                                       relativeTo: stamp, calendar: cal)
+        #expect(!warning.isEmpty)
+        #expect(warning.contains("all your devices"))
+    }
+
     @Test func theAccessibilityLabelCarriesBothParts() {
-        let stamp = Date(timeIntervalSince1970: 1_750_000_000)
         let spoken = UnfinishedRideCopy.accessibilityLabel(checkpointedAt: stamp,
                                                            relativeTo: stamp, calendar: cal)
-        #expect(spoken.contains("No end recorded"))
-        #expect(spoken.contains("Recorded until"))
+        #expect(spoken.contains(UnfinishedRideCopy.label))
+        #expect(spoken.contains("wasn't saved"))
     }
 }
 ```
+
+Note what is deliberately **not** tested: `#expect(UnfinishedRideCopy.label == "No end recorded")`. Asserting a `let` against the literal it was declared with passes forever and detects no behavior.
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -1004,33 +1165,42 @@ import Foundation
 import AuraCore
 
 /// Copy for a ride the rider never ended. Pure and view-free so the strings are unit-tested
-/// rather than eyeballed, and shared by History, the last-ride card, the summary sheet and
-/// the widget so they cannot drift.
+/// rather than eyeballed, and shared by History, the last-ride card, the summary sheet, the
+/// share card and the widget so they cannot drift.
 ///
-/// **It describes the recording, not the rider** (spec D4). "Unfinished" reads as an
-/// accusation on a Home surface whose job is motivation, and it is wrong in the common case:
-/// a rider who rode to the brewery and got a lift home did finish their ride. It must also be
-/// true for a ride still being recorded on another device, since a synced second device cannot
-/// tell that apart from an abandoned one.
+/// **It describes the recording, not the rider** (spec D4). A rider who rode to the brewery
+/// and got a lift home did finish their ride; Aura failed to record the end. The copy must
+/// also be true for a ride still being recorded on another device, since a synced second
+/// device cannot tell that apart from an abandoned one.
+///
+/// **And it has to separate two failures.** A ride killed *during* the stop is complete but
+/// un-ended. A ride whose rider resumed and was killed later while moving is truncated, and
+/// the missing distance is invisible. Both render identically, so the detail line says what
+/// was not saved rather than only when recording stopped. This is what `checkpointedAt`, and
+/// the schema version it cost, was bought for.
 public enum UnfinishedRideCopy {
     public static let label = "No end recorded"
 
-    /// "Recorded until 2:14 PM", or with the date when the stop was not on `now`'s day.
-    /// Nil when there is no marker timestamp, which is a PR #90 dev-build row.
+    /// "Recording stops at 2:14 PM. Anything after that wasn't saved." Carries the date too
+    /// when the stop was not on `now`'s day. Nil when there is no marker timestamp, which is a
+    /// PR #90 dev-build row.
     public static func detail(checkpointedAt: Date?, relativeTo now: Date = Date(),
                               calendar: Calendar = .current) -> String? {
-        guard let stamp = checkpointedAt else { return nil }
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.locale = .autoupdatingCurrent
-        if calendar.isDate(stamp, inSameDayAs: now) {
-            formatter.dateStyle = .none
-            formatter.timeStyle = .short
-        } else {
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .short
+        guard let when = timestamp(checkpointedAt, relativeTo: now, calendar: calendar) else {
+            return nil
         }
-        return "Recorded until \(formatter.string(from: stamp))"
+        return "Recording stops at \(when). Anything after that wasn't saved."
+    }
+
+    /// Shown before an irreversible, all-devices delete. It must not claim the ride is intact:
+    /// the rider standing in front of this dialog may be missing 40 km.
+    public static func deleteWarning(checkpointedAt: Date?, relativeTo now: Date = Date(),
+                                     calendar: Calendar = .current) -> String {
+        let tail = "Deleting removes it from all your devices."
+        guard let when = timestamp(checkpointedAt, relativeTo: now, calendar: calendar) else {
+            return "Aura never recorded this ride's end, so anything after the last pause wasn't saved. \(tail)"
+        }
+        return "Aura recorded this ride up to \(when). Anything after that wasn't saved. \(tail)"
     }
 
     /// One spoken string. A VoiceOver user handed the same caption as a finished ride has not
@@ -1040,6 +1210,17 @@ public enum UnfinishedRideCopy {
         guard let detail = detail(checkpointedAt: checkpointedAt, relativeTo: now,
                                   calendar: calendar) else { return label }
         return "\(label). \(detail)"
+    }
+
+    private static func timestamp(_ date: Date?, relativeTo now: Date,
+                                  calendar: Calendar) -> String? {
+        guard let date else { return nil }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeStyle = .short
+        formatter.dateStyle = calendar.isDate(date, inSameDayAs: now) ? .none : .medium
+        return formatter.string(from: date)
     }
 }
 ```
@@ -1063,25 +1244,29 @@ import AuraKit
 /// `GPSSignalChip` uses for weak or lost GPS — pausing under a railway bridge would otherwise
 /// light two amber elements meaning different things. This is a fact about the recording, not
 /// an app error, so it takes secondary weight.
+///
+/// **Not a pause glyph.** The rider just learned `pause.circle` in the HUD, where it means
+/// "paused and resumable". Here it means the opposite: this ride can never be resumed or
+/// ended. A clock says "when" without promising an action.
 struct UnfinishedRideBadge: View {
     let checkpointedAt: Date?
-    /// `.compact` drops the detail line for dense rows; `.full` shows it.
+    /// `.compact` shows the label alone for dense rows; `.full` adds the detail line.
     enum Style { case compact, full }
     var style: Style = .compact
 
     var body: some View {
-        HStack(spacing: AuraTheme.Spacing.xs) {
-            Image(systemName: "pause.circle")
+        HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.xs) {
+            Image(systemName: "clock")
                 .font(.caption2.weight(.semibold))
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text(UnfinishedRideCopy.label)
                 if style == .full,
                    let detail = UnfinishedRideCopy.detail(checkpointedAt: checkpointedAt) {
-                    Text(detail)
+                    Text(detail).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
-        .font(.caption2.weight(.medium))
+        .font(.footnote.weight(.medium))
         .foregroundStyle(AuraTheme.textSecondary)
         .padding(.horizontal, AuraTheme.Spacing.sm)
         .padding(.vertical, 2)
@@ -1092,17 +1277,33 @@ struct UnfinishedRideBadge: View {
 }
 ```
 
-Verify `"pause.circle"` exists on the deployment target before shipping it — read the symbol list from the installed simulator runtime's SF Symbols plist rather than trusting recall (this bit us on ROH-44). If it is missing, use `"clock"`.
+Verify `"clock"` exists on the deployment target by reading the installed simulator runtime's SF Symbols plist rather than trusting recall — this bit us on ROH-44.
 
-- [ ] **Step 6: Render it on the three app surfaces**
+Footnote weight, not caption2: the badge competes with a 22 pt Saira distance numeral on the same row, and its job is to stop the rider trusting that numeral. Run the new foreground/background pair through the project's existing WCAG contrast guard, as every other palette pair is.
 
-**History row** (`HistoryView.swift`, the middle `VStack` at 183-192). The caption is one `.footnote` with `.lineLimit(1)`; appending the marker there makes it the first thing Dynamic Type truncates, for the users least able to lose it. Give it its own line inside the existing `VStack`, after the caption `Text`:
+- [ ] **Step 6: Add the badge to the widget target**
+
+`Aura/project.yml`'s `AuraWidgets` target enumerates individual files from `Sources/` (`LiveActivity/RideActivityAttributes.swift`, `Theme/AuraTheme.swift`, `Theme/StatPair.swift`, `Shared/RouteThumbnail.swift`). Without this step `UnfinishedRideBadge` compiles into the app target only, and Step 8's widget work fails with "cannot find 'UnfinishedRideBadge' in scope".
+
+Add `- path: Sources/Shared/UnfinishedRideBadge.swift` to that list, then regenerate:
+
+```bash
+cd Aura && xcodegen generate
+```
+
+The `.xcodeproj` is untracked, so the regeneration is local-only; `project.yml` is the tracked change.
+
+- [ ] **Step 7: Render it on the three app surfaces**
+
+**History row** (`HistoryView.swift`, the middle `VStack` at 184-192). The caption is one `.footnote` with `.lineLimit(1)`; appending the marker there makes it the first thing Dynamic Type truncates, for the users least able to lose it. Give it its own line inside the existing `VStack`, after the caption `Text`:
 
 ```swift
                 if summary.isUnfinished {
                     UnfinishedRideBadge(checkpointedAt: summary.checkpointedAt)
                 }
 ```
+
+This takes the row from ~66 pt to ~89 pt. That is a deliberate signal, not an accident: in a list of uniform rows the marked one is visibly different before any text is read.
 
 **Last-ride card** (`LastRideCard.swift`, the `VStack` at 24-35), after the `relativeDate` `Text`:
 
@@ -1112,14 +1313,13 @@ Verify `"pause.circle"` exists on the deployment target before shipping it — r
                     }
 ```
 
-**Ride summary sheet** (`RideSummaryView.swift`, `titleBlock`). This screen is reachable — every History row taps into it via `HistoryView.swift:62` — and it is where a rider goes *because* the row looked odd, so it gets the full style. Replace the `Text("Nice ride")` line with:
+This takes the card past the 88 pt thumbnail that currently governs its height, to ~111 pt — which no longer matches the hardcoded 88 pt loading placeholder at `HomeView.swift:174`, and eats ~23 pt of the peek's scroll affordance at `peekHeight` 250. Update the placeholder to match and check the peek; both are in Step 9's acceptance.
 
-```swift
-                Text(ride.checkpointedAt != nil || ride.endedAt == nil ? "Your ride" : "Nice ride")
-                    .font(.largeTitle.bold()).foregroundStyle(AuraTheme.textPrimary)
-```
+**Ride summary sheet** (`RideSummaryView.swift`, `titleBlock`). This screen is reachable — every History row taps into it via `HistoryView.swift:62` — and it is where a rider goes *because* the row looked odd, so it gets `.full`.
 
-and add, immediately after the destination-name block and before the `isLongest` label:
+**Keep the "Nice ride" headline.** Flipping it to "Your ride" would change how the app addresses the *rider* over something Aura got wrong, which is the rule spec D4 sets for the copy, and it would break the golden-ride E2E assertion at `Aura/UITests/Screens/Screens.swift:90` for no gain. The badge carries the fact.
+
+Add after the destination-name block, before the `isLongest` label:
 
 ```swift
             if ride.checkpointedAt != nil || ride.endedAt == nil {
@@ -1127,87 +1327,54 @@ and add, immediately after the destination-name block and before the `isLongest`
             }
 ```
 
-`RideSummaryView` takes a `Ride`, not a `RideSummary`, which is why the condition is spelled out rather than reusing `isUnfinished`. If `Ride` already carries an equivalent helper by the time you get here, use it instead of duplicating the expression.
+`RideSummaryView` takes a `Ride`, not a `RideSummary`, which is why the condition is spelled out. If `Ride` has grown an equivalent helper by now, use it.
 
-**Widget** (`LastRideWidget.swift`): add the badge only where there is room. `systemSmall` (lines 37-56) and `accessoryRectangular` (lines 90-114) are already tight — a 34 pt thumbnail plus three lines on the Lock Screen. If a family cannot fit it without truncating a stat, render that family without the marker rather than shrinking a number, and put the state in its accessibility label via `UnfinishedRideCopy.accessibilityLabel`. `LastRideWidget.swift:142` already builds an accessibility string; extend that.
+Two more changes on this screen:
 
-- [ ] **Step 7: Build and eyeball**
+1. **Suppress the trophy.** `isLongest` (`RideSummaryView.swift:128`, computed at `:216`) can fire on a truncated ride, putting a lime celebration capsule directly under a grey "anything after that wasn't saved" pill. Gate it: `if isLongest && ride.checkpointedAt == nil && ride.endedAt != nil`. The reverse case — a rider who genuinely rode their longest and is denied the trophy because the end was lost — is a real cost and is accepted: claiming a record from a recording we have just told them is incomplete is worse.
+2. **Skip the count-up.** The hero distance counts up from zero over ~0.7 s. Jump straight to the value for an unfinished ride, the way `reduceMotion` already does at `:151`. Celebrating a number the same screen calls incomplete is the same contradiction as the trophy.
 
-Delegate to the `apple-platform-build-tools:builder` agent: build the `Aura` scheme for an iPhone simulator. Expected: clean.
+**Fix the save-failure copy while you are here.** `RideSummaryView.swift:135-137` says *"Couldn't save this ride — it won't appear in History."* Since Task 2, a ride whose `finish()` throws still has its checkpoint row in History, now wearing the badge — so the app asserts absence and displays presence. When a checkpoint exists, say instead: *"Aura couldn't save the end of this ride. What was recorded is in History."*
 
-Then check the badge at the largest accessibility text size on the smallest device in the matrix (iPhone SE), on both the History row and the last-ride card. The badge must not push the hero distance numeral off the row, and the caption must still be legible.
+- [ ] **Step 8: The widget renders the marker, not just an accessibility label**
 
-- [ ] **Step 8: Commit**
+Do **not** ship the marker to VoiceOver only. A sighted rider glancing at the Lock Screen would see a truncated ride looking complete while a VoiceOver user is told the truth — backwards from every other surface here, and it makes the glance surface the one that misleads.
 
-```bash
-git add AuraCore Aura
-git commit -m "feat(roh-107): mark an unfinished ride on History, Home, the summary and the widget"
-```
+There is room. Both tight families already spend a line on low-value text: `accessoryRectangular` renders `"Last ride · Tue"` (`LastRideWidget.swift:97`) and `systemSmall` renders `"Tue · Explore"` (`:44`). When `ride.isUnfinished`, replace that secondary line with `UnfinishedRideCopy.label` (plus the badge glyph if it fits). Zero added height, no stat truncated.
 
----
+Extend the existing accessibility string at `LastRideWidget.swift:142` with `UnfinishedRideCopy.accessibilityLabel(checkpointedAt: ride.checkpointedAt)`.
 
-### Task 7: Confirm before deleting an unfinished ride
+**Share card** (`ShareCardContent.swift` and its rendered view). PO decision, 2026-07-29: mark it now rather than deferring. Without this the marker reaches every surface only the rider sees and none of the surface other people see — the rider reads "anything after 2:14 PM wasn't saved", taps Share, and posts a card showing a truncated distance as though it were the whole ride. Add `checkpointedAt` to `ShareCardContent` and render `UnfinishedRideCopy.label` in the card footer when it is non-nil. Keep it quiet; this is a footnote on the card, not a headline.
 
-**Files:**
-- Modify: `Aura/Sources/History/HistoryView.swift:67-71`
+Note on spec D4's duration labeling: the detail line now states the recording boundary explicitly on every surface that carries the badge, which is what that clause was for. A separate per-number qualifier ("1h 38m moving") is **not** implemented, and that is a deliberate cut rather than an oversight.
 
-**Interfaces:**
-- Consumes: `RideSummary.isUnfinished`.
+- [ ] **Step 9: Swap the dialog message from Task 6 to the real string**
 
-- [ ] **Step 1: Add the confirmation**
-
-History's delete is `.swipeActions(edge: .trailing, allowsFullSwipe: true)` with a destructive role, calling a hard delete that propagates to every device via CloudKit (`RideStore.swift:125`). Labelling a row as damaged and leaving a one-gesture irreversible destroy on it is a trap: in the common case the row is a complete, correct ride missing only its ending, and a rider who reads the marker as "broken, junk" full-swipes away a real ride.
-
-Add state to `HistoryView`:
+In `HistoryView.swift`, replace the inlined placeholder with the helper:
 
 ```swift
-    /// A ride awaiting delete confirmation. Only unfinished rides land here: the marker is what
-    /// makes a rider likely to delete a row they would otherwise keep, so the confirmation
-    /// exists to answer the hazard this feature created — not to slow down ordinary deletes.
-    @State private var pendingDelete: RideSummary?
-```
-
-Change the swipe action to route unfinished rows through it:
-
-```swift
-                    .swipeActions(edge: .trailing, allowsFullSwipe: !summary.isUnfinished) {
-                        Button(role: .destructive) {
-                            if summary.isUnfinished { pendingDelete = summary } else { delete(summary) }
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-```
-
-Attach the dialog to the same view that carries the existing `.sheet` (around line 48):
-
-```swift
-        .confirmationDialog("Delete this ride?", isPresented: .constant(pendingDelete != nil),
-                            presenting: pendingDelete) { summary in
-            Button("Delete ride", role: .destructive) { delete(summary); pendingDelete = nil }
-            Button("Keep", role: .cancel) { pendingDelete = nil }
-        } message: { _ in
-            Text("Aura never recorded this ride's end, but everything up to that point was saved. Deleting removes it from all your devices.")
+        } message: { summary in
+            Text(UnfinishedRideCopy.deleteWarning(checkpointedAt: summary.checkpointedAt))
         }
 ```
 
-`allowsFullSwipe: !summary.isUnfinished` matters as much as the dialog: a full swipe on an unfinished row would otherwise fire the destructive button without the rider ever seeing it.
+- [ ] **Step 10: Build and eyeball**
 
-- [ ] **Step 2: Build**
+Delegate to the `apple-platform-build-tools:builder` agent: build the `Aura` scheme **and** the `AuraWidgets` extension for an iPhone simulator. Expected: clean.
 
-Delegate to the `apple-platform-build-tools:builder` agent: build the `Aura` scheme for an iPhone simulator. Expected: clean.
+Then, on the smallest device in the matrix (iPhone SE) at the largest accessibility text size, confirm:
 
-- [ ] **Step 3: Verify by hand in the simulator**
+- the History row's badge does not push the hero distance numeral off the row, and the caption stays legible;
+- the last-ride card still fits the Home peek with its scroll affordance intact, and the 88 pt loading placeholder no longer jumps on load;
+- the badge's label wraps rather than clipping inside its capsule in the narrow column between the 88 pt thumbnail and the chevron;
+- the summary sheet shows no trophy and no count-up on an unfinished ride.
 
-Seed an unfinished ride (start a simulated ride, pause it, then kill the app from the simulator rather than ending the ride), relaunch, and confirm: History shows the row with the badge, a full swipe does **not** delete it, the swipe button opens the dialog, "Keep" leaves the row, and a finished ride still full-swipes away with no dialog.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add Aura/Sources/History/HistoryView.swift
-git commit -m "feat(roh-107): confirm before deleting a ride with no recorded end"
+git add AuraCore Aura
+git commit -m "feat(roh-107): mark a ride with no recorded end across every surface"
 ```
-
 ---
 
 ## After the plan
@@ -1221,5 +1388,13 @@ cd AuraCore && swift test && swiftlint --strict
 Then build the app target through the builder agent, and device-verify the recovery path: pause a real ride above the 25 m floor, kill Aura from the app switcher, relaunch, and confirm the badge, the "Recorded until" line, the weekly ring still counting the distance, and Home showing the recovered ride rather than a stale mid-ride row.
 
 **Do not promote the CloudKit production schema during this plan.** [ROH-108](https://linear.app/rohun/issue/ROH-108) deploys once, after V7 has landed, covering `CD_segmentsData`, `CD_pausedSeconds` and `CD_checkpointedAt` together.
+
+Running a signed device build *will* add `CD_checkpointedAt` to the CloudKit **development** schema, which is correct and required — development auto-updates from the client, and it is what makes the eventual promotion possible. The constraint above is about production only; do not let it stop you device-verifying.
+
+**Once a Task-1-or-later build is on a device, do not install a `main` build on that device without deleting the app first.** A store stamped V7 cannot be opened by a V6 build: `RideStore.persistent()` throws, `AuraApp` catches it by falling back to the ephemeral in-memory store, and the rider's History reads empty with no error surface. This project device-verifies on a real phone with real history, so it is a live hazard, not a theoretical one.
+
+**`RideMigrationTests` is the only end-to-end chain guard.** It reopens on `RideRecord.self` plus the plan, so it silently becomes the V1→V7 chain test the moment Task 1 lands. It must stay green; a mis-ordered stage does not fail loudly, it throws inside `ModelContainer.init` and the rider just sees an empty History.
+
+Stale comments to update while you are in there: `SwiftDataSerialGate.swift:9-10` and `SchemaInvariantTests.swift:12-13` both say two `@Model` classes share the entity name `RideRecord`. From Task 1 there are three. Those comments are the institutional memory of the ROH-65 flake, so leaving them wrong costs the next person real time.
 
 **Known gap, deliberate:** `AppRouter` has no unit-test coverage and cannot get any here — it lives in the app target, and `Aura/project.yml` defines only `Aura`, `AuraWidgets` and `AuraUITests`. Task 3's computed-property change is covered by the existing `AuraUITests` deep-link cases and by device verification. If that is judged insufficient, moving the guard logic into AuraCore is its own pass, not a step in this one.
