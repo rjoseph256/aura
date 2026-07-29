@@ -144,9 +144,10 @@ import AuraCore
                      "thumbnailCoordinates":[]},
          "week":{"distanceMeters":20000,"rideCount":3,"goalMeters":40000,
                  "start":748000000,"end":749000000}}
-        """.data(using: .utf8)!
+        """
+        let data = Data(json.utf8)
 
-        let decoded = try JSONDecoder().decode(WidgetSnapshot.self, from: json)
+        let decoded = try JSONDecoder().decode(WidgetSnapshot.self, from: data)
         let ride = try #require(decoded.lastRide)
         #expect(ride.checkpointedAt == nil)
         #expect(ride.endedAt == nil)
