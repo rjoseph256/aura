@@ -49,12 +49,19 @@ Worth reading once so nothing here looks like an oversight.
 
 ## The lane
 
+**Do [ROH-123](https://linear.app/rohun/issue/ROH-123) before anything below it.** It is the
+one-time pass that brings your machine onto the repo's process config and proves the review
+gates actually fire. Work done before it runs through a weaker process than this repo requires,
+which is not a hypothetical: the first pipeline observed on the second machine ran a single
+generic reviewer instead of the two or three adversarial ones, because the mandate lived only in
+the owner's user-scope config and never reached the clone.
+
 Ranked. The first two exist to prove the toolchain and the process on something small before
 anything with real design surface in it.
 
 | Issue | Size | Why it is safe to take |
 |---|---|---|
-| [ROH-104](https://linear.app/rohun/issue/ROH-104) | XS | Two `try?` in one file, no epic routes through it |
+| ~~[ROH-104](https://linear.app/rohun/issue/ROH-104)~~ | XS | Shipped 2026-07-29 in PR #110 |
 | [ROH-13](https://linear.app/rohun/issue/ROH-13) | S | Pure package tests, device-independent by definition |
 | [ROH-113](https://linear.app/rohun/issue/ROH-113) | M | Contained AuraKit bug with genuine design work in it |
 | [ROH-77](https://linear.app/rohun/issue/ROH-77) | M | Refactor for testability, no live backend needed |
@@ -66,26 +73,31 @@ anything with real design surface in it.
 
 ### ROH-104 (Low, Bug) — swallowed decode failures in the migration plan
 
-`RideMigrationPlan.swift:37` decodes the track with a bare `try?` and no `assertionFailure`,
-four lines below a `statsData` branch that does assert. Line 39 swallows the thumbnail encode
-the same way. A track that fails to decode silently leaves `thumbnailData` nil.
+Shipped 2026-07-29 in PR #110, the first issue taken in this lane. Left here as a worked
+example rather than as available work.
 
-The catch worth knowing before starting: an `assertionFailure` here fires at container-open on
-launch, so the fix has to be right about which failures are real bugs and which are legitimately
-empty. The issue notes that `RideMigrationTests.swift:34` writes an empty encoded track that
-decodes cleanly, so no existing test breaks.
+What made it more than the one-word edit the issue described: an empty `trackData` blob is a
+ride with no track, not a corrupt one, so asserting on every decode failure would have trapped
+at container-open on the launch path. The fix separates four outcomes where the old code could
+express two. That distinction is the kind of thing the adversarial review gates exist to surface
+before the code is written.
 
-### ROH-13 (Medium) — schema-invariant guard tests
+### ROH-13 (Medium) — the V1 `.unique` check
 
-Assert in package CI that every non-optional `RideRecord` attribute has a default and that
-nothing carries `.unique` or a relationship, both of which break the CloudKit mirror. Then
-confirm the frozen `RideSchemaV1` `.unique` never trips the mirror during the V1 to V2
+Narrowed on 2026-07-29, and the issue description now leads with the change, so read it before
+starting. The first half of the original ask already shipped:
+`AuraCore/Tests/AuraKitTests/SchemaInvariantTests.swift` runs in package CI and already asserts
+that every attribute is optional or defaulted and that nothing carries `.unique` or a
+relationship.
+
+What is left is the second half. That suite pins the current schema only, so nothing yet
+confirms the frozen `RideSchemaV1` `.unique` never trips the CloudKit mirror during the V1 to V2
 `didMigrate`.
 
-One correction to make before writing anything: the issue was filed against schema V2. The
-schema is V6 now (ROH-100 added `segmentsData` and `pausedSeconds`). The test has to guard the
-current shape, and it should be written so a future column that forgets its default fails in
-package CI rather than at the CloudKit dashboard.
+The trap to know before writing it: a new suite that materializes a V1 entity while the
+migration suites hold `RideSchemaV2.RideRecord` hits the process-global CoreData entity cache
+under the same name. That is the ROH-65 hazard, and it crashed CI from an unrelated suite once
+already. `SchemaInvariantTests` carries `.swiftDataSerialized` for exactly this reason.
 
 ### ROH-113 (Medium) — a timed-out Overpass fetch poisons the gem cache
 
@@ -183,6 +195,11 @@ written, and the difference is worth understanding rather than trusting blindly.
   done here": the full pipeline with its adversarial review gates for major work, iOS-skill
   routing before writing Swift, device verification for UI, and `humanizer` for prose. Every
   session in this repo reads them.
+- **The three adversarial reviewers** the pipeline names are in `.claude/agents/`:
+  `review-skeptic`, `review-product`, `review-architecture`. They are checked in rather than
+  left at user scope because a mandate naming agents a clone does not have degrades quietly
+  into one generic reviewer, which is the failure that prompted all of this. Each declares a
+  `tools:` list with no Agent tool, so a reviewer cannot spawn grandchildren by construction.
 - **The plugins** are declared in `.claude/settings.json`, so `superpowers`, `all-ios-skills`,
   `apple-platform-build-tools`, and `ios-build-verify` resolve without a manual install. Claude
   Code will ask you to trust the marketplaces on first run, which is expected. Approve them.
@@ -222,20 +239,6 @@ a blocked-task message is slower than not tripping it.
 - `xcodegen generate` after every clone, branch switch, and `project.yml` change. A stale
   project fails with `cannot find X in scope` in files you did not touch, which reads like
   broken code. Nothing catches this for you.
-- SwiftLint pinned to 0.64.1, not Homebrew's current. `scripts/lint.sh` runs it. There is a
-  custom rule banning `async` closure default arguments (ROH-110); if it fires, default the
-  parameter to nil and build the closure inside the module rather than working around the rule.
-- `swift test --no-parallel` in `AuraCore`. Any new suite that builds a SwiftData container
-  needs the `.swiftDataSerialized` trait, or it flakes against every other suite that registers
-  the same entity descriptions. `scripts/golden-ride.sh` is the local end-to-end ride gate.
-
-### Repo gates that are easy to trip
-
-The three that cost the most time when missed:
-
-- `xcodegen generate` after every clone, branch switch, and `project.yml` change. A stale
-  project fails with `cannot find X in scope` in files you did not touch, which reads like
-  broken code.
 - SwiftLint pinned to 0.64.1, not Homebrew's current. `scripts/lint.sh` runs it. There is a
   custom rule banning `async` closure default arguments (ROH-110); if it fires, default the
   parameter to nil and build the closure inside the module rather than working around the rule.
