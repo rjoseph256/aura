@@ -46,7 +46,7 @@ would serialize it against every other SwiftData suite for no reason.
 ## Task 1: Extract and diagnose the thumbnail backfill
 
 **Files:**
-- Modify: `AuraCore/Sources/AuraKit/Persistence/RideMigrationPlan.swift:1-3` (imports), `:22-44` (`didMigrate`)
+- Modify: `AuraCore/Sources/AuraKit/Persistence/RideMigrationPlan.swift:1-3` (imports), `:18-44` (`migrateV1toV2` and its `didMigrate` closure)
 - Test: `AuraCore/Tests/AuraKitTests/RideMigrationThumbnailTests.swift` (create)
 
 - [ ] **Step 1: Write the failing test**
@@ -213,7 +213,8 @@ freshly migrated row either way — but it no longer depends on that default.
 cd AuraCore && swift test --no-parallel --filter RideMigrationThumbnailTests
 ```
 
-Expected: PASS, 4 tests (the parameterized case counts as two).
+Expected: PASS — Swift Testing reports **3 tests, 4 test cases** (the parameterized function is
+one test that runs two cases). Seeing "3 tests" is correct, not a missing test.
 
 - [ ] **Step 7: Run the existing migration tests for regressions**
 
