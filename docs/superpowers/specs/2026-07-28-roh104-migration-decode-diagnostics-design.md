@@ -153,7 +153,7 @@ nothing outside `AuraKit` has any reason to call it.
 
 ## Testing
 
-**What is covered.** Two behaviors that are new assertions about how this code works, both
+**What is covered.** Three behaviors that are new assertions about how this code works, all
 exercised directly against the helper:
 
 - An empty `Data()` returns nil **without** tripping the assert. This is the Decision 2
@@ -168,7 +168,9 @@ exercised directly against the helper:
 DEBUG. `swift test` builds DEBUG, so a test that drove either would abort the suite rather than
 fail an expectation. Of the two, only the undecodable-blob path is reachable at all — the encode
 path is unreachable by construction (see above), so there is no input that could drive it even if
-the assert were removed. There is no way to assert on either without adding an injection seam.
+the assert were removed — no seam would help there, because the problem is that the state cannot
+be reached, not that the assert traps. For the undecodable-blob path a seam would work, and is
+rejected below.
 
 **Rejected: adding that seam.** A settable diagnostic hook, or routing the assert through a
 closure a test could swap, would make the undecodable-blob path testable. It is rejected under YAGNI: it adds
@@ -190,7 +192,9 @@ unit tests.
 Out of scope: the `statsData` branch's missing release-log (it asserts, which is what its own
 review asked for; widening it is a separate call), `RideMapper`'s pre-existing `try?` on
 `thumbnailData` (`RideMapper.swift:86-88`), which is deliberate per the D3 note at
-`RideMapper.swift:10-15`, and the V6 backfill path, which is `RideSegmentBackfiller`'s job.
+`RideMapper.swift:10-15`, and the V6 backfill path, which is `RideSegmentBackfill`'s job
+(`RideSegmentBackfill.swift:50` — three doc comments elsewhere call it `RideSegmentBackfiller`,
+which is not a type that exists; noted, and left alone as unrelated).
 
 ## Gates
 
