@@ -1,7 +1,8 @@
 import Foundation
 
-/// Selects which peers get a dot on the group-ride map — the one home for that rule, since
-/// both call sites (`NavigateHUDView` and `RideMapView`) are in the untestable app target.
+/// Selects which peers get a dot on the group-ride map — the one home for that rule, since its
+/// only call site (`NavigateHUDView`) is in the untestable app target. `RideMapView` was a
+/// second call site until ROH-105 removed its dead peer path.
 ///
 /// The rider is already drawn by Mapbox's location puck, so their own entry must be
 /// excluded: the annotations set `allowOverlapWithPuck(true)`, so a self dot stacks a
@@ -13,8 +14,8 @@ import Foundation
 public enum GroupMapDots {
     /// Peers that should be drawn: everyone except the rider, that has a fix to draw at.
     /// Order is preserved so dot identity stays stable across refreshes. `selfUserID` is
-    /// optional because the solo map has no group identity to exclude — nil filters on
-    /// coordinate alone rather than forcing callers to invent a placeholder id.
+    /// optional because `NavigateHUDView`'s solo path has no group identity to exclude — nil
+    /// filters on coordinate alone rather than forcing callers to invent a placeholder id.
     public static func visiblePeers(peers: [RidePeer], selfUserID: UUID?,
                                     maxDots: Int = 7) -> [RidePeer] {
         let visible = peers.filter { $0.userID != selfUserID && $0.coordinate != nil }

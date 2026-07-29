@@ -4,71 +4,50 @@ import Foundation
 /// to decide for itself whether two adjacent points belong in the same line. A pause gap is
 /// unrepresentable in the output: pieces never span segments.
 ///
-/// `splitAtMeters` is the rider's own progress along the ride (group rides dim what is
-/// already ridden), sourced from `recorder.stats.distanceMeters`.
+/// Two rules are worth knowing before extending this, both learned the expensive way.
+///
+/// **Progress along a segmented track must be spent per segment.** It must never be resolved
+/// by walking the flattened geometry: that walk includes the straight-line chord across each
+/// pause, while segment-aware stats exclude it. Mixing the two measures progress against a
+/// longer track than the rider rode, which freezes anything keyed to it for the length of the
+/// chord after every resume. A behind/ahead ribbon split that made this mistake shipped dead
+/// and was removed in ROH-105; the trap outlived the feature.
+///
+/// **`sourceIndex` is stable only because the recorder appends solely to the last segment**
+/// (`RideRecorder.record`, and `resume(at:)` which appends a fresh one). Any future path that
+/// backfills an interior segment — checkpoint restore, GPX import, a replay harness — renumbers
+/// these indices, which churns Mapbox annotation identity in `RideMapView`.
 public enum TrackRibbon {
     public struct Piece: Equatable, Sendable {
         public let coordinates: [Coordinate]
-        /// True for the already-ridden portion, which the group map dims.
-        public let isBehind: Bool
         /// Index into the original `segments` array. Preserved because runs too short to
-        /// stroke are dropped, so output position is not input position — and Pass 4 wants
-        /// to render the *current* segment differently while paused.
+        /// stroke are dropped, so output position is not input position.
+        ///
+        /// **`RideMapView` keys its Mapbox annotation group on this, so it must stay unique
+        /// across the returned array.** Duplicate IDs collide silently in Mapbox: both
+        /// annotations receive the same feature id, and tap resolution finds only the first.
+        /// A future rule that emits more than one piece per segment (Pass 4 / ROH-101 renders
+        /// the current segment differently while paused) must introduce a compound key rather
+        /// than reusing this one. `TrackRibbonTests.test_sourceIndicesAreUnique` documents the
+        /// invariant and catches a regression in today's one-piece-per-segment implementation;
+        /// its fixture has no pause state, so it would stay green through a ROH-101-style change
+        /// and does not guard against that future rule.
         public let sourceIndex: Int
 
-        public init(coordinates: [Coordinate], isBehind: Bool, sourceIndex: Int) {
+        public init(coordinates: [Coordinate], sourceIndex: Int) {
             self.coordinates = coordinates
-            self.isBehind = isBehind
             self.sourceIndex = sourceIndex
         }
     }
 
-    /// - Parameter splitAtMeters: nil draws every segment as one bright piece. Non-nil splits
-    ///   at that cumulative *ridden* distance into behind/ahead pieces.
-    /// - Returns: drawable pieces in ride order. Runs of fewer than two coordinates are
-    ///   dropped — a single point strokes nothing.
-    public static func pieces(segments: [RideSegment], splitAtMeters: Double?) -> [Piece] {
-        var result: [Piece] = []
-        // The budget is spent segment by segment. It must NOT be resolved by walking the
-        // flattened geometry: that walk includes the straight-line chord across each pause,
-        // while `splitAtMeters` comes from segment-aware stats and excludes it. Mixing the
-        // two measures the split against a longer track than the rider rode, which freezes
-        // the ribbon for the length of the chord after every resume.
-        var remaining = splitAtMeters ?? 0
-        let splitting = splitAtMeters != nil
-
-        for (index, segment) in segments.enumerated() {
+    /// - Returns: drawable pieces in ride order, one per segment. Runs of fewer than two
+    ///   coordinates are dropped — a single point strokes nothing — without shifting the
+    ///   `sourceIndex` of the runs after them.
+    public static func pieces(segments: [RideSegment]) -> [Piece] {
+        segments.enumerated().compactMap { index, segment in
             let run = segment.points.map(\.coordinate)
-            guard run.count > 1 else { continue }   // strokes nothing, and contributes no length
-
-            guard splitting else {
-                result.append(Piece(coordinates: run, isBehind: false, sourceIndex: index))
-                continue
-            }
-
-            let local = RouteSplit.splitIndex(geometry: run, atMeters: remaining)
-            remaining = max(remaining - length(of: run), 0)
-
-            if local <= 1 {
-                result.append(Piece(coordinates: run, isBehind: false, sourceIndex: index))
-            } else if local >= run.count {
-                result.append(Piece(coordinates: run, isBehind: true, sourceIndex: index))
-            } else {
-                // Overlap by one point so behind and ahead join without a visual gap. The
-                // code this replaces used `prefix(split)` beside `suffix(from: split)`, which
-                // left the leg between them stroked by neither — a hairline gap in the
-                // ribbon. Fixing it is a deliberate change, not a preservation.
-                result.append(Piece(coordinates: Array(run.prefix(local)),
-                                    isBehind: true, sourceIndex: index))
-                result.append(Piece(coordinates: Array(run.suffix(from: local - 1)),
-                                    isBehind: false, sourceIndex: index))
-            }
+            guard run.count > 1 else { return nil }   // strokes nothing
+            return Piece(coordinates: run, sourceIndex: index)
         }
-        return result
-    }
-
-    private static func length(of run: [Coordinate]) -> Double {
-        guard run.count > 1 else { return 0 }
-        return (1..<run.count).reduce(0.0) { $0 + Geo.distance(run[$1 - 1], run[$1]) }
     }
 }

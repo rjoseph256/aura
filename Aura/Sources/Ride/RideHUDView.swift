@@ -30,7 +30,9 @@ struct RideHUDView: View {
     @State private var cameraBox = MapZoomCameraBox()
     // Free rides are solo by construction — group rides use NavigateHUDView +
     // GroupRideSession, never this HUD — so gem discovery is never suppressed here.
-    // (GemDiscoveryStore.isSuppressed exists for a future group-explore surface.)
+    // (GemDiscoveryStore.isSuppressed exists for a future group-explore surface. That surface
+    // would be a rebuild, not a wiring-up: ROH-105 removed the last dormant peer path here.
+    // See docs/superpowers/specs/2026-07-27-roh105-dead-peer-split-deletion-design.md.)
     // Built lazily in the appear .task: it needs SeenGemStore(container:) from `rideStore`,
     // which a @State initializer can't read.
     @State private var gems: GemDiscoveryStore?
