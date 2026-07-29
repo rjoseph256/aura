@@ -20,17 +20,28 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         public let hasStats: Bool
         public let distanceMeters: Double
         public let movingTimeSeconds: Double
+        /// Nil on a payload written before ROH-107, and on every finished ride.
+        public let checkpointedAt: Date?
+        /// `endedAt` and `pausedSeconds` are here for ROH-112's active-with-elapsed pair, added
+        /// now because this struct was being touched anyway. Optional so an existing payload
+        /// decodes without a version bump.
+        public let endedAt: Date?
+        public let pausedSeconds: Double?
         public let elevationGainMeters: Double
         public let destinationName: String?
         public let thumbnailCoordinates: [Coordinate]
 
         public init(id: UUID, kind: Ride.Kind, startedAt: Date, hasStats: Bool,
                     distanceMeters: Double, movingTimeSeconds: Double,
+                    checkpointedAt: Date?, endedAt: Date?, pausedSeconds: Double?,
                     elevationGainMeters: Double, destinationName: String?,
                     thumbnailCoordinates: [Coordinate]) {
             self.id = id; self.kind = kind; self.startedAt = startedAt
             self.hasStats = hasStats; self.distanceMeters = distanceMeters
             self.movingTimeSeconds = movingTimeSeconds
+            self.checkpointedAt = checkpointedAt
+            self.endedAt = endedAt
+            self.pausedSeconds = pausedSeconds
             self.elevationGainMeters = elevationGainMeters
             self.destinationName = destinationName
             self.thumbnailCoordinates = thumbnailCoordinates
@@ -40,6 +51,8 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
             self.init(id: summary.id, kind: summary.kind, startedAt: summary.startedAt,
                       hasStats: summary.hasStats, distanceMeters: summary.distanceMeters,
                       movingTimeSeconds: summary.movingTimeSeconds,
+                      checkpointedAt: summary.checkpointedAt, endedAt: summary.endedAt,
+                      pausedSeconds: summary.pausedSeconds,
                       elevationGainMeters: summary.elevationGainMeters,
                       destinationName: summary.destinationName,
                       thumbnailCoordinates: summary.thumbnailCoordinates)
@@ -120,9 +133,18 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         lastRide: LastRide(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!, kind: .freeRide,
                            startedAt: Date(timeIntervalSince1970: 1_749_900_000),
                            hasStats: true, distanceMeters: 20_000, movingTimeSeconds: 3_720,
+                           checkpointedAt: nil,
+                           endedAt: Date(timeIntervalSince1970: 1_749_903_720),
+                           pausedSeconds: 0,
                            elevationGainMeters: 104, destinationName: nil,
                            thumbnailCoordinates: []),
         week: Week(distanceMeters: 20_000, rideCount: 3, goalMeters: 40_000,
                    start: Date(timeIntervalSince1970: 1_749_600_000),
                    end: Date(timeIntervalSince1970: 1_750_204_800)))
+}
+
+extension WidgetSnapshot.LastRide {
+    /// Mirrors `RideSummary.isUnfinished`. The widget renders from this struct, not from
+    /// `RideSummary`, so the predicate exists twice by necessity — keep them in step.
+    public var isUnfinished: Bool { checkpointedAt != nil || (endedAt == nil && pausedSeconds != nil) }
 }

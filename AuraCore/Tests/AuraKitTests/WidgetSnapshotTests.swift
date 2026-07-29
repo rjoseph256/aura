@@ -126,4 +126,49 @@ import AuraCore
         #expect(snapshot.week.distanceMeters == 10_000, "the earlier ride still counts")
         #expect(snapshot.week.rideCount == 1)
     }
+
+    /// A payload written by the previous app version has none of the new keys. Swift's
+    /// synthesized `Codable` decodes a missing key for an Optional as nil, which is the safe
+    /// reading: not a checkpoint, no duration pair, no paused time.
+    ///
+    /// This is why `currentVersion` stays 1. Bumping it would make `WidgetSnapshotStore.read()`
+    /// reject the stored payload, and the only writer is in the app target — so both widgets
+    /// would render "No rides yet" with the ring at 0% until the rider next foregrounds Aura,
+    /// which for a widget user can be days.
+    @Test func aPayloadWrittenWithoutTheNewFieldsStillDecodes() throws {
+        let json = """
+        {"version":1,"generatedAt":749000000,"units":"metric",
+         "lastRide":{"id":"00000000-0000-0000-0000-000000000001","kind":"freeRide",
+                     "startedAt":748000000,"hasStats":true,"distanceMeters":20000,
+                     "movingTimeSeconds":3720,"elevationGainMeters":104,
+                     "thumbnailCoordinates":[]},
+         "week":{"distanceMeters":20000,"rideCount":3,"goalMeters":40000,
+                 "start":748000000,"end":749000000}}
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(WidgetSnapshot.self, from: json)
+        let ride = try #require(decoded.lastRide)
+        #expect(ride.checkpointedAt == nil)
+        #expect(ride.endedAt == nil)
+        #expect(ride.pausedSeconds == nil)
+        #expect(!ride.isUnfinished, "a payload from before this field must not read as unfinished")
+    }
+
+    /// `RideSummary.isUnfinished` and `LastRide.isUnfinished` are deliberately different
+    /// expressions — the widget struct needs the `pausedSeconds` provenance guard and the summary
+    /// does not. Nothing else stops them drifting apart.
+    @Test func theWidgetPredicateAgreesWithTheSummaryPredicate() {
+        let base = Date(timeIntervalSince1970: 1_750_000_000)
+        func summary(endedAt: Date?, checkpointedAt: Date?) -> RideSummary {
+            RideSummary(id: UUID(), kind: .freeRide, startedAt: base, endedAt: endedAt,
+                        hasStats: true, distanceMeters: 1_000, movingTimeSeconds: 300,
+                        pausedSeconds: 0, checkpointedAt: checkpointedAt,
+                        elevationGainMeters: 10, destinationName: nil, thumbnailCoordinates: [])
+        }
+        for s in [summary(endedAt: base, checkpointedAt: nil),
+                  summary(endedAt: base, checkpointedAt: base),
+                  summary(endedAt: nil, checkpointedAt: nil)] {
+            #expect(WidgetSnapshot.LastRide(s).isUnfinished == s.isUnfinished)
+        }
+    }
 }
