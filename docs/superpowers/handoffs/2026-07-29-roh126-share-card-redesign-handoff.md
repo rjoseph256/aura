@@ -27,37 +27,49 @@ button). Two defects, reported by Andrew:
 ## Pipeline position (per CLAUDE.md, all gates required)
 
 1. ~~Brainstorm / settle intent~~ — done (defects and direction fixed by the user's report).
-2. **Adversarial spec review — IN FLIGHT when this handoff was written.** Three
-   independent reviewers (`review-skeptic`, `review-product`, `review-architecture`)
-   were dispatched against the spec with refuting stances. If their findings are not
-   reconciled into the spec yet, re-run this gate rather than trusting it happened.
-3. `superpowers:writing-plans` → bite-sized TDD plan.
-4. Adversarial plan review (2+ reviewers, refuting stance). Fix before executing.
-5. `superpowers:subagent-driven-development` — fresh implementer + reviewer per task.
-6. Whole-branch review on the most capable model before finishing.
-7. Prose deliverables (PR body, issue updates) through `humanizer`.
+2. ~~Adversarial spec review, round 1~~ — done: skeptic, product, and architecture
+   reviewers all returned REVISE. Convergent blockers: (a) a Snapshotter style-load
+   timeout yields a *blank successful* raster, not `nil`, so rev 1's offline fallback
+   never fired; (b) the rev-1 band needed ~286 pt in a 220 pt budget (Saira Condensed
+   line height is 1.57× point size — measure, don't assume); (c) `start()` had no
+   timeout → permanently dead Share after backgrounding; (d) fixed `Aura ride.png`
+   filename + async window → wrong-ride share from History; (e) no cancellation;
+   (f) NaN camera propagation; (g) `scaledToFill` could crop Mapbox attribution;
+   (h) orchestration untestable in the view body (repo pattern is a protocol seam,
+   see `TerrainSnapshotRendering`); (i) stroke width was specified 3× too thick (the
+   overlay CGContext is already in points).
+3. **Spec revision 2 written and committed** — key changes: fallback-card-first with
+   upgrade-in-place (Share enables instantly, map card swaps in when the raster is
+   accepted); a measured 240 pt map / 210 pt band budget with a 44 pt hero; an
+   acceptance pipeline (gate timeout → `nil` before `start()`, bounded `start()` with
+   `cancel()`, camera validation, non-blank variance backstop, cache only accepted
+   rasters via `TerrainSnapshotDiskCache`); per-ride+generation temp filenames with a
+   sweep; `ShareMapRasterProviding` protocol seam; one shared style-resolution helper
+   (Home refactored onto it).
+4. **Adversarial spec review, round 2 — IN FLIGHT when this was last updated.** Three
+   fresh reviewers against rev 2, primed with the round-1 findings. Reconcile before
+   planning; re-run the gate if you can't find its results.
+5. `superpowers:writing-plans` → bite-sized TDD plan.
+6. Adversarial plan review (2+ reviewers, refuting stance). Fix before executing.
+7. `superpowers:subagent-driven-development` — fresh implementer + reviewer per task.
+8. Whole-branch review on the most capable model before finishing.
+9. Prose deliverables (PR body, issue updates) through `humanizer`.
 
-## Design (see the spec for full detail)
+Also done: warm `xcodebuild build` of the untouched worktree passed (project generated
+via `cd Aura && xcodegen generate`; DerivedData at `Aura/DerivedData` is warm). A
+separate task chip was spawned for the latent Home bug the review found
+(`MapboxTerrainSnapshotter` caches blank rasters to disk on gate timeout).
 
-- New `ShareMapSnapshotter` (app target, `Aura/Sources/Ride/ShareCard/`): async
-  `MapboxMaps.Snapshotter` render of the card's map field — rider's map style resolved
-  exactly as `MapStyle+Mapbox.swift` does, camera via `snapshotter.camera(for:padding:)`
-  clamped to zoom ≤ 16, route segments stroked per-segment in `start(overlayHandler:)`
-  using `pointForCoordinate` + `AuraTheme.routeUIColor`. Style-load timeout gate copied
-  from `MapboxTerrainSnapshotter` (including its continuation-leak fix). Returns
-  `UIImage?`; `nil` on any failure.
-- `ShareCardView` gains `mapImage: UIImage?`. Map variant: raster full-bleed on top
-  (~230 pt of the 360×450 card), **nothing drawn over it** (Mapbox attribution is
-  composited bottom of the raster by the SDK and must stay legible). All text moves to
-  the readout band below: context line, distance hero, elevation sparkline + climbed,
-  moving time row with the AURA wordmark trailing on the same row. Fallback variant
-  (route, no raster): today's `RouteThumbnail` look minus the opaque tile. No-route
-  variant unchanged.
-- `RideCardRenderer.make(content, mapImage:)` stays sync/@MainActor;
-  `RideSummaryView`'s `.task` awaits the snapshot first, then renders. Share button
-  stays disabled until the PNG exists (unchanged behavior; snapshot always resolves via
-  timeout → fallback).
-- `ShareCardContent` (AuraCore) is unchanged — keeps its package unit tests green.
+## Design
+
+**The spec (revision 2) is the single source of truth** — read it in full rather than
+this summary: map field exactly 360×240 pt (one constant shared by snapshot request and
+view, no `scaledToFill` so attribution can't be cropped), readout band 210 pt with a
+measured budget (44 pt Saira hero ≈ 69 pt line box), fallback-card-first share flow with
+upgrade-in-place, a strict raster acceptance pipeline, per-ride temp filenames,
+`ShareMapRasterProviding` seam, pure package-tested helpers in AuraKit (coordinate
+hygiene/decimation, camera validation, non-blank variance), 5 pt **unscaled** route
+stroke in the overlay handler. `ShareCardContent` (AuraCore) is unchanged.
 
 ## Facts a new session should not re-derive
 
