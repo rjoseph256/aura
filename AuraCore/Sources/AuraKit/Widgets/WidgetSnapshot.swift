@@ -26,6 +26,11 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
         /// now because this struct was being touched anyway. Optional so an existing payload
         /// decodes without a version bump.
         public let endedAt: Date?
+        /// **Both optionals are load-bearing beyond ROH-112.** `pausedSeconds` being nil is the
+        /// only signal that a decoded payload predates these keys, and `isUnfinished` (below)
+        /// reads it that way to avoid badging every ride in an old payload. ROH-112 is expected
+        /// to be the next thing to touch this pair: making `pausedSeconds` non-optional (a
+        /// default of 0, say) compiles cleanly and kills that guard silently.
         public let pausedSeconds: Double?
         public let elevationGainMeters: Double
         public let destinationName: String?
@@ -144,7 +149,21 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
 }
 
 extension WidgetSnapshot.LastRide {
-    /// Mirrors `RideSummary.isUnfinished`. The widget renders from this struct, not from
-    /// `RideSummary`, so the predicate exists twice by necessity — keep them in step.
+    /// True when Aura never recorded this ride's end.
+    ///
+    /// **Deliberately NOT the same expression as `RideSummary.isUnfinished`** (`checkpointedAt
+    /// != nil || endedAt == nil`), and it must not be "corrected" into one. This struct is
+    /// decoded from a stored payload, and a payload written before ROH-107 is still version 1 —
+    /// so `WidgetSnapshotStore.read()` accepts it and all three new keys decode nil. Under the
+    /// summary's expression a nil `endedAt` that only means *the writer did not have the field*
+    /// would badge every ride in that payload until the app next foregrounds, which for a widget
+    /// user can be days.
+    ///
+    /// `pausedSeconds != nil` is the provenance guard: a writer that knew about `endedAt` also
+    /// wrote `pausedSeconds`, so its presence is what makes a nil `endedAt` mean "no end
+    /// recorded" rather than "not written". Pinned by
+    /// `WidgetSnapshotTests.aPayloadWrittenWithoutTheNewFieldsStillDecodes`, and the agreement
+    /// with the summary predicate on real rides by
+    /// `theWidgetPredicateAgreesWithTheSummaryPredicate`.
     public var isUnfinished: Bool { checkpointedAt != nil || (endedAt == nil && pausedSeconds != nil) }
 }
