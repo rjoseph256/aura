@@ -210,3 +210,11 @@ asynchronous, so start all four before anything else.
 - [ ] Build to Simulator (no signing) or Run on Silver Bar (auto-registers)
 - [ ] `cd AuraCore && swift test --no-parallel` passes
 - [ ] `swiftlint lint --strict` clean
+
+## Once they are building
+
+Setting up the machine is half of it. [COLLABORATOR-TASKS.md](COLLABORATOR-TASKS.md) covers the
+other half: which board issues one person can actually finish without the owner's second phone
+or Supabase access, how to reproduce Aura's development process (the superpowers pipeline, the
+iOS and design skills, the review gates) in their own Claude Code, and a prompt that sets up a
+daily briefing of issues they can pick up unassisted.
