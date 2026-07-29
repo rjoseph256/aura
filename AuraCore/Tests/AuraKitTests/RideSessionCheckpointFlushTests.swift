@@ -208,4 +208,17 @@ struct RideSessionCheckpointFlushTests {
         #expect(c.saveFailed)
         #expect(c.checkpointedRideID != nil, "the row is still out there and must stay removable")
     }
+
+    /// `recorder.rideID` survives `end()` — it is reset only in `start(at:)` — so a passthrough
+    /// that forgets the recording check hands the glance surfaces an id for a ride that finished,
+    /// permanently filtering it out of Home and the widget.
+    @Test func activeRideIDIsNilOnceTheRideEnds() async throws {
+        let saving = RecordingRideSaving()
+        // Reuse the suite's existing start-a-ride helper; do not hand-roll the start(...) call.
+        let c = try await pausedRideWithACheckpoint(saving: saving)
+        #expect(c.activeRideID != nil, "a paused ride is still active")
+
+        c.finish()
+        #expect(c.activeRideID == nil, "rideID survives end(); the isRecording check is what saves us")
+    }
 }

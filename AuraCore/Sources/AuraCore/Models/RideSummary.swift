@@ -51,3 +51,13 @@ public struct RideSummary: Identifiable, Equatable, Sendable {
         self.thumbnailCoordinates = thumbnailCoordinates
     }
 }
+
+extension RideSummary {
+    /// The rider never ended this ride: it is a pause checkpoint that a kill, or a ride still
+    /// running on another device, left behind.
+    ///
+    /// The `endedAt == nil` clause is not redundant with `checkpointedAt`. It catches rows
+    /// written by the PR #90 dev builds, whose `checkpoint(at:)` wrote a nil `endedAt` and no
+    /// marker at all.
+    public var isUnfinished: Bool { checkpointedAt != nil || endedAt == nil }
+}

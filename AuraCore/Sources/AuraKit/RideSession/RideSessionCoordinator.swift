@@ -23,6 +23,10 @@ public final class RideSessionCoordinator {
     /// the paused reading.
     public var isRecording: Bool { recorder.isRecording }
     public var isPaused: Bool { recorder.isPaused }
+    /// The id of the ride being recorded, for the glance surfaces to exclude (ROH-107, D3).
+    /// **The `isRecording` check is load-bearing:** `recorder.rideID` survives `end()`, so a
+    /// bare passthrough would keep filtering the ride out of Home after it finished.
+    public var activeRideID: UUID? { recorder.isRecording ? recorder.rideID : nil }
     /// **Active** time: wall-clock since the start, less everything spent paused (spec D5).
     /// The ticker keeps running while paused; this simply stops advancing.
     public private(set) var elapsed: TimeInterval = 0

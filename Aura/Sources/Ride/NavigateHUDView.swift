@@ -229,11 +229,11 @@ struct NavigateHUDView: View {
             guidance.units = settings.units
             guidance.start(route: route)
         }
-        .onChange(of: coordinator.isRecording) { _, recording in
-            // Stays true across a pause — a paused ride is an active ride, and this flag is
+        .onChange(of: coordinator.isRecording) { _, _ in
+            // Stays non-nil across a pause — a paused ride is an active ride, and this id is
             // the only thing stopping a deep link from tearing the HUD down into `cancel()`,
             // which does not save (spec D6/D7).
-            router.isRideActive = recording
+            router.activeRideID = coordinator.activeRideID
         }
         .onChange(of: coordinator.finishedRide) { _, ride in
             guard let ride else { return }
@@ -250,7 +250,7 @@ struct NavigateHUDView: View {
             guidance.hapticsEnabled = on
         }
         .onDisappear {
-            router.isRideActive = false
+            router.activeRideID = nil
             teardownGuidance()
             coordinator.cancel()
         }
