@@ -240,7 +240,8 @@ struct NavigateHUDView: View {
             // Refresh widgets BEFORE navigating: showRideSummary collapses the path and tears
             // this HUD down. saveFailed is already set by finish() (before finishedRide), so it
             // reads correctly here. (ROH-85)
-            WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+            // finishedRide fires after finish() cleared the marker, so no ride is active.
+            WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil)
             router.showRideSummary(ride, saveFailed: coordinator.saveFailed)
         }
         .onChange(of: settings.units) { _, newUnits in

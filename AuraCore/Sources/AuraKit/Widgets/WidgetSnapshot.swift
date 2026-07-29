@@ -84,13 +84,19 @@ public struct WidgetSnapshot: Codable, Equatable, Sendable {
 
     /// Builds the snapshot from the cheap summary projection + settings. `now` is injected
     /// (not `Date()`) so the factory is deterministic and testable.
+    ///
+    /// `activeRideID` carries **no default**, deliberately: the ride the rider is currently on
+    /// must never present itself as their last ride, and a defaulted nil lets a new call site
+    /// leak it silently. Excluded by id rather than by `isUnfinished`, because a rider can hold
+    /// a recovered unfinished ride from earlier the same week that still belongs in the ring.
     public static func make(summaries: [RideSummary], goalMeters: Double,
-                            units: DistanceUnits, now: Date,
+                            units: DistanceUnits, now: Date, activeRideID: UUID?,
                             calendar: Calendar = .current) -> WidgetSnapshot {
-        let weekly = RideAggregator.weekToDate(summaries, now: now, calendar: calendar)
+        let visible = summaries.filter { $0.id != activeRideID }
+        let weekly = RideAggregator.weekToDate(visible, now: now, calendar: calendar)
         let interval = calendar.dateInterval(of: .weekOfYear, for: now)
             ?? DateInterval(start: now, end: now)
-        let last = RideAggregator.mostRecent(summaries).map(LastRide.init)
+        let last = RideAggregator.mostRecent(visible).map(LastRide.init)
         return WidgetSnapshot(
             generatedAt: now, units: units, lastRide: last,
             week: Week(distanceMeters: weekly.distanceMeters, rideCount: weekly.rideCount,

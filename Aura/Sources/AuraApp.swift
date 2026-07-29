@@ -132,7 +132,8 @@ private struct RootView: View {
                 }
         }
         .tint(AuraTheme.accent)
-        .task { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+        // Launch .task; no ride can be active yet.
+        .task { WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil) }
         // Schema V6's segment backfill (ROH-100). Deliberately not in the V5→V6 migration
         // stage: stages run inside `ModelContainer.init`, which `AuraApp.init()` calls before
         // the first frame, so re-encoding a long ride history there is a watchdog kill that
@@ -175,12 +176,18 @@ private struct RootView: View {
             for await change in settings.kvSyncStream {
                 let changed = settings.applyRemoteChange(change)
                 if changed.contains("units") || changed.contains("weeklyGoalMeters") {
-                    WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+                    // KVS sync loop — reachable mid-ride when another device changes a setting.
+                    WidgetRefresh.reload(rideStore: rideStore, settings: settings,
+                                         activeRideID: router.activeRideID)
                 }
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+            // The scenePhase edge, which is the leak this fixes.
+            if phase == .active {
+                WidgetRefresh.reload(rideStore: rideStore, settings: settings,
+                                     activeRideID: router.activeRideID)
+            }
             syncLocationActivity()
         }
         .onChange(of: router.path) { _, _ in syncLocationActivity() }

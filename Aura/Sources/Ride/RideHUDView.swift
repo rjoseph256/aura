@@ -196,7 +196,8 @@ struct RideHUDView: View {
         }
         .onChange(of: coordinator.finishedRide) { _, ride in
             guard let ride else { return }
-            WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+            // finishedRide fires after finish() cleared the marker, so no ride is active.
+            WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil)
             router.showRideSummary(ride, saveFailed: coordinator.saveFailed)
         }
         .onDisappear {
