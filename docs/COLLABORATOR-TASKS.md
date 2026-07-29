@@ -130,10 +130,16 @@ up is the cheap path. An honest "measured, it costs nothing, closing" is a good 
 unconditionally. A host reaching the destination gets popped to the summary while `session.end()`
 never fires, so guests wait in `.riding` until they leave or the ride expires.
 
-Ask the PO one question before building, because the issue leaves it open and it changes the
-implementation: should one rider arriving end the ride for everyone, or only detach that rider?
-The logic itself can go behind a pure helper with unit tests. Two-device confirmation stays
-with the owner.
+The PO call the issue left open is answered as of 2026-07-29 and recorded on it: arrival
+detaches that rider only, never ends the ride for everyone. It routes through the existing
+member-leave path whether the arriving rider is the host or not.
+
+That answer leaves one thing to resolve rather than absorb quietly. A host who arrives and
+detaches leaves a live ride with no host in the HUD, and nothing fires `ride_ended` until the
+ride expires or the last member leaves. Host transfer is ROH-17 and is out of scope, so either
+keep the arriving host attached to the crew layer or name the gap in the PR and hand it to
+ROH-17. The logic itself goes behind a pure helper with unit tests. Two-device confirmation
+stays with the owner.
 
 ### ROH-14 (Medium) — QR-code join
 
