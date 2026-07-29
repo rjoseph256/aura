@@ -14,8 +14,8 @@ import Foundation
 public enum GroupMapDots {
     /// Peers that should be drawn: everyone except the rider, that has a fix to draw at.
     /// Order is preserved so dot identity stays stable across refreshes. `selfUserID` is
-    /// optional because the solo map has no group identity to exclude — nil filters on
-    /// coordinate alone rather than forcing callers to invent a placeholder id.
+    /// optional because `NavigateHUDView`'s solo path has no group identity to exclude — nil
+    /// filters on coordinate alone rather than forcing callers to invent a placeholder id.
     public static func visiblePeers(peers: [RidePeer], selfUserID: UUID?,
                                     maxDots: Int = 7) -> [RidePeer] {
         let visible = peers.filter { $0.userID != selfUserID && $0.coordinate != nil }

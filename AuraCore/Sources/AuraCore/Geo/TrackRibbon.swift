@@ -28,7 +28,10 @@ public enum TrackRibbon {
         /// annotations receive the same feature id, and tap resolution finds only the first.
         /// A future rule that emits more than one piece per segment (Pass 4 / ROH-101 renders
         /// the current segment differently while paused) must introduce a compound key rather
-        /// than reusing this one. `TrackRibbonTests.test_sourceIndicesAreUnique` guards it.
+        /// than reusing this one. `TrackRibbonTests.test_sourceIndicesAreUnique` documents the
+        /// invariant and catches a regression in today's one-piece-per-segment implementation;
+        /// its fixture has no pause state, so it would stay green through a ROH-101-style change
+        /// and does not guard against that future rule.
         public let sourceIndex: Int
 
         public init(coordinates: [Coordinate], sourceIndex: Int) {

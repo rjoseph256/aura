@@ -154,45 +154,79 @@ final class PeerAnnotationDriver {
 /// the fixture this replaces (on `RideMapView`) set no `lastUpdate`, so the interpolator
 /// skipped every peer and it rendered an empty map from the day it was written.
 ///
-/// Covers riding, stopped and dropped styling, the heading pointer, the liveness pulse,
-/// monogram widening (Mara / Marco collide on "M"), and declutter (they also sit ~14pt apart,
-/// inside the 26pt enter radius). The `.awaiting` dot is deliberately absent: an awaiting peer
-/// has no coordinate by definition, `GroupMapDots.visiblePeers` filters on exactly that, so it
-/// can never appear here. Its styling is covered by `GroupRosterSheet`'s previews.
+/// Covers riding, stopped and dropped styling; the heading pointer for the two `.riding` peers
+/// (Devon is `.stopped` and Sam is `.dropped`, and `PeerDotView.showsPointer` requires
+/// `.riding`, so those two correctly never show one); a single frame of the liveness pulse
+/// (there's no `TimelineView` here, so it doesn't animate); monogram widening (Mara / Mira
+/// collide on "M" at width 1, then separate cleanly at width 2 — "MA" / "MI"); and declutter
+/// (Mara and Mira's final fixes sit ~14pt apart, inside the 26pt enter radius). The `.awaiting`
+/// dot is deliberately absent: an awaiting peer has no coordinate by definition,
+/// `GroupMapDots.visiblePeers` filters on exactly that, so it can never appear here. Its
+/// styling is covered by `GroupRosterSheet`'s previews.
 #Preview {
     @Previewable @State var viewport: Viewport = .camera(
         center: CLLocationCoordinate2D(latitude: 37.7746, longitude: -122.4186), zoom: 15)
     let now = Date()
     let driver = PeerAnnotationDriver()
-    let peers: [RidePeer] = [
-        RidePeer(userID: UUID(), displayName: "Mara",
+    let maraID = UUID(), miraID = UUID(), devonID = UUID(), samID = UUID()
+    // Devon and Sam never move between the two fixes below, so they're identical in both
+    // peer sets — they stay on `PeerInterpolator`'s stationary branch and never get a bearing,
+    // which is correct: neither is `.riding`.
+    let devon = RidePeer(userID: devonID, displayName: "Devon",
+                          coordinate: Coordinate(latitude: 37.7742, longitude: -122.4182),
+                          progressMeters: 450, motionState: .stopped,
+                          lastUpdate: now, status: .stopped)
+    // A dropped peer keeps its last known fix; what makes it dropped is the silence since.
+    let sam = RidePeer(userID: samID, displayName: "Sam",
+                        coordinate: Coordinate(latitude: 37.7732, longitude: -122.4172),
+                        progressMeters: 200, motionState: .stopped,
+                        lastUpdate: now.addingTimeInterval(-120), status: .dropped)
+    // A bearing only resolves once `PeerInterpolator.commit` has seen TWO fixes with increasing
+    // `lastUpdate` (its moving branch) — a single fix always lands on the first-fix branch,
+    // which sets no bearing at all. So Mara and Mira each get a prior fix ~30m back along their
+    // final heading, 3s before the final fix: 30m / 3s = 10 m/s, under the interpolator's
+    // 25 m/s implausibility gate and over its 0.5m coincident threshold, so `commit` takes the
+    // moving branch and a bearing actually resolves.
+    let priorFixTime = now.addingTimeInterval(-3)
+    let priorPeers = [
+        RidePeer(userID: maraID, displayName: "Mara",
+                 coordinate: Coordinate(latitude: 37.77493, longitude: -122.4192),
+                 progressMeters: 900, motionState: .moving,
+                 lastUpdate: priorFixTime, status: .riding),
+        RidePeer(userID: miraID, displayName: "Mira",
+                 coordinate: Coordinate(latitude: 37.77483, longitude: -122.4191),
+                 progressMeters: 880, motionState: .moving,
+                 lastUpdate: priorFixTime, status: .riding),
+        devon, sam
+    ]
+    let finalPeers = [
+        RidePeer(userID: maraID, displayName: "Mara",
                  coordinate: Coordinate(latitude: 37.7752, longitude: -122.4192),
                  progressMeters: 900, motionState: .moving,
                  lastUpdate: now, status: .riding),
-        RidePeer(userID: UUID(), displayName: "Marco",
+        RidePeer(userID: miraID, displayName: "Mira",
                  coordinate: Coordinate(latitude: 37.7751, longitude: -122.4191),
                  progressMeters: 880, motionState: .moving,
                  lastUpdate: now, status: .riding),
-        RidePeer(userID: UUID(), displayName: "Devon",
-                 coordinate: Coordinate(latitude: 37.7742, longitude: -122.4182),
-                 progressMeters: 450, motionState: .stopped,
-                 lastUpdate: now, status: .stopped),
-        // A dropped peer keeps its last known fix; what makes it dropped is the silence since.
-        RidePeer(userID: UUID(), displayName: "Sam",
-                 coordinate: Coordinate(latitude: 37.7732, longitude: -122.4172),
-                 progressMeters: 200, motionState: .stopped,
-                 lastUpdate: now.addingTimeInterval(-120), status: .dropped)
+        devon, sam
     ]
-    driver.updateSet(peers: peers, selfUserID: nil, nameMap: [:],
+    driver.updateSet(peers: priorPeers, selfUserID: nil, nameMap: [:],
+                     reduceMotion: false, now: priorFixTime)
+    driver.updateSet(peers: finalPeers, selfUserID: nil, nameMap: [:],
                      reduceMotion: false, now: now)
     // A linear stand-in for Mapbox's projection: ~10 points per 0.0001°, enough for the
     // declutter radii to mean what they mean on screen. A preview has no live MapProxy, and
     // returning nil for any peer disables declutter entirely (`canDeclutter`, above).
+    let project: (Coordinate) -> ClusterDeclutter.Point2D? = { c in
+        ClusterDeclutter.Point2D(x: (c.longitude + 122.4200) * 100_000,
+                                 y: (37.7760 - c.latitude) * 100_000)
+    }
+    // The tween duration is `min(max(gap, 0.5), 8)` = 3s (the gap between the two fixes above),
+    // so resolving at `now + 3s` lands exactly at t=1: the final coordinates, not the prior
+    // ones. Resolving at `now` instead would render Mara/Mira mid-glide and break the declutter
+    // geometry this preview claims to show.
     return Map(viewport: $viewport) {
-        PeerAnnotations(frame: driver.frame(now: now, project: { c in
-            ClusterDeclutter.Point2D(x: (c.longitude + 122.4200) * 100_000,
-                                     y: (37.7760 - c.latitude) * 100_000)
-        }))
+        PeerAnnotations(frame: driver.frame(now: now.addingTimeInterval(3), project: project))
     }
     .ignoresSafeArea()
 }
