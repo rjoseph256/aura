@@ -35,13 +35,29 @@ struct RideMigrationThumbnailTests {
             forTrack: Data(), rideID: UUID(), decoder: decoder, encoder: encoder) == nil)
     }
 
-    /// The happy path: a real track round-trips to a decodable polyline of at least two points.
-    @Test func trackWithEnoughPointsProducesADecodableThumbnail() throws {
-        let data = try encoder.encode(track(200))
+    /// The happy path. Asserts the polyline's *endpoints*, not just its length: `count >= 2`
+    /// merely restates the guard, and would still pass if the simplifier regressed to three
+    /// points. `TrackSimplifier` promises to keep the first and last point, which is what makes
+    /// the thumbnail the right shape rather than merely the right size.
+    @Test func trackWithEnoughPointsKeepsBothEndpoints() throws {
+        let points = track(200)
         let thumb = try #require(RideMigrationPlan.thumbnailData(
-            forTrack: data, rideID: UUID(), decoder: decoder, encoder: encoder))
+            forTrack: try encoder.encode(points), rideID: UUID(),
+            decoder: decoder, encoder: encoder))
         let coords = try decoder.decode([Coordinate].self, from: thumb)
+        #expect(coords.first == points.first?.coordinate)
+        #expect(coords.last == points.last?.coordinate)
         #expect(coords.count >= 2)
+    }
+
+    /// Two points is the boundary — the first count that draws, and a different branch of the
+    /// simplifier from the 200-point case, which downsamples. Pins the `>= 2` guard.
+    @Test func twoPointTrackIsTheSmallestDrawableThumbnail() throws {
+        let points = track(2)
+        let thumb = try #require(RideMigrationPlan.thumbnailData(
+            forTrack: try encoder.encode(points), rideID: UUID(),
+            decoder: decoder, encoder: encoder))
+        #expect(try decoder.decode([Coordinate].self, from: thumb).count == 2)
     }
 
     /// A ride with fewer than two points has no polyline to draw. Silent, like the empty blob.
