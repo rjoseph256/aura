@@ -403,7 +403,7 @@ Append to `RideSessionCheckpointFlushTests.swift`:
     #expect(finished.endedAt != nil)
 }
 
-/// `finish()` cleared `checkpointedRideID` before the save, so a throw stranded the row with
+/// `finish()` cleared `pendingCheckpoint` before the save, so a throw stranded the row with
 /// nothing able to remove it — and the rider saw "couldn't save this ride" beside a History
 /// row marked as never ended.
 @Test func aFailedFinishKeepsTheDeletionHandle() async throws {
@@ -414,7 +414,7 @@ Append to `RideSessionCheckpointFlushTests.swift`:
     c.finish()
 
     #expect(c.saveFailed)
-    #expect(c.checkpointedRideID != nil, "the row is still out there and must stay removable")
+    #expect(c.pendingCheckpoint != nil, "the row is still out there and must stay removable")
 }
 ```
 
@@ -439,12 +439,14 @@ final class RecordingRideSaving: RideSaving {
 
 Check `RideSaving`'s real requirements in `RideSessionSeams.swift:24-38` before writing this — it has a defaulted `discard(id:)` and the protocol may carry members not shown here. The two tests above already name it `RecordingRideSaving`.
 
-`checkpointedRideID` is currently private — widen it to `private(set)` on the coordinator so the test can read it.
+`pendingCheckpoint` is currently private — widen it to `private(set)` on the coordinator so the test can read it.
+
+> **This handle was named `checkpointedRideID` while the plan was written**, and every reference in this document has been renamed to match the code. The whole-branch review's fix wave collapsed the id and the flush stamp into one `pendingCheckpoint: PendingCheckpoint?` (`rideID` + `at`), so that a failed `finish()` can publish the surviving row's marker, and so neither half can be cleared without the other. Where the plan reads the id specifically, the shipped expression is `c.pendingCheckpoint?.rideID`.
 
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `cd AuraCore && swift test --filter RideSessionCheckpointFlushTests`
-Expected: FAIL — `checkpointedAt` is nil on the checkpoint, and `checkpointedRideID` is nil after a failed finish.
+Expected: FAIL — `checkpointedAt` is nil on the checkpoint, and `pendingCheckpoint` is nil after a failed finish.
 
 - [ ] **Step 3: Set the marker in `checkpoint(at:)`**
 
@@ -481,7 +483,7 @@ In `RideSessionCoordinator.finish()`, replace lines 236-245:
             // stranded the checkpoint row with nothing able to remove it (ROH-107). Safe to
             // clear here: only `discard()` deletes, and `cancel()` — the one thing
             // `onDisappear` always fires — does not.
-            checkpointedRideID = nil
+            pendingCheckpoint = nil
             saveFailed = false
         } catch {
             saveFailed = true
@@ -1382,8 +1384,15 @@ git commit -m "feat(roh-107): mark a ride with no recorded end across every surf
 Run the whole gate before opening a PR:
 
 ```bash
-cd AuraCore && swift test && swiftlint --strict
+cd AuraCore && swift test
+cd "$(git rev-parse --show-toplevel)" && swiftlint lint --strict
 ```
+
+**SwiftLint runs from the repo root, not from `AuraCore/`.** It reads `.swiftlint.yml` from the
+current directory and does not walk parents, and the only rule-configuring config is the one at
+the root — so running it inside `AuraCore/` silently drops `identifier_name.min_length` and the
+relaxed `line_length` and reports ~11,000 violations that CI does not see. CI invokes
+`swiftlint lint --strict` from the root (`.github/workflows/ci.yml:188`); match it.
 
 Then build the app target through the builder agent, and device-verify the recovery path: pause a real ride above the 25 m floor, kill Aura from the app switcher, relaunch, and confirm the badge, the "Recorded until" line, the weekly ring still counting the distance, and Home showing the recovered ride rather than a stale mid-ride row.
 

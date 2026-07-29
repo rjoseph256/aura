@@ -11,9 +11,10 @@ import AuraCore
 ///
 /// `@MainActor` and `.swiftDataSerialized`: same shape as `SchemaV6MigrationTests` for the
 /// same reasons — `ModelContainer.mainContext` is main-actor isolated under
-/// `swiftLanguageModes: [.v6]`, and **three** `@Model` classes now share the CoreData entity
-/// name `RideRecord` (`RideSchemaV2`'s for V2–V5, `RideSchemaV6`'s, `RideSchemaV7`'s), which
-/// crashes CI without the serialization gate (ROH-65).
+/// `swiftLanguageModes: [.v6]`, and **four** `@Model` classes now share the CoreData entity name
+/// `RideRecord` (`RideSchemaV1`'s, `RideSchemaV2`'s for V2–V5, `RideSchemaV6`'s, and
+/// `RideSchemaV7`'s), which crashes CI without the serialization gate (ROH-65). All four reach a
+/// live container: V1's in `RideMigrationTests`, the rest here and in the current-schema suites.
 @MainActor
 @Suite("Schema V6 → V7", .swiftDataSerialized)
 struct SchemaV7MigrationTests {

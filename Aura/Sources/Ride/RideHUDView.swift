@@ -196,7 +196,10 @@ struct RideHUDView: View {
         }
         .onChange(of: coordinator.finishedRide) { _, ride in
             guard let ride else { return }
-            // finishedRide fires after finish() cleared the marker, so no ride is active.
+            // `activeRideID: nil` rather than `coordinator.activeRideID`: finishedRide fires after
+            // `recorder.end()` dropped `isRecording`, so no ride is being recorded and this ride
+            // belongs on the glance surfaces again. (Not about `checkpointedAt` — a failed save
+            // leaves that set.)
             WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil)
             router.showRideSummary(ride, saveFailed: coordinator.saveFailed)
         }

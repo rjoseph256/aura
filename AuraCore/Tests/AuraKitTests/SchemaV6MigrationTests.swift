@@ -14,12 +14,12 @@ import AuraCore
 /// nothing is rewritten. An un-backfilled row still has to read correctly, because that is
 /// also the permanent state of any ride a V5 device records after this migration runs.
 ///
-/// `.serialized, .swiftDataSerialized`: these are file-backed stores, and from V6 on **several
-/// `@Model` classes share the CoreData entity name `RideRecord`** — `RideSchemaV2.RideRecord`
-/// (V2–V5), `RideSchemaV6.RideRecord`, and `RideSchemaV7.RideRecord`, one more per redeclaring
-/// version. CoreData caches entity descriptions process-globally by name, so a concurrent suite
-/// holding any other version can bind an object to the wrong one. Same hazard `SavedPlaceRecord`
-/// hit in ROH-65.
+/// `.serialized, .swiftDataSerialized`: these are file-backed stores, and **four `@Model` classes
+/// share the CoreData entity name `RideRecord`** — `RideSchemaV1.RideRecord` (live in
+/// `RideMigrationTests`), `RideSchemaV2.RideRecord` (V2–V5), `RideSchemaV6.RideRecord`, and
+/// `RideSchemaV7.RideRecord`, one more per redeclaring version. CoreData caches entity
+/// descriptions process-globally by name, so a concurrent suite holding any other version can
+/// bind an object to the wrong one. Same hazard `SavedPlaceRecord` hit in ROH-65.
 @Suite("Schema V6 migration", .serialized, .swiftDataSerialized)
 @MainActor
 struct SchemaV6MigrationTests {

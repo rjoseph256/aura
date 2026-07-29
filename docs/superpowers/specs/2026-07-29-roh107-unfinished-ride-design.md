@@ -274,7 +274,9 @@ no room, it renders without the marker rather than truncating a stat.
 
 ### `finish()` must not drop the deletion handle before the save
 
-`RideSessionCoordinator.swift:238-245` clears `checkpointedRideID` *before* `try saving?.save`.
+`RideSessionCoordinator.swift:238-245` clears the checkpoint handle *before* `try saving?.save`.
+(That handle was `checkpointedRideID` when this spec was written; the whole-branch fix wave
+collapsed it into `pendingCheckpoint`, which carries the flush stamp alongside the ride id.)
 On a throw the checkpoint row survives with nothing able to remove it, and the rider sees
 "Couldn't save this ride, it won't appear in History" (`RideSummaryView.swift:135-137`) beside a
 History row marked as never ended. The clear moves after a successful save. This is safe: only
@@ -337,7 +339,7 @@ Pure tests in `AuraCoreTests` and `AuraKitTests`. Pass 6
 * `RideMapper` round-trips `checkpointedAt` through the V7 record into `RideSummary`.
 * **`RideStore.save`'s update branch copies `checkpointedAt`**: flush, then finish, leaves one row
   with `isUnfinished == false`. This is the test that would have caught Pass 3's trap.
-* A save failure at `finish()` leaves `checkpointedRideID` non-nil.
+* A save failure at `finish()` leaves `pendingCheckpoint` non-nil.
 * V6 to V7 lightweight migration preserves every existing row, with `checkpointedAt` nil.
 * `weekToDate` counts an unfinished summary.
 * The active-ride filter drops exactly the matching id and keeps a second unfinished row with a

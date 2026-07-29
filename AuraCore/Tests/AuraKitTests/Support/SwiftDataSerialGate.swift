@@ -7,8 +7,14 @@ import Testing
 /// floor:
 ///
 /// - `SavedPlaceRecord` — TWO: `RideSchemaV3`'s (no `resurface`) and `RideSchemaV5`'s (adds it).
-/// - `RideRecord` — THREE: `RideSchemaV2`'s (V2 through V5), `RideSchemaV6`'s (adds
-///   `segmentsData` and `pausedSeconds`), and `RideSchemaV7`'s (adds `checkpointedAt`).
+/// - `RideRecord` — FOUR: `RideSchemaV1`'s (the pre-Wave-1 shape, with `@Attribute(.unique)`),
+///   `RideSchemaV2`'s (V2 through V5), `RideSchemaV6`'s (adds `segmentsData` and
+///   `pausedSeconds`), and `RideSchemaV7`'s (adds `checkpointedAt`).
+///
+/// **V1's counts.** It is not merely declared: `RideMigrationTests` builds a live container on
+/// `RideSchemaV1.RideRecord` (`RideMigrationTests.swift:25`) to write old-shaped rows, and it is
+/// the most divergent of the four — unique constraint, no defaults — so binding an object to it
+/// by mistake is the worst version to land on.
 ///
 /// CoreData caches entity descriptions **process-globally by entity name**, so if two
 /// containers pinning different versions are alive at once (e.g. a migration suite running

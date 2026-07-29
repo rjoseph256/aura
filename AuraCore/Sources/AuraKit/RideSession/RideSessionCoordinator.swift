@@ -273,11 +273,17 @@ public final class RideSessionCoordinator {
             saveFailed = true
             // The save threw, so what a rider will find in History is the pause checkpoint: a
             // row whose track stops at the flush. Publish the ride wearing that row's marker so
-            // the summary describes the ride that exists rather than the one in memory —
-            // otherwise the sheet celebrates a full distance, suppresses nothing, and tells the
-            // rider the ride "won't appear in History" while it sits there marked "No end
-            // recorded". Nil when no checkpoint was ever written (an unpaused ride, or a pause
-            // under the discard floor), which correctly leaves the "it won't appear" wording.
+            // the summary *says so* — otherwise the sheet suppresses nothing, and tells the rider
+            // the ride "won't appear in History" while it sits there marked "No end recorded".
+            //
+            // **This restores the marker, not the numbers.** The sheet's distance, moving time,
+            // top speed, elevation band and route map all still come from the full in-memory
+            // ride, so it legitimately shows more than the History row has. That is what the
+            // badge's detail line is for ("Anything after that wasn't saved"); reconciling the
+            // figures to the persisted row is not attempted here.
+            //
+            // Nil when no checkpoint was ever written (an unpaused ride, or a pause under the
+            // discard floor), which correctly leaves the "it won't appear" wording.
             //
             // Presentation only. Nothing downstream of `finishedRide` writes: both HUDs hand it
             // to `router.showRideSummary` (a value pushed onto the nav path) and refresh the
