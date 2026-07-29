@@ -12,6 +12,14 @@ public struct ShareCardContent: Equatable, Sendable {
     public let climbedUnit: String
     public let dateText: String
     public let destinationName: String?
+    /// When the pause-boundary flush last wrote this ride, or nil if the rider ended it.
+    ///
+    /// The card is the one surface other people see. Without this the rider reads "anything
+    /// after 2:14 PM wasn't saved", taps Share, and posts a truncated distance as though it
+    /// were the whole ride (PO decision, 2026-07-29). Gated on the marker timestamp rather than
+    /// the wider `isUnfinished` predicate: a card is only ever rendered from a ride in hand, so
+    /// the checkpoint is the case that can actually reach it.
+    public let checkpointedAt: Date?
     /// The route to stroke, one run per ride segment. Empty when there is nothing to draw.
     /// Segmented rather than flattened: a share card that connected two segments would draw
     /// a straight line across the café stop.
@@ -34,6 +42,8 @@ public struct ShareCardContent: Equatable, Sendable {
 
         let trimmed = ride.destinationName?.trimmingCharacters(in: .whitespacesAndNewlines)
         destinationName = (trimmed?.isEmpty == false) ? trimmed : nil
+
+        checkpointedAt = ride.checkpointedAt
 
         routeSegments = ride.segments.map { $0.points.map(\.coordinate) }.filter { $0.count > 1 }
 

@@ -58,8 +58,8 @@ struct HistoryView: View {
                             presenting: pendingDelete) { summary in
             Button("Delete ride", role: .destructive) { delete(summary); pendingDelete = nil }
             Button("Keep", role: .cancel) { pendingDelete = nil }
-        } message: { _ in
-            Text("Aura never recorded this ride's end. Deleting removes it from all your devices.")
+        } message: { summary in
+            Text(UnfinishedRideCopy.deleteWarning(checkpointedAt: summary.checkpointedAt))
         }
     }
 
@@ -188,6 +188,24 @@ private struct RideRow: View {
     }
 
     var body: some View {
+        // A row, then the marker on a full-width line beneath it. Not tucked into the middle
+        // column: verified on an iPhone SE at AX5, where that column is ~130 pt and the label
+        // broke one syllable per line. Not appended to the caption either — that is a single
+        // `.lineLimit(1)` footnote, so a marker inside it would be the first thing Dynamic Type
+        // truncates, for the readers least able to lose it. The row grows from ~66 pt to ~89 pt,
+        // which is the point: in a list of uniform rows the marked one is visibly different
+        // before a word is read.
+        VStack(alignment: .leading, spacing: AuraTheme.Spacing.sm) {
+            rowContent
+            if summary.isUnfinished {
+                UnfinishedRideBadge(checkpointedAt: summary.checkpointedAt)
+            }
+        }
+        .padding(.vertical, AuraTheme.Spacing.md)
+        .frame(minHeight: 64)
+    }
+
+    private var rowContent: some View {
         HStack(spacing: AuraTheme.Spacing.lg) {
             // Leading — a thumbnail of the actual route (or an accent kind badge when
             // the ride has no recorded track). Kind is shown by the symbol, not by hue.
@@ -221,8 +239,6 @@ private struct RideRow: View {
                     .foregroundStyle(AuraTheme.textSecondary)
             }
         }
-        .padding(.vertical, AuraTheme.Spacing.md)
-        .frame(minHeight: 64)
     }
 }
 

@@ -129,6 +129,17 @@ struct ShareCardContentTests {
         #expect(ShareCardContent(ride: ride(stats: stats()), units: .imperial).destinationName == nil)
     }
 
+    @Test func checkpointReachesTheCard() {
+        // The card is the only surface other people see, so the marker has to survive the
+        // projection rather than stopping at the summary sheet.
+        let stamp = Date(timeIntervalSince1970: 1_750_000_000)
+        let checkpointed = Ride(kind: .freeRide, startedAt: startedAt, endedAt: nil,
+                                track: [], stats: stats(), checkpointedAt: stamp,
+                                destinationName: nil, routeId: nil, destinationPlaceId: nil)
+        #expect(ShareCardContent(ride: checkpointed, units: .imperial).checkpointedAt == stamp)
+        #expect(ShareCardContent(ride: ride(stats: stats()), units: .imperial).checkpointedAt == nil)
+    }
+
     @Test func statsNilProducesZeroedStrings() {
         let c = ShareCardContent(ride: ride(stats: nil), units: .imperial,
                                  locale: posix, timeZone: utc)

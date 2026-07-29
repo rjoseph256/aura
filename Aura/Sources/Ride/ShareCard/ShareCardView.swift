@@ -74,6 +74,7 @@ struct ShareCardView: View {
             if hasElevation { elevationBlock }
             metricsRow
             Spacer(minLength: 0)
+            unfinishedNote
             wordmark
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -111,6 +112,17 @@ struct ShareCardView: View {
         }
     }
 
+    /// A footnote, not a headline: the card should still read as a ride worth posting, while
+    /// not passing a truncated distance off as the whole ride to people who cannot check.
+    @ViewBuilder
+    private var unfinishedNote: some View {
+        if content.checkpointedAt != nil {
+            Label(UnfinishedRideCopy.label, systemImage: "clock")
+                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                .foregroundStyle(scrimText)
+        }
+    }
+
     private var wordmark: some View {
         Text("AURA")
             .font(AuraTheme.Typography.metricCockpit(18, face: .semibold, relativeTo: .callout))
@@ -145,6 +157,7 @@ struct ShareCardView: View {
                          labelFont: .system(.subheadline, design: .rounded))
             }
             Spacer()
+            unfinishedNote
             wordmark
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -183,6 +196,23 @@ struct ShareCardView: View {
                    endedAt: nil, track: [], stats: RideStats(distanceMeters: 5000,
                    movingTimeSeconds: 1200, averageSpeedMetersPerSecond: 4,
                    maxSpeedMetersPerSecond: 7, elevationGainMeters: 20),
+                   destinationName: nil, routeId: nil, destinationPlaceId: nil),
+        units: .imperial))
+}
+
+#Preview("No end recorded") {
+    ShareCardView(content: ShareCardContent(
+        ride: Ride(kind: .freeRide, startedAt: Date(timeIntervalSince1970: 1_782_907_200),
+                   endedAt: nil,
+                   track: (0..<40).map { i in
+                       TrackPoint(coordinate: Coordinate(latitude: 40.44 + Double(i) * 0.001,
+                                                         longitude: -79.99 + Double(i) * 0.0012),
+                                  elevation: 240 + 30 * sin(Double(i) / 4), timestamp: Date())
+                   },
+                   stats: RideStats(distanceMeters: 8046, movingTimeSeconds: 2520,
+                                    averageSpeedMetersPerSecond: 5, maxSpeedMetersPerSecond: 9,
+                                    elevationGainMeters: 73),
+                   checkpointedAt: Date(timeIntervalSince1970: 1_782_914_400),
                    destinationName: nil, routeId: nil, destinationPlaceId: nil),
         units: .imperial))
 }

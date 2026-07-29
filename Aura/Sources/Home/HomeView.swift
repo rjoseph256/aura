@@ -178,8 +178,14 @@ struct HomeView: View {
                 if let lastRide {
                     LastRideCard(summary: lastRide, units: settings.units) { router.push(.history) }
                 } else if !didLoad {
+                    // Quiet loading placeholder, sized to the card that replaces it. Still 88 pt:
+                    // ROH-107's no-end-recorded marker sits on its own full-width line *under*
+                    // the card's row, so the row — and with it the card's height for an ordinary
+                    // finished ride — is unchanged. An unfinished last ride makes the card
+                    // taller, and the placeholder deliberately matches the common case rather
+                    // than pre-reserving space almost every launch would then give back.
                     RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous)
-                        .fill(AuraTheme.surface).frame(height: 88) // quiet loading placeholder
+                        .fill(AuraTheme.surface).frame(height: 88)
                 }
             }
         } body: {

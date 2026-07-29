@@ -92,6 +92,20 @@ struct AuraPaletteContrastTests {
         #expect(WCAGContrast.ratio(AuraPalette.amber, AuraPalette.panel) >= 3.0)
     }
 
+    @Test func unfinishedBadgeTextClearsBodyContrastOnBothCanvases() {
+        // ROH-107. The marker is secondary text on a capsule of the same colour at low alpha.
+        // Its two real backdrops are the near-black canvas (History row, summary sheet) and the
+        // panel (last-ride card), and the capsule lifts both toward the text — so the pair is
+        // guarded on each rather than assumed from the bare-text case.
+        let text = WCAGContrast.white(AuraPalette.textSecondaryWhite)
+        let alpha = AuraPalette.unfinishedBadgeFillOpacity
+        for canvas in [AuraPalette.nearBlack, AuraPalette.panel] {
+            let capsule = WCAGContrast.composite(.white(AuraPalette.textSecondaryWhite),
+                                                 over: canvas, alpha: alpha)
+            #expect(WCAGContrast.ratio(text, capsule) >= 4.5)
+        }
+    }
+
     @Test func inkOnAmberClearsBodyContrast() {
         // Dark ink on an amber pill must clear body text 4.5:1.
         #expect(WCAGContrast.ratio(AuraPalette.inkOnAmber, AuraPalette.amber) >= 4.5)
