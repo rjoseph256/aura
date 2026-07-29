@@ -3,6 +3,21 @@ import Foundation
 import AuraCore
 @testable import AuraKit
 
+/// Records what was saved, which neither `FlakyRideSaving` nor `ThrowingRideSaving` does —
+/// they count. These tests assert on the `Ride`'s fields, so they need the object.
+@MainActor
+final class RecordingRideSaving: RideSaving {
+    private(set) var saved: [Ride] = []
+    private(set) var discarded: [UUID] = []
+    var failNextSave = false
+
+    func save(_ ride: Ride) throws {
+        if failNextSave { failNextSave = false; throw CocoaError(.fileWriteUnknown) }
+        saved.append(ride)
+    }
+    func discard(id: UUID) throws { discarded.append(id) }
+}
+
 /// The pause-boundary flush (spec D7) and the lifecycle of the row it writes. Nothing else in
 /// the app persists mid-ride, so these tests own the rules for when that row appears, when it
 /// is updated, and when it is removed.
@@ -71,6 +86,12 @@ struct RideSessionCheckpointFlushTests {
 
     /// Throwing the ride away takes its checkpoint with it, or an abandoned ride is left
     /// behind in History as a ghost.
+    ///
+    /// **Seam test, not a reachable production state.** `flushCheckpoint` writes only above the
+    /// 25 m discard floor (`RideSessionCoordinator.swift:206`) and `RideHUDView.backTapped`
+    /// discards only below it, so a checkpoint and a discard cannot coexist in the app.
+    /// `finish()` is the only path that clears the marker in production. This pins the seam so a
+    /// future UI that *can* reach both still deletes the row.
     @Test func discardingAPausedRideRemovesTheCheckpoint() async throws {
         let store = try RideStore.inMemory()
         let c = try await pausedRideWithACheckpoint(saving: store)
@@ -157,5 +178,34 @@ struct RideSessionCheckpointFlushTests {
         c.pause()
         #expect(try store.allRides().isEmpty)
         c.cancel()
+    }
+
+    /// The marker is set at the pause and cleared at End. `endedAt` keeps its Pass 2 stamp
+    /// throughout, so an unfinished row still carries a real duration.
+    @Test func aCheckpointIsMarkedAndFinishingClearsIt() async throws {
+        let saving = RecordingRideSaving()
+        let c = try await pausedRideWithACheckpoint(saving: saving)
+        let checkpoint = try #require(saving.saved.last)
+        #expect(checkpoint.checkpointedAt != nil)
+        #expect(checkpoint.endedAt != nil, "Pass 2's stamp stays; the marker is a separate field")
+
+        c.finish()
+        let finished = try #require(saving.saved.last)
+        #expect(finished.checkpointedAt == nil)
+        #expect(finished.endedAt != nil)
+    }
+
+    /// `finish()` cleared `checkpointedRideID` before the save, so a throw stranded the row with
+    /// nothing able to remove it — and the rider saw "couldn't save this ride" beside a History
+    /// row marked as never ended.
+    @Test func aFailedFinishKeepsTheDeletionHandle() async throws {
+        let saving = RecordingRideSaving()
+        let c = try await pausedRideWithACheckpoint(saving: saving)
+        saving.failNextSave = true
+
+        c.finish()
+
+        #expect(c.saveFailed)
+        #expect(c.checkpointedRideID != nil, "the row is still out there and must stay removable")
     }
 }

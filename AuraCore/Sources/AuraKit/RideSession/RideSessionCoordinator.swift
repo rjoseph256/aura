@@ -63,7 +63,7 @@ public final class RideSessionCoordinator {
     /// The ride id written by the last pause-boundary flush, while that row is still a
     /// checkpoint. Cleared by `finish()` — after which the row is a real finished ride and
     /// `cancel()` must leave it alone.
-    private var checkpointedRideID: UUID?
+    private(set) var checkpointedRideID: UUID?
     // Internal so a test can await the stream draining; not part of the public surface.
     var streamTask: Task<Void, Never>?
     private var tickerTask: Task<Void, Never>?
@@ -235,10 +235,13 @@ public final class RideSessionCoordinator {
         let ride = recorder.end(at: Date(), destinationName: destinationName)
         do {
             // An upsert on `ride.id`: if a pause already flushed this ride, the same row is
-            // updated rather than duplicated. Cleared first so a later `cancel()` — which
-            // `onDisappear` always fires — cannot delete the ride that was just saved.
-            checkpointedRideID = nil
+            // updated rather than duplicated.
             try saving?.save(ride)
+            // Cleared only on success, and only after the save. Clearing first meant a throw
+            // stranded the checkpoint row with nothing able to remove it (ROH-107). Safe to
+            // clear here: only `discard()` deletes, and `cancel()` — the one thing
+            // `onDisappear` always fires — does not.
+            checkpointedRideID = nil
             saveFailed = false
         } catch {
             saveFailed = true

@@ -140,19 +140,17 @@ public final class RideRecorder {
     /// updates the same row the finished ride will write rather than accumulating a copy per
     /// pause.
     ///
-    /// `endedAt` is the pause instant, **not nil**, even though the ride has not ended. Nil
-    /// would be the more truthful encoding, but no surface in this app reads
-    /// `RideSummary.endedAt` — History, the last-ride card, the widget snapshot and the weekly
-    /// ring all render from the denormalized stats — so a nil-ended row is displayed as a
-    /// finished ride regardless. Given that, a row that says "a ride that ended when you
-    /// stopped" describes what was actually recorded, while a nil would be an unfinished-ride
-    /// claim that nothing in the app is equipped to make. Spec D5 assumes a statless treatment
-    /// for nil `endedAt` that does not exist; building it belongs with the pass that owns the
-    /// summary.
+    /// `endedAt` is the pause instant, **not nil**. Nil would be the more literal encoding of
+    /// "not ended", but it costs the row its elapsed and active time, and it cannot tell a
+    /// second synced device that this ride is being recorded right now rather than abandoned.
+    /// `checkpointedAt` carries that instead (ROH-107, spec D1), and it additionally records
+    /// what the recording covers — a rider who resumed and was killed later while riding has a
+    /// row whose track stops well before they did.
     public func checkpoint(at date: Date, destinationName: String? = nil) -> Ride {
         Ride(id: rideID, kind: kind, startedAt: startedAt ?? date, endedAt: date,
              segments: normalizedSegments, stats: stats,
-             pausedSeconds: pausedSeconds(asOf: date), destinationName: destinationName,
+             pausedSeconds: pausedSeconds(asOf: date), checkpointedAt: date,
+             destinationName: destinationName,
              routeId: nil, destinationPlaceId: nil)
     }
 
@@ -165,6 +163,7 @@ public final class RideRecorder {
         state = .idle
         return Ride(id: rideID, kind: kind, startedAt: startedAt ?? date, endedAt: date,
                     segments: normalizedSegments, stats: stats, pausedSeconds: paused,
+                    checkpointedAt: nil,
                     destinationName: destinationName, routeId: nil, destinationPlaceId: nil)
     }
 
