@@ -174,56 +174,60 @@ Same rules as [BOARD.md](BOARD.md), plus two that only matter with more than one
 
 ## Same process, on the other machine
 
-Aura's development flow is not in the repo. It lives in the owner's user-scope Claude Code
-configuration, so a fresh install produces sessions that skip every review gate and write Swift
-from training-data recall. Four things have to be reproduced.
+Most of this is now checked in, so a clone gets it. That was not true when this file was
+written, and the difference is worth understanding rather than trusting blindly.
 
-### 1. The standing mandates
+### What arrives with the clone
 
-Copy `~/.claude/CLAUDE.md` from the owner's machine, or recreate its four sections. They are the
-whole process, and they override the default agent behavior on purpose:
+- **The standing mandates** are in the repo's [CLAUDE.md](../CLAUDE.md), under "How work gets
+  done here": the full pipeline with its adversarial review gates for major work, iOS-skill
+  routing before writing Swift, device verification for UI, and `humanizer` for prose. Every
+  session in this repo reads them.
+- **The plugins** are declared in `.claude/settings.json`, so `superpowers`, `all-ios-skills`,
+  `apple-platform-build-tools`, and `ios-build-verify` resolve without a manual install. Claude
+  Code will ask you to trust the marketplaces on first run, which is expected. Approve them.
+  `all-ios-skills` is the one that matters most day to day, 84 framework skills routed by name.
+  `apple-platform-build-tools` provides the `builder` subagent that absorbs xcodebuild output,
+  and delegating builds to it is what keeps a session's context from filling with logs.
+- **The quality gate.** `.claude/settings.json` declares a `TaskCompleted` hook running
+  `.claude/hooks/aura-task-gate.sh`, which runs `.claude/agent-gate.sh`: SwiftLint strict, the
+  package suite with `--no-parallel`, and the two guard scripts. An agent that tries to call a
+  task done with any of those red gets blocked and told why. The gate does not build the app or
+  run pgTAP, both too slow per task, so CI can still fail after it passes.
 
-- **Major feature work runs the full superpowers pipeline** with adversarial review gates:
-  brainstorm, then 2 to 3 independent reviewer subagents with differing lenses against the spec,
-  then a plan, then 2 or more reviewers against the plan, then subagent-driven implementation,
-  then a whole-branch review. The gates are the part that gets skipped, and they are the part
-  that has repeatedly caught defects that green tests and single-pass review missed.
-- **Any Apple-platform work consults the matching iOS skill first**, before writing code from
-  memory.
-- **Any design or frontend work invokes the design skills.** Native SwiftUI surfaces use the iOS
-  skills plus direct design judgment rather than the web tooling.
-- **Any prose deliverable runs through `humanizer`.**
+### What does not, and cannot
 
-### 2. Plugins
+**Linear.** The MCP connector is per-user OAuth. A workspace invite does not give that person's
+Claude Code access to the board. They authorize it themselves in claude.ai connector settings or
+with `/mcp` in an interactive terminal. Until they do, their sessions cannot move issues, and
+keeping the board honest is part of the flow rather than optional bookkeeping.
 
-Add the marketplaces, then install at user scope with `/plugin` in an interactive terminal:
+**The global `TaskCompleted` hook, optionally.** If you install one at
+`~/.claude/hooks/agent-gate.sh` for your other projects, it will find and run this repo's
+`.claude/agent-gate.sh` as a project override on its own. The repo's wrapper detects that and
+steps aside, so the gate runs once rather than twice. You do not need the global hook for Aura;
+this only matters if you want the same gate everywhere else.
 
-| Plugin | Marketplace source |
-|---|---|
-| `superpowers` | `anthropics/claude-plugins-official` |
-| `frontend-design` | `anthropics/claude-plugins-official` |
-| `figma` | `anthropics/claude-plugins-official` |
-| `all-ios-skills` | `dpearson2699/swift-ios-skills` |
-| `apple-platform-build-tools` | `https://github.com/kylehughes/apple-platform-build-tools-claude-code-plugin.git` |
-| `ios-build-verify` | `https://github.com/vermont42/ios-build-verify.git` |
+**The design skills are deliberately not here.** The owner's `~/.claude/skills/` holds 17 loose
+skill directories, and they are not vendored into this repo for two reasons. Only `impeccable`
+(Apache 2.0) and `humanizer` (MIT) carry a license, and this repo is public. More to the point
+they are web design tooling, and the design mandate already exempts native Apple UI from them.
+An iOS app gains nothing. Visual quality here comes from the iOS skills plus direct judgment.
 
-`all-ios-skills` is the one that matters most day to day: 84 framework skills, routed by name.
-`apple-platform-build-tools` provides the `builder` subagent that absorbs xcodebuild output, and
-delegating builds to it is what keeps a session's context from filling with build logs.
+### Repo gates that are easy to trip
 
-### 3. The design skills
+The gate catches the last two automatically now. They are still worth knowing, because reading
+a blocked-task message is slower than not tripping it.
 
-The 17 skills in the owner's `~/.claude/skills/` (`impeccable`, `emil-design-eng`,
-`design-taste-frontend`, `humanizer`, and the rest) are loose directories, not marketplace
-plugins. They have to be copied across. Ask the owner to archive that directory; there is no
-install command for them.
-
-### 4. Linear
-
-The MCP connector is per-user OAuth. A Linear workspace invite does not give that person's
-Claude Code access to the board. They authorize it themselves in claude.ai connector settings
-or with `/mcp` in an interactive terminal. Until they do, their sessions cannot move issues,
-and keeping the board honest is part of the flow rather than optional bookkeeping.
+- `xcodegen generate` after every clone, branch switch, and `project.yml` change. A stale
+  project fails with `cannot find X in scope` in files you did not touch, which reads like
+  broken code. Nothing catches this for you.
+- SwiftLint pinned to 0.64.1, not Homebrew's current. `scripts/lint.sh` runs it. There is a
+  custom rule banning `async` closure default arguments (ROH-110); if it fires, default the
+  parameter to nil and build the closure inside the module rather than working around the rule.
+- `swift test --no-parallel` in `AuraCore`. Any new suite that builds a SwiftData container
+  needs the `.swiftDataSerialized` trait, or it flakes against every other suite that registers
+  the same entity descriptions. `scripts/golden-ride.sh` is the local end-to-end ride gate.
 
 ### Repo gates that are easy to trip
 
