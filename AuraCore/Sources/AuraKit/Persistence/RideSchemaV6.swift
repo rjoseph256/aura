@@ -86,7 +86,3 @@ public enum RideSchemaV6: VersionedSchema {
         }
     }
 }
-
-/// The rest of AuraKit refers to the current model as `RideRecord`. Moved here from
-/// `RideSchemaV2`, which keeps its own frozen class for the V2–V5 stages.
-public typealias RideRecord = RideSchemaV6.RideRecord
