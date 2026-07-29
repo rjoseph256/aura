@@ -27,4 +27,21 @@ struct RideSummaryUnfinishedTests {
     @Test func aPassTwoDevBuildRowIsUnfinished() {
         #expect(summary(endedAt: nil, checkpointedAt: nil).isUnfinished)
     }
+
+    /// `Ride` carries the same predicate — the summary sheet and the share card read it off the
+    /// ride in hand rather than the projection. Two model-layer copies; this pins them equal on
+    /// every case above, which is the only thing stopping them drifting.
+    @Test func rideAgreesWithItsSummaryProjection() {
+        func ride(endedAt: Date?, checkpointedAt: Date?) -> Ride {
+            Ride(kind: .freeRide, startedAt: Date(timeIntervalSince1970: 0), endedAt: endedAt,
+                 track: [], stats: nil, checkpointedAt: checkpointedAt,
+                 routeId: nil, destinationPlaceId: nil)
+        }
+        let stamp = Date(timeIntervalSince1970: 100)
+        for (endedAt, checkpointedAt) in [(stamp, nil), (stamp, stamp), (nil, nil), (nil, stamp)]
+            as [(Date?, Date?)] {
+            #expect(ride(endedAt: endedAt, checkpointedAt: checkpointedAt).isUnfinished
+                    == summary(endedAt: endedAt, checkpointedAt: checkpointedAt).isUnfinished)
+        }
+    }
 }

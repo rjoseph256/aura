@@ -54,7 +54,8 @@ public struct RideSummary: Identifiable, Equatable, Sendable {
 
 extension RideSummary {
     /// The rider never ended this ride: it is a pause checkpoint that a kill, or a ride still
-    /// running on another device, left behind.
+    /// running on another device, left behind. Same rule as `Ride.isUnfinished` (Ride.swift),
+    /// which is where the other model-layer copy lives.
     ///
     /// The `endedAt == nil` clause is not redundant with `checkpointedAt`. It catches rows
     /// written by the PR #90 dev builds, whose `checkpoint(at:)` wrote a nil `endedAt` and no

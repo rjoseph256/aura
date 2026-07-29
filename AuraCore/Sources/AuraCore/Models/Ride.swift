@@ -74,3 +74,18 @@ public struct Ride: Identifiable, Codable, Equatable, Sendable {
     /// `body` (the live HUD re-evaluates at 30 fps under `TimelineView`).
     public var flattenedPoints: [TrackPoint] { segments.flatMap(\.points) }
 }
+
+extension Ride {
+    /// The rider never ended this ride: it is a pause checkpoint that a kill, or a ride still
+    /// running on another device, left behind.
+    ///
+    /// The same rule as `RideSummary.isUnfinished`, and deliberately kept beside it: these are
+    /// the ride and its projection, so the two model-layer copies sit in adjacent files where a
+    /// change to one is visible from the other. (`WidgetSnapshot.LastRide.isUnfinished` is a
+    /// third expression and is *not* a copy — see the note there.)
+    ///
+    /// The `endedAt == nil` clause is not redundant with `checkpointedAt`. It catches rows
+    /// written by the PR #90 dev builds, whose `checkpoint(at:)` wrote a nil `endedAt` and no
+    /// marker at all.
+    public var isUnfinished: Bool { checkpointedAt != nil || endedAt == nil }
+}

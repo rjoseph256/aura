@@ -129,14 +129,14 @@ struct RideSummaryView: View {
             // rider over something Aura got wrong; the badge carries the fact instead. This
             // screen is where a rider lands *because* the History row looked odd, so it gets
             // the detail line.
-            if isUnfinished {
+            if ride.isUnfinished {
                 UnfinishedRideBadge(checkpointedAt: ride.checkpointedAt, style: .full)
             }
             // No trophy on a truncated ride: a lime celebration directly under a grey "anything
             // after that wasn't saved" contradicts it. The reverse cost — a rider who genuinely
             // rode their longest and is denied it because the end was lost — is accepted;
             // claiming a record from a recording we just called incomplete is worse.
-            if isLongest && !isUnfinished {
+            if isLongest && !ride.isUnfinished {
                 Label("Longest ride yet", systemImage: "trophy.fill")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(AuraTheme.accent)
@@ -152,13 +152,12 @@ struct RideSummaryView: View {
         }
     }
 
-    /// The rider never ended this ride. Spelled out rather than read off `RideSummary`, which is
-    /// the projection this screen does not take.
-    private var isUnfinished: Bool { ride.checkpointedAt != nil || ride.endedAt == nil }
-
     /// Since ROH-107 a ride whose `finish()` throws still leaves its pause checkpoint in
     /// History, wearing the marker — so the old wording asserted absence while the app was
-    /// displaying presence.
+    /// displaying presence. The coordinator publishes the surviving row's `checkpointedAt` on
+    /// the failed-finish route (`RideSessionCoordinator.finish()`), which is what makes this
+    /// branch reachable; `endedAt` is always stamped there, so gating on the marker rather than
+    /// `isUnfinished` is the same test and says what the first sentence depends on.
     private var saveFailureMessage: String {
         ride.checkpointedAt != nil
             ? "Aura couldn't save the end of this ride. What was recorded is in History."
@@ -174,7 +173,7 @@ struct RideSummaryView: View {
                     // Unfinished rides skip the count-up the same way Reduce Motion does:
                     // celebrating a number the same screen calls incomplete is the trophy
                     // contradiction again, in motion.
-                    if reduceMotion || isUnfinished {
+                    if reduceMotion || ride.isUnfinished {
                         Text(fmt.distanceValue(stats.distanceMeters))
                     } else {
                         CountUpText(meters: animatedMeters, format: fmt.distanceValue)
@@ -230,7 +229,7 @@ struct RideSummaryView: View {
         // Animatable CountUpText separately, and is skipped on the same terms `heroDistance`
         // skips it so the two can't disagree about which value is on screen.
         revealed = true
-        if reduceMotion || isUnfinished {
+        if reduceMotion || ride.isUnfinished {
             animatedMeters = stats.distanceMeters
         } else {
             withAnimation(.easeOut(duration: 0.7)) { animatedMeters = stats.distanceMeters }

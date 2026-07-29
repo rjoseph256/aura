@@ -116,7 +116,7 @@ struct ShareCardView: View {
     /// not passing a truncated distance off as the whole ride to people who cannot check.
     @ViewBuilder
     private var unfinishedNote: some View {
-        if content.checkpointedAt != nil {
+        if content.isUnfinished {
             Label(UnfinishedRideCopy.label, systemImage: "clock")
                 .font(.system(.caption2, design: .rounded).weight(.semibold))
                 .foregroundStyle(scrimText)
@@ -174,10 +174,13 @@ struct ShareCardView: View {
     }
 }
 
+// Every finished-ride preview stamps a real `endedAt`. They used to pass nil, which under the
+// wider `isUnfinished` gate would have marked all four — and a preview fixture must never be the
+// reason a production predicate is narrowed. Only the "No end recorded" preview is unfinished.
 #Preview("Route + elevation") {
     ShareCardView(content: ShareCardContent(
         ride: Ride(kind: .navigate, startedAt: Date(timeIntervalSince1970: 1_782_907_200),
-                   endedAt: nil,
+                   endedAt: Date(timeIntervalSince1970: 1_782_909_720),
                    track: (0..<40).map { i in
                        TrackPoint(coordinate: Coordinate(latitude: 40.44 + Double(i) * 0.001,
                                                          longitude: -79.99 + Double(i) * 0.0012),
@@ -193,7 +196,8 @@ struct ShareCardView: View {
 #Preview("No route") {
     ShareCardView(content: ShareCardContent(
         ride: Ride(kind: .freeRide, startedAt: Date(timeIntervalSince1970: 1_782_907_200),
-                   endedAt: nil, track: [], stats: RideStats(distanceMeters: 5000,
+                   endedAt: Date(timeIntervalSince1970: 1_782_908_400),
+                   track: [], stats: RideStats(distanceMeters: 5000,
                    movingTimeSeconds: 1200, averageSpeedMetersPerSecond: 4,
                    maxSpeedMetersPerSecond: 7, elevationGainMeters: 20),
                    destinationName: nil, routeId: nil, destinationPlaceId: nil),
@@ -203,7 +207,9 @@ struct ShareCardView: View {
 #Preview("No end recorded") {
     ShareCardView(content: ShareCardContent(
         ride: Ride(kind: .freeRide, startedAt: Date(timeIntervalSince1970: 1_782_907_200),
-                   endedAt: nil,
+                   // A checkpoint row carries the flush instant in BOTH fields, per
+                   // `RideRecorder.checkpoint(at:)` — `endedAt` is the pause, not nil.
+                   endedAt: Date(timeIntervalSince1970: 1_782_914_400),
                    track: (0..<40).map { i in
                        TrackPoint(coordinate: Coordinate(latitude: 40.44 + Double(i) * 0.001,
                                                          longitude: -79.99 + Double(i) * 0.0012),
@@ -222,7 +228,7 @@ struct ShareCardView: View {
     // StatPair) when the track has coordinates but no elevation samples.
     ShareCardView(content: ShareCardContent(
         ride: Ride(kind: .navigate, startedAt: Date(timeIntervalSince1970: 1_782_907_200),
-                   endedAt: nil,
+                   endedAt: Date(timeIntervalSince1970: 1_782_909_000),
                    track: (0..<30).map { i in
                        TrackPoint(coordinate: Coordinate(latitude: 40.44 + Double(i) * 0.001,
                                                          longitude: -79.99 + Double(i) * 0.0012),

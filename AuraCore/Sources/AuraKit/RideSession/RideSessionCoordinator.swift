@@ -33,6 +33,10 @@ public final class RideSessionCoordinator {
     /// Set by `finish()`; observed by the HUD's `onChange(of:)`, which pushes the summary route
     /// (ROH-85). Not reset here: the HUD is torn down when the path collapses to the summary, so
     /// the coordinator goes with it.
+    ///
+    /// **For display, and it is not always byte-identical to what was saved.** When the save
+    /// throws, this carries the surviving checkpoint's `checkpointedAt` so the summary describes
+    /// the row that reached History; see `finish()`. Never feed it back into a save.
     public var finishedRide: Ride?
     public private(set) var saveFailed = false
 
@@ -64,10 +68,24 @@ public final class RideSessionCoordinator {
     private var saveToHealth = false
     private var groupSink: (any GroupLocationSink)?
     private var discoverySink: (any RideDiscoverySink)?
-    /// The ride id written by the last pause-boundary flush, while that row is still a
-    /// checkpoint. Cleared by `finish()` — after which the row is a real finished ride and
-    /// `cancel()` must leave it alone.
-    private(set) var checkpointedRideID: UUID?
+    /// Identifies the row the last **successful** pause-boundary flush left in the store, while
+    /// that row is still a checkpoint.
+    struct PendingCheckpoint: Equatable, Sendable {
+        let rideID: UUID
+        /// The `checkpointedAt` that is actually on that row — the instant of the flush that
+        /// wrote it, which is not necessarily the latest pause: a later flush that threw leaves
+        /// the earlier row, and the earlier stamp, in place.
+        let at: Date
+    }
+
+    /// The checkpoint row currently out there, or nil if there is none. Cleared by `finish()` —
+    /// after which the row is a real finished ride and `cancel()` must leave it alone.
+    ///
+    /// One optional rather than two properties: the id and the stamp describe the *same* row, so
+    /// clearing one without the other would either strand the row or badge a ride whose row is
+    /// gone. `finish()` reads the stamp to tell the summary what actually reached History when
+    /// the save throws.
+    private(set) var pendingCheckpoint: PendingCheckpoint?
     // Internal so a test can await the stream draining; not part of the public surface.
     var streamTask: Task<Void, Never>?
     private var tickerTask: Task<Void, Never>?
@@ -210,11 +228,12 @@ public final class RideSessionCoordinator {
         guard !RideBackOutGate.canDiscard(distanceMeters: recorder.stats.distanceMeters) else { return }
         do {
             try saving.save(recorder.checkpoint(at: date, destinationName: destinationName))
-            checkpointedRideID = recorder.rideID
+            pendingCheckpoint = PendingCheckpoint(rideID: recorder.rideID, at: date)
         } catch {
-            // Deliberately NOT cleared: `checkpointedRideID` tracks whether a row is out there,
+            // Deliberately NOT cleared: `pendingCheckpoint` tracks whether a row is out there,
             // not whether the last write succeeded. A failed second flush leaves the first one
-            // in the store, and forgetting its id would make it undeletable.
+            // in the store, and forgetting its id would make it undeletable — and its stamp is
+            // still the right one, because the surviving row is the first flush's.
         }
     }
 
@@ -237,6 +256,9 @@ public final class RideSessionCoordinator {
         screen.setKeepAwake(false)
         activity.end()
         let ride = recorder.end(at: Date(), destinationName: destinationName)
+        // The ride as the summary should present it. Diverges from `ride` only when the save
+        // throws; `ride` is what is handed to `save`, so the divergence can never be persisted.
+        var published = ride
         do {
             // An upsert on `ride.id`: if a pause already flushed this ride, the same row is
             // updated rather than duplicated.
@@ -245,12 +267,24 @@ public final class RideSessionCoordinator {
             // stranded the checkpoint row with nothing able to remove it (ROH-107). Safe to
             // clear here: only `discard()` deletes, and `cancel()` — the one thing
             // `onDisappear` always fires — does not.
-            checkpointedRideID = nil
+            pendingCheckpoint = nil
             saveFailed = false
         } catch {
             saveFailed = true
+            // The save threw, so what a rider will find in History is the pause checkpoint: a
+            // row whose track stops at the flush. Publish the ride wearing that row's marker so
+            // the summary describes the ride that exists rather than the one in memory —
+            // otherwise the sheet celebrates a full distance, suppresses nothing, and tells the
+            // rider the ride "won't appear in History" while it sits there marked "No end
+            // recorded". Nil when no checkpoint was ever written (an unpaused ride, or a pause
+            // under the discard floor), which correctly leaves the "it won't appear" wording.
+            //
+            // Presentation only. Nothing downstream of `finishedRide` writes: both HUDs hand it
+            // to `router.showRideSummary` (a value pushed onto the nav path) and refresh the
+            // widgets by re-reading the store, and the workout write below uses `ride`.
+            published.checkpointedAt = pendingCheckpoint?.at
         }
-        finishedRide = ride
+        finishedRide = published
         if RideWorkoutGate.shouldWrite(ride: ride, saveToHealthEnabled: saveToHealth) {
             workout?.writeWorkout(WorkoutData(from: ride))
         }
@@ -277,9 +311,9 @@ public final class RideSessionCoordinator {
     /// destroy the one persisted copy of a ride, which is the exact outcome the checkpoint
     /// exists to prevent. A discard is an explicit rider action and says so.
     public func discard() {
-        if let id = checkpointedRideID {
-            try? saving?.discard(id: id)
-            checkpointedRideID = nil
+        if let pending = pendingCheckpoint {
+            try? saving?.discard(id: pending.rideID)
+            pendingCheckpoint = nil
         }
         cancel()
     }
