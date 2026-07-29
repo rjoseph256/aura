@@ -12,6 +12,10 @@ struct HistoryView: View {
     @State private var summaries: [RideSummary] = []
     @State private var selected: Ride?
     @State private var appeared = false
+    /// A ride awaiting delete confirmation. Only unfinished rides land here: the marker is what
+    /// makes a rider likely to delete a row they would otherwise keep, so the confirmation
+    /// answers the hazard this feature creates rather than slowing down ordinary deletes.
+    @State private var pendingDelete: RideSummary?
     @ScaledMetric(relativeTo: .largeTitle) private var emptyGlyph: CGFloat = 56
 
     var body: some View {
@@ -48,6 +52,15 @@ struct HistoryView: View {
         .sheet(item: $selected) { ride in
             RideSummaryView(ride: ride)
         }
+        .confirmationDialog("Delete this ride?",
+                            isPresented: Binding(get: { pendingDelete != nil },
+                                                 set: { if !$0 { pendingDelete = nil } }),
+                            presenting: pendingDelete) { summary in
+            Button("Delete ride", role: .destructive) { delete(summary); pendingDelete = nil }
+            Button("Keep", role: .cancel) { pendingDelete = nil }
+        } message: { _ in
+            Text("Aura never recorded this ride's end. Deleting removes it from all your devices.")
+        }
     }
 
     // MARK: - List
@@ -64,8 +77,10 @@ struct HistoryView: View {
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                     .modifier(EntranceModifier(index: index, appeared: appeared, reduceMotion: reduceMotion))
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) { delete(summary) } label: {
+                    .swipeActions(edge: .trailing, allowsFullSwipe: !summary.isUnfinished) {
+                        Button(role: .destructive) {
+                            if summary.isUnfinished { pendingDelete = summary } else { delete(summary) }
+                        } label: {
                             Label("Delete", systemImage: "trash")
                         }
                     }
