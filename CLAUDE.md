@@ -91,5 +91,12 @@ runs `.claude/agent-gate.sh`, which lints and runs the package suite before an a
 a task complete. The gate does not build the app or run pgTAP, so CI can still fail after it
 passes.
 
+`.claude/agents/` carries the three adversarial reviewers the pipeline above names:
+`review-skeptic`, `review-product`, `review-architecture`. They are checked in rather than
+left at user scope because a mandate that names agent types a clone does not have degrades
+silently into one generic reviewer, which is the failure this section exists to prevent.
+Each declares a `tools:` list with no Agent tool, so a reviewer structurally cannot spawn
+grandchildren; that is enforcement, not a request in a prompt.
+
 Machine setup is [docs/COLLABORATOR-SETUP.md](docs/COLLABORATOR-SETUP.md). A second
 developer's issue lane is [docs/COLLABORATOR-TASKS.md](docs/COLLABORATOR-TASKS.md).
