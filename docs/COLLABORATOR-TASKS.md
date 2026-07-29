@@ -49,12 +49,19 @@ Worth reading once so nothing here looks like an oversight.
 
 ## The lane
 
+**Do [ROH-123](https://linear.app/rohun/issue/ROH-123) before anything below it.** It is the
+one-time pass that brings your machine onto the repo's process config and proves the review
+gates actually fire. Work done before it runs through a weaker process than this repo requires,
+which is not a hypothetical: the first pipeline observed on the second machine ran a single
+generic reviewer instead of the two or three adversarial ones, because the mandate lived only in
+the owner's user-scope config and never reached the clone.
+
 Ranked. The first two exist to prove the toolchain and the process on something small before
 anything with real design surface in it.
 
 | Issue | Size | Why it is safe to take |
 |---|---|---|
-| [ROH-104](https://linear.app/rohun/issue/ROH-104) | XS | Two `try?` in one file, no epic routes through it |
+| ~~[ROH-104](https://linear.app/rohun/issue/ROH-104)~~ | XS | Shipped 2026-07-29 in PR #110 |
 | [ROH-13](https://linear.app/rohun/issue/ROH-13) | S | Pure package tests, device-independent by definition |
 | [ROH-113](https://linear.app/rohun/issue/ROH-113) | M | Contained AuraKit bug with genuine design work in it |
 | [ROH-77](https://linear.app/rohun/issue/ROH-77) | M | Refactor for testability, no live backend needed |
@@ -66,26 +73,31 @@ anything with real design surface in it.
 
 ### ROH-104 (Low, Bug) — swallowed decode failures in the migration plan
 
-`RideMigrationPlan.swift:37` decodes the track with a bare `try?` and no `assertionFailure`,
-four lines below a `statsData` branch that does assert. Line 39 swallows the thumbnail encode
-the same way. A track that fails to decode silently leaves `thumbnailData` nil.
+Shipped 2026-07-29 in PR #110, the first issue taken in this lane. Left here as a worked
+example rather than as available work.
 
-The catch worth knowing before starting: an `assertionFailure` here fires at container-open on
-launch, so the fix has to be right about which failures are real bugs and which are legitimately
-empty. The issue notes that `RideMigrationTests.swift:34` writes an empty encoded track that
-decodes cleanly, so no existing test breaks.
+What made it more than the one-word edit the issue described: an empty `trackData` blob is a
+ride with no track, not a corrupt one, so asserting on every decode failure would have trapped
+at container-open on the launch path. The fix separates four outcomes where the old code could
+express two. That distinction is the kind of thing the adversarial review gates exist to surface
+before the code is written.
 
-### ROH-13 (Medium) — schema-invariant guard tests
+### ROH-13 (Medium) — the V1 `.unique` check
 
-Assert in package CI that every non-optional `RideRecord` attribute has a default and that
-nothing carries `.unique` or a relationship, both of which break the CloudKit mirror. Then
-confirm the frozen `RideSchemaV1` `.unique` never trips the mirror during the V1 to V2
+Narrowed on 2026-07-29, and the issue description now leads with the change, so read it before
+starting. The first half of the original ask already shipped:
+`AuraCore/Tests/AuraKitTests/SchemaInvariantTests.swift` runs in package CI and already asserts
+that every attribute is optional or defaulted and that nothing carries `.unique` or a
+relationship.
+
+What is left is the second half. That suite pins the current schema only, so nothing yet
+confirms the frozen `RideSchemaV1` `.unique` never trips the CloudKit mirror during the V1 to V2
 `didMigrate`.
 
-One correction to make before writing anything: the issue was filed against schema V2. The
-schema is V6 now (ROH-100 added `segmentsData` and `pausedSeconds`). The test has to guard the
-current shape, and it should be written so a future column that forgets its default fails in
-package CI rather than at the CloudKit dashboard.
+The trap to know before writing it: a new suite that materializes a V1 entity while the
+migration suites hold `RideSchemaV2.RideRecord` hits the process-global CoreData entity cache
+under the same name. That is the ROH-65 hazard, and it crashed CI from an unrelated suite once
+already. `SchemaInvariantTests` carries `.swiftDataSerialized` for exactly this reason.
 
 ### ROH-113 (Medium) — a timed-out Overpass fetch poisons the gem cache
 
@@ -174,64 +186,59 @@ Same rules as [BOARD.md](BOARD.md), plus two that only matter with more than one
 
 ## Same process, on the other machine
 
-Aura's development flow is not in the repo. It lives in the owner's user-scope Claude Code
-configuration, so a fresh install produces sessions that skip every review gate and write Swift
-from training-data recall. Four things have to be reproduced.
+Most of this is now checked in, so a clone gets it. That was not true when this file was
+written, and the difference is worth understanding rather than trusting blindly.
 
-### 1. The standing mandates
+### What arrives with the clone
 
-Copy `~/.claude/CLAUDE.md` from the owner's machine, or recreate its four sections. They are the
-whole process, and they override the default agent behavior on purpose:
+- **The standing mandates** are in the repo's [CLAUDE.md](../CLAUDE.md), under "How work gets
+  done here": the full pipeline with its adversarial review gates for major work, iOS-skill
+  routing before writing Swift, device verification for UI, and `humanizer` for prose. Every
+  session in this repo reads them.
+- **The three adversarial reviewers** the pipeline names are in `.claude/agents/`:
+  `review-skeptic`, `review-product`, `review-architecture`. They are checked in rather than
+  left at user scope because a mandate naming agents a clone does not have degrades quietly
+  into one generic reviewer, which is the failure that prompted all of this. Each declares a
+  `tools:` list with no Agent tool, so a reviewer cannot spawn grandchildren by construction.
+- **The plugins** are declared in `.claude/settings.json`, so `superpowers`, `all-ios-skills`,
+  `apple-platform-build-tools`, and `ios-build-verify` resolve without a manual install. Claude
+  Code will ask you to trust the marketplaces on first run, which is expected. Approve them.
+  `all-ios-skills` is the one that matters most day to day, 84 framework skills routed by name.
+  `apple-platform-build-tools` provides the `builder` subagent that absorbs xcodebuild output,
+  and delegating builds to it is what keeps a session's context from filling with logs.
+- **The quality gate.** `.claude/settings.json` declares a `TaskCompleted` hook running
+  `.claude/hooks/aura-task-gate.sh`, which runs `.claude/agent-gate.sh`: SwiftLint strict, the
+  package suite with `--no-parallel`, and the two guard scripts. An agent that tries to call a
+  task done with any of those red gets blocked and told why. The gate does not build the app or
+  run pgTAP, both too slow per task, so CI can still fail after it passes.
 
-- **Major feature work runs the full superpowers pipeline** with adversarial review gates:
-  brainstorm, then 2 to 3 independent reviewer subagents with differing lenses against the spec,
-  then a plan, then 2 or more reviewers against the plan, then subagent-driven implementation,
-  then a whole-branch review. The gates are the part that gets skipped, and they are the part
-  that has repeatedly caught defects that green tests and single-pass review missed.
-- **Any Apple-platform work consults the matching iOS skill first**, before writing code from
-  memory.
-- **Any design or frontend work invokes the design skills.** Native SwiftUI surfaces use the iOS
-  skills plus direct design judgment rather than the web tooling.
-- **Any prose deliverable runs through `humanizer`.**
+### What does not, and cannot
 
-### 2. Plugins
+**Linear.** The MCP connector is per-user OAuth. A workspace invite does not give that person's
+Claude Code access to the board. They authorize it themselves in claude.ai connector settings or
+with `/mcp` in an interactive terminal. Until they do, their sessions cannot move issues, and
+keeping the board honest is part of the flow rather than optional bookkeeping.
 
-Add the marketplaces, then install at user scope with `/plugin` in an interactive terminal:
+**The global `TaskCompleted` hook, optionally.** If you install one at
+`~/.claude/hooks/agent-gate.sh` for your other projects, it will find and run this repo's
+`.claude/agent-gate.sh` as a project override on its own. The repo's wrapper detects that and
+steps aside, so the gate runs once rather than twice. You do not need the global hook for Aura;
+this only matters if you want the same gate everywhere else.
 
-| Plugin | Marketplace source |
-|---|---|
-| `superpowers` | `anthropics/claude-plugins-official` |
-| `frontend-design` | `anthropics/claude-plugins-official` |
-| `figma` | `anthropics/claude-plugins-official` |
-| `all-ios-skills` | `dpearson2699/swift-ios-skills` |
-| `apple-platform-build-tools` | `https://github.com/kylehughes/apple-platform-build-tools-claude-code-plugin.git` |
-| `ios-build-verify` | `https://github.com/vermont42/ios-build-verify.git` |
-
-`all-ios-skills` is the one that matters most day to day: 84 framework skills, routed by name.
-`apple-platform-build-tools` provides the `builder` subagent that absorbs xcodebuild output, and
-delegating builds to it is what keeps a session's context from filling with build logs.
-
-### 3. The design skills
-
-The 17 skills in the owner's `~/.claude/skills/` (`impeccable`, `emil-design-eng`,
-`design-taste-frontend`, `humanizer`, and the rest) are loose directories, not marketplace
-plugins. They have to be copied across. Ask the owner to archive that directory; there is no
-install command for them.
-
-### 4. Linear
-
-The MCP connector is per-user OAuth. A Linear workspace invite does not give that person's
-Claude Code access to the board. They authorize it themselves in claude.ai connector settings
-or with `/mcp` in an interactive terminal. Until they do, their sessions cannot move issues,
-and keeping the board honest is part of the flow rather than optional bookkeeping.
+**The design skills are deliberately not here.** The owner's `~/.claude/skills/` holds 17 loose
+skill directories, and they are not vendored into this repo for two reasons. Only `impeccable`
+(Apache 2.0) and `humanizer` (MIT) carry a license, and this repo is public. More to the point
+they are web design tooling, and the design mandate already exempts native Apple UI from them.
+An iOS app gains nothing. Visual quality here comes from the iOS skills plus direct judgment.
 
 ### Repo gates that are easy to trip
 
-The three that cost the most time when missed:
+The gate catches the last two automatically now. They are still worth knowing, because reading
+a blocked-task message is slower than not tripping it.
 
 - `xcodegen generate` after every clone, branch switch, and `project.yml` change. A stale
   project fails with `cannot find X in scope` in files you did not touch, which reads like
-  broken code.
+  broken code. Nothing catches this for you.
 - SwiftLint pinned to 0.64.1, not Homebrew's current. `scripts/lint.sh` runs it. There is a
   custom rule banning `async` closure default arguments (ROH-110); if it fires, default the
   parameter to nil and build the closure inside the module rather than working around the rule.
