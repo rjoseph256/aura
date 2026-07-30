@@ -24,7 +24,7 @@ struct RideLiveActivity: Widget {
 
     private func dynamicIsland(_ context: ActivityViewContext<RideActivityAttributes>) -> DynamicIsland {
         let nav = context.attributes.mode == .navigate
-        let imminent = rideActivityIsImminent(context.state.turnDistanceMeters)
+        let imminent = rideActivityIsImminent(context.state.turnDistanceMeters, isPaused: context.state.isPaused)
         let accent = AuraTheme.accent
         let clock = context.state.activeClock(startedAt: context.attributes.startedAt)
 
@@ -39,7 +39,9 @@ struct RideLiveActivity: Widget {
                 expandedBottom(context, nav: nav, clock: clock)
             }
         } compactLeading: {
-            Image(systemName: nav ? (context.state.turnGlyphSystemName ?? "arrow.turn.up.right") : "bicycle")
+            Image(systemName: rideActivityGlyph(nav: nav, paused: context.state.isPaused,
+                                                stale: context.isStale,
+                                                turnGlyph: context.state.turnGlyphSystemName))
                 .foregroundStyle(accent)
         } compactTrailing: {
             if nav {
@@ -55,7 +57,9 @@ struct RideLiveActivity: Widget {
                     .frame(maxWidth: 56)
             }
         } minimal: {
-            Image(systemName: nav ? (context.state.turnGlyphSystemName ?? "arrow.turn.up.right") : "bicycle")
+            Image(systemName: rideActivityGlyph(nav: nav, paused: context.state.isPaused,
+                                                stale: context.isStale,
+                                                turnGlyph: context.state.turnGlyphSystemName))
                 .foregroundStyle(accent)
         }
         .keylineTint(accent)
@@ -66,7 +70,9 @@ struct RideLiveActivity: Widget {
     private func expandedLeading(_ context: ActivityViewContext<RideActivityAttributes>,
                                  nav: Bool, imminent: Bool) -> some View {
         HStack(spacing: 8) {
-            AuraGlyph(systemName: nav ? (context.state.turnGlyphSystemName ?? "arrow.turn.up.right") : "bicycle",
+            AuraGlyph(systemName: rideActivityGlyph(nav: nav, paused: context.state.isPaused,
+                                                    stale: context.isStale,
+                                                    turnGlyph: context.state.turnGlyphSystemName),
                       imminent: nav && imminent, size: 30)
             VStack(alignment: .leading, spacing: 1) {
                 Text("Aura")

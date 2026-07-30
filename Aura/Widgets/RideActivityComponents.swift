@@ -14,8 +14,11 @@ import AuraCore
 /// Matches `TurnCardPresenter`'s 150 m expand threshold.
 let rideActivityImminentMeters: Double = 150
 
-func rideActivityIsImminent(_ turnDistanceMeters: Double?) -> Bool {
-    guard let d = turnDistanceMeters else { return false }
+/// Paused suppresses it: pausing within 150 m of a turn — at the junction, at the light, at the
+/// shop just before it — would otherwise leave the app's single most urgent cue, a solid mint
+/// fill, burning on a ride that is recording nothing.
+func rideActivityIsImminent(_ turnDistanceMeters: Double?, isPaused: Bool) -> Bool {
+    guard !isPaused, let d = turnDistanceMeters else { return false }
     return d <= rideActivityImminentMeters
 }
 
@@ -109,18 +112,26 @@ struct AuraGlyph: View {
     }
 }
 
-/// Tiny live/updating indicator shown in the Lock Screen header. Goes muted when the
-/// activity's content is stale (app suspended / killed mid-ride).
+/// The Lock Screen's state word. Paused and stale **compose** rather than one masking the other:
+/// a jetsam kill during a pause is likely by construction, nothing ends the orphan until ROH-124
+/// ships, and a killed ride wearing a confident PAUSED is how a rider reads "still paused, good",
+/// rides home, and records none of it (spec D6).
 struct RideStatusPill: View {
+    let isPaused: Bool
     let isStale: Bool
 
     var body: some View {
-        if isStale {
+        switch (isPaused, isStale) {
+        case (true, true):
+            pill("\(PauseControlCopy.stateChipLabel) · NOT UPDATING")
+        case (true, false):
+            pill(PauseControlCopy.stateChipLabel)
+        case (false, true):
             Label("Updating", systemImage: "arrow.trianglehead.2.clockwise")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(AuraTheme.textSecondary)
                 .labelStyle(.titleAndIcon)
-        } else {
+        case (false, false):
             HStack(spacing: 5) {
                 Circle().fill(AuraTheme.accent).frame(width: 6, height: 6)
                 Text("LIVE")
@@ -129,4 +140,24 @@ struct RideStatusPill: View {
             }
         }
     }
+
+    private func pill(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundStyle(AuraTheme.textSecondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+    }
+}
+
+/// `pause.fill` outranks both the maneuver arrow and the bicycle: what the rider needs from a
+/// glance at a paused activity is that it is paused.
+///
+/// The stale variant exists because `RideStatusPill` is Lock-Screen-only. Without it, a rider in
+/// another app after a jetsam kill sees `pause.fill` beside a still-counting timer indefinitely —
+/// D6's failure on the presentation reached without unlocking. Minimal is a single glyph, so a
+/// glyph is the only channel it has.
+func rideActivityGlyph(nav: Bool, paused: Bool, stale: Bool, turnGlyph: String?) -> String {
+    if paused { return stale ? "pause.trianglebadge.exclamationmark" : "pause.fill" }
+    return nav ? (turnGlyph ?? "arrow.turn.up.right") : "bicycle"
 }

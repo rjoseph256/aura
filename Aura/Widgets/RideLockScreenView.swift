@@ -40,7 +40,9 @@ struct RideLockScreenView: View {
 
     private var freeRide: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header(title: "Explore", glyph: "bicycle", imminent: false)
+            header(title: "Explore", glyph: rideActivityGlyph(nav: false, paused: state.isPaused,
+                                                               stale: context.isStale, turnGlyph: nil),
+                   imminent: false)
 
             HStack(alignment: .top, spacing: 12) {
                 RideTimerStatCell(clock: state.activeClock(startedAt: attributes.startedAt),
@@ -57,17 +59,19 @@ struct RideLockScreenView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Explore in progress")
+        .accessibilityLabel(state.isPaused ? "Explore paused" : "Explore in progress")
     }
 
     // MARK: Navigate
 
     private var navigate: some View {
-        let imminent = rideActivityIsImminent(state.turnDistanceMeters)
+        let imminent = rideActivityIsImminent(state.turnDistanceMeters, isPaused: state.isPaused)
         let turnTint = imminent ? AuraTheme.accent : AuraTheme.textPrimary
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                AuraGlyph(systemName: state.turnGlyphSystemName ?? "arrow.turn.up.right",
+                AuraGlyph(systemName: rideActivityGlyph(nav: true, paused: state.isPaused,
+                                                        stale: context.isStale,
+                                                        turnGlyph: state.turnGlyphSystemName),
                           imminent: imminent, size: 38)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(turnDistanceText)
@@ -82,7 +86,7 @@ struct RideLockScreenView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                RideStatusPill(isStale: context.isStale)
+                RideStatusPill(isPaused: state.isPaused, isStale: context.isStale)
             }
 
             HStack(alignment: .top, spacing: 12) {
@@ -100,7 +104,9 @@ struct RideLockScreenView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Navigating. Next: \(instructionText), \(turnDistanceText)")
+        .accessibilityLabel(state.isPaused
+                            ? "Navigating, paused. Next: \(instructionText), \(turnDistanceText)"
+                            : "Navigating. Next: \(instructionText), \(turnDistanceText)")
     }
 
     private func destinationCell(_ name: String) -> some View {
@@ -125,7 +131,7 @@ struct RideLockScreenView: View {
                 .font(.system(.subheadline, design: .rounded).weight(.semibold))
                 .foregroundStyle(AuraTheme.textPrimary)
             Spacer(minLength: 8)
-            RideStatusPill(isStale: context.isStale)
+            RideStatusPill(isPaused: state.isPaused, isStale: context.isStale)
         }
     }
 
