@@ -25,10 +25,23 @@ public enum ShareCardLayout {
     public static let statsLabelPointSize: CGFloat = 13
     public static let wordmarkPointSize: CGFloat = 16
     public static let sparklineHeight: CGFloat = 40
-    /// The unfinished-ride note (ROH-107) costs the band one caption2 line it has no slack for,
-    /// so the sparkline yields that height instead of the band growing into the map field. The
-    /// budget test measures both variants.
-    public static let sparklineHeightUnfinished: CGFloat = 24
+    /// The unfinished-ride note (ROH-107) costs the band one line it has no slack for, so the
+    /// sparkline yields that height instead of the band growing into the map field.
+    public static let sparklineHeightUnfinished: CGFloat = 20
+
+    /// The unfinished note's row height, PINNED by the view with `.frame(height:)` rather than
+    /// predicted from a font metric.
+    ///
+    /// The first version of this budget derived a ceiling from SF caption2's line box and was
+    /// wrong twice over: the note is a `Label`, so its height is `max(symbol image, text box)`,
+    /// and the SF Symbol "clock" at 11 pt measures ~14 pt against a ~13 pt text box — the glyph
+    /// sets the height, not the text the ceiling came from. Pinning the frame makes the budget
+    /// a fact the view enforces instead of a prediction the test restates, which is the only
+    /// version of this a package test can honestly assert.
+    ///
+    /// 16 pt clears the 14 pt glyph. Do not shrink it below that without re-measuring the
+    /// symbol at the rendered weight.
+    public static let unfinishedNoteHeight: CGFloat = 16
 
     /// Route stroke on the raster: dark casing under mint (spec §Route drawing).
     public static let routeCasingWidth: CGFloat = 8

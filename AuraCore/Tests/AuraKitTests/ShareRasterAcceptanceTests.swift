@@ -120,8 +120,85 @@ final class ShareRasterAcceptanceTests: XCTestCase {
 
     func testThresholdParametersHaveSpecDefaults() {
         XCTAssertEqual(ShareRasterAcceptance.stddevThreshold, 1.0)
-        XCTAssertEqual(ShareRasterAcceptance.texturedCellFraction, 0.5)
+        XCTAssertEqual(ShareRasterAcceptance.texturedCellFraction, 0.875)
         XCTAssertEqual(ShareRasterAcceptance.gridSize, 4)
+    }
+
+    // MARK: - Partial loads
+
+    /// Half the frame blank, in each of the four orientations. This is what a missing
+    /// tile column or row at the fit zoom looks like, and it is the shape the gate exists
+    /// to catch. Under the original 0.5 fraction every one of these scored exactly 8/16
+    /// and ACCEPTED on the `>=` — the one value between the suite's 6/16 reject case and
+    /// its fully-textured accept case, and the only value the comparison actually decides.
+    ///
+    /// An accepted partial does not just ship one bad card: the composite is written to
+    /// the disk cache, cache hits skip acceptance entirely, and there is no negative
+    /// cache, so that ride serves the half-blank card from the fast path forever.
+    func testRejectsHalfBlankRasterInEveryOrientation() {
+        let sampledHeight = height - excludedRows
+        struct Half {
+            let name: String
+            let rows: Range<Int>
+            let cols: Range<Int>
+        }
+        let halves = [
+            Half(name: "top", rows: 0..<(sampledHeight / 2), cols: 0..<width),
+            Half(name: "bottom", rows: (sampledHeight / 2)..<sampledHeight, cols: 0..<width),
+            Half(name: "left", rows: 0..<sampledHeight, cols: 0..<(width / 2)),
+            Half(name: "right", rows: 0..<sampledHeight, cols: (width / 2)..<width)
+        ]
+        for half in halves {
+            var buffer = flat()
+            paintNoise(into: &buffer, rows: half.rows, cols: half.cols)
+            XCTAssertEqual(
+                ShareRasterAcceptance.cellDeviations(
+                    pixels: buffer, width: width, height: height,
+                    excludedBottomRows: excludedRows
+                ).filter { $0 > ShareRasterAcceptance.stddevThreshold }.count,
+                8, "\(half.name) half should texture exactly 8 of 16 cells")
+            XCTAssertFalse(ShareRasterAcceptance.accepts(
+                pixels: buffer, width: width, height: height, excludedBottomRows: excludedRows),
+                "a raster blank on the \(half.name) half must not ship")
+        }
+    }
+
+    /// The stddev floor's real resolution, pinned so nobody re-derives the partial-load
+    /// defense from it. A cell of flat background plus a SINGLE differing pixel scores
+    /// well above 1.0 and counts as textured — so "textured" means "not perfectly
+    /// uniform", not "rendered map content". Fourteen specks would satisfy the fraction
+    /// too; what stops this buffer is that eight cells cannot reach 14/16.
+    func testOneStrayPixelMakesACellCountAsTextured() {
+        var buffer = flat()
+        let sampledHeight = height - excludedRows
+        for (r, c) in [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1), (1, 2), (1, 3)] {
+            let row = r * sampledHeight / 4
+            let col = c * width / 4
+            buffer[row * width + col] = 56
+        }
+        let textured = ShareRasterAcceptance.cellDeviations(
+            pixels: buffer, width: width, height: height, excludedBottomRows: excludedRows
+        ).filter { $0 > ShareRasterAcceptance.stddevThreshold }.count
+        XCTAssertEqual(textured, 8, "one pixel per cell should clear the 1.0 stddev floor")
+        XCTAssertFalse(ShareRasterAcceptance.accepts(
+            pixels: buffer, width: width, height: height, excludedBottomRows: excludedRows))
+    }
+
+    /// The accept side keeps slack: a real map with two genuinely low-texture cells
+    /// (open water, snow, a large park) still ships at 14/16.
+    func testAcceptsWithTwoUntexturedCells() {
+        var buffer = flat()
+        let sampledHeight = height - excludedRows
+        for r in 0..<4 {
+            for c in 0..<4 where !(r == 0 && c == 0) && !(r == 3 && c == 3) {
+                paintNoise(into: &buffer,
+                           rows: (r * sampledHeight / 4)..<((r + 1) * sampledHeight / 4),
+                           cols: (c * width / 4)..<((c + 1) * width / 4),
+                           seed: UInt64(r * 4 + c + 1))
+            }
+        }
+        XCTAssertTrue(ShareRasterAcceptance.accepts(
+            pixels: buffer, width: width, height: height, excludedBottomRows: excludedRows))
     }
 
     // MARK: - Real-capture fixture (plan Task 14)

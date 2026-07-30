@@ -11,12 +11,6 @@ final class ShareCardLayoutTests: XCTestCase {
     /// than shipping an SF copy into test resources; both band-budget tests share it.
     private static let contextCeiling: CGFloat = 16.5
 
-    /// Same treatment for the unfinished-ride note, which is SF caption2 (11 pt at Large) to
-    /// the context row's caption (12 pt): the measured 16.0 pt box scaled by 11/12, plus the
-    /// same slack. The `Label`'s clock glyph is SF Symbol at the same text style, so it rides
-    /// inside this line box rather than adding to it.
-    private static let unfinishedNoteCeiling: CGFloat = 15.0
-
     private func lineBox(fontResource: String, size: CGFloat) throws -> CGFloat {
         let url = try XCTUnwrap(Bundle.module.url(forResource: fontResource, withExtension: "ttf"))
         let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor]
@@ -54,13 +48,24 @@ final class ShareCardLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(total, ShareCardLayout.bandContentHeight)
     }
 
-    /// The unfinished-ride note (ROH-107) adds a line the band had ~3 pt of slack for, so the
-    /// sparkline shrinks to pay for it. Both unfinished variants have to fit, or the card
-    /// clips the state it exists to disclose.
+    /// The unfinished-ride note (ROH-107) adds a row the band had ~3 pt of slack for, so the
+    /// sparkline shrinks to pay for it.
+    ///
+    /// Read what this does and does not establish. The Saira rows are measured from the
+    /// shipped faces. The context row is a pinned SF ceiling. The note's row is pinned by the
+    /// VIEW — `ShareCardView.unfinishedNote` applies `.frame(height:)` — so this arithmetic is
+    /// checking a height the layout enforces, not predicting one a font might exceed. An
+    /// earlier version of this test derived the note's height from a scaled caption metric and
+    /// could not have failed on a real overflow: it compared constants to a constant while the
+    /// actual row is a `Label` whose SF Symbol is taller than its text box.
+    ///
+    /// Overflow here does not clip — `readoutBand` has no `.clipped()` and 16 pt of bottom
+    /// padding below it — it pushes the stats row and the wordmark toward the card edge. The
+    /// margin below is what keeps that from happening at all.
     func testUnfinishedVariantsFitOnTheShorterSparkline() throws {
         let hero = try lineBox(fontResource: "SairaCondensed-Bold", size: ShareCardLayout.heroPointSize)
         let stats = try lineBox(fontResource: "SairaCondensed-SemiBold", size: ShareCardLayout.statsValuePointSize)
-        let head = Self.contextCeiling + ShareCardLayout.gapXS + Self.unfinishedNoteCeiling
+        let head = Self.contextCeiling + ShareCardLayout.gapXS + ShareCardLayout.unfinishedNoteHeight
             + ShareCardLayout.gapXS + hero
 
         let withSparkline = head + ShareCardLayout.gapSM
@@ -71,9 +76,20 @@ final class ShareCardLayoutTests: XCTestCase {
         let withoutSparkline = head + ShareCardLayout.gapSM + stats
         XCTAssertLessThanOrEqual(withoutSparkline, ShareCardLayout.bandContentHeight)
 
+        // Hold the same slack the finished variant ships with. The first cut of this budget
+        // passed by 0.19 pt, which is not a margin — it is a rounding error that happened to
+        // land on the right side.
+        let finished = Self.contextCeiling + ShareCardLayout.gapXS + hero + ShareCardLayout.gapSM
+            + ShareCardLayout.sparklineHeight + ShareCardLayout.gapSM + stats
+        XCTAssertGreaterThanOrEqual(ShareCardLayout.bandContentHeight - withSparkline,
+                                    ShareCardLayout.bandContentHeight - finished - 0.01,
+                                    "the unfinished variant must not ship thinner slack than the finished one")
+
         // The shorter sparkline is a reduction, not a second full-height one: a future edit
-        // that quietly restores 40 pt here would clip the note instead of failing.
+        // that quietly restores 40 pt here would overflow the band instead of failing.
         XCTAssertLessThan(ShareCardLayout.sparklineHeightUnfinished, ShareCardLayout.sparklineHeight)
+        // The pinned row must clear the SF Symbol that sets its height (~14 pt at 11 pt semibold).
+        XCTAssertGreaterThanOrEqual(ShareCardLayout.unfinishedNoteHeight, 14)
     }
 
     func testFontResourceMatchesAppFont() throws {

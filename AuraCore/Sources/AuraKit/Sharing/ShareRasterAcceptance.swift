@@ -4,21 +4,49 @@ import Foundation
 /// is used only when it demonstrably rendered map content: the caller downsamples the
 /// bare snapshot (no route ink) to a grayscale buffer and this predicate requires
 /// texture — per-cell standard deviation over a 4×4 grid — across enough of the map
-/// interior. Flat fills, blank offline tiles, and partially loaded rasters all reject.
+/// interior. Flat fills and blank offline tiles reject on the stddev floor; partial
+/// loads reject on the textured-cell fraction, which is the only one of the two that
+/// can see them (see `texturedCellFraction`).
 ///
 /// The thresholds are `let` (Swift 6 forbids nonisolated global mutable state); tuning
-/// and tests pass overrides through the parameters instead. Real-map fixture crops of
-/// the three styles land after device verification (plan Task 14) — the seeded-noise
-/// fixtures here validate the mechanics, not the thresholds' discriminating power.
+/// and tests pass overrides through the parameters instead.
+///
+/// **Still owed, and the reason the stddev floor is not the partial-load defense:** the
+/// plan (Task 4 follow-up) required real fixture crops of ALL THREE styles before the
+/// thresholds could be called tuned, precisely because "the seeded-noise fixtures cannot
+/// validate the threshold's real discriminating power". One shipped — authored dark
+/// terrain. `.standard` is the light basemap, whose stddev profile differs most from the
+/// tuning capture, and there is no fixture of a genuinely DEGRADED real capture at all,
+/// so nothing establishes what a real half-loaded map scores. Until those land, treat
+/// `stddevThreshold` as validated in the accept direction only.
 public enum ShareRasterAcceptance {
     /// Minimum per-cell grayscale standard deviation for a cell to count as textured.
     /// Tuned against a real device capture (ROH-126 verification): a fully-loaded
     /// authored-dark-terrain raster scores 1.9–5.9 per cell at the 90×60 downsample —
-    /// the initial 4.0 rejected it — while a flat fill scores ~0. 1.0 keeps a wide
-    /// margin in both directions; the capture is pinned as a test fixture.
+    /// the initial 4.0 rejected it — while a flat fill scores ~0. The capture is pinned
+    /// as a test fixture.
+    ///
+    /// The margin is wide toward real content (1.9× on the capture) and one pixel wide
+    /// the other way: a cell of flat background plus ONE differing pixel scores ~2.7 and
+    /// counts as textured. That is why `texturedCellFraction`, not this, is what rejects
+    /// a partially loaded raster.
     public static let stddevThreshold: Double = 1.0
-    /// Minimum fraction of grid cells that must be textured for the raster to pass.
-    public static let texturedCellFraction: Double = 0.5
+    /// Minimum fraction of grid cells that must be textured for the raster to pass:
+    /// 14 of 16.
+    ///
+    /// This carries the partial-load defense on its own, because the stddev floor above
+    /// cannot. At 1.0 a single non-background pixel in a ~264-pixel cell scores ~2.7, so
+    /// a cell counts as "textured" on one speck. The original 0.5 therefore accepted a
+    /// raster that was half blank in any orientation — a single missing tile column at
+    /// the fit zoom, which is the most common partial load — and accepted it into the
+    /// disk cache, where no acceptance check ever runs again.
+    ///
+    /// 14/16 rejects every half-blank case while leaving the real capture (16/16) two
+    /// cells of slack for a legitimately low-texture corner: open water, snow, a large
+    /// park. Raising the stddev floor instead would re-open the false-reject this
+    /// threshold was cut 4× to fix, and there is no data to re-tune it against — see
+    /// the fixture note below.
+    public static let texturedCellFraction: Double = 0.875
     /// The sampled interior is scored on a 4×4 grid of cells.
     static let gridSize = 4
 

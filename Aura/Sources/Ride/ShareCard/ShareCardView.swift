@@ -103,6 +103,9 @@ struct ShareCardView: View {
     /// (ROH-107). It sits directly under the context line, in the metadata zone and directly
     /// above the distance it qualifies — not at the band's foot, where it would read as a
     /// caption on the AURA sign-off.
+    /// The row's height is pinned, not measured: a `Label`'s height is the taller of its
+    /// symbol and its text, and the SF Symbol here is the taller of the two. Pinning keeps
+    /// the band's budget a fact rather than a prediction — see `unfinishedNoteHeight`.
     @ViewBuilder
     private var unfinishedNote: some View {
         if content.isUnfinished {
@@ -110,6 +113,7 @@ struct ShareCardView: View {
                 .font(.system(.caption2, design: .rounded).weight(.semibold))
                 .lineLimit(1)
                 .foregroundStyle(scrimText)
+                .frame(height: ShareCardLayout.unfinishedNoteHeight, alignment: .leading)
                 .padding(.top, ShareCardLayout.gapXS)
         }
     }

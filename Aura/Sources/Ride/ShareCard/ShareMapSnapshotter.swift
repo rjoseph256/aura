@@ -145,10 +145,16 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
         if let data = cache.read(request.cacheKey), let image = UIImage(data: data, scale: request.scale) {
             return image
         }
-        if let inFlight, inFlight.key == request.cacheKey {
-            return await boundedValue(of: inFlight.task, slotID: inFlight.id)
-        }
+        // The same-key join is tested EVERY lap, not once before the loop. Two waiters for
+        // the same key queued behind an unrelated pipeline both wake when it clears; one
+        // claims the slot, and a join tested only on entry would leave the other waiting out
+        // its own key's pipeline and then starting a second one for it. On a successful
+        // pipeline the in-pipeline cache read absorbs the duplicate, but a REJECT caches
+        // nothing, so the duplicate ran the full pipeline again with the hint still up.
         while let current = inFlight {                                  // suspends, no spin
+            if current.key == request.cacheKey {
+                return await boundedValue(of: current.task, slotID: current.id)
+            }
             _ = await boundedValue(of: current.task, slotID: current.id)
         }
         // No await between the loop exit and this assignment (single-pipeline invariant).
