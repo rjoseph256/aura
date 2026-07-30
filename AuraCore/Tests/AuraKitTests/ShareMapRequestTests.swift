@@ -1,0 +1,87 @@
+import XCTest
+import AuraCore
+@testable import AuraKit
+
+final class ShareMapRequestTests: XCTestCase {
+    private let rideID = UUID(uuidString: "6F9619FF-8B86-D011-B42D-00C04FC964FF")!
+
+    private func line(_ n: Int, lat0: Double = 40.44) -> [Coordinate] {
+        (0..<n).map { Coordinate(latitude: lat0 + Double($0) * 0.0005, longitude: -79.99 + Double($0) * 0.0006) }
+    }
+
+    private func request(style: MapStyle = .auraTerrain, lat0: Double = 40.44) -> ShareMapRequest {
+        ShareMapRequest(rideID: rideID, segments: [line(50, lat0: lat0)], style: style)!
+    }
+
+    func testNilOnDegenerateSegments() {
+        XCTAssertNil(ShareMapRequest(rideID: rideID, segments: [], style: .auraTerrain))
+        XCTAssertNil(ShareMapRequest(rideID: rideID, segments: [[Coordinate(latitude: 40, longitude: -79)]],
+                                     style: .auraTerrain))
+        let stationary = Array(repeating: Coordinate(latitude: 40, longitude: -79), count: 50)
+        XCTAssertNil(ShareMapRequest(rideID: rideID, segments: [stationary], style: .dark))
+    }
+
+    func testDefaultsComeFromShareCardLayout() {
+        let request = request()
+        XCTAssertEqual(request.size, ShareCardLayout.mapFieldSize)
+        XCTAssertEqual(request.scale, ShareCardLayout.rasterScale)
+    }
+
+    func testCacheKeyIsFilenameSafe() {
+        // TerrainSnapshotDiskCache uses the key as a filename; "/" and ":" silently
+        // break the write. The FNV-1a digest keeps the key safe by construction.
+        for style in [MapStyle.auraTerrain, .dark, .standard] {
+            let key = request(style: style).cacheKey
+            XCTAssertFalse(key.contains("/"), key)
+            XCTAssertFalse(key.contains(":"), key)
+            XCTAssertTrue(key.hasPrefix("sharemap-"), key)
+        }
+    }
+
+    func testCacheKeyStableAcrossConstructions() {
+        XCTAssertEqual(request().cacheKey, request().cacheKey)
+    }
+
+    func testCacheKeySensitiveToStyle() {
+        let keys = [MapStyle.auraTerrain, .dark, .standard].map { request(style: $0).cacheKey }
+        XCTAssertEqual(Set(keys).count, 3)
+    }
+
+    func testCacheKeySensitiveToRoute() {
+        XCTAssertNotEqual(request().cacheKey, request(lat0: 40.45).cacheKey)
+    }
+
+    func testCacheKeySensitiveToRideID() {
+        let other = ShareMapRequest(rideID: UUID(), segments: [line(50)], style: .auraTerrain)!
+        XCTAssertNotEqual(request().cacheKey, other.cacheKey)
+    }
+
+    func testCacheKeySensitiveToCompositeVersion() {
+        // compositeVersion is a static let; sensitivity is asserted on the composer the
+        // initializer delegates to.
+        let route = ShareRouteGeometry.prepare(segments: [line(50)])!
+        let v1 = ShareMapRequest.cacheKey(rideID: rideID, route: route, style: .dark,
+                                          size: ShareCardLayout.mapFieldSize,
+                                          scale: ShareCardLayout.rasterScale, compositeVersion: 1)
+        let v2 = ShareMapRequest.cacheKey(rideID: rideID, route: route, style: .dark,
+                                          size: ShareCardLayout.mapFieldSize,
+                                          scale: ShareCardLayout.rasterScale, compositeVersion: 2)
+        XCTAssertNotEqual(v1, v2)
+    }
+
+    func testStyleIdentityTracksAuthoredTerrainVersion() {
+        // A restyle of the authored terrain bumps `TerrainStyle.styleVersion`, which must
+        // flow into the key; the stock styles use stable slugs (the SDK's MapStyle.data
+        // is internal, so identity is derived from the AuraKit case).
+        XCTAssertEqual(ShareMapRequest.styleIdentity(.auraTerrain), TerrainStyle.authoredStyleIdentity)
+        XCTAssertEqual(ShareMapRequest.styleIdentity(.dark), "style-dark")
+        XCTAssertEqual(ShareMapRequest.styleIdentity(.standard), "style-standard")
+    }
+
+    func testCarriesPreparedRoute() {
+        let request = request()
+        XCTAssertEqual(request.route, ShareRouteGeometry.prepare(segments: [line(50)]))
+        XCTAssertEqual(request.rideID, rideID)
+        XCTAssertEqual(request.style, .auraTerrain)
+    }
+}
