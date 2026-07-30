@@ -17,7 +17,7 @@ import AuraCore
         let saving = try RideStore.inMemory()
         let coordinator = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                                  screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                                 haptics: HapticSpy())
+                                                 haptics: HapticSpy(), nudges: NudgeSpy())
         let sink = SpySink()
         coordinator.start(location: location, saving: saving, units: .metric,
                           authorization: .authorized, discoverySink: sink)

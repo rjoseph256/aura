@@ -20,7 +20,8 @@ struct RideSessionCoordinatorPauseTests {
                                  haptics: HapticSpy = HapticSpy())
         -> RideSessionCoordinator {
         RideSessionCoordinator(kind: .freeRide, destinationName: nil,
-                               screen: screen, activity: activity, haptics: haptics)
+                               screen: screen, activity: activity, haptics: haptics,
+                               nudges: NudgeSpy())
     }
 
     /// A ride with two fixes — comfortably past the discard floor, so the pause writes a real
