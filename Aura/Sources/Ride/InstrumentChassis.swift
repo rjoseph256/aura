@@ -3,7 +3,7 @@ import AuraCore
 import AuraKit
 
 /// The shared cockpit instrument chassis: a hero SPEED readout beside a caller-supplied
-/// column of secondary instruments, on the opaque quarter-screen panel. Navigate fills the
+/// column of secondary instruments, on the opaque bottom-pinned panel. Navigate fills the
 /// column with to-go + ETA; Explore fills it with distance + time + climb. The chassis owns
 /// the optional top line (navigate's street name) and applies ONE composed VoiceOver label
 /// across the secondary column, so it reads as a single utterance (the top line's own Text
@@ -16,12 +16,21 @@ struct InstrumentChassis<Column: View>: View {
     let topLine: String?
     /// The composed VoiceOver read for the whole secondary cluster (includes the top line).
     let columnAccessibilityLabel: String
+    /// While paused, the readouts drop to secondary weight so a frozen clock looks deliberately
+    /// frozen rather than broken.
+    ///
+    /// `AuraTheme.textSecondary`, never an opacity multiplier on `textPrimary`:
+    /// `AuraPaletteContrastTests` guards the token against the panel, and it cannot see through
+    /// a composition. This must also stay pure styling — adding a `Text` here would break the
+    /// one-composed-VoiceOver-element invariant documented above.
+    let isPaused: Bool
     @ViewBuilder let column: Column
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
     private var fmt: RideStatsFormatter { RideStatsFormatter(units: units) }
+    private var readoutColor: Color { isPaused ? AuraTheme.textSecondary : AuraTheme.textPrimary }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
@@ -46,6 +55,14 @@ struct InstrumentChassis<Column: View>: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
+        // `maxHeight: .infinity` lets the instruments centre in — and shrink into — whatever
+        // height the HUD gives the panel, which is how `HUDLayoutMetrics.instrumentPanelHeight`
+        // stays a height the panel can honour rather than one it overruns. The shrinking has a
+        // floor (`minimumScaleFactor` 0.5 on the hero, 0.7 on the instrument values), so a slot
+        // below that floor is not honoured at all: the content keeps its floor height and this
+        // frame reports it, and the fixed frame outside then centres an oversized panel and
+        // lets it bleed past both ends. That is what a quarter-of-the-screen slot did, until
+        // ROH-101 replaced it — see `RideHUDView.bottomCockpit`.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(.horizontal, AuraTheme.Spacing.xl)
         .padding(.top, AuraTheme.Spacing.lg)
@@ -62,7 +79,7 @@ struct InstrumentChassis<Column: View>: View {
         HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.sm) {
             Text(fmt.speedValue(currentSpeedMetersPerSecond))
                 .font(AuraTheme.Typography.speedHero(150, relativeTo: .largeTitle))
-                .foregroundStyle(AuraTheme.textPrimary)
+                .foregroundStyle(readoutColor)
                 .contentTransition(.numericText())
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
@@ -94,12 +111,13 @@ struct InstrumentChassis<Column: View>: View {
 struct CockpitInstrument: View {
     let value: String
     let label: String
+    let isPaused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
                 .font(AuraTheme.Typography.metricCockpit(34, relativeTo: .title2))
-                .foregroundStyle(AuraTheme.textPrimary)
+                .foregroundStyle(isPaused ? AuraTheme.textSecondary : AuraTheme.textPrimary)
                 .contentTransition(.numericText())
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)

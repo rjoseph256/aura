@@ -25,6 +25,10 @@ public enum ShareCardLayout {
     public static let statsLabelPointSize: CGFloat = 13
     public static let wordmarkPointSize: CGFloat = 16
     public static let sparklineHeight: CGFloat = 40
+    /// The unfinished-ride note (ROH-107) costs the band one caption2 line it has no slack for,
+    /// so the sparkline yields that height instead of the band growing into the map field. The
+    /// budget test measures both variants.
+    public static let sparklineHeightUnfinished: CGFloat = 24
 
     /// Route stroke on the raster: dark casing under mint (spec §Route drawing).
     public static let routeCasingWidth: CGFloat = 8

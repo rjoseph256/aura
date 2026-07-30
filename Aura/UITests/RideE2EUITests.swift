@@ -165,5 +165,25 @@ final class RideE2EUITests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let allow = springboard.buttons["Allow While Using App"]
         if allow.waitForExistence(timeout: 3) { allow.tap() }
+        dismissNotificationAlertIfPresent(springboard)
+    }
+
+    /// Belt and braces beside the location one, and only that. The actual fix is at the source:
+    /// `PauseNudgeScheduler.prepareAuthorization` is a no-op under the simulated-ride harness,
+    /// so ROH-101's ride-start request never runs in this suite.
+    ///
+    /// It has to be fixed there rather than here, because a notification alert is
+    /// unrecoverable for this suite in a way the location one is not. There is no
+    /// `xcrun simctl privacy` service for notifications, so CI cannot pre-grant it on a freshly
+    /// installed app; once the alert is up every tap lands on SpringBoard; and the retry
+    /// re-enters the same state. This call also only covers a prompt raised around launch — a
+    /// prompt raised later, at the ride start, is already past it.
+    @MainActor
+    private func dismissNotificationAlertIfPresent(_ springboard: XCUIApplication) {
+        // Short wait, not `exists`: the request is asynchronous, so an alert may still be on
+        // its way when the location check returns. Exact label — the location alert's buttons
+        // are "Allow While Using App" / "Allow Once", so this cannot match those.
+        let allow = springboard.buttons["Allow"]
+        if allow.waitForExistence(timeout: 2) { allow.tap() }
     }
 }

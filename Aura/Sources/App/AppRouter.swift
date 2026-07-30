@@ -10,9 +10,16 @@ final class AppRouter {
     /// cluster, so the always-present Home dashboard sheet never buries navigation chrome.
     var path: [AppRoute] = []
 
-    /// True while a ride HUD is recording. The HUDs drive it from `coordinator.isRecording`;
-    /// `handle(url:)` reads it so a deep link cannot pop an active ride out from under the rider.
-    var isRideActive = false
+    /// The ride being recorded, or nil. Written by both HUDs alongside their existing
+    /// lifecycle edges.
+    var activeRideID: UUID?
+    /// Computed, never stored: two stored properties written from four HUD sites can desync,
+    /// and a desync means either the in-flight ride leaks back into Home or a finished ride
+    /// vanishes from it. Every existing reader — the deep-link guard below,
+    /// `LocationAccuracyMode.desired`, Settings' toggles, Home's post-ride reset, and the
+    /// backfill cancellation — is unchanged, and observation still propagates because this
+    /// getter reads the tracked stored property.
+    var isRideActive: Bool { activeRideID != nil }
 
     func push(_ route: AppRoute) { path.append(route) }
     func pop() { if !path.isEmpty { path.removeLast() } }

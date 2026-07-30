@@ -24,6 +24,12 @@ public struct RideSummary: Identifiable, Equatable, Sendable {
     /// are not distinguishable, which is accepted because "no pauses were recorded" is a true
     /// statement about both.
     public let pausedSeconds: Double
+    /// When the pause-boundary flush last wrote this ride, or nil once the rider ends it.
+    /// Non-nil means the row is a checkpoint: either a ride a kill left behind, or one still
+    /// being recorded on another device. It is when *recording* stopped, which is not
+    /// necessarily when the rider stopped riding — the recording may also be short, if the
+    /// rider resumed and was killed later while moving.
+    public let checkpointedAt: Date?
     public let elevationGainMeters: Double
     public let destinationName: String?
     /// Simplified route for the thumbnail; empty when the ride has no drawable track.
@@ -32,14 +38,27 @@ public struct RideSummary: Identifiable, Equatable, Sendable {
     public init(id: UUID, kind: Ride.Kind, startedAt: Date, endedAt: Date?,
                 hasStats: Bool, distanceMeters: Double, movingTimeSeconds: Double,
                 pausedSeconds: Double = 0,
+                checkpointedAt: Date? = nil,
                 elevationGainMeters: Double, destinationName: String?,
                 thumbnailCoordinates: [Coordinate]) {
         self.id = id; self.kind = kind; self.startedAt = startedAt; self.endedAt = endedAt
         self.hasStats = hasStats
         self.distanceMeters = distanceMeters; self.movingTimeSeconds = movingTimeSeconds
         self.pausedSeconds = pausedSeconds
+        self.checkpointedAt = checkpointedAt
         self.elevationGainMeters = elevationGainMeters
         self.destinationName = destinationName
         self.thumbnailCoordinates = thumbnailCoordinates
     }
+}
+
+extension RideSummary {
+    /// The rider never ended this ride: it is a pause checkpoint that a kill, or a ride still
+    /// running on another device, left behind. Same rule as `Ride.isUnfinished` (Ride.swift),
+    /// which is where the other model-layer copy lives.
+    ///
+    /// The `endedAt == nil` clause is not redundant with `checkpointedAt`. It catches rows
+    /// written by the PR #90 dev builds, whose `checkpoint(at:)` wrote a nil `endedAt` and no
+    /// marker at all.
+    public var isUnfinished: Bool { checkpointedAt != nil || endedAt == nil }
 }

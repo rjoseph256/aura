@@ -90,6 +90,7 @@ public final class RideStore {
             existing.distanceMeters = record.distanceMeters
             existing.movingTimeSeconds = record.movingTimeSeconds
             existing.pausedSeconds = record.pausedSeconds
+            existing.checkpointedAt = record.checkpointedAt
             existing.elevationGainMeters = record.elevationGainMeters
             existing.thumbnailData = record.thumbnailData
             existing.destinationName = record.destinationName

@@ -23,12 +23,24 @@ public final class RideSessionCoordinator {
     /// the paused reading.
     public var isRecording: Bool { recorder.isRecording }
     public var isPaused: Bool { recorder.isPaused }
+    /// The id of the ride being recorded, for the glance surfaces to exclude (ROH-107, D3).
+    /// **The `isRecording` check is load-bearing:** `recorder.rideID` survives `end()`, so a
+    /// bare passthrough would keep filtering the ride out of Home after it finished.
+    public var activeRideID: UUID? { recorder.isRecording ? recorder.rideID : nil }
     /// **Active** time: wall-clock since the start, less everything spent paused (spec D5).
     /// The ticker keeps running while paused; this simply stops advancing.
     public private(set) var elapsed: TimeInterval = 0
+    /// Duration of the stop in progress, zero while recording. Clamped non-decreasing within a
+    /// stop: a backward wall-clock step would otherwise make the chip count down while the
+    /// headline active clock jumps forward in the same tick (ROH-130 owns the headline).
+    public private(set) var currentPauseSeconds: TimeInterval = 0
     /// Set by `finish()`; observed by the HUD's `onChange(of:)`, which pushes the summary route
     /// (ROH-85). Not reset here: the HUD is torn down when the path collapses to the summary, so
     /// the coordinator goes with it.
+    ///
+    /// **For display, and it is not always byte-identical to what was saved.** When the save
+    /// throws, this carries the surviving checkpoint's `checkpointedAt` so the summary describes
+    /// the row that reached History; see `finish()`. Never feed it back into a save.
     public var finishedRide: Ride?
     public private(set) var saveFailed = false
 
@@ -50,6 +62,8 @@ public final class RideSessionCoordinator {
     private let destinationName: String?
     private let screen: any ScreenWakeControlling
     private let activity: any RideActivityControlling
+    private let haptics: any HapticPlaying
+    private let nudges: any RideNudgeScheduling
     private let workout: (any WorkoutWriting)?
     @ObservationIgnored private let guidance: (any GuidanceControlling)?
 
@@ -60,20 +74,38 @@ public final class RideSessionCoordinator {
     private var saveToHealth = false
     private var groupSink: (any GroupLocationSink)?
     private var discoverySink: (any RideDiscoverySink)?
-    /// The ride id written by the last pause-boundary flush, while that row is still a
-    /// checkpoint. Cleared by `finish()` — after which the row is a real finished ride and
-    /// `cancel()` must leave it alone.
-    private var checkpointedRideID: UUID?
+    /// Identifies the row the last **successful** pause-boundary flush left in the store, while
+    /// that row is still a checkpoint.
+    struct PendingCheckpoint: Equatable, Sendable {
+        let rideID: UUID
+        /// The `checkpointedAt` that is actually on that row — the instant of the flush that
+        /// wrote it, which is not necessarily the latest pause: a later flush that threw leaves
+        /// the earlier row, and the earlier stamp, in place.
+        let at: Date
+    }
+
+    /// The checkpoint row currently out there, or nil if there is none. Cleared by `finish()` —
+    /// after which the row is a real finished ride and `cancel()` must leave it alone.
+    ///
+    /// One optional rather than two properties: the id and the stamp describe the *same* row, so
+    /// clearing one without the other would either strand the row or badge a ride whose row is
+    /// gone. `finish()` reads the stamp to tell the summary what actually reached History when
+    /// the save throws.
+    private(set) var pendingCheckpoint: PendingCheckpoint?
     // Internal so a test can await the stream draining; not part of the public surface.
     var streamTask: Task<Void, Never>?
     private var tickerTask: Task<Void, Never>?
 
+    /// `haptics` and `nudges` are required rather than optional on purpose: they are wired at
+    /// two production call sites each, and an optional would let a missed one ship silently.
     public init(kind: Ride.Kind,
                 destinationName: String?,
                 screen: any ScreenWakeControlling,
                 activity: any RideActivityControlling,
                 workout: (any WorkoutWriting)? = nil,
-                guidance: (any GuidanceControlling)? = nil) {
+                guidance: (any GuidanceControlling)? = nil,
+                haptics: any HapticPlaying,
+                nudges: any RideNudgeScheduling) {
         self.kind = kind
         self.recorder = RideRecorder(kind: kind)
         self.destinationName = destinationName
@@ -81,6 +113,8 @@ public final class RideSessionCoordinator {
         self.activity = activity
         self.workout = workout
         self.guidance = guidance
+        self.haptics = haptics
+        self.nudges = nudges
     }
 
     public enum StartOutcome: Sendable { case started, permissionDenied }
@@ -99,11 +133,32 @@ public final class RideSessionCoordinator {
         switch authorization {
         case .denied, .restricted:
             return .permissionDenied
+        case .authorized:
+            // Ask now, while the app is foregrounded and the rider is looking at it. A
+            // pause-time request cannot work: a forgotten pause is backgrounded and iOS defers
+            // the alert.
+            //
+            // Only once location is already granted. On a first ride `.notDetermined` means the
+            // location prompt — the one the rider tapped Start expecting — is about to appear,
+            // and stacking an unexplained "Aura Would Like to Send You Notifications" in front
+            // of it is how a rider declines both.
+            //
+            // The cost is accepted, not avoided: a rider who pauses and forgets on that very
+            // first ride gets no ladder at all. Nothing has asked yet, so iOS drops the
+            // requests at delivery. From the next ride onward — the first one that starts with
+            // location already decided — the prompt has been shown and the ladder works. One
+            // unprotected ride is the price of not poisoning the location prompt.
+            nudges.prepareAuthorization()
         // .notDetermined proceeds: the location stream's points() requests When-In-Use,
         // which surfaces the system prompt on first use.
-        case .authorized, .notDetermined:
+        case .notDetermined:
             break
         }
+
+        // The one moment the app knows no ride is paused. Clears anything an earlier ride in
+        // this same app session orphaned. Unconditional across both starting cases: a
+        // `.notDetermined` ride can still reach a pause, so it can still inherit an orphan.
+        nudges.cancelForgottenPauseNudges()
 
         self.location = location
         self.saving = saving
@@ -113,6 +168,10 @@ public final class RideSessionCoordinator {
         let now = Date()
         startedAt = now
         elapsed = 0
+        // Reset alongside `elapsed`, for the same reason. `refreshElapsed` only ever raises this
+        // one, so a value left over from a previous ride on a reused coordinator would pin the
+        // chip at that ride's last stop and never fall.
+        currentPauseSeconds = 0
         recorder.start(at: now)
         screen.setKeepAwake(true)
         activity.start(kind: kind, startedAt: now, units: units, destinationName: destinationName)
@@ -154,9 +213,14 @@ public final class RideSessionCoordinator {
     /// Recompute active time: wall-clock since the start, less paused time — including the
     /// pause currently in flight, so the clock stops the moment the rider taps rather than
     /// when the interval eventually closes.
-    private func refreshElapsed(now: Date = Date()) {
+    ///
+    /// Internal rather than private, like `pushActivityUpdate`, so a test can drive a specific
+    /// `now` instead of waiting on the 0.5 s ticker — the only way to pin the stop clock's
+    /// non-decreasing clamp against a backward wall-clock step.
+    func refreshElapsed(now: Date = Date()) {
         guard let startedAt else { return }
         elapsed = max(0, now.timeIntervalSince(startedAt) - recorder.pausedSeconds(asOf: now))
+        currentPauseSeconds = max(currentPauseSeconds, recorder.currentPauseSeconds(asOf: now))
     }
 
     /// Pause the ride: stop recording, release the wake lock, and flush what has been ridden so
@@ -170,12 +234,32 @@ public final class RideSessionCoordinator {
         guard recorder.isRecording, !recorder.isPaused else { return }
         let now = Date()
         recorder.pause(at: now)
+        haptics.play(.pause)
         // Before anything that can yield: an arrival draining after the pause but before
-        // guidance knows about it would end the ride under the rider.
+        // guidance knows about it would end the ride under the rider. `haptics.play` above and
+        // `scheduleNudges` below are both synchronous, so neither opens that window.
         pauseObserver?.rideDidSetPaused(true)
         refreshElapsed(now: now)
+        // Belt-and-braces, and honestly labelled as such: `start()` and `resume()` both zero
+        // this, and `recorder.currentPauseSeconds` returns zero whenever no stop is open, so the
+        // value reaching here is already zero on every path today. Deleting this line breaks no
+        // test — the reset that actually carries the behaviour is `resume()`'s. It stays because
+        // the `max` in `refreshElapsed` makes any future path that *does* arrive here dirty fail
+        // permanently rather than for one tick.
+        currentPauseSeconds = 0
         screen.setKeepAwake(false)
         flushCheckpoint(at: now)
+        scheduleNudges(from: now)
+    }
+
+    /// Schedule the forgotten-pause ladder, if this stop is worth one.
+    ///
+    /// Gated on the same discard floor as `flushCheckpoint`: a ride the app would itself throw
+    /// away has no business sending notifications, and that gate is also what stops an
+    /// edge-swipe back-out below the floor from orphaning a ladder.
+    private func scheduleNudges(from date: Date) {
+        guard !RideBackOutGate.canDiscard(distanceMeters: recorder.stats.distanceMeters) else { return }
+        nudges.scheduleForgottenPauseNudges(startingAt: date)
     }
 
     /// Resume recording: open the next segment and re-acquire the screen. A no-op unless the
@@ -184,6 +268,9 @@ public final class RideSessionCoordinator {
         guard recorder.isPaused else { return }
         let now = Date()
         recorder.resume(at: now)
+        haptics.play(.resume)
+        nudges.cancelForgottenPauseNudges()
+        currentPauseSeconds = 0
         pauseObserver?.rideDidSetPaused(false)
         refreshElapsed(now: now)
         screen.setKeepAwake(true)
@@ -206,11 +293,12 @@ public final class RideSessionCoordinator {
         guard !RideBackOutGate.canDiscard(distanceMeters: recorder.stats.distanceMeters) else { return }
         do {
             try saving.save(recorder.checkpoint(at: date, destinationName: destinationName))
-            checkpointedRideID = recorder.rideID
+            pendingCheckpoint = PendingCheckpoint(rideID: recorder.rideID, at: date)
         } catch {
-            // Deliberately NOT cleared: `checkpointedRideID` tracks whether a row is out there,
+            // Deliberately NOT cleared: `pendingCheckpoint` tracks whether a row is out there,
             // not whether the last write succeeded. A failed second flush leaves the first one
-            // in the store, and forgetting its id would make it undeletable.
+            // in the store, and forgetting its id would make it undeletable — and its stamp is
+            // still the right one, because the surviving row is the first flush's.
         }
     }
 
@@ -228,22 +316,47 @@ public final class RideSessionCoordinator {
     /// publishes the ride (even on a save failure, so the summary still shows).
     public func finish() {
         guard recorder.isRecording else { return }
+        nudges.cancelForgottenPauseNudges()
         guidance?.detach()
         stopStreaming()
         screen.setKeepAwake(false)
         activity.end()
         let ride = recorder.end(at: Date(), destinationName: destinationName)
+        // The ride as the summary should present it. Diverges from `ride` only when the save
+        // throws; `ride` is what is handed to `save`, so the divergence can never be persisted.
+        var published = ride
         do {
             // An upsert on `ride.id`: if a pause already flushed this ride, the same row is
-            // updated rather than duplicated. Cleared first so a later `cancel()` — which
-            // `onDisappear` always fires — cannot delete the ride that was just saved.
-            checkpointedRideID = nil
+            // updated rather than duplicated.
             try saving?.save(ride)
+            // Cleared only on success, and only after the save. Clearing first meant a throw
+            // stranded the checkpoint row with nothing able to remove it (ROH-107). Safe to
+            // clear here: only `discard()` deletes, and `cancel()` — the one thing
+            // `onDisappear` always fires — does not.
+            pendingCheckpoint = nil
             saveFailed = false
         } catch {
             saveFailed = true
+            // The save threw, so what a rider will find in History is the pause checkpoint: a
+            // row whose track stops at the flush. Publish the ride wearing that row's marker so
+            // the summary *says so* — otherwise the sheet suppresses nothing, and tells the rider
+            // the ride "won't appear in History" while it sits there marked "No end recorded".
+            //
+            // **This restores the marker, not the numbers.** The sheet's distance, moving time,
+            // top speed, elevation band and route map all still come from the full in-memory
+            // ride, so it legitimately shows more than the History row has. That is what the
+            // badge's detail line is for ("Anything after that wasn't saved"); reconciling the
+            // figures to the persisted row is not attempted here.
+            //
+            // Nil when no checkpoint was ever written (an unpaused ride, or a pause under the
+            // discard floor), which correctly leaves the "it won't appear" wording.
+            //
+            // Presentation only. Nothing downstream of `finishedRide` writes: both HUDs hand it
+            // to `router.showRideSummary` (a value pushed onto the nav path) and refresh the
+            // widgets by re-reading the store, and the workout write below uses `ride`.
+            published.checkpointedAt = pendingCheckpoint?.at
         }
-        finishedRide = ride
+        finishedRide = published
         if RideWorkoutGate.shouldWrite(ride: ride, saveToHealthEnabled: saveToHealth) {
             workout?.writeWorkout(WorkoutData(from: ride))
         }
@@ -254,6 +367,13 @@ public final class RideSessionCoordinator {
     /// Activity — so an auto-started ride discarded before it is worth saving leaves no
     /// orphaned Lock Screen activity. Does not save or publish a ride. `activity.end()` is
     /// idempotent, so calling this after `finish()` (e.g. onDisappear after End) is a no-op.
+    ///
+    /// Deliberately does **not** cancel the pause nudges. This runs from `onDisappear`, which
+    /// this codebase documents as firing without the rider asking for anything, and `pause()`'s
+    /// `!isPaused` guard means a nudge cancelled here could never be re-armed for a stop still
+    /// in progress. Every *legitimate* exit goes through `finish()` or `discard()` first, both
+    /// of which cancel; the below-floor path that reaches only `cancel()` never scheduled
+    /// anything, because `scheduleNudges` is gated on the discard floor (ROH-101 P5).
     public func cancel() {
         guidance?.detach()
         stopStreaming()
@@ -270,9 +390,10 @@ public final class RideSessionCoordinator {
     /// destroy the one persisted copy of a ride, which is the exact outcome the checkpoint
     /// exists to prevent. A discard is an explicit rider action and says so.
     public func discard() {
-        if let id = checkpointedRideID {
-            try? saving?.discard(id: id)
-            checkpointedRideID = nil
+        nudges.cancelForgottenPauseNudges()
+        if let pending = pendingCheckpoint {
+            try? saving?.discard(id: pending.rideID)
+            pendingCheckpoint = nil
         }
         cancel()
     }

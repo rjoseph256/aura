@@ -12,6 +12,10 @@ struct HistoryView: View {
     @State private var summaries: [RideSummary] = []
     @State private var selected: Ride?
     @State private var appeared = false
+    /// A ride awaiting delete confirmation. Only unfinished rides land here: the marker is what
+    /// makes a rider likely to delete a row they would otherwise keep, so the confirmation
+    /// answers the hazard this feature creates rather than slowing down ordinary deletes.
+    @State private var pendingDelete: RideSummary?
     @ScaledMetric(relativeTo: .largeTitle) private var emptyGlyph: CGFloat = 56
 
     var body: some View {
@@ -48,6 +52,15 @@ struct HistoryView: View {
         .sheet(item: $selected) { ride in
             RideSummaryView(ride: ride)
         }
+        .confirmationDialog("Delete this ride?",
+                            isPresented: Binding(get: { pendingDelete != nil },
+                                                 set: { if !$0 { pendingDelete = nil } }),
+                            presenting: pendingDelete) { summary in
+            Button("Delete ride", role: .destructive) { delete(summary); pendingDelete = nil }
+            Button("Keep", role: .cancel) { pendingDelete = nil }
+        } message: { summary in
+            Text(UnfinishedRideCopy.deleteWarning(checkpointedAt: summary.checkpointedAt))
+        }
     }
 
     // MARK: - List
@@ -64,8 +77,10 @@ struct HistoryView: View {
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                     .modifier(EntranceModifier(index: index, appeared: appeared, reduceMotion: reduceMotion))
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) { delete(summary) } label: {
+                    .swipeActions(edge: .trailing, allowsFullSwipe: !summary.isUnfinished) {
+                        Button(role: .destructive) {
+                            if summary.isUnfinished { pendingDelete = summary } else { delete(summary) }
+                        } label: {
                             Label("Delete", systemImage: "trash")
                         }
                     }
@@ -79,7 +94,8 @@ struct HistoryView: View {
     private func delete(_ summary: RideSummary) {
         try? store.delete(id: summary.id)
         summaries.removeAll { $0.id == summary.id }
-        WidgetRefresh.reload(rideStore: store, settings: settings)
+        // History is not reachable during a ride.
+        WidgetRefresh.reload(rideStore: store, settings: settings, activeRideID: nil)
     }
 
     // MARK: - Empty state
@@ -172,6 +188,24 @@ private struct RideRow: View {
     }
 
     var body: some View {
+        // A row, then the marker on a full-width line beneath it. Not tucked into the middle
+        // column: verified on an iPhone SE at AX5, where that column is ~130 pt and the label
+        // broke one syllable per line. Not appended to the caption either — that is a single
+        // `.lineLimit(1)` footnote, so a marker inside it would be the first thing Dynamic Type
+        // truncates, for the readers least able to lose it. The row grows from ~66 pt to ~89 pt,
+        // which is the point: in a list of uniform rows the marked one is visibly different
+        // before a word is read.
+        VStack(alignment: .leading, spacing: AuraTheme.Spacing.sm) {
+            rowContent
+            if summary.isUnfinished {
+                UnfinishedRideBadge(checkpointedAt: summary.checkpointedAt)
+            }
+        }
+        .padding(.vertical, AuraTheme.Spacing.md)
+        .frame(minHeight: 64)
+    }
+
+    private var rowContent: some View {
         HStack(spacing: AuraTheme.Spacing.lg) {
             // Leading — a thumbnail of the actual route (or an accent kind badge when
             // the ride has no recorded track). Kind is shown by the symbol, not by hue.
@@ -205,8 +239,6 @@ private struct RideRow: View {
                     .foregroundStyle(AuraTheme.textSecondary)
             }
         }
-        .padding(.vertical, AuraTheme.Spacing.md)
-        .frame(minHeight: 64)
     }
 }
 

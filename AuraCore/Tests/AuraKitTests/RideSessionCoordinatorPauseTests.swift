@@ -16,10 +16,12 @@ struct RideSessionCoordinatorPauseTests {
     }
 
     private func makeCoordinator(screen: SpyScreenWake = SpyScreenWake(),
-                                 activity: SpyRideActivity = SpyRideActivity())
+                                 activity: SpyRideActivity = SpyRideActivity(),
+                                 haptics: HapticSpy = HapticSpy())
         -> RideSessionCoordinator {
         RideSessionCoordinator(kind: .freeRide, destinationName: nil,
-                               screen: screen, activity: activity)
+                               screen: screen, activity: activity, haptics: haptics,
+                               nudges: NudgeSpy())
     }
 
     /// A ride with two fixes — comfortably past the discard floor, so the pause writes a real
@@ -202,6 +204,54 @@ struct RideSessionCoordinatorPauseTests {
         #expect(sink.updates.last?.progressMeters == nil)
         #expect(sink.updates.last?.coordinate == Coordinate(latitude: 40.42, longitude: -80))
         c.cancel()
+    }
+
+    // MARK: Pause/resume haptics (spec, ROH-101)
+
+    @Test func pausingConfirmsWithAHaptic() async throws {
+        let store = try RideStore.inMemory()
+        let haptics = HapticSpy()
+        let location = ManualLocationProvider()
+        let c = makeCoordinator(haptics: haptics)
+        c.start(location: location, saving: store, units: .metric, authorization: .authorized)
+        location.emit(point(40.40, 0))
+        location.emit(point(40.41, 10))
+        // `> 0`, not `>= 0`: the latter is true on the first poll, so the wait would return before
+        // the emitted points were consumed and the test would assert against an empty recorder.
+        #expect(await waitUntil { c.stats.distanceMeters > 0 })
+        c.pause()
+        #expect(haptics.cues == [.pause])
+    }
+
+    @Test func resumingConfirmsWithADistinctHaptic() async throws {
+        let store = try RideStore.inMemory()
+        let haptics = HapticSpy()
+        let location = ManualLocationProvider()
+        let c = makeCoordinator(haptics: haptics)
+        c.start(location: location, saving: store, units: .metric, authorization: .authorized)
+        c.pause()
+        c.resume()
+        #expect(haptics.cues == [.pause, .resume])
+    }
+
+    @Test func redundantTransitionsPlayNothing() async throws {
+        let store = try RideStore.inMemory()
+        let haptics = HapticSpy()
+        let c = makeCoordinator(haptics: haptics)
+        c.start(location: ManualLocationProvider(), saving: store, units: .metric,
+                authorization: .authorized)
+        c.pause()
+        c.pause()   // already paused — guarded
+        c.resume()
+        c.resume()  // already recording — guarded
+        #expect(haptics.cues == [.pause, .resume])
+    }
+
+    @Test func pausingBeforeTheRideStartsPlaysNothing() {
+        let haptics = HapticSpy()
+        let c = makeCoordinator(haptics: haptics)
+        c.pause()
+        #expect(haptics.cues.isEmpty)
     }
 
 }

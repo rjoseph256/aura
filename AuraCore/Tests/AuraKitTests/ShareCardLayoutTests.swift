@@ -11,6 +11,12 @@ final class ShareCardLayoutTests: XCTestCase {
     /// than shipping an SF copy into test resources; both band-budget tests share it.
     private static let contextCeiling: CGFloat = 16.5
 
+    /// Same treatment for the unfinished-ride note, which is SF caption2 (11 pt at Large) to
+    /// the context row's caption (12 pt): the measured 16.0 pt box scaled by 11/12, plus the
+    /// same slack. The `Label`'s clock glyph is SF Symbol at the same text style, so it rides
+    /// inside this line box rather than adding to it.
+    private static let unfinishedNoteCeiling: CGFloat = 15.0
+
     private func lineBox(fontResource: String, size: CGFloat) throws -> CGFloat {
         let url = try XCTUnwrap(Bundle.module.url(forResource: fontResource, withExtension: "ttf"))
         let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor]
@@ -46,6 +52,28 @@ final class ShareCardLayoutTests: XCTestCase {
         let stats = try lineBox(fontResource: "SairaCondensed-SemiBold", size: ShareCardLayout.statsValuePointSize)
         let total = Self.contextCeiling + ShareCardLayout.gapXS + hero + ShareCardLayout.gapSM + stats
         XCTAssertLessThanOrEqual(total, ShareCardLayout.bandContentHeight)
+    }
+
+    /// The unfinished-ride note (ROH-107) adds a line the band had ~3 pt of slack for, so the
+    /// sparkline shrinks to pay for it. Both unfinished variants have to fit, or the card
+    /// clips the state it exists to disclose.
+    func testUnfinishedVariantsFitOnTheShorterSparkline() throws {
+        let hero = try lineBox(fontResource: "SairaCondensed-Bold", size: ShareCardLayout.heroPointSize)
+        let stats = try lineBox(fontResource: "SairaCondensed-SemiBold", size: ShareCardLayout.statsValuePointSize)
+        let head = Self.contextCeiling + ShareCardLayout.gapXS + Self.unfinishedNoteCeiling
+            + ShareCardLayout.gapXS + hero
+
+        let withSparkline = head + ShareCardLayout.gapSM
+            + ShareCardLayout.sparklineHeightUnfinished + ShareCardLayout.gapSM + stats
+        XCTAssertLessThanOrEqual(withSparkline, ShareCardLayout.bandContentHeight,
+                                 "unfinished band \(withSparkline) exceeds \(ShareCardLayout.bandContentHeight)")
+
+        let withoutSparkline = head + ShareCardLayout.gapSM + stats
+        XCTAssertLessThanOrEqual(withoutSparkline, ShareCardLayout.bandContentHeight)
+
+        // The shorter sparkline is a reduction, not a second full-height one: a future edit
+        // that quietly restores 40 pt here would clip the note instead of failing.
+        XCTAssertLessThan(ShareCardLayout.sparklineHeightUnfinished, ShareCardLayout.sparklineHeight)
     }
 
     func testFontResourceMatchesAppFont() throws {

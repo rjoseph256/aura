@@ -15,17 +15,23 @@ public struct CruisingState: Equatable, Sendable {
     /// One composed VoiceOver read for the whole strip, e.g.
     /// "On Penn Ave, 2.1 miles to go, arriving 4:38 PM".
     public var accessibilityLabel: String
+    /// The same read with the arrival time dropped, for a paused ride whose ETA is no longer
+    /// meaningful. Pure, so the wording is tested rather than eyeballed (ROH-101 P4).
+    public var pausedAccessibilityLabel: String
 
-    public init(streetName: String?, distanceRemaining: String?, eta: String?, accessibilityLabel: String) {
+    public init(streetName: String?, distanceRemaining: String?, eta: String?, accessibilityLabel: String,
+                pausedAccessibilityLabel: String) {
         self.streetName = streetName
         self.distanceRemaining = distanceRemaining
         self.eta = eta
         self.accessibilityLabel = accessibilityLabel
+        self.pausedAccessibilityLabel = pausedAccessibilityLabel
     }
 
     /// Before the first usable progress update; the strip reads a calm "Starting…".
     public static let starting = CruisingState(streetName: nil, distanceRemaining: nil, eta: nil,
-                                               accessibilityLabel: "Starting navigation.")
+                                               accessibilityLabel: "Starting navigation.",
+                                               pausedAccessibilityLabel: "Starting navigation.")
 }
 
 /// Turns a `GuidanceUpdate` into a `CruisingState`. Pure: the caller passes `now` and a
@@ -44,7 +50,10 @@ public enum CruisingPresenter {
             eta: eta,
             accessibilityLabel: label(streetName: streetName,
                                       meters: update.distanceRemainingMeters,
-                                      eta: eta, units: units))
+                                      eta: eta, units: units),
+            pausedAccessibilityLabel: label(streetName: streetName,
+                                            meters: update.distanceRemainingMeters,
+                                            eta: nil, units: units))
     }
 
     /// Empty or whitespace-only names (unnamed trails) become nil so the strip omits them.

@@ -79,4 +79,23 @@ final class TurnCardPresenterTests: XCTestCase {
                                nextManeuver: Maneuver(kind: .turn, modifier: .left, label: "Highland Ave"))
         XCTAssertTrue(TurnCardPresenter.state(for: u, units: .imperial).accessibilityLabel.contains("then Highland Ave"))
     }
+
+    // MARK: - calmed() (ROH-101 P4)
+
+    func test_calmedDropsTheEmphasisAndKeepsEverythingElse() {
+        let expanded = TurnCardState(primaryText: "Right onto Penn Ave", distanceText: "90 ft",
+                                     isExpanded: true,
+                                     accessibilityLabel: "In 90 feet, Right onto Penn Ave")
+        let calm = expanded.calmed()
+        XCTAssertFalse(calm.isExpanded)
+        XCTAssertEqual(calm.primaryText, expanded.primaryText)
+        XCTAssertEqual(calm.distanceText, expanded.distanceText)
+        XCTAssertEqual(calm.accessibilityLabel, expanded.accessibilityLabel)
+        XCTAssertEqual(calm.maneuver, expanded.maneuver)
+    }
+
+    func test_calmingAnAlreadyCalmCardChangesNothing() {
+        let calm = TurnCardState.starting
+        XCTAssertEqual(calm.calmed(), calm)
+    }
 }

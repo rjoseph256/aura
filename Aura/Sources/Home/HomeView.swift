@@ -43,8 +43,11 @@ struct HomeView: View {
 
     private let renderer: TerrainSnapshotRendering = MapboxTerrainSnapshotter()
 
-    private var weekStats: WeeklyRideStats { RideAggregator.weekToDate(summaries, now: Date()) }
-    private var lastRide: RideSummary? { RideAggregator.mostRecent(summaries) }
+    /// Filtered once, so the ring, the card and the glance headline cannot disagree. Excluded
+    /// by id: a recovered unfinished ride from earlier this week still belongs in the ring.
+    private var visibleSummaries: [RideSummary] { summaries.filter { $0.id != router.activeRideID } }
+    private var weekStats: WeeklyRideStats { RideAggregator.weekToDate(visibleSummaries, now: Date()) }
+    private var lastRide: RideSummary? { RideAggregator.mostRecent(visibleSummaries) }
     private var mode: HomeMode {
         HomeMode.resolve(hasCompletedOnboarding: settings.didCompleteOnboarding,
                          hasRides: !summaries.isEmpty, auth: location.authorization)
@@ -106,6 +109,11 @@ struct HomeView: View {
             if wasActive && !isActive, HomeMapCamera.shouldReset(on: .rideCompleted) {
                 Task { await resolveCenter(reset: true) }
             }
+        }
+        // The exclusion lifting is not enough: `summaries` may still hold the mid-ride
+        // checkpoint that synced while the rider was out. Refetch so the finished row wins.
+        .onChange(of: router.activeRideID) { previous, current in
+            if previous != nil, current == nil { Task { await loadRides() } }
         }
         // Align the selected detent with the sheet's *scaled* peek detent (the @State literal
         // is only correct at default Dynamic Type); keeps the selection binding valid at all sizes.
@@ -170,8 +178,14 @@ struct HomeView: View {
                 if let lastRide {
                     LastRideCard(summary: lastRide, units: settings.units) { router.push(.history) }
                 } else if !didLoad {
+                    // Quiet loading placeholder, sized to the card that replaces it. Still 88 pt:
+                    // ROH-107's no-end-recorded marker sits on its own full-width line *under*
+                    // the card's row, so the row — and with it the card's height for an ordinary
+                    // finished ride — is unchanged. An unfinished last ride makes the card
+                    // taller, and the placeholder deliberately matches the common case rather
+                    // than pre-reserving space almost every launch would then give back.
                     RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous)
-                        .fill(AuraTheme.surface).frame(height: 88) // quiet loading placeholder
+                        .fill(AuraTheme.surface).frame(height: 88)
                 }
             }
         } body: {

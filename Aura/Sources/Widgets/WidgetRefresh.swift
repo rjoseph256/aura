@@ -9,11 +9,18 @@ import AuraKit
 enum WidgetRefresh {
     private static let store = WidgetSnapshotStore.appGroup()
 
-    static func reload(rideStore: RideStore, settings: SettingsStore, now: Date = Date()) {
+    static func reload(rideStore: RideStore, settings: SettingsStore,
+                       activeRideID: UUID?, now: Date = Date()) {
         let summaries = (try? rideStore.summaries()) ?? []
         let snapshot = WidgetSnapshot.make(summaries: summaries,
                                            goalMeters: settings.weeklyGoalMeters,
-                                           units: settings.units, now: now)
+                                           units: settings.units, now: now,
+                                           activeRideID: activeRideID)
+        // The exclusion removed the rider's only ride. Writing this would replace a correct
+        // widget with the first-run empty state mid-ride — and the snapshot is a file, so a
+        // jetsam kill during the pause freezes that empty state until the app is next opened.
+        // Keeping the previous snapshot is stale by one ride instead of wrong.
+        if activeRideID != nil, snapshot.lastRide == nil, !summaries.isEmpty { return }
         store.write(snapshot)
         WidgetCenter.shared.reloadAllTimelines()
     }

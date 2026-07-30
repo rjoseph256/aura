@@ -5,6 +5,7 @@ import MapboxMaps
 
 @main
 struct AuraApp: App {
+    @UIApplicationDelegateAdaptor(AuraAppDelegate.self) private var appDelegate
     @State private var router: AppRouter
     @State private var auth: AuthStore
     @State private var rideStore: RideStore
@@ -136,7 +137,8 @@ private struct RootView: View {
                 }
         }
         .tint(AuraTheme.accent)
-        .task { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+        // Launch .task; no ride can be active yet.
+        .task { WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil) }
         // Schema V6's segment backfill (ROH-100). Deliberately not in the V5→V6 migration
         // stage: stages run inside `ModelContainer.init`, which `AuraApp.init()` calls before
         // the first frame, so re-encoding a long ride history there is a watchdog kill that
@@ -156,6 +158,21 @@ private struct RootView: View {
         // the launch, and cancelled when a ride starts: the sweep is resumable, and the rider's
         // ride owns the device from that moment.
         .task {
+            // Clear any pause nudge an earlier process orphaned. A jetsam kill during a pause,
+            // which is the likely end of a long stop, leaves the ladder scheduled with nobody
+            // left to cancel it.
+            //
+            // Safe **only** because a persisted checkpoint is never resumable: a pause writes a
+            // real row (ROH-107's badge is for exactly that row), so "nothing persists an
+            // in-flight ride" is false — what is true is that nothing restores one. If
+            // checkpoint restore ever lands, this becomes "destroy the nudges for the ride we
+            // just restored" and must move behind that check.
+            //
+            // Idempotent, which matters: this `.task` re-runs on a scene reconnect, the same
+            // hazard the V6 backfill sweep below had to be guarded against.
+            if router.activeRideID == nil {
+                PauseNudgeScheduler.shared.cancelForgottenPauseNudges()
+            }
             guard !rideStore.isEphemeral, backfill == nil else { return }
             let container = rideStore.container
             backfill = Task.detached(priority: .utility) {
@@ -179,12 +196,18 @@ private struct RootView: View {
             for await change in settings.kvSyncStream {
                 let changed = settings.applyRemoteChange(change)
                 if changed.contains("units") || changed.contains("weeklyGoalMeters") {
-                    WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+                    // KVS sync loop — reachable mid-ride when another device changes a setting.
+                    WidgetRefresh.reload(rideStore: rideStore, settings: settings,
+                                         activeRideID: router.activeRideID)
                 }
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { WidgetRefresh.reload(rideStore: rideStore, settings: settings) }
+            // The scenePhase edge, which is the leak this fixes.
+            if phase == .active {
+                WidgetRefresh.reload(rideStore: rideStore, settings: settings,
+                                     activeRideID: router.activeRideID)
+            }
             syncLocationActivity()
         }
         .onChange(of: router.path) { _, _ in syncLocationActivity() }

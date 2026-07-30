@@ -128,6 +128,19 @@ public final class RideRecorder {
         return closedPausedSeconds + max(0, now.timeIntervalSince(start))
     }
 
+    /// The stop **in progress** only, or zero when recording. `pausedSeconds(asOf:)` is the
+    /// ride's running total across every stop, which is the wrong number for a chip that says
+    /// how long *this* stop has been (ROH-101 P4).
+    ///
+    /// `max(0,)` guards a backward wall-clock step mid-stop the same way `pausedSeconds` does.
+    /// The chip is additionally clamped non-decreasing by the coordinator, because clamping to
+    /// zero here would still let the displayed number fall. The headline active clock has the
+    /// same wall-clock weakness and is tracked as ROH-130.
+    public func currentPauseSeconds(asOf now: Date) -> TimeInterval {
+        guard let start = pauseStartedAt else { return 0 }
+        return max(0, now.timeIntervalSince(start))
+    }
+
     /// Bank the stop in progress. `max(0,)` guards a caller whose clock ran backwards (an NTP
     /// correction mid-stop); it can only ever drop a stop, never invent one.
     private func closePause(at date: Date) {
@@ -140,19 +153,17 @@ public final class RideRecorder {
     /// updates the same row the finished ride will write rather than accumulating a copy per
     /// pause.
     ///
-    /// `endedAt` is the pause instant, **not nil**, even though the ride has not ended. Nil
-    /// would be the more truthful encoding, but no surface in this app reads
-    /// `RideSummary.endedAt` — History, the last-ride card, the widget snapshot and the weekly
-    /// ring all render from the denormalized stats — so a nil-ended row is displayed as a
-    /// finished ride regardless. Given that, a row that says "a ride that ended when you
-    /// stopped" describes what was actually recorded, while a nil would be an unfinished-ride
-    /// claim that nothing in the app is equipped to make. Spec D5 assumes a statless treatment
-    /// for nil `endedAt` that does not exist; building it belongs with the pass that owns the
-    /// summary.
+    /// `endedAt` is the pause instant, **not nil**. Nil would be the more literal encoding of
+    /// "not ended", but it costs the row its elapsed and active time, and it cannot tell a
+    /// second synced device that this ride is being recorded right now rather than abandoned.
+    /// `checkpointedAt` carries that instead (ROH-107, spec D1), and it additionally records
+    /// what the recording covers — a rider who resumed and was killed later while riding has a
+    /// row whose track stops well before they did.
     public func checkpoint(at date: Date, destinationName: String? = nil) -> Ride {
         Ride(id: rideID, kind: kind, startedAt: startedAt ?? date, endedAt: date,
              segments: normalizedSegments, stats: stats,
-             pausedSeconds: pausedSeconds(asOf: date), destinationName: destinationName,
+             pausedSeconds: pausedSeconds(asOf: date), checkpointedAt: date,
+             destinationName: destinationName,
              routeId: nil, destinationPlaceId: nil)
     }
 
@@ -165,6 +176,7 @@ public final class RideRecorder {
         state = .idle
         return Ride(id: rideID, kind: kind, startedAt: startedAt ?? date, endedAt: date,
                     segments: normalizedSegments, stats: stats, pausedSeconds: paused,
+                    checkpointedAt: nil,
                     destinationName: destinationName, routeId: nil, destinationPlaceId: nil)
     }
 

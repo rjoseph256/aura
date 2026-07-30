@@ -11,11 +11,11 @@ public enum RideMigrationPlan: SchemaMigrationPlan {
 
     public static var schemas: [any VersionedSchema.Type] {
         [RideSchemaV1.self, RideSchemaV2.self, RideSchemaV3.self, RideSchemaV4.self,
-         RideSchemaV5.self, RideSchemaV6.self]
+         RideSchemaV5.self, RideSchemaV6.self, RideSchemaV7.self]
     }
 
     public static var stages: [MigrationStage] {
-        [migrateV1toV2, migrateV2toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6]
+        [migrateV1toV2, migrateV2toV3, migrateV3toV4, migrateV4toV5, migrateV5toV6, migrateV6toV7]
     }
 
     public static let migrateV1toV2 = MigrationStage.custom(
@@ -80,6 +80,18 @@ public enum RideMigrationPlan: SchemaMigrationPlan {
     public static let migrateV5toV6 = MigrationStage.lightweight(
         fromVersion: RideSchemaV5.self,
         toVersion: RideSchemaV6.self)
+
+    /// V7 redeclares `RideRecord` with one optional attribute (`checkpointedAt`) added, which
+    /// is exactly what a lightweight stage handles, so **no data moves at launch**.
+    ///
+    /// No backfill, and none is possible: nil is the correct value for every existing row.
+    /// They were all written by `finish()`, which is the only pre-V7 path that persists a
+    /// ride other than the pause flush, and a flushed row that was later finished was
+    /// upserted in place. A row still sitting as a pre-V7 checkpoint reads as finished, which
+    /// is what it read as before this schema existed.
+    public static let migrateV6toV7 = MigrationStage.lightweight(
+        fromVersion: RideSchemaV6.self,
+        toVersion: RideSchemaV7.self)
 
     // MARK: - Backfill helpers
 

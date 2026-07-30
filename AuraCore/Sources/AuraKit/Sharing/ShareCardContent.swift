@@ -12,6 +12,17 @@ public struct ShareCardContent: Equatable, Sendable {
     public let climbedUnit: String
     public let dateText: String
     public let destinationName: String?
+    /// True when Aura never recorded this ride's end (`Ride.isUnfinished`).
+    ///
+    /// The card is the one surface other people see. Without this the rider reads "anything
+    /// after 2:14 PM wasn't saved", taps Share, and posts a truncated distance as though it
+    /// were the whole ride (PO decision, 2026-07-29).
+    ///
+    /// **The same predicate the summary sheet gates on, not the narrower marker test.** Share is
+    /// tapped *from* that sheet, so a row the sheet badges and the card does not is a rider
+    /// posting a truncated ride they were just warned about — which a legacy PR #90 dev-build row
+    /// (nil `endedAt`, no marker) hits exactly.
+    public let isUnfinished: Bool
     /// The route to stroke, one run per ride segment. Empty when there is nothing to draw.
     /// Segmented rather than flattened: a share card that connected two segments would draw
     /// a straight line across the café stop.
@@ -34,6 +45,8 @@ public struct ShareCardContent: Equatable, Sendable {
 
         let trimmed = ride.destinationName?.trimmingCharacters(in: .whitespacesAndNewlines)
         destinationName = (trimmed?.isEmpty == false) ? trimmed : nil
+
+        isUnfinished = ride.isUnfinished
 
         routeSegments = ride.segments.map { $0.points.map(\.coordinate) }.filter { $0.count > 1 }
 

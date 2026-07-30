@@ -64,6 +64,7 @@ struct ShareCardView: View {
     private var readoutBand: some View {
         VStack(alignment: .leading, spacing: 0) {
             contextRow
+            unfinishedNote
             heroRow
                 .padding(.top, ShareCardLayout.gapXS)
             if hasElevation {
@@ -71,7 +72,7 @@ struct ShareCardView: View {
                                    stroke: AuraTheme.accent,
                                    fill: AuraTheme.accent.opacity(0.18),
                                    lineWidth: 2)
-                    .frame(height: ShareCardLayout.sparklineHeight)
+                    .frame(height: sparklineHeight)
                     .padding(.top, ShareCardLayout.gapSM)
                 // Bottom-anchors the stats row, absorbing the small budget slack; the
                 // fixed gaps around the sparkline stay exactly as budgeted.
@@ -95,6 +96,32 @@ struct ShareCardView: View {
             .tracking(1.5)
             .lineLimit(1)
             .foregroundStyle(scrimText)
+    }
+
+    /// A footnote, not a headline: the card should still read as a ride worth posting, while
+    /// not passing a truncated distance off as the whole ride to people who cannot check
+    /// (ROH-107). It sits directly under the context line, in the metadata zone and directly
+    /// above the distance it qualifies — not at the band's foot, where it would read as a
+    /// caption on the AURA sign-off.
+    @ViewBuilder
+    private var unfinishedNote: some View {
+        if content.isUnfinished {
+            Label(UnfinishedRideCopy.label, systemImage: "clock")
+                .font(.system(.caption2, design: .rounded).weight(.semibold))
+                .lineLimit(1)
+                .foregroundStyle(scrimText)
+                .padding(.top, ShareCardLayout.gapXS)
+        }
+    }
+
+    /// The band is a fixed budget, so the note's line is bought from the sparkline rather
+    /// than grown into the map field. Unfinished is the rare state; a shorter profile there
+    /// costs less than a smaller hero or a clipped stats row, and the package budget test
+    /// pins both variants.
+    private var sparklineHeight: CGFloat {
+        content.isUnfinished
+            ? ShareCardLayout.sparklineHeightUnfinished
+            : ShareCardLayout.sparklineHeight
     }
 
     private var heroRow: some View {
@@ -183,6 +210,7 @@ struct ShareCardView: View {
                          labelColor: scrimText)
             }
             Spacer()
+            unfinishedNote
             wordmark
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -201,11 +229,16 @@ struct ShareCardView: View {
 
 // MARK: - Preview fixtures
 
+/// Finished by default. `isUnfinished` is `checkpointedAt != nil || endedAt == nil`, so leaving
+/// `endedAt` nil here would stamp the note on every preview — and a preview fixture must never
+/// be the reason a production predicate gets narrowed (ROH-107). Only "No end recorded" opts in.
 private func previewRide(distanceMeters: Double = 8046, movingSeconds: Double = 2520,
                          gainMeters: Double = 73, elevation: Bool = true,
-                         destination: String? = "Millvale", points: Int = 40) -> Ride {
+                         destination: String? = "Millvale", points: Int = 40,
+                         endedAt: Date? = Date(timeIntervalSince1970: 1_782_909_720),
+                         checkpointedAt: Date? = nil) -> Ride {
     Ride(kind: .navigate, startedAt: Date(timeIntervalSince1970: 1_782_907_200),
-         endedAt: nil,
+         endedAt: endedAt,
          track: (0..<points).map { i in
              TrackPoint(coordinate: Coordinate(latitude: 40.44 + Double(i) * 0.001,
                                                longitude: -79.99 + Double(i) * 0.0012),
@@ -215,6 +248,7 @@ private func previewRide(distanceMeters: Double = 8046, movingSeconds: Double = 
          stats: RideStats(distanceMeters: distanceMeters, movingTimeSeconds: movingSeconds,
                           averageSpeedMetersPerSecond: 5, maxSpeedMetersPerSecond: 9,
                           elevationGainMeters: gainMeters),
+         checkpointedAt: checkpointedAt,
          destinationName: destination, routeId: nil, destinationPlaceId: nil)
 }
 
@@ -251,6 +285,18 @@ private func previewMapFixture() -> UIImage {
         ride: previewRide(distanceMeters: 5000, movingSeconds: 1200, gainMeters: 20,
                           destination: nil, points: 0),
         units: .imperial), mapImage: nil)
+}
+
+#Preview("No end recorded") {
+    // The tightest budget case for the note: map raster + sparkline, where the band pays for
+    // the extra line out of the sparkline's height rather than growing.
+    // A checkpoint row carries the flush instant in BOTH fields, per
+    // `RideRecorder.checkpoint(at:)` — `endedAt` is the pause, not nil.
+    ShareCardView(content: ShareCardContent(
+        ride: previewRide(destination: nil,
+                          endedAt: Date(timeIntervalSince1970: 1_782_914_400),
+                          checkpointedAt: Date(timeIntervalSince1970: 1_782_914_400)),
+        units: .imperial), mapImage: previewMapFixture())
 }
 
 #Preview("Route, no elevation") {

@@ -21,7 +21,7 @@ struct RideSessionCoordinatorTests {
                                  screen: SpyScreenWake, activity: SpyRideActivity)
         -> RideSessionCoordinator {
         RideSessionCoordinator(kind: kind, destinationName: destinationName,
-                               screen: screen, activity: activity)
+                               screen: screen, activity: activity, haptics: HapticSpy(), nudges: NudgeSpy())
     }
 
     @Test func rideStoreConformsToRideSaving() throws {
@@ -162,7 +162,7 @@ struct RideSessionCoordinatorTests {
         let spy = SpyWorkoutWriter()
         let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                        screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                       workout: spy)
+                                       workout: spy, haptics: HapticSpy(), nudges: NudgeSpy())
         c.start(location: ScriptedLocationProvider([point(40.40, 0), point(40.41, 10)]),
                 saving: try RideStore.inMemory(), units: .metric,
                 authorization: .authorized, saveToHealth: true)
@@ -176,7 +176,7 @@ struct RideSessionCoordinatorTests {
         let spy = SpyWorkoutWriter()
         let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                        screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                       workout: spy)
+                                       workout: spy, haptics: HapticSpy(), nudges: NudgeSpy())
         c.start(location: ScriptedLocationProvider([point(40.40, 0), point(40.41, 10)]),
                 saving: try RideStore.inMemory(), units: .metric,
                 authorization: .authorized, saveToHealth: false)
@@ -189,7 +189,7 @@ struct RideSessionCoordinatorTests {
         let spy = SpyWorkoutWriter()
         let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                        screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                       workout: spy)
+                                       workout: spy, haptics: HapticSpy(), nudges: NudgeSpy())
         c.start(location: ScriptedLocationProvider([point(40.40, 0)]),
                 saving: try RideStore.inMemory(), units: .metric,
                 authorization: .authorized, saveToHealth: true)
@@ -203,7 +203,7 @@ struct RideSessionCoordinatorTests {
         let spy = SpyWorkoutWriter()
         let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                        screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                       workout: spy)
+                                       workout: spy, haptics: HapticSpy(), nudges: NudgeSpy())
         c.start(location: ScriptedLocationProvider([point(40.40, 0), point(40.41, 10)]),
                 saving: ThrowingRideSaving(), units: .metric,
                 authorization: .authorized, saveToHealth: true)

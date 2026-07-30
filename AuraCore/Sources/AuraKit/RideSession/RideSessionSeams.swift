@@ -50,6 +50,27 @@ public protocol RidePauseObserving: AnyObject {
     func rideDidSetPaused(_ paused: Bool)
 }
 
+/// Schedules and cancels the forgotten-pause notification ladder. The app conforms a
+/// UserNotifications-backed type; the package never imports UserNotifications.
+///
+/// **Authorization happens at ride start, not at the first pause.** `requestAuthorization` is
+/// async and iOS defers its alert while the app is backgrounded — which a forgotten pause always
+/// is, since `pause()` releases the wake lock and the rider walks away. Asking at pause time
+/// therefore cannot serve the one case the ladder exists for: the continuation never resumes.
+/// Asking at `start()`, while the rider is holding the phone and looking at it, lets scheduling
+/// be plain and synchronous.
+@MainActor
+public protocol RideNudgeScheduling: AnyObject {
+    /// Ask the system once per install. Called at ride start, while the app is foregrounded.
+    /// Fire-and-forget: nothing waits on the rider's answer.
+    func prepareAuthorization()
+    /// Schedule every rung of `PauseNudgePolicy`, offset from `startingAt`, replacing any
+    /// already scheduled.
+    func scheduleForgottenPauseNudges(startingAt: Date)
+    /// Remove every pending and already delivered nudge.
+    func cancelForgottenPauseNudges()
+}
+
 /// Writes a finished ride to Apple Health as a cycling workout. The app conforms a
 /// HealthKit-backed type; the package never imports HealthKit. Fire-and-forget: the
 /// coordinator calls this and moves on, so a HealthKit failure cannot affect the save.

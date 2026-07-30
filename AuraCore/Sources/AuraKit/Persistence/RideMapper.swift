@@ -26,6 +26,7 @@ public enum RideMapper {
             distanceMeters: ride.stats?.distanceMeters ?? 0,
             movingTimeSeconds: ride.stats?.movingTimeSeconds ?? 0,
             pausedSeconds: ride.pausedSeconds,
+            checkpointedAt: ride.checkpointedAt,
             elevationGainMeters: ride.stats?.elevationGainMeters ?? 0,
             thumbnailData: thumb.count >= 2 ? try encoder.encode(thumb) : nil,
             destinationName: ride.destinationName,
@@ -43,6 +44,7 @@ public enum RideMapper {
             segments: try segments(from: record, decoder: decoder),
             stats: try record.statsData.map { try decoder.decode(RideStats.self, from: $0) },
             pausedSeconds: record.pausedSeconds,
+            checkpointedAt: record.checkpointedAt,
             destinationName: record.destinationName,
             routeId: record.routeId,
             destinationPlaceId: record.destinationPlaceId)
@@ -98,6 +100,7 @@ public enum RideMapper {
             distanceMeters: record.distanceMeters,
             movingTimeSeconds: record.movingTimeSeconds,
             pausedSeconds: record.pausedSeconds,
+            checkpointedAt: record.checkpointedAt,
             elevationGainMeters: record.elevationGainMeters,
             destinationName: record.destinationName,
             thumbnailCoordinates: coords)

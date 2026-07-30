@@ -57,4 +57,41 @@ final class TrackRibbonTests: XCTestCase {
                        seg([(41.0, -80.0), (41.001, -80.0), (41.002, -80.0)])])
         XCTAssertEqual(Set(pieces.map(\.sourceIndex)).count, pieces.count)
     }
+
+    func test_unpausedRideStylesEveryPieceAsRecorded() {
+        let segments = [RideSegment(points: [pt(0, 0), pt(0, 1)]),
+                        RideSegment(points: [pt(1, 0), pt(1, 1)])]
+        let pieces = TrackRibbon.pieces(segments: segments, isPaused: false)
+        XCTAssertEqual(pieces.map(\.style), [.recorded, .recorded])
+    }
+
+    func test_pausedRideStylesOnlyTheTrailingPiece() {
+        let segments = [RideSegment(points: [pt(0, 0), pt(0, 1)]),
+                        RideSegment(points: [pt(1, 0), pt(1, 1)])]
+        let pieces = TrackRibbon.pieces(segments: segments, isPaused: true)
+        XCTAssertEqual(pieces.map(\.style), [.recorded, .paused])
+    }
+
+    func test_pausedStyleFollowsTheLastDrawnPieceNotTheLastSegment() {
+        // A trailing single-point segment strokes nothing and is dropped, so the paused style
+        // must land on the piece that is actually drawn last.
+        let segments = [RideSegment(points: [pt(0, 0), pt(0, 1)]),
+                        RideSegment(points: [pt(1, 0)])]
+        let pieces = TrackRibbon.pieces(segments: segments, isPaused: true)
+        XCTAssertEqual(pieces.count, 1)
+        XCTAssertEqual(pieces.first?.style, .paused)
+        XCTAssertEqual(pieces.first?.sourceIndex, 0)
+    }
+
+    func test_pausedStylingKeepsSourceIndicesUnique() {
+        let segments = (0..<4).map { i in
+            RideSegment(points: [pt(Double(i), 0), pt(Double(i), 1)])
+        }
+        let indices = TrackRibbon.pieces(segments: segments, isPaused: true).map(\.sourceIndex)
+        XCTAssertEqual(Set(indices).count, indices.count)
+    }
+
+    func test_emptyRideYieldsNoPiecesEvenWhenPaused() {
+        XCTAssertTrue(TrackRibbon.pieces(segments: [], isPaused: true).isEmpty)
+    }
 }

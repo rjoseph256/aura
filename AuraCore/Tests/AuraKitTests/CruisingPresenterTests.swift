@@ -120,4 +120,16 @@ import AuraCore
     @Test func accessibilityLabel_startingState() {
         #expect(CruisingState.starting.accessibilityLabel == "Starting navigation.")
     }
+
+    @Test func pausedAccessibilityLabel_dropsArrival() {
+        let cal = calendar("en_US")
+        let s = CruisingPresenter.state(for: update(distance: 3380, duration: 1080, street: "Penn Ave"),
+                                        units: .imperial, now: now(cal), calendar: cal)
+        #expect(s.pausedAccessibilityLabel == "On Penn Ave, 2.1 miles to go")
+        #expect(!s.pausedAccessibilityLabel.contains("arriving"))
+    }
+
+    @Test func pausedAccessibilityLabel_startingState() {
+        #expect(CruisingState.starting.pausedAccessibilityLabel == "Starting navigation.")
+    }
 }

@@ -97,6 +97,9 @@ targets:
       - path: Sources/Theme/AuraTheme.swift
       - path: Sources/Theme/StatPair.swift
       - path: Sources/Shared/RouteThumbnail.swift
+      # The no-end-recorded marker (ROH-107). Shared so the widget shows a sighted rider the
+      # same marker every in-app surface does, from the same copy helper.
+      - path: Sources/Shared/UnfinishedRideBadge.swift
       # Bundled Saira Condensed faces (OFL), registered via Widgets/Info.plist
       # UIAppFonts so the Live Activity can render cockpit numerals.
       - path: Resources/Fonts
