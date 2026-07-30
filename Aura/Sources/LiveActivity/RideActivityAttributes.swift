@@ -1,5 +1,6 @@
 import ActivityKit
 import Foundation
+import AuraCore
 import AuraKit
 
 /// Whether the in-progress ride is a free ride or a turn-by-turn navigated ride.
@@ -20,10 +21,18 @@ public enum RideActivityMode: String, Codable, Hashable, Sendable {
 /// activity honors the distance-units setting, and the elapsed clock ticks on-device via
 /// `Text(_, style: .timer)` from `startedAt` rather than being pushed every second.
 public struct RideActivityAttributes: ActivityAttributes {
+    /// **Every field added here from now on must be `Optional` or defaulted.** `ContentState` is
+    /// `Codable` and re-serialized on every update, so an activity in flight across an app update
+    /// is decoded by the *new* binary from bytes the *old* one wrote. Swift's synthesized
+    /// `init(from:)` uses `decodeIfPresent` for `Optional` stored properties, so a missing key
+    /// yields nil; a non-Optional field would throw and strand the activity on its last rendered
+    /// content forever. The same applies to `RideActiveClock`'s cases and associated-value labels:
+    /// adding is safe, renaming is not. No test target on any platform can see this type, so this
+    /// rule is the whole guarantee (ROH-102 spec D2, invariant 6).
     public struct ContentState: Codable, Hashable, Sendable {
         /// Distance covered so far, in meters.
         public var distanceMeters: Double
-        /// Speed in meters per second (the ride's average — the free-ride hero stat).
+        /// Current smoothed speed in meters per second — not the ride average.
         public var speedMetersPerSecond: Double
         /// Elevation gained so far, in meters.
         public var elevationGainMeters: Double
@@ -36,19 +45,49 @@ public struct RideActivityAttributes: ActivityAttributes {
         /// via `ManeuverIcon` (so the widget needs no guidance logic). `nil` before a
         /// maneuver / in free ride — the widget falls back to the generic arrow.
         public var turnGlyphSystemName: String?
+        /// What the clock displays. `nil` for an activity started before ROH-102 shipped; every
+        /// read site falls back to `attributes.startedAt`, which is the pre-ROH-102 behavior.
+        public var clock: RideActiveClock?
 
-        public init(distanceMeters: Double = 0,
-                    speedMetersPerSecond: Double = 0,
-                    elevationGainMeters: Double = 0,
-                    turnInstruction: String? = nil,
-                    turnDistanceMeters: Double? = nil,
-                    turnGlyphSystemName: String? = nil) {
+        /// Deliberately left `internal` (not `private`) for now: `RideLiveActivityController`'s
+        /// `lastState` default and its `update(...)` body still call this directly. A later task
+        /// rewrites `update` and drops `lastState` as a stored property; once nothing outside a
+        /// payload constructs a `ContentState`, this becomes `private` so the dedupe's whole
+        /// correctness argument — "payload equality implies content equality" — holds for a type
+        /// nothing can test (invariant 5).
+        init(distanceMeters: Double = 0,
+             speedMetersPerSecond: Double = 0,
+             elevationGainMeters: Double = 0,
+             turnInstruction: String? = nil,
+             turnDistanceMeters: Double? = nil,
+             turnGlyphSystemName: String? = nil,
+             clock: RideActiveClock? = nil) {
             self.distanceMeters = distanceMeters
             self.speedMetersPerSecond = speedMetersPerSecond
             self.elevationGainMeters = elevationGainMeters
             self.turnInstruction = turnInstruction
             self.turnDistanceMeters = turnDistanceMeters
             self.turnGlyphSystemName = turnGlyphSystemName
+            self.clock = clock
+        }
+
+        /// The only initializer production code uses.
+        public init(payload: RideActivityPayload) {
+            self.init(distanceMeters: payload.distanceMeters,
+                      speedMetersPerSecond: payload.speedMetersPerSecond,
+                      elevationGainMeters: payload.elevationGainMeters,
+                      turnInstruction: payload.turnInstruction,
+                      turnDistanceMeters: payload.turnDistanceMeters,
+                      turnGlyphSystemName: payload.turnGlyphSystemName,
+                      clock: payload.clock)
+        }
+
+        public var isPaused: Bool { clock?.isPaused ?? false }
+
+        /// The clock to render, falling back to a wall-clock anchor for an activity that
+        /// predates ROH-102.
+        public func activeClock(startedAt: Date) -> RideActiveClock {
+            clock ?? .running(anchor: startedAt)
         }
     }
 

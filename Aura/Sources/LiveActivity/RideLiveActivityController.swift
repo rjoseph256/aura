@@ -50,7 +50,8 @@ final class RideLiveActivityController {
 
         let attributes = RideActivityAttributes(
             mode: mode, startedAt: startedAt, units: units, destinationName: destinationName)
-        let state = RideActivityAttributes.ContentState()
+        let state = RideActivityAttributes.ContentState(
+            payload: RideActivityPayload(clock: .running(anchor: startedAt)))
         let content = ActivityContent(state: state,
                                       staleDate: startedAt.addingTimeInterval(staleInterval))
         do {
