@@ -58,6 +58,7 @@ public final class RideSessionCoordinator {
     private let destinationName: String?
     private let screen: any ScreenWakeControlling
     private let activity: any RideActivityControlling
+    private let haptics: any HapticPlaying
     private let workout: (any WorkoutWriting)?
     @ObservationIgnored private let guidance: (any GuidanceControlling)?
 
@@ -90,12 +91,15 @@ public final class RideSessionCoordinator {
     var streamTask: Task<Void, Never>?
     private var tickerTask: Task<Void, Never>?
 
+    /// `haptics` and `nudges` are required rather than optional on purpose: they are wired at
+    /// two production call sites each, and an optional would let a missed one ship silently.
     public init(kind: Ride.Kind,
                 destinationName: String?,
                 screen: any ScreenWakeControlling,
                 activity: any RideActivityControlling,
                 workout: (any WorkoutWriting)? = nil,
-                guidance: (any GuidanceControlling)? = nil) {
+                guidance: (any GuidanceControlling)? = nil,
+                haptics: any HapticPlaying) {
         self.kind = kind
         self.recorder = RideRecorder(kind: kind)
         self.destinationName = destinationName
@@ -103,6 +107,7 @@ public final class RideSessionCoordinator {
         self.activity = activity
         self.workout = workout
         self.guidance = guidance
+        self.haptics = haptics
     }
 
     public enum StartOutcome: Sendable { case started, permissionDenied }
@@ -192,6 +197,7 @@ public final class RideSessionCoordinator {
         guard recorder.isRecording, !recorder.isPaused else { return }
         let now = Date()
         recorder.pause(at: now)
+        haptics.play(.pause)
         // Before anything that can yield: an arrival draining after the pause but before
         // guidance knows about it would end the ride under the rider.
         pauseObserver?.rideDidSetPaused(true)
@@ -206,6 +212,7 @@ public final class RideSessionCoordinator {
         guard recorder.isPaused else { return }
         let now = Date()
         recorder.resume(at: now)
+        haptics.play(.resume)
         pauseObserver?.rideDidSetPaused(false)
         refreshElapsed(now: now)
         screen.setKeepAwake(true)

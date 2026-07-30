@@ -4,14 +4,6 @@ import AuraCore
 
 @MainActor
 struct GuidanceViewModelHapticsTests {
-    /// Records the cues the view model plays, and how often it prepared.
-    final class HapticSpy: HapticPlaying {
-        var cues: [RideHapticCue] = []
-        var prepareCount = 0
-        func prepare() { prepareCount += 1 }
-        func play(_ cue: RideHapticCue) { cues.append(cue) }
-    }
-
     private func makeRoute() -> Route {
         let o = Coordinate(latitude: 40.44, longitude: -79.99)
         let d = Coordinate(latitude: 40.45, longitude: -79.95)

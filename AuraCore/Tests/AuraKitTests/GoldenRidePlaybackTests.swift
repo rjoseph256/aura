@@ -22,7 +22,7 @@ struct GoldenRidePlaybackTests {
         let store = try RideStore.inMemory()
         let coordinator = RideSessionCoordinator(
             kind: .freeRide, destinationName: nil,
-            screen: SpyScreenWake(), activity: SpyRideActivity())
+            screen: SpyScreenWake(), activity: SpyRideActivity(), haptics: HapticSpy())
         let outcome = coordinator.start(location: provider, saving: store,
                                         units: .metric, authorization: .authorized)
         #expect(outcome == .started)
