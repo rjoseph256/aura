@@ -2,9 +2,10 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Revision 2** — after adversarial plan review (skeptic + architecture, both REVISE). All
-their must-change items are folded in; the concurrency shapes in Task 10 are the
-reviewed, compile-checked ones.
+**Revision 3** — rev 2 folded in the adversarial plan review (skeptic + architecture,
+both REVISE); rev 3 folds in the delta re-review's four fixes (livelock-proof slot
+release, nonisolated SnapshotBox, MainActor hint task, systemic nonisolated rule). The
+concurrency shapes in Task 10 are the reviewed, compile-probed ones.
 
 **Goal:** Rebuild the shareable post-ride PNG so the route sits on a real map raster (rider's map style) with nothing covering the map, distance and stats in a readout band below, and a polyline fallback that ships instantly and upgrades in place.
 
