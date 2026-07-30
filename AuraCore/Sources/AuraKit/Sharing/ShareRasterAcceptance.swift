@@ -16,7 +16,7 @@ public enum ShareRasterAcceptance {
     /// Minimum fraction of grid cells that must be textured for the raster to pass.
     public static let texturedCellFraction: Double = 0.5
     /// The sampled interior is scored on a 4×4 grid of cells.
-    public static let gridSize = 4
+    static let gridSize = 4
 
     /// - Parameters:
     ///   - pixels: grayscale buffer, exactly `width * height` bytes, row-major with NO

@@ -24,21 +24,21 @@ final class ShareRouteGeometryTests: XCTestCase {
         XCTAssertNil(ShareRouteGeometry.prepare(segments: [stationary]))
     }
 
-    func testDropsNonFiniteAndKeepsRest() {
+    func testDropsNonFiniteAndKeepsRest() throws {
         var pts = line(20)
         pts.insert(Coordinate(latitude: .nan, longitude: -79.99), at: 5)
         pts.insert(Coordinate(latitude: 40.44, longitude: .infinity), at: 10)
-        let prepared = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [pts]))
+        let prepared = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [pts]))
         XCTAssertEqual(prepared.segments[0].count, 20)
         XCTAssertTrue(prepared.segments.allSatisfy { $0.allSatisfy { $0.latitude.isFinite && $0.longitude.isFinite } })
     }
 
     /// Mirrors `WorkoutRouteLocationsTests.dropsInvalidCoordinates`: finite-but-out-of-range
     /// coordinates (|lat| > 90, |lon| > 180) are hygiene failures too, not just NaN/inf.
-    func testDropsOutOfRangeCoordinatesAndKeepsRest() {
+    func testDropsOutOfRangeCoordinatesAndKeepsRest() throws {
         var pts = line(20)
         pts.insert(Coordinate(latitude: 200, longitude: 999), at: 5)
-        let prepared = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [pts]))
+        let prepared = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [pts]))
         XCTAssertEqual(prepared.segments[0], line(20))
     }
 
@@ -73,9 +73,9 @@ final class ShareRouteGeometryTests: XCTestCase {
         XCTAssertNil(ShareRouteGeometry.prepare(segments: [pts]))
     }
 
-    func testDecimationCapsAndKeepsExtremes() {
+    func testDecimationCapsAndKeepsExtremes() throws {
         let pts = loop(5000)
-        let prepared = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [pts]))
+        let prepared = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [pts]))
         // The cap must hold INCLUDING the four force-kept extreme points.
         XCTAssertLessThanOrEqual(prepared.segments[0].count, ShareRouteGeometry.maxPointsPerSegment)
         let lats = prepared.segments[0].map(\.latitude), lons = prepared.segments[0].map(\.longitude)
@@ -85,15 +85,15 @@ final class ShareRouteGeometryTests: XCTestCase {
         XCTAssertEqual(lons.max(), pts.map(\.longitude).max())
     }
 
-    func testShortSegmentsPassThroughUndecimated() {
+    func testShortSegmentsPassThroughUndecimated() throws {
         let pts = line(30)
-        let prepared = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [pts]))
+        let prepared = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [pts]))
         XCTAssertEqual(prepared.segments[0], pts)
     }
 
-    func testSegmentsStaySeparate() {
+    func testSegmentsStaySeparate() throws {
         let input = [line(30), line(30, lat0: 40.5)]
-        let prepared = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: input))
+        let prepared = try XCTUnwrap(ShareRouteGeometry.prepare(segments: input))
         XCTAssertEqual(prepared.segments.count, 2)
         // Each output segment must be an order-preserving subsequence of ITS OWN input
         // segment — no points invented, reordered, or leaked across segments.
@@ -115,34 +115,34 @@ final class ShareRouteGeometryTests: XCTestCase {
         return true
     }
 
-    func testContentHashStableAndSensitive() {
-        let a = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [line(100)]))
-        let b = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [line(100)]))
+    func testContentHashStableAndSensitive() throws {
+        let a = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [line(100)]))
+        let b = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [line(100)]))
         XCTAssertEqual(a.contentHash, b.contentHash)
-        let c = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [line(100, lat0: 40.45)]))
+        let c = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [line(100, lat0: 40.45)]))
         XCTAssertNotEqual(a.contentHash, c.contentHash)
     }
 
     /// Pins the 1e5 quantization scale of the content hash: a ~1.5e-5° move (~1.5 m,
     /// larger than the 1e-5° quantum) must change the hash; a 1e-7° jitter (GPS noise,
     /// far below the quantum) must not.
-    func testQuantizationScaleBoundsHashSensitivity() {
+    func testQuantizationScaleBoundsHashSensitivity() throws {
         let base = line(100)
         var moved = base
         moved[50] = Coordinate(latitude: moved[50].latitude + 1.5e-5, longitude: moved[50].longitude)
         var jittered = base
         jittered[50] = Coordinate(latitude: jittered[50].latitude + 1e-7, longitude: jittered[50].longitude)
-        let a = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [base]))
-        let b = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [moved]))
-        let c = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [jittered]))
+        let a = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [base]))
+        let b = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [moved]))
+        let c = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [jittered]))
         XCTAssertNotEqual(a.contentHash, b.contentHash, "a super-quantum move must change the hash")
         XCTAssertEqual(a.contentHash, c.contentHash, "a sub-quantum jitter must not change the hash")
     }
 
-    func testContentHashSensitiveToSegmentBoundaries() {
+    func testContentHashSensitiveToSegmentBoundaries() throws {
         let pts = line(60)
-        let one = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [pts]))
-        let two = try! XCTUnwrap(ShareRouteGeometry.prepare(
+        let one = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [pts]))
+        let two = try XCTUnwrap(ShareRouteGeometry.prepare(
             segments: [Array(pts[0..<30]), Array(pts[30...])]))
         XCTAssertNotEqual(one.contentHash, two.contentHash)
     }

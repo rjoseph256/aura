@@ -12,13 +12,18 @@ final class ShareRasterAcceptanceTests: XCTestCase {
         [UInt8](repeating: value, count: width * height)
     }
 
-    /// Deterministic seeded noise (LCG) — high per-cell stddev everywhere it's painted.
+    /// One step of the deterministic seeded-noise stream (LCG) every fixture draws from —
+    /// high per-cell stddev everywhere it's painted.
+    private func seededNoise(_ state: inout UInt64) -> UInt8 {
+        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        return UInt8(truncatingIfNeeded: state >> 33)
+    }
+
     private func paintNoise(into buffer: inout [UInt8], rows: Range<Int>, cols: Range<Int>, seed: UInt64 = 1) {
         var state = seed
         for row in rows {
             for col in cols {
-                state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-                buffer[row * width + col] = UInt8(truncatingIfNeeded: state >> 33)
+                buffer[row * width + col] = seededNoise(&state)
             }
         }
     }
@@ -42,8 +47,7 @@ final class ShareRasterAcceptanceTests: XCTestCase {
         var padded = [UInt8](repeating: 128, count: 96 * height)
         var state: UInt64 = 7
         for i in padded.indices {
-            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
-            padded[i] = UInt8(truncatingIfNeeded: state >> 33)
+            padded[i] = seededNoise(&state)
         }
         XCTAssertFalse(ShareRasterAcceptance.accepts(
             pixels: padded, width: width, height: height, excludedBottomRows: excludedRows))

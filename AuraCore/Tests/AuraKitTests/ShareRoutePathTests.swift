@@ -20,24 +20,24 @@ final class ShareRoutePathTests: XCTestCase {
         XCTAssertNil(ShareRoutePath.path(runs: [[CGPoint(x: 1, y: 1)], [], [CGPoint(x: 2, y: 2)]]))
     }
 
-    func testSingleRunIsOneSubpath() {
-        let path = try! XCTUnwrap(ShareRoutePath.path(runs: [run(4)]))
+    func testSingleRunIsOneSubpath() throws {
+        let path = try XCTUnwrap(ShareRoutePath.path(runs: [run(4)]))
         let types = elements(of: path)
         XCTAssertEqual(types.filter { $0 == .moveToPoint }.count, 1)
         XCTAssertEqual(types.filter { $0 == .addLineToPoint }.count, 3)
     }
 
-    func testRunsNeverConnectAcrossPauseGaps() {
+    func testRunsNeverConnectAcrossPauseGaps() throws {
         // One moveTo per run is the invariant: a stroke across a pause gap would draw a
         // line the rider never rode.
-        let path = try! XCTUnwrap(ShareRoutePath.path(runs: [run(4), run(3, x0: 200), run(2, y0: 200)]))
+        let path = try XCTUnwrap(ShareRoutePath.path(runs: [run(4), run(3, x0: 200), run(2, y0: 200)]))
         let types = elements(of: path)
         XCTAssertEqual(types.filter { $0 == .moveToPoint }.count, 3)
         XCTAssertEqual(types.filter { $0 == .addLineToPoint }.count, 3 + 2 + 1)
     }
 
-    func testSubTwoPointRunsAreSkippedNotConnected() {
-        let path = try! XCTUnwrap(ShareRoutePath.path(runs: [[CGPoint(x: 5, y: 5)], run(3), []]))
+    func testSubTwoPointRunsAreSkippedNotConnected() throws {
+        let path = try XCTUnwrap(ShareRoutePath.path(runs: [[CGPoint(x: 5, y: 5)], run(3), []]))
         let types = elements(of: path)
         XCTAssertEqual(types.filter { $0 == .moveToPoint }.count, 1)
         XCTAssertEqual(types.filter { $0 == .addLineToPoint }.count, 2)
@@ -56,7 +56,7 @@ final class ShareRoutePathTests: XCTestCase {
         return (moves, lineTargets)
     }
 
-    func testNonFiniteRunHeadDoesNotFuseRunsAcrossPauseGap() {
+    func testNonFiniteRunHeadDoesNotFuseRunsAcrossPauseGap() throws {
         // CoreGraphics silently ignores `move(to:)` with a NaN point; an unfiltered
         // implementation would then addLine(to: (300,300)) as a continuation of the
         // FIRST run — a stroke across the pause gap. The NaN-headed run has only one
@@ -65,20 +65,20 @@ final class ShareRoutePathTests: XCTestCase {
             [CGPoint(x: 10, y: 10), CGPoint(x: 20, y: 20)],
             [CGPoint(x: CGFloat.nan, y: 5), CGPoint(x: 300, y: 300)]
         ]
-        let path = try! XCTUnwrap(ShareRoutePath.path(runs: runs))
+        let path = try XCTUnwrap(ShareRoutePath.path(runs: runs))
         let (moves, lineTargets) = decompose(path)
         XCTAssertEqual(moves, 1)
         XCTAssertEqual(lineTargets, [CGPoint(x: 20, y: 20)])
         XCTAssertFalse(lineTargets.contains(CGPoint(x: 300, y: 300)))
     }
 
-    func testMidRunNonFinitePointIsDroppedButRunStillStrokes() {
+    func testMidRunNonFinitePointIsDroppedButRunStillStrokes() throws {
         // Filtering is per POINT, not per run: a run with 2+ finite points survives a
         // non-finite sample in the middle.
         let runs: [[CGPoint]] = [
             [CGPoint(x: 10, y: 10), CGPoint(x: CGFloat.nan, y: CGFloat.nan), CGPoint(x: 20, y: 20)]
         ]
-        let path = try! XCTUnwrap(ShareRoutePath.path(runs: runs))
+        let path = try XCTUnwrap(ShareRoutePath.path(runs: runs))
         let (moves, lineTargets) = decompose(path)
         XCTAssertEqual(moves, 1)
         XCTAssertEqual(lineTargets, [CGPoint(x: 20, y: 20)])
@@ -90,9 +90,9 @@ final class ShareRoutePathTests: XCTestCase {
         ]))
     }
 
-    func testPointsPassThroughUnchanged() {
+    func testPointsPassThroughUnchanged() throws {
         let points = run(3)
-        let path = try! XCTUnwrap(ShareRoutePath.path(runs: [points]))
+        let path = try XCTUnwrap(ShareRoutePath.path(runs: [points]))
         var seen: [CGPoint] = []
         path.applyWithBlock { seen.append($0.pointee.points[0]) }
         XCTAssertEqual(seen, points)

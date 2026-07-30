@@ -9,8 +9,8 @@ final class ShareMapRequestTests: XCTestCase {
         (0..<n).map { Coordinate(latitude: lat0 + Double($0) * 0.0005, longitude: -79.99 + Double($0) * 0.0006) }
     }
 
-    private func request(style: MapStyle = .auraTerrain, lat0: Double = 40.44) -> ShareMapRequest {
-        ShareMapRequest(rideID: rideID, segments: [line(50, lat0: lat0)], style: style)!
+    private func request(style: MapStyle = .auraTerrain, lat0: Double = 40.44) throws -> ShareMapRequest {
+        try XCTUnwrap(ShareMapRequest(rideID: rideID, segments: [line(50, lat0: lat0)], style: style))
     }
 
     func testNilOnDegenerateSegments() {
@@ -28,45 +28,45 @@ final class ShareMapRequestTests: XCTestCase {
         XCTAssertNil(ShareMapRequest(rideID: rideID, segments: [offEarth], style: .auraTerrain))
     }
 
-    func testDefaultsComeFromShareCardLayout() {
-        let request = request()
+    func testDefaultsComeFromShareCardLayout() throws {
+        let request = try request()
         XCTAssertEqual(request.size, ShareCardLayout.mapFieldSize)
         XCTAssertEqual(request.scale, ShareCardLayout.rasterScale)
     }
 
-    func testCacheKeyIsFilenameSafe() {
+    func testCacheKeyIsFilenameSafe() throws {
         // TerrainSnapshotDiskCache uses the key as a filename; "/" and ":" silently
         // break the write. The FNV-1a digest keeps the key safe by construction.
         for style in [MapStyle.auraTerrain, .dark, .standard] {
-            let key = request(style: style).cacheKey
+            let key = try request(style: style).cacheKey
             XCTAssertFalse(key.contains("/"), key)
             XCTAssertFalse(key.contains(":"), key)
             XCTAssertTrue(key.hasPrefix("sharemap-"), key)
         }
     }
 
-    func testCacheKeyStableAcrossConstructions() {
-        XCTAssertEqual(request().cacheKey, request().cacheKey)
+    func testCacheKeyStableAcrossConstructions() throws {
+        XCTAssertEqual(try request().cacheKey, try request().cacheKey)
     }
 
-    func testCacheKeySensitiveToStyle() {
-        let keys = [MapStyle.auraTerrain, .dark, .standard].map { request(style: $0).cacheKey }
+    func testCacheKeySensitiveToStyle() throws {
+        let keys = try [MapStyle.auraTerrain, .dark, .standard].map { try request(style: $0).cacheKey }
         XCTAssertEqual(Set(keys).count, 3)
     }
 
-    func testCacheKeySensitiveToRoute() {
-        XCTAssertNotEqual(request().cacheKey, request(lat0: 40.45).cacheKey)
+    func testCacheKeySensitiveToRoute() throws {
+        XCTAssertNotEqual(try request().cacheKey, try request(lat0: 40.45).cacheKey)
     }
 
-    func testCacheKeySensitiveToRideID() {
-        let other = ShareMapRequest(rideID: UUID(), segments: [line(50)], style: .auraTerrain)!
-        XCTAssertNotEqual(request().cacheKey, other.cacheKey)
+    func testCacheKeySensitiveToRideID() throws {
+        let other = try XCTUnwrap(ShareMapRequest(rideID: UUID(), segments: [line(50)], style: .auraTerrain))
+        XCTAssertNotEqual(try request().cacheKey, other.cacheKey)
     }
 
-    func testCacheKeySensitiveToCompositeVersion() {
+    func testCacheKeySensitiveToCompositeVersion() throws {
         // compositeVersion is a static let; sensitivity is asserted on the composer the
         // initializer delegates to.
-        let route = ShareRouteGeometry.prepare(segments: [line(50)])!
+        let route = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [line(50)]))
         let v1 = ShareMapRequest.cacheKey(rideID: rideID, route: route, style: .dark,
                                           size: ShareCardLayout.mapFieldSize,
                                           scale: ShareCardLayout.rasterScale, compositeVersion: 1)
@@ -76,13 +76,13 @@ final class ShareMapRequestTests: XCTestCase {
         XCTAssertNotEqual(v1, v2)
     }
 
-    func testInitFoldsPublishedCompositeVersionIntoPublicCacheKey() {
+    func testInitFoldsPublishedCompositeVersionIntoPublicCacheKey() throws {
         // Both directions: the PUBLIC key the initializer produces must equal the
         // composer fed `ShareMapRequest.compositeVersion` (an init hardcoding a stale
         // version would pass composer-only sensitivity tests), and must differ from
         // the composer fed the next version.
-        let request = request(style: .dark)
-        let route = ShareRouteGeometry.prepare(segments: [line(50)])!
+        let request = try request(style: .dark)
+        let route = try XCTUnwrap(ShareRouteGeometry.prepare(segments: [line(50)]))
         let published = ShareMapRequest.cacheKey(
             rideID: rideID, route: route, style: .dark,
             size: ShareCardLayout.mapFieldSize, scale: ShareCardLayout.rasterScale,
@@ -104,8 +104,8 @@ final class ShareMapRequestTests: XCTestCase {
         XCTAssertEqual(ShareMapRequest.styleIdentity(.standard), "style-standard")
     }
 
-    func testCarriesPreparedRoute() {
-        let request = request()
+    func testCarriesPreparedRoute() throws {
+        let request = try request()
         XCTAssertEqual(request.route, ShareRouteGeometry.prepare(segments: [line(50)]))
         XCTAssertEqual(request.rideID, rideID)
         XCTAssertEqual(request.style, .auraTerrain)
