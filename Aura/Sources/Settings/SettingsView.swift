@@ -77,6 +77,7 @@ struct SettingsView: View {
                         .accessibilityIdentifier("settings.turnHaptics")
                 }
                 HealthAccessRow()
+                PauseRemindersRow()
                 row(icon: "target", tint: AuraTheme.accent, title: "Weekly goal") {
                     Stepper(value: goalBinding(settings), in: 5...200, step: 5) {
                         Text(goalLabel(settings))
