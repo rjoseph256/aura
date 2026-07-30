@@ -1,6 +1,7 @@
 // Aura/Sources/Ride/ShareCard/RideCardRenderer.swift
 import SwiftUI
 import AuraKit
+import os
 
 /// The shareable image, a preview thumbnail, and the share-sheet title. Sharing a written
 /// PNG file URL (not a bare SwiftUI `Image`) is the robust payload for Photos / Messages /
@@ -15,6 +16,9 @@ struct RideShareImage {
 /// `ImageRenderer` is main-actor-only; the PNG encode and file write hop off it.
 @MainActor
 enum RideCardRenderer {
+    /// `nonisolated` so the detached write closure can log; `Logger` is Sendable.
+    private nonisolated static let log = Logger(subsystem: "app.aura.ios", category: "ShareCard")
+
     static func make(_ content: ShareCardContent, mapImage: UIImage?, title: String,
                      writeTo url: URL) async -> RideShareImage? {
         let card = ShareCardView(content: content, mapImage: mapImage)
@@ -33,6 +37,8 @@ enum RideCardRenderer {
                 try data.write(to: url, options: .atomic)
                 return true
             } catch {
+                // A failed generation-0 write means Share never enables — worth a trace.
+                log.error("Share card write failed at \(url.path, privacy: .public): \(error.localizedDescription)")
                 return false
             }
         }.value

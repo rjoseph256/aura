@@ -64,19 +64,27 @@ struct ShareCardView: View {
     private var readoutBand: some View {
         VStack(alignment: .leading, spacing: 0) {
             contextRow
-            heroRow
-                .padding(.top, ShareCardLayout.gapXS)
             if hasElevation {
+                heroRow
+                    .padding(.top, ShareCardLayout.gapXS)
                 ElevationSparkline(elevations: content.elevationSamples,
                                    stroke: AuraTheme.accent,
                                    fill: AuraTheme.accent.opacity(0.18),
                                    lineWidth: 2)
                     .frame(height: ShareCardLayout.sparklineHeight)
                     .padding(.top, ShareCardLayout.gapSM)
+                // Bottom-anchors the stats row, absorbing the small budget slack; the
+                // fixed gaps around the sparkline stay exactly as budgeted.
+                Spacer(minLength: ShareCardLayout.gapSM)
+            } else {
+                // No sparkline: distribute the band's slack instead of leaving one big
+                // (~59 pt) void between hero and stats (Tasks 7–9 product review). The
+                // flexible runs above and below the hero split it, so the hero floats
+                // mid-band while the stats row stays bottom-anchored.
+                Spacer(minLength: ShareCardLayout.gapXS)
+                heroRow
+                Spacer(minLength: ShareCardLayout.gapSM)
             }
-            // Bottom-anchors the stats row: absorbs the sparkline's slot when there is
-            // no elevation (spec: no dead gap) and the small budget slack when there is.
-            Spacer(minLength: ShareCardLayout.gapSM)
             statsRow
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -127,7 +135,9 @@ struct ShareCardView: View {
         return Text(movingValue).font(valueFont).foregroundStyle(AuraTheme.textPrimary)
             + Text(" MIN MOVING · ").font(labelFont).foregroundStyle(scrimText)
             + Text(content.climbedValue).font(valueFont).foregroundStyle(AuraTheme.textPrimary)
-            + Text(" \(content.climbedUnit.uppercased()) CLIMBED")
+            // The unit stays lowercase ("m", "ft") — uppercasing metric "m" into a bare
+            // "M" reads ambiguous next to MIN (Tasks 7–9 product review).
+            + Text(" \(content.climbedUnit) CLIMBED")
                 .font(labelFont).foregroundStyle(scrimText)
     }
 
@@ -263,7 +273,7 @@ private func previewMapFixture() -> UIImage {
 }
 
 #Preview("Worst-case stats") {
-    // 480 MIN MOVING · 12000 FT CLIMBED — the hand-measured width case the spec covers by
+    // 480 MIN MOVING · 12000 ft CLIMBED — the hand-measured width case the spec covers by
     // preview: the stats run scales (≥0.85) rather than clipping, wordmark holds fixed.
     ShareCardView(content: ShareCardContent(
         ride: previewRide(distanceMeters: 160_934, movingSeconds: 28_800, gainMeters: 3657.6),

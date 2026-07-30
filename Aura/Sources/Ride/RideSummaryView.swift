@@ -15,6 +15,7 @@ struct RideSummaryView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(SettingsStore.self) private var settings
     @Environment(RideStore.self) private var store
+    @Environment(ShareMapProviderBox.self) private var shareMap
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -22,6 +23,10 @@ struct RideSummaryView: View {
     @State private var animatedMeters: Double = 0
     @State private var revealed = false
     @State private var shareImage: RideShareImage?
+    /// True while the map upgrade is in flight (raster request + re-render); drives the hint.
+    @State private var isUpgrading = false
+    /// Shown 300 ms into an upgrade so a warm cache hit never flashes it.
+    @State private var showHint = false
 
     // Brand (SF Pro Rounded) is fixed-size, so @ScaledMetric drives Dynamic Type for the
     // hero. (Cockpit Saira self-scales via relativeTo: — not used here.)
@@ -78,7 +83,7 @@ struct RideSummaryView: View {
                     Group {
                         if let shareImage {
                             ShareLink(item: shareImage.fileURL,
-                                      preview: SharePreview("Aura ride", image: shareImage.preview)) {
+                                      preview: SharePreview(shareImage.title, image: shareImage.preview)) {
                                 Text("Share")
                             }
                         } else {
@@ -87,6 +92,15 @@ struct RideSummaryView: View {
                     }
                     .buttonStyle(.ctaSecondary)
                     .padding(.top, AuraTheme.Spacing.md)
+
+                    if showHint {
+                        HStack(spacing: AuraTheme.Spacing.xs) {
+                            ProgressView()
+                            Text("Adding your map…")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(AuraTheme.secondaryText(contrast))
+                    }
                 }
 
                 Button("Done") {
@@ -108,10 +122,37 @@ struct RideSummaryView: View {
             guard ride.stats != nil, shareImage == nil else { return }
             await Task.yield()   // let the entrance animation start before the synchronous render
             let content = ShareCardContent(ride: ride, units: settings.units)
-            let title = "Aura ride · \(content.distanceValue) \(content.distanceUnit) · \(content.dateText)"
             let store = ShareCardFileStore(rideID: ride.id)
+            store.sweepOtherRides()
+            let title = "Aura ride · \(content.distanceValue) \(content.distanceUnit) · \(content.dateText)"
+            // Fallback card first: Share is enabled from the first frame; the map upgrades
+            // in place below. A failed fallback render leaves Share disabled (spec promise).
             shareImage = await RideCardRenderer.make(content, mapImage: nil, title: title,
                                                      writeTo: store.url(generation: 0))
+            guard let request = ShareMapRequest(rideID: ride.id, segments: content.routeSegments,
+                                                style: settings.mapStyle) else { return }
+            // Both presentation paths wait out the entrance window before requesting.
+            // Ride-end: the HUD prefetch fired at +0.7 s is already in flight and this
+            // request dedups onto it. History: this is the entrance-animation courtesy delay.
+            try? await Task.sleep(for: .seconds(0.8))
+            guard !Task.isCancelled else { return }
+            isUpgrading = true
+            // Hint show-delay, counted from the isUpgrading transition. A plain Task (NOT
+            // `async let` — a child task is nonisolated and cannot touch @State) inherits
+            // the MainActor; the re-check prevents a late flash after the flags clear.
+            let hint = Task {
+                try? await Task.sleep(for: .seconds(0.3))
+                if isUpgrading { showHint = true }
+            }
+            let raster = await shareMap.provider.raster(for: request)
+            hint.cancel()
+            if let raster, !Task.isCancelled,
+               let upgraded = await RideCardRenderer.make(content, mapImage: raster, title: title,
+                                                          writeTo: store.url(generation: 1)) {
+                shareImage = upgraded   // never assign nil over a working fallback
+            }
+            isUpgrading = false
+            showHint = false
         }
     }
 
