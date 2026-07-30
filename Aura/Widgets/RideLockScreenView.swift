@@ -2,6 +2,7 @@ import SwiftUI
 import WidgetKit
 import ActivityKit
 import AuraKit
+import AuraCore
 
 /// The Lock Screen presentation of the in-progress-ride Live Activity — the primary
 /// surface (every device shows it; Dynamic Island is supplementary). Two layouts:
@@ -42,7 +43,8 @@ struct RideLockScreenView: View {
             header(title: "Explore", glyph: "bicycle", imminent: false)
 
             HStack(alignment: .top, spacing: 12) {
-                RideTimerStatCell(start: attributes.startedAt, label: "TIME")
+                RideTimerStatCell(clock: state.activeClock(startedAt: attributes.startedAt),
+                                  label: "TIME")
                     .frame(maxWidth: .infinity, alignment: .leading)
                 RideStatCell(value: fmt.distanceValue(state.distanceMeters),
                              label: fmt.distanceUnit.uppercased())
@@ -84,7 +86,8 @@ struct RideLockScreenView: View {
             }
 
             HStack(alignment: .top, spacing: 12) {
-                RideTimerStatCell(start: attributes.startedAt, label: "TIME")
+                RideTimerStatCell(clock: state.activeClock(startedAt: attributes.startedAt),
+                                  label: "TIME")
                     .frame(maxWidth: .infinity, alignment: .leading)
                 RideStatCell(value: fmt.distanceValue(state.distanceMeters),
                              label: fmt.distanceUnit.uppercased())

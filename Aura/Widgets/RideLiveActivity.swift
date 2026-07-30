@@ -2,6 +2,7 @@ import SwiftUI
 import WidgetKit
 import ActivityKit
 import AuraKit
+import AuraCore
 
 /// The in-progress-ride Live Activity: Lock Screen layout plus all four Dynamic Island
 /// presentations (compact leading/trailing, minimal, expanded). The Lock Screen lives in
@@ -25,16 +26,17 @@ struct RideLiveActivity: Widget {
         let nav = context.attributes.mode == .navigate
         let imminent = rideActivityIsImminent(context.state.turnDistanceMeters)
         let accent = AuraTheme.accent
+        let clock = context.state.activeClock(startedAt: context.attributes.startedAt)
 
         return DynamicIsland {
             DynamicIslandExpandedRegion(.leading) {
                 expandedLeading(context, nav: nav, imminent: imminent)
             }
             DynamicIslandExpandedRegion(.trailing) {
-                expandedTrailing(context, nav: nav, imminent: imminent)
+                expandedTrailing(context, nav: nav, imminent: imminent, clock: clock)
             }
             DynamicIslandExpandedRegion(.bottom) {
-                expandedBottom(context, nav: nav)
+                expandedBottom(context, nav: nav, clock: clock)
             }
         } compactLeading: {
             Image(systemName: nav ? (context.state.turnGlyphSystemName ?? "arrow.turn.up.right") : "bicycle")
@@ -46,10 +48,10 @@ struct RideLiveActivity: Widget {
                     .foregroundStyle(accent)
                     .lineLimit(1)
             } else {
-                Text(context.attributes.startedAt, style: .timer)
+                Text(rideActivityClockAnchor(clock), style: .timer)
                     .font(.system(.body, design: .rounded).weight(.bold))
                     .monospacedDigit()
-                    .foregroundStyle(AuraTheme.accent)
+                    .foregroundStyle(clock.isPaused ? AuraTheme.textSecondary : AuraTheme.accent)
                     .frame(maxWidth: 56)
             }
         } minimal: {
@@ -78,7 +80,7 @@ struct RideLiveActivity: Widget {
     }
 
     private func expandedTrailing(_ context: ActivityViewContext<RideActivityAttributes>,
-                                  nav: Bool, imminent: Bool) -> some View {
+                                  nav: Bool, imminent: Bool, clock: RideActiveClock) -> some View {
         VStack(alignment: .trailing, spacing: 1) {
             if nav {
                 Text(turnDistanceText(context))
@@ -91,13 +93,13 @@ struct RideLiveActivity: Widget {
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(AuraTheme.textSecondary)
             } else {
-                Text(context.attributes.startedAt, style: .timer)
+                Text(rideActivityClockAnchor(clock), style: .timer)
                     .font(.system(size: 30, weight: .heavy, design: .rounded))
                     .monospacedDigit()
-                    .foregroundStyle(AuraTheme.accent)
+                    .foregroundStyle(clock.isPaused ? AuraTheme.textSecondary : AuraTheme.accent)
                     .lineLimit(1)
                     .multilineTextAlignment(.trailing)
-                Text("ELAPSED")
+                Text(rideActivityClockLabel(clock, running: "ELAPSED"))
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(AuraTheme.textSecondary)
             }
@@ -106,7 +108,7 @@ struct RideLiveActivity: Widget {
 
     @ViewBuilder
     private func expandedBottom(_ context: ActivityViewContext<RideActivityAttributes>,
-                                nav: Bool) -> some View {
+                                nav: Bool, clock: RideActiveClock) -> some View {
         let fmt = RideStatsFormatter(units: context.attributes.units)
         let state = context.state
         let statOpacity = context.isStale ? 0.4 : 1
@@ -118,7 +120,7 @@ struct RideLiveActivity: Widget {
                     .foregroundStyle(AuraTheme.textPrimary)
                     .lineLimit(1)
                 HStack(alignment: .top, spacing: 16) {
-                    RideTimerStatCell(start: context.attributes.startedAt, label: "TIME")
+                    RideTimerStatCell(clock: clock, label: "TIME")
                     RideStatCell(value: fmt.distanceValue(state.distanceMeters),
                                  label: fmt.distanceUnit.uppercased())
                         .opacity(statOpacity)

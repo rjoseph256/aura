@@ -1,6 +1,7 @@
 import SwiftUI
 import WidgetKit
 import AuraKit
+import AuraCore
 
 // Shared building blocks for the in-progress-ride Live Activity. They reuse AuraTheme
 // (shared into this target) so the Lock Screen and Dynamic Island read like a slice of
@@ -40,23 +41,42 @@ struct RideStatCell: View {
     }
 }
 
-/// Like `RideStatCell` but its value is a self-ticking elapsed clock counting up from
-/// `start`. The system renders it on-device, so elapsed time stays live without the app
-/// pushing a state update every second. Mint tint marks it as the live, trustworthy value.
+/// The date to hand `Text(_, style: .timer)`: the active-time anchor while running, the stop's
+/// own instant while paused.
+func rideActivityClockAnchor(_ clock: RideActiveClock) -> Date {
+    switch clock {
+    case .running(let anchor): anchor
+    case .paused(let since, _): since
+    }
+}
+
+/// The label under the clock. A paused clock is not reporting elapsed ride time and must not keep
+/// claiming to — the expanded Dynamic Island has no status pill, so this label is that
+/// presentation's only paused signal.
+func rideActivityClockLabel(_ clock: RideActiveClock, running: String) -> String {
+    clock.isPaused ? PauseControlCopy.stateChipLabel : running
+}
+
+/// The clock cell. Running, it is a self-ticking active-time clock the system renders on-device,
+/// so elapsed stays live without the app pushing every second. Paused, it counts *up* from the
+/// instant of the stop — still OS-rendered, so it keeps moving even when the app is suspended or
+/// dead, and answers the one question a stopped rider has: how long have I been stopped.
+///
+/// Mint marks the live running value; paused drops to secondary, because a paused clock is not
+/// reporting the ride.
 struct RideTimerStatCell: View {
-    let start: Date
+    let clock: RideActiveClock
     let label: String
-    var tint: Color = AuraTheme.accent
     var size: CGFloat = 20
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(start, style: .timer)
+            Text(rideActivityClockAnchor(clock), style: .timer)
                 .font(.system(size: size, weight: .heavy, design: .rounded))
                 .monospacedDigit()
-                .foregroundStyle(tint)
+                .foregroundStyle(clock.isPaused ? AuraTheme.textSecondary : AuraTheme.accent)
                 .lineLimit(1)
-            Text(label)
+            Text(rideActivityClockLabel(clock, running: label))
                 .font(.system(size: 9, weight: .bold))
                 .foregroundStyle(AuraTheme.textSecondary)
         }
