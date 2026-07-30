@@ -142,10 +142,14 @@ struct RideSummaryView: View {
             isUpgrading = true
             // Hint show-delay, counted from the isUpgrading transition. A plain Task (NOT
             // `async let` — a child task is nonisolated and cannot touch @State) inherits
-            // the MainActor; the re-check prevents a late flash after the flags clear.
+            // the MainActor. The isCancelled check is load-bearing: `try?` swallows the
+            // sleep's CancellationError, so a warm cache hit's hint.cancel() would
+            // otherwise fall through and flash the hint mid-render — the exact case the
+            // show-delay exists to prevent. isUpgrading guards the late-flash case.
             let hint = Task {
                 try? await Task.sleep(for: .seconds(0.3))
-                if isUpgrading { showHint = true }
+                guard !Task.isCancelled, isUpgrading else { return }
+                showHint = true
             }
             let raster = await shareMap.provider.raster(for: request)
             hint.cancel()

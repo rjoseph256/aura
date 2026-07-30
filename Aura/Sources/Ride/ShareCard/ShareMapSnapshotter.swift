@@ -59,34 +59,29 @@ private nonisolated final class SnapshotBox: @unchecked Sendable {
     func releaseSnapshotter() { lock.withLockUnchecked { $0.snapshotter = nil } }
 }
 
-/// Flags the `onMapLoadingError` observer writes from the SDK's compositor thread — ONE
-/// lock guards both the rejected flag and the tile counter. `nonisolated` is REQUIRED
-/// for the same reason as `SnapshotBox`; `initialState:` is fine here because the state
-/// is all-Sendable. `.style`/`.source` errors reject; `.tile` errors only count and log
-/// (edge tiles 404 routinely — DEM outside coverage — and Home's precedent only logs;
-/// the interior-variance check is the primary defense for partial tiles). `.glyphs`/
-/// `.sprite` fall to the `default` branch and are deliberately ignored as cosmetic.
+/// The rejected flag the `onMapLoadingError` observer writes from the SDK's compositor
+/// thread. `nonisolated` is REQUIRED for the same reason as `SnapshotBox`;
+/// `initialState:` is fine here because the state is Sendable. `.style`/`.source`
+/// errors reject; `.tile` errors only log (edge tiles 404 routinely — DEM outside
+/// coverage — and Home's precedent only logs; the interior-variance check is the
+/// primary defense for partial tiles). `.glyphs`/`.sprite` fall to the `default`
+/// branch and are deliberately ignored as cosmetic.
 private nonisolated final class MapLoadErrorFlags: @unchecked Sendable {
     private static let log = Logger(subsystem: "app.aura.ios", category: "ShareCard")
-    private struct State {
-        var rejected = false
-        var tileErrors = 0
-    }
-    private let lock = OSAllocatedUnfairLock(initialState: State())
+    private let lock = OSAllocatedUnfairLock(initialState: false)
 
     func record(_ error: MapLoadingError) {
         switch error.type {
         case .style, .source:
-            lock.withLock { $0.rejected = true }
+            lock.withLock { $0 = true }
         case .tile:
-            lock.withLock { $0.tileErrors += 1 }
             Self.log.warning("share-map tile load error (non-fatal): \(error.message, privacy: .public)")
         default:
             break
         }
     }
 
-    var rejected: Bool { lock.withLock { $0.rejected } }
+    var rejected: Bool { lock.withLock { $0 } }
 }
 
 /// Style-load latch outcome. Timeout is distinct from failure on purpose: the caller
@@ -144,7 +139,12 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
         // Fast path, BEFORE the same-key join and the wait loop: a warm cache hit must
         // not queue behind an unrelated in-flight pipeline (~10 s worst case, reproduced
         // in review). Small file read on main — same balance as the in-pipeline read.
-        if let data = cache.read(request.cacheKey) { return UIImage(data: data, scale: request.scale) }
+        // The image binding is load-bearing: returning nil on a corrupt-but-present
+        // entry would pin the fallback card forever; falling through re-renders and
+        // overwrites the bad file.
+        if let data = cache.read(request.cacheKey), let image = UIImage(data: data, scale: request.scale) {
+            return image
+        }
         if let inFlight, inFlight.key == request.cacheKey {
             return await boundedValue(of: inFlight.task, slotID: inFlight.id)
         }
@@ -210,7 +210,10 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
         // projected points and never needs a re-composite (spec step 2). Kept even
         // though raster(for:) probes first: a request that queued behind another
         // pipeline BEFORE its key was cached still hits here instead of re-rendering.
-        if let data = cache.read(request.cacheKey) { return UIImage(data: data, scale: request.scale) }
+        // Corrupt entries fall through to a re-render that overwrites them.
+        if let data = cache.read(request.cacheKey), let image = UIImage(data: data, scale: request.scale) {
+            return image
+        }
 
         let snapshotter = Snapshotter(options: MapSnapshotOptions(
             size: request.size,
@@ -299,7 +302,10 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
             segment.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
         }
         var cam = snapshotter.camera(for: coords,
-                                     padding: UIEdgeInsets(top: 24, left: 24, bottom: 40, right: 24),
+                                     padding: UIEdgeInsets(top: ShareCardLayout.cameraPaddingTop,
+                                                           left: ShareCardLayout.cameraPaddingSides,
+                                                           bottom: ShareCardLayout.cameraPaddingBottom,
+                                                           right: ShareCardLayout.cameraPaddingSides),
                                      bearing: 0, pitch: 0)
         guard let validated = ShareCameraValidation.validated(latitude: cam.center?.latitude,
                                                               longitude: cam.center?.longitude,
