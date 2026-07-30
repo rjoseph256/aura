@@ -697,10 +697,16 @@ Add `import AuraCore` at the top of `Aura/Sources/LiveActivity/RideActivityAttri
         /// read site falls back to `attributes.startedAt`, which is the pre-ROH-102 behavior.
         public var clock: RideActiveClock?
 
-        /// Private so that `ContentState` can only be built from a payload. The dedupe's whole
-        /// correctness argument is "payload equality implies content equality"; a field set
-        /// outside a payload would break it silently, on a type nothing can test (invariant 5).
-        private init(distanceMeters: Double = 0,
+        /// Becomes `private` in Task 7, so that `ContentState` can only be built from a payload.
+        /// It cannot be private yet: `RideLiveActivityController` still holds a
+        /// `lastState = ContentState()` stored property and an `update` body that constructs one
+        /// field-by-field, and both disappear in Task 7. Making it private here would leave the
+        /// app target non-compiling for two commits.
+        ///
+        /// The dedupe's whole correctness argument is "payload equality implies content
+        /// equality"; a field set outside a payload breaks it silently, on a type nothing can
+        /// test (invariant 5). Task 7 is where that becomes structural.
+        init(distanceMeters: Double = 0,
                      speedMetersPerSecond: Double = 0,
                      elevationGainMeters: Double = 0,
                      turnInstruction: String? = nil,
@@ -1108,6 +1114,15 @@ git commit -m "feat(roh-102): carry the active clock across the seam and push on
 **Interfaces:**
 - Consumes: `RideActivityPushPolicy.decide` (Task 3), `RideActivityPayload.holdingTurn` (Task 2), `ContentState.init(payload:)` (Task 5).
 - Produces: nothing later tasks consume.
+
+- [ ] **Step 0: Close the deferred invariant from Task 5**
+
+Task 5 left `ContentState`'s memberwise initializer internal because `lastState` and the old
+`update` body still constructed one field-by-field. Step 1 deletes both. Once they are gone, mark
+that initializer `private` in `Aura/Sources/LiveActivity/RideActivityAttributes.swift` and update
+its doc comment to drop the "becomes private in Task 7" note. Invariant 5 — `ContentState` derived
+solely from a payload — is only structural once this lands, and a `grep -rn "ContentState(" Aura/`
+should afterwards show every construction going through `ContentState(payload:)`.
 
 - [ ] **Step 1: Replace the throttle state**
 
