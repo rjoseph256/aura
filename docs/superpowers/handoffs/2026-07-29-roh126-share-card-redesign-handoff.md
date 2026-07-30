@@ -84,12 +84,31 @@ button). Two defects, reported by Andrew:
      prefetch; fold-in A void distribution reinterpreted); **spec review IN FLIGHT**.
    - Package.resolved churn trap fixed at the root (branch now carries main's slim
      resolution, which is what swift test regenerates).
-8. Remaining: reconcile the two in-flight reviews → Task 13 full gate → Task 14
-   simulator verification (golden-ride harness; checklist in the plan, including the
-   share-before-upgrade, cache-hit second open, offline-fallback, three styles, seam
-   and slack eyeballs) → whole-branch review on the most capable model → PR
-   (humanizer body, screenshots, time-to-upgrade, plan errata + deviations) → ROH-126
-   to In Review, Rohun reviews.
+8. ~~Task 10/11-12 review fix loops~~ — done (fast-path cache probe, slot watchdog,
+   shared singleton, spec-gap band revert, prefetch deferral, logging; errata d/e).
+9. ~~Task 13 full gate~~ — 693 package tests, lint clean, app build green.
+10. ~~Task 14 simulator verification~~ — done on iPhone 17 sim via the golden-ride
+    harness. **Verified working end-to-end:** fallback card ships instantly (gen 0),
+    map card upgrades in place (gen 1); the initial acceptance threshold (stddev 4.0)
+    rejected real dark-terrain rasters — the spec's named risk #1 — and was tuned to
+    1.0 against a real capture (measured cells 1.9–5.9; capture landed as a package
+    fixture asserting both directions; rejection reasons now logged with per-cell
+    numbers); share sheet shows the upgraded card + "Aura ride · 1.8 mi · Jul 30,
+    2026" title, Copy completes; History second open is a byte-identical cache hit
+    with zero pipeline activity (fast-path probe); all three styles accepted and
+    rendered (casing keeps the route legible on Standard); ~130 pt thumbnail legible;
+    route clear of the Mapbox chrome in all captures. Captures in the session
+    scratchpad (card-map/fallback/standard/dark, thumb). Time-to-upgrade ≈ 8 s cold
+    (incl. prefetch+entrance delays), instant warm.
+    **Deferred to a real-device pass (mechanisms package-tested or proven in vivo):**
+    airplane-mode offline (reject→fallback shipped correctly twice during threshold
+    tuning), slow-network partial tiles, paused multi-segment ride (no pause control
+    on the free-ride HUD; pinned at three package-tested layers), no-route variant
+    (preview-covered), swap-while-sheet-open (sheet opened post-upgrade in this pass),
+    entrance frame-drop measurement.
+11. Remaining: whole-branch review (IN FLIGHT) → PR (plain-prose body — humanizer not
+    installed in this session; include captures, timing, errata a–e + the two 11/12
+    deviations) → ROH-126 to In Review with the PR link; Rohun reviews.
 5. `superpowers:writing-plans` → bite-sized TDD plan.
 6. Adversarial plan review (2+ reviewers, refuting stance). Fix before executing.
 7. `superpowers:subagent-driven-development` — fresh implementer + reviewer per task.
