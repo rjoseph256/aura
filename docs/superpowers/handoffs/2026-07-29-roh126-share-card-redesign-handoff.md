@@ -106,9 +106,15 @@ button). Two defects, reported by Andrew:
     on the free-ride HUD; pinned at three package-tested layers), no-route variant
     (preview-covered), swap-while-sheet-open (sheet opened post-upgrade in this pass),
     entrance frame-drop measurement.
-11. Remaining: whole-branch review (IN FLIGHT) → PR (plain-prose body — humanizer not
-    installed in this session; include captures, timing, errata a–e + the two 11/12
-    deviations) → ROH-126 to In Review with the PR link; Rohun reviews.
+11. ~~Whole-branch review~~ — ready-for-PR after one fix (warm-cache hint flash:
+    `try?` swallowed the sleep's cancellation) + minors, all landed in the final
+    commit (corrupt-cache binding, camera-padding constants consumed, shared prefetch
+    helper with a stats gate, dead counter removed), re-verified end-to-end on the
+    simulator.
+12. ~~Shipped~~ — PR: https://github.com/rjoseph256/aura/pull/115 (branch pushed).
+    ROH-126 is **In Review** with the PR linked, four verification captures attached,
+    and a review-notes comment for Rohun. **Do not mark Done until merged**; the
+    deferred real-device checks are listed in the PR and in item 10 above.
 5. `superpowers:writing-plans` → bite-sized TDD plan.
 6. Adversarial plan review (2+ reviewers, refuting stance). Fix before executing.
 7. `superpowers:subagent-driven-development` — fresh implementer + reviewer per task.
