@@ -9,9 +9,9 @@ import AuraKit
 /// light two amber elements meaning different things. This is a fact about the recording, not
 /// an app error, so it takes secondary weight.
 ///
-/// **Not a pause glyph.** The rider just learned `pause.circle` in the HUD, where it means
-/// "paused and resumable". Here it means the opposite: this ride can never be resumed or
-/// ended. A clock says "when" without promising an action.
+/// **Not a pause glyph.** The rider just learned `pause.fill` and `play.fill` in the HUD, where
+/// they mean "paused and resumable". Here the meaning is the opposite: this ride can never be
+/// resumed or ended. A clock says "when" without promising an action.
 struct UnfinishedRideBadge: View {
     let checkpointedAt: Date?
 

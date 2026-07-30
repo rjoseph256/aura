@@ -312,3 +312,55 @@ struct RideRecorderPauseTests {
         #expect(checkpoint.stats?.distanceMeters ?? 0 > 0, "the checkpoint carries the ride so far")
     }
 }
+
+// MARK: - Current stop duration
+//
+// A plain extension (excluded from SwiftLint's `type_body_length`) rather than more cases in
+// the struct above, which is already at that rule's warning threshold. `at()`/`pt()` stay
+// visible here: `private` grants access to same-type extensions in the same file.
+extension RideRecorderPauseTests {
+    /// `currentPauseSeconds(asOf:)` is the stop **in progress** only — the chip needs this, not
+    /// `pausedSeconds(asOf:)`'s ride-wide running total (ROH-101 P4).
+    @Test func currentPauseSecondsIsZeroWhileRecording() {
+        let r = RideRecorder()
+        r.start(at: at(0))
+        #expect(r.currentPauseSeconds(asOf: at(30)) == 0)
+    }
+
+    @Test func currentPauseSecondsGrowsWhilePaused() {
+        let r = RideRecorder()
+        r.start(at: at(0))
+        r.pause(at: at(60))
+        #expect(r.currentPauseSeconds(asOf: at(90)) == 30)
+    }
+
+    /// Distinguishes this accessor from `pausedSeconds(asOf:)`: the current stop resets to zero
+    /// on resume, but the ride's banked total keeps the closed stop.
+    @Test func currentPauseSecondsResetsOnResumeUnlikeTheRideTotal() {
+        let r = RideRecorder()
+        r.start(at: at(0))
+        r.pause(at: at(60))
+        r.resume(at: at(120))
+        #expect(r.currentPauseSeconds(asOf: at(180)) == 0)
+        #expect(r.pausedSeconds(asOf: at(180)) == 60)
+    }
+
+    @Test func currentPauseSecondsCountsOnlyTheSecondStop() {
+        let r = RideRecorder()
+        r.start(at: at(0))
+        r.pause(at: at(60))
+        r.resume(at: at(120))
+        r.pause(at: at(180))
+        #expect(r.currentPauseSeconds(asOf: at(200)) == 20)
+        #expect(r.pausedSeconds(asOf: at(200)) == 80)
+    }
+
+    /// Mirrors `pausedSeconds(asOf:)`'s own guard: a backward wall-clock step mid-stop must not
+    /// report a negative duration.
+    @Test func currentPauseSecondsClampsToZeroOnABackwardClockStep() {
+        let r = RideRecorder()
+        r.start(at: at(0))
+        r.pause(at: at(60))
+        #expect(r.currentPauseSeconds(asOf: at(30)) == 0)
+    }
+}

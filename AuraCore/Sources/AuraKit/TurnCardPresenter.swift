@@ -29,6 +29,19 @@ public struct TurnCardState: Equatable, Sendable {
     public static let unavailable = TurnCardState(
         primaryText: "Navigate to destination", distanceText: "–", isExpanded: false,
         accessibilityLabel: "Navigate to destination.")
+
+    /// The same card without its imminent-turn emphasis.
+    ///
+    /// A paused rider is not about to take the turn, and the expanded card is a solid mint fill
+    /// that would otherwise compete with the mint Resume control directly below it. The text is
+    /// kept: the rider stopped mid-route and the next instruction is still what they will want
+    /// when they set off (ROH-101 P4, discharging ROH-105 D5's positive-signal requirement
+    /// together with the state chip and the paused ribbon).
+    public func calmed() -> TurnCardState {
+        var copy = self
+        copy.isExpanded = false
+        return copy
+    }
 }
 
 /// The maneuver after the upcoming one, driving the "then …" preview chip. Carries a

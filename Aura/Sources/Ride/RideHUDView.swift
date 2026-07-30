@@ -4,7 +4,7 @@ import AuraCore
 import AuraKit
 
 /// The Explore (free-ride) cockpit. Auto-starts recording on appear (parity with navigate),
-/// shows the quarter-screen `ExploreInstrumentPanel` + a recenter/end `ControlCluster` over
+/// shows the bottom-pinned `ExploreInstrumentPanel` + a recenter/end `ControlCluster` over
 /// the terrain map, and offers an always-visible back-out: a just-started ride (below the
 /// discard floor) is discarded with no summary; once it is worth a summary, back opens the
 /// End confirmation. Ending routes through the coordinator's finish → pushed summary route.
@@ -58,7 +58,8 @@ struct RideHUDView: View {
         _coordinator = State(initialValue: RideSessionCoordinator(
             kind: .freeRide, destinationName: nil,
             screen: ScreenWakeController(), activity: RideLiveActivityController.shared,
-            workout: WorkoutWriter.shared, guidance: controller))
+            workout: WorkoutWriter.shared, guidance: controller, haptics: HapticPlayer.shared,
+            nudges: PauseNudgeScheduler.shared))
         _showPermission = State(initialValue: false)
         _showEndConfirm = State(initialValue: false)
         _viewport = State(initialValue: .followPuck(zoom: 16, bearing: .heading))
@@ -68,6 +69,7 @@ struct RideHUDView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             RideMapView(segments: coordinator.segments,
+                        isPaused: coordinator.isPaused,
                         gems: gems?.visiblePins ?? [],
                         seenGemIDs: gems?.seenIDs ?? [],
                         onSelectGem: { gem in gems?.select(gem) },
@@ -121,7 +123,8 @@ struct RideHUDView: View {
         // while a detour is active.
         .overlay(alignment: .top) {
             if guidance.isDetouring || guidance.arrivalBanner != nil {
-                DetourOverlay(controller: guidance, units: settings.units,
+                DetourOverlay(controller: guidance, isPaused: coordinator.isPaused,
+                              units: settings.units,
                               reduceMotion: reduceMotion, onStop: { guidance.cancel() })
                     .padding(.top, 8)
             }
@@ -182,8 +185,30 @@ struct RideHUDView: View {
                 haptics: GemHapticPlayer())
             // Arbiter (R7): a detour in flight suppresses the gem peek card + Tier-3 haptic
             // (turn cues own the cockpit) but pins/seen-state are unaffected.
+            //
+            // KNOWN GAP, ROH-101: a detour arrival that lands while the ride is paused is
+            // dropped, and the arbiter is then stuck on for the rest of the ride.
+            // `GuidanceViewModel` `continue`s past `.arrivedAtDestination` while `isPaused`
+            // (deliberate — see spec D7 and the comment there), and the Mapbox session yields
+            // that event once, on the final-waypoint transition, so resuming does not bring it
+            // back. Nothing else advances the phase: the controller's `riderDidUpdate` does
+            // nothing while `.guiding`, because Mapbox is supposed to own arrival. `onArrive`
+            // therefore never fires, the phase stays `.guiding`, `coordinator.isDetouring`
+            // stays true, and this closure keeps returning true — gem peek cards and Tier-3 gem
+            // haptics stay suppressed, and `RideMapView` keeps dimming the recorded track to 25%
+            // under a stale detour polyline, until the rider notices and taps Stop on the detour
+            // chip. Discovery is off with nothing on screen saying so. Narrow to reach (the rider
+            // has to pause inside the gem's arrival radius in the window before Mapbox fires),
+            // but silent when it happens. Re-arming guidance across a pause is out of scope for
+            // this pass; the fix belongs with the device verification of the pause control.
             store.detourActive = { [coordinator] in coordinator.isDetouring }
             guidance.units = settings.units
+            // Explore's detour guidance needs the paused flag too, or a rider on a "Take me
+            // there" leg keeps getting turn haptics through a café stop. Navigate has always
+            // set this; Explore never has. `GuidanceController` forwards to whichever
+            // `GuidanceViewModel` a leg is running (and to one started while paused).
+            // Voice is not in play here: the detour never sets `onSpeak`.
+            coordinator.pauseObserver = guidance
             gems = store
             let outcome = coordinator.start(
                 location: rideLocation, saving: rideStore, units: settings.units,
@@ -266,14 +291,39 @@ private extension RideHUDView {
             }
             .padding(.horizontal, AuraTheme.Spacing.lg)
 
+            PauseControl(isPaused: coordinator.isPaused,
+                         pausedSeconds: coordinator.currentPauseSeconds,
+                         onToggle: { togglePause() })
+                .padding(.horizontal, AuraTheme.Spacing.lg)
+
+            // A fixed height, not `containerRelativeFrame(.vertical, count: 4)`. The panel's
+            // contents shrink to fit the height they are given, but only down to a floor
+            // (`InstrumentChassis`), and a quarter of the HUD is under that floor on every
+            // device Aura supports. The panel therefore drew its floor height, 219 pt, while
+            // this VStack reserved 161.75 pt for it on an iPhone SE — so the panel was centred
+            // on the space it had been given and bled ~29 pt past each end of it. Before
+            // ROH-101 the top bleed landed on empty map; the pause row now sits there, and on
+            // an SE the panel covered its bottom 21 pt (and the CLIMB row fell off the bottom
+            // of the screen). Reserving the height the panel actually draws fixes both ends.
             ExploreInstrumentPanel(
                 currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
                 units: settings.units,
                 state: ExploreInstrumentState(stats: coordinator.stats,
                                               elapsed: coordinator.elapsed,
-                                              units: settings.units))
-                .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
+                                              units: settings.units),
+                isPaused: coordinator.isPaused)
+                .frame(height: CGFloat(HUDLayoutMetrics.instrumentPanelHeight))
         }
+    }
+
+    /// Pause/resume from the cockpit row, returning the resulting state — which is not always
+    /// the flipped one, since both coordinator calls are guarded no-ops with no ride recording.
+    /// Just the state change otherwise: the VoiceOver announcement is posted inside
+    /// `PauseControl`'s button action, which is shared by both HUDs, so it is written once
+    /// rather than once per HUD.
+    func togglePause() -> Bool {
+        if coordinator.isPaused { coordinator.resume() } else { coordinator.pause() }
+        return coordinator.isPaused
     }
 
     var backButton: some View {

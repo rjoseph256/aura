@@ -128,6 +128,19 @@ public final class RideRecorder {
         return closedPausedSeconds + max(0, now.timeIntervalSince(start))
     }
 
+    /// The stop **in progress** only, or zero when recording. `pausedSeconds(asOf:)` is the
+    /// ride's running total across every stop, which is the wrong number for a chip that says
+    /// how long *this* stop has been (ROH-101 P4).
+    ///
+    /// `max(0,)` guards a backward wall-clock step mid-stop the same way `pausedSeconds` does.
+    /// The chip is additionally clamped non-decreasing by the coordinator, because clamping to
+    /// zero here would still let the displayed number fall. The headline active clock has the
+    /// same wall-clock weakness and is tracked as ROH-130.
+    public func currentPauseSeconds(asOf now: Date) -> TimeInterval {
+        guard let start = pauseStartedAt else { return 0 }
+        return max(0, now.timeIntervalSince(start))
+    }
+
     /// Bank the stop in progress. `max(0,)` guards a caller whose clock ran backwards (an NTP
     /// correction mid-stop); it can only ever drop a stop, never invent one.
     private func closePause(at date: Date) {

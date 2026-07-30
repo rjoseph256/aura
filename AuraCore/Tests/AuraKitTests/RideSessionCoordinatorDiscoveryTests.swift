@@ -16,7 +16,8 @@ import AuraCore
         let location = ScriptedLocationProvider([point])
         let saving = try RideStore.inMemory()
         let coordinator = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
-                                                 screen: SpyScreenWake(), activity: SpyRideActivity())
+                                                 screen: SpyScreenWake(), activity: SpyRideActivity(),
+                                                 haptics: HapticSpy(), nudges: NudgeSpy())
         let sink = SpySink()
         coordinator.start(location: location, saving: saving, units: .metric,
                           authorization: .authorized, discoverySink: sink)
