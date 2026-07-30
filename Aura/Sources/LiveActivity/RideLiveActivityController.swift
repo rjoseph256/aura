@@ -23,19 +23,17 @@ final class RideLiveActivityController {
     static let shared = RideLiveActivityController()
     private init() {}
 
-    /// Smallest gap between pushed stat updates. GPS samples and the half-second ticker
-    /// arrive far faster than a glanceable surface needs; we coalesce them to this cadence
-    /// (a new turn instruction bypasses it — see `update`).
-    private let minInterval: TimeInterval = 4
-    /// How far ahead to mark content stale. If the app is killed mid-ride the system flips
-    /// `context.isStale` after this, and the widget dims the now-frozen stats while the
-    /// elapsed clock — wall-clock from `startedAt` — keeps ticking on its own.
-    private let staleInterval: TimeInterval = 90
-
     private var activity: Activity<RideActivityAttributes>?
-    private var lastState = RideActivityAttributes.ContentState()
-    private var lastPush: Date?
-    private var lastInstruction: String?
+    /// The last payload *enqueued*, and when it was decided. Stamped at enqueue, not after the
+    /// push lands: `Activity.update` returns on hand-off with no delivery signal, so no
+    /// assignment point could mean "what the widget has" — and deferring the stamp would let
+    /// every tick inside the in-flight window decide against pre-push state and enqueue again
+    /// (spec D5).
+    private var lastPayload: RideActivityPayload?
+    private var lastPushedAt: Date?
+    /// Serializes pushes so they land in the order they were decided. Two racing tasks could
+    /// otherwise leave the widget holding a running state after a pause was pushed.
+    private var pushChain: Task<Void, Never>?
 
     /// Begins a Live Activity for a ride, if the rider has them enabled. Best-effort:
     /// a failure here never affects the ride itself.
@@ -43,61 +41,77 @@ final class RideLiveActivityController {
                startedAt: Date,
                units: DistanceUnits,
                destinationName: String?) {
-        // Honor the user/system setting — never force-enable.
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         // Defensive: clear any activity a previous ride somehow left running.
         end()
+        // Honor the user/system setting — never force-enable.
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
         let attributes = RideActivityAttributes(
             mode: mode, startedAt: startedAt, units: units, destinationName: destinationName)
-        let state = RideActivityAttributes.ContentState(
-            payload: RideActivityPayload(clock: .running(anchor: startedAt)))
-        let content = ActivityContent(state: state,
-                                      staleDate: startedAt.addingTimeInterval(staleInterval))
+        let payload = RideActivityPayload(clock: .running(anchor: startedAt))
+        let content = ActivityContent(
+            state: RideActivityAttributes.ContentState(payload: payload),
+            staleDate: startedAt.addingTimeInterval(RideActivityPushPolicy.staleInterval))
         do {
             activity = try Activity.request(attributes: attributes, content: content)
-            lastState = state
-            lastPush = startedAt
-            lastInstruction = nil
+            lastPayload = payload
+            lastPushedAt = startedAt
         } catch {
             activity = nil
+            lastPayload = nil
+            lastPushedAt = nil
         }
     }
 
-    /// Pushes the latest ride stats, the next maneuver (in navigate mode), and the active clock.
-    /// Throttled: pushes only when at least `minInterval` has elapsed, or immediately when the
-    /// turn instruction changes — so the activity reflects a new maneuver right away while
-    /// distance/speed churn stays coalesced. Safe to call every tick; a no-op when no
-    /// activity is running.
+    /// Pushes the latest ride stats, maneuver and clock. Whether the push goes out is
+    /// `RideActivityPushPolicy`'s decision — pure and host-tested in AuraCore, because this type
+    /// imports ActivityKit and no test target can reach it.
     func update(stats: RideStats,
                 currentSpeedMetersPerSecond: Double,
                 maneuver: GuidanceUpdate?,
                 activeClock: RideActiveClock) {
         guard let activity else { return }
 
-        let instruction = maneuver?.instruction
         let now = Date()
-        let turnChanged = instruction != lastInstruction
-        let due = lastPush.map { now.timeIntervalSince($0) >= minInterval } ?? true
-        guard turnChanged || due else { return }
-
-        lastPush = now
-        lastInstruction = instruction
-
         let payload = RideActivityPayload(
             distanceMeters: stats.distanceMeters,
             speedMetersPerSecond: currentSpeedMetersPerSecond,
             elevationGainMeters: stats.elevationGainMeters,
-            turnInstruction: instruction,
+            turnInstruction: maneuver?.instruction,
             turnDistanceMeters: maneuver?.distanceToManeuverMeters,
+            // Resolve the directional glyph app-side so the widget stays logic-free.
             turnGlyphSystemName: ManeuverIcon.symbol(for: maneuver?.maneuver),
-            clock: activeClock)
-        let state = RideActivityAttributes.ContentState(payload: payload)
-        lastState = state
+            clock: activeClock
+        ).holdingTurn(from: lastPayload)
 
-        let content = ActivityContent(state: state,
-                                      staleDate: now.addingTimeInterval(staleInterval))
-        Task { await activity.update(content) }
+        guard RideActivityPushPolicy.decide(last: lastPayload, next: payload,
+                                            lastPushedAt: lastPushedAt, now: now) == .push else {
+            return
+        }
+
+        // Inside the .push branch only: a skip must advance nothing (invariant 3).
+        lastPayload = payload
+        lastPushedAt = now
+        enqueue(payload, on: activity)
+    }
+
+    /// Chains onto the previous push so updates land in the order they were decided.
+    private func enqueue(_ payload: RideActivityPayload,
+                         on activity: Activity<RideActivityAttributes>) {
+        let previous = pushChain
+        pushChain = Task { @MainActor [weak self] in
+            await previous?.value
+            // Before the send, not after: placed after, this would prevent stale bookkeeping but
+            // not the stale push itself, and `start()` ends the old activity and requests the
+            // next one in a single turn.
+            guard let self, self.activity === activity else { return }
+            // Fresh, so a push that waited behind others does not carry a window that has
+            // already half elapsed.
+            let staleDate = Date().addingTimeInterval(RideActivityPushPolicy.staleInterval)
+            await activity.update(
+                ActivityContent(state: RideActivityAttributes.ContentState(payload: payload),
+                                staleDate: staleDate))
+        }
     }
 
     /// Ends the activity immediately so it clears the moment the ride does (the summary
@@ -105,10 +119,19 @@ final class RideLiveActivityController {
     func end() {
         guard let activity else { return }
         self.activity = nil
-        lastPush = nil
-        lastInstruction = nil
+        let final = lastPayload ?? RideActivityPayload(clock: .running(anchor: Date()))
+        lastPayload = nil
+        lastPushedAt = nil
 
-        let content = ActivityContent(state: lastState, staleDate: nil)
-        Task { await activity.end(content, dismissalPolicy: .immediate) }
+        let previous = pushChain
+        pushChain = nil
+        Task { @MainActor in
+            // Drain what is already queued, so the end is the last thing the activity sees.
+            await previous?.value
+            await activity.end(
+                ActivityContent(state: RideActivityAttributes.ContentState(payload: final),
+                                staleDate: nil),
+                dismissalPolicy: .immediate)
+        }
     }
 }

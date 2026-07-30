@@ -49,19 +49,16 @@ public struct RideActivityAttributes: ActivityAttributes {
         /// read site falls back to `attributes.startedAt`, which is the pre-ROH-102 behavior.
         public var clock: RideActiveClock?
 
-        /// Deliberately left `internal` (not `private`) for now: `RideLiveActivityController`'s
-        /// `lastState` default and its `update(...)` body still call this directly. A later task
-        /// rewrites `update` and drops `lastState` as a stored property; once nothing outside a
-        /// payload constructs a `ContentState`, this becomes `private` so the dedupe's whole
+        /// Nothing outside a payload constructs a `ContentState`, so the dedupe's whole
         /// correctness argument — "payload equality implies content equality" — holds for a type
         /// nothing can test (invariant 5).
-        init(distanceMeters: Double = 0,
-             speedMetersPerSecond: Double = 0,
-             elevationGainMeters: Double = 0,
-             turnInstruction: String? = nil,
-             turnDistanceMeters: Double? = nil,
-             turnGlyphSystemName: String? = nil,
-             clock: RideActiveClock? = nil) {
+        private init(distanceMeters: Double = 0,
+                     speedMetersPerSecond: Double = 0,
+                     elevationGainMeters: Double = 0,
+                     turnInstruction: String? = nil,
+                     turnDistanceMeters: Double? = nil,
+                     turnGlyphSystemName: String? = nil,
+                     clock: RideActiveClock? = nil) {
             self.distanceMeters = distanceMeters
             self.speedMetersPerSecond = speedMetersPerSecond
             self.elevationGainMeters = elevationGainMeters
