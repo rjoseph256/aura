@@ -1470,7 +1470,10 @@ Both call sites — `RideLiveActivity.swift:26` and `RideLockScreenView.swift:64
 /// D6's failure on the presentation reached without unlocking. Minimal is a single glyph, so a
 /// glyph is the only channel it has.
 func rideActivityGlyph(nav: Bool, paused: Bool, stale: Bool, turnGlyph: String?) -> String {
-    if paused { return stale ? "pause.trianglebadge.exclamationmark" : "pause.fill" }
+    // Same family, solid vs hollow: the stale variant reads as this state weakening, not as a
+    // different state. A warning symbol would read as an error. Both names verified against the
+    // runtime's name_availability.plist — a nonexistent SF Symbol compiles and renders blank.
+    if paused { return stale ? "pause.circle" : "pause.fill" }
     return nav ? (turnGlyph ?? "arrow.turn.up.right") : "bicycle"
 }
 ```
