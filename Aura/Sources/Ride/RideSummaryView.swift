@@ -122,13 +122,16 @@ struct RideSummaryView: View {
             guard ride.stats != nil, shareImage == nil else { return }
             await Task.yield()   // let the entrance animation start before the synchronous render
             let content = ShareCardContent(ride: ride, units: settings.units)
-            let store = ShareCardFileStore(rideID: ride.id)
-            store.sweepOtherRides()
+            let fileStore = ShareCardFileStore(rideID: ride.id)
+            fileStore.sweepOtherRides()
             let title = "Aura ride · \(content.distanceValue) \(content.distanceUnit) · \(content.dateText)"
             // Fallback card first: Share is enabled from the first frame; the map upgrades
             // in place below. A failed fallback render leaves Share disabled (spec promise).
             shareImage = await RideCardRenderer.make(content, mapImage: nil, title: title,
-                                                     writeTo: store.url(generation: 0))
+                                                     writeTo: fileStore.url(generation: 0))
+            // No fallback, no upgrade: Share stays disabled, unchanged (spec error table) —
+            // an "Adding your map…" spinner under a dead Share button would be a lie.
+            guard shareImage != nil else { return }
             guard let request = ShareMapRequest(rideID: ride.id, segments: content.routeSegments,
                                                 style: settings.mapStyle) else { return }
             // Both presentation paths wait out the entrance window before requesting.
@@ -148,7 +151,7 @@ struct RideSummaryView: View {
             hint.cancel()
             if let raster, !Task.isCancelled,
                let upgraded = await RideCardRenderer.make(content, mapImage: raster, title: title,
-                                                          writeTo: store.url(generation: 1)) {
+                                                          writeTo: fileStore.url(generation: 1)) {
                 shareImage = upgraded   // never assign nil over a working fallback
             }
             isUpgrading = false

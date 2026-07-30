@@ -64,9 +64,9 @@ struct ShareCardView: View {
     private var readoutBand: some View {
         VStack(alignment: .leading, spacing: 0) {
             contextRow
+            heroRow
+                .padding(.top, ShareCardLayout.gapXS)
             if hasElevation {
-                heroRow
-                    .padding(.top, ShareCardLayout.gapXS)
                 ElevationSparkline(elevations: content.elevationSamples,
                                    stroke: AuraTheme.accent,
                                    fill: AuraTheme.accent.opacity(0.18),
@@ -77,12 +77,8 @@ struct ShareCardView: View {
                 // fixed gaps around the sparkline stay exactly as budgeted.
                 Spacer(minLength: ShareCardLayout.gapSM)
             } else {
-                // No sparkline: distribute the band's slack instead of leaving one big
-                // (~59 pt) void between hero and stats (Tasks 7–9 product review). The
-                // flexible runs above and below the hero split it, so the hero floats
-                // mid-band while the stats row stays bottom-anchored.
-                Spacer(minLength: ShareCardLayout.gapXS)
-                heroRow
+                // No sparkline: the band's slack becomes one hero→stats void. That void is
+                // spec-sanctioned; the device check owns the final call (plan erratum e).
                 Spacer(minLength: ShareCardLayout.gapSM)
             }
             statsRow

@@ -242,19 +242,21 @@ struct NavigateHUDView: View {
             // this HUD down. saveFailed is already set by finish() (before finishedRide), so it
             // reads correctly here. (ROH-85)
             WidgetRefresh.reload(rideStore: rideStore, settings: settings)
-            // Prefetch the share-map raster. Detached + delayed: request construction walks
-            // the whole track (ShareRouteGeometry.prepare), and the push transition starts on
+            // Prefetch the share-map raster. Detached + delayed: the whole-track walk (the
+            // segment flattening below plus ShareRouteGeometry.prepare inside the request
+            // init) runs off-frame in the detached task, and the push transition starts on
             // the next line — neither belongs on this frame. The summary's own request
-            // (t≈0.8s) dedups onto this via the shared provider instance. The `segments`
+            // (t≈0.8s) dedups onto this via the shared provider instance. The mapped/filtered
             // expression must stay in lockstep with ShareCardContent.routeSegments, or the
             // cache keys diverge and the prefetch is wasted.
             let provider = shareMapBox.provider
-            let segments = ride.segments.map { $0.points.map(\.coordinate) }.filter { $0.count > 1 }
+            let segments = ride.segments   // RideSegment is Sendable; the walk stays deferred
             let style = settings.mapStyle
             let rideID = ride.id
             Task.detached(priority: .utility) {
                 try? await Task.sleep(for: .seconds(0.7))
-                guard let request = ShareMapRequest(rideID: rideID, segments: segments,
+                let routeSegments = segments.map { $0.points.map(\.coordinate) }.filter { $0.count > 1 }
+                guard let request = ShareMapRequest(rideID: rideID, segments: routeSegments,
                                                     style: style) else { return }
                 _ = await provider.raster(for: request)
             }

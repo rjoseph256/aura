@@ -25,20 +25,26 @@ enum RideCardRenderer {
             .environment(\.dynamicTypeSize, .large)   // pixel output invariant to Dynamic Type
         let renderer = ImageRenderer(content: card)
         renderer.scale = ShareCardLayout.rasterScale    // 360×450 pt → 1080×1350 px
-        guard let uiImage = renderer.uiImage else { return nil }
+        // Any nil return at generation 0 leaves Share disabled (spec error table), so every
+        // failure exit — render, encode, or write — logs its own distinct trace.
+        guard let uiImage = renderer.uiImage else {
+            log.error("Share card render failed: ImageRenderer produced no image")
+            return nil
+        }
         // Encode + write off the main actor. Creating the directory first is mandatory,
-        // not defensive: an atomic write into a missing directory throws, and a failed
-        // generation-0 write means Share never enables.
+        // not defensive: an atomic write into a missing directory throws.
         let wrote = await Task.detached(priority: .userInitiated) {
-            guard let data = uiImage.pngData() else { return false }
+            guard let data = uiImage.pngData() else {
+                log.error("Share card PNG encode failed")
+                return false
+            }
             do {
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                         withIntermediateDirectories: true)
                 try data.write(to: url, options: .atomic)
                 return true
             } catch {
-                // A failed generation-0 write means Share never enables — worth a trace.
-                log.error("Share card write failed at \(url.path, privacy: .public): \(error.localizedDescription)")
+                log.error("Share card write failed: \(error.localizedDescription, privacy: .public)")
                 return false
             }
         }.value
