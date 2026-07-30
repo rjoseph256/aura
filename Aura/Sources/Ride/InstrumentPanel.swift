@@ -45,7 +45,7 @@ struct InstrumentPanel: View {
                         accessibilityLabel: "On Stedman Street, 7.2 miles to go, arriving 11:32 PM",
                         pausedAccessibilityLabel: "On Stedman Street, 7.2 miles to go"),
             isPaused: false)
-            .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
+            .frame(height: CGFloat(HUDLayoutMetrics.instrumentPanelHeight))
     }
 }
 
@@ -60,6 +60,6 @@ struct InstrumentPanel: View {
                         accessibilityLabel: "On Stedman Street, 7.2 miles to go, arriving 11:32 PM",
                         pausedAccessibilityLabel: "On Stedman Street, 7.2 miles to go"),
             isPaused: true)
-            .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
+            .frame(height: CGFloat(HUDLayoutMetrics.instrumentPanelHeight))
     }
 }

@@ -65,7 +65,7 @@ extension NavigateHUDView {
         }
     }
 
-    /// The bottom cockpit: a crew-roster + map-controls row floating above the quarter-screen
+    /// The bottom cockpit: a crew-roster + map-controls row floating above the bottom-pinned
     /// instrument panel (hero speed + to-go + ETA). The roster (only in a live group ride)
     /// shares that row with the controls as a pill to their left, its bottom edge aligned
     /// with the End (stop) button — bottom alignment keeps the collapsed one-line pill beside
@@ -110,12 +110,16 @@ extension NavigateHUDView {
                          onToggle: { togglePause() })
                 .padding(.horizontal, AuraTheme.Spacing.lg)
 
+            // A fixed height, not `containerRelativeFrame(.vertical, count: 4)` — a quarter of
+            // the HUD is below the height the panel's contents will shrink to, so the panel
+            // used to draw past both ends of the space this VStack reserved and cover the pause
+            // row above it. `RideHUDView.bottomCockpit` carries the full account.
             InstrumentPanel(
                 currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
                 units: settings.units,
                 trip: cruisingState,
                 isPaused: coordinator.isPaused)
-                .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
+                .frame(height: CGFloat(HUDLayoutMetrics.instrumentPanelHeight))
         }
     }
 

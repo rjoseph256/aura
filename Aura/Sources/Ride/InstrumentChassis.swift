@@ -3,7 +3,7 @@ import AuraCore
 import AuraKit
 
 /// The shared cockpit instrument chassis: a hero SPEED readout beside a caller-supplied
-/// column of secondary instruments, on the opaque quarter-screen panel. Navigate fills the
+/// column of secondary instruments, on the opaque bottom-pinned panel. Navigate fills the
 /// column with to-go + ETA; Explore fills it with distance + time + climb. The chassis owns
 /// the optional top line (navigate's street name) and applies ONE composed VoiceOver label
 /// across the secondary column, so it reads as a single utterance (the top line's own Text
@@ -55,6 +55,14 @@ struct InstrumentChassis<Column: View>: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
+        // `maxHeight: .infinity` lets the instruments centre in — and shrink into — whatever
+        // height the HUD gives the panel, which is how `HUDLayoutMetrics.instrumentPanelHeight`
+        // stays a height the panel can honour rather than one it overruns. The shrinking has a
+        // floor (`minimumScaleFactor` 0.5 on the hero, 0.7 on the instrument values), so a slot
+        // below that floor is not honoured at all: the content keeps its floor height and this
+        // frame reports it, and the fixed frame outside then centres an oversized panel and
+        // lets it bleed past both ends. That is what a quarter-of-the-screen slot did, until
+        // ROH-101 replaced it — see `RideHUDView.bottomCockpit`.
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(.horizontal, AuraTheme.Spacing.xl)
         .padding(.top, AuraTheme.Spacing.lg)

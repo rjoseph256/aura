@@ -4,7 +4,7 @@ import AuraCore
 import AuraKit
 
 /// The Explore (free-ride) cockpit. Auto-starts recording on appear (parity with navigate),
-/// shows the quarter-screen `ExploreInstrumentPanel` + a recenter/end `ControlCluster` over
+/// shows the bottom-pinned `ExploreInstrumentPanel` + a recenter/end `ControlCluster` over
 /// the terrain map, and offers an always-visible back-out: a just-started ride (below the
 /// discard floor) is discarded with no summary; once it is worth a summary, back opens the
 /// End confirmation. Ending routes through the coordinator's finish → pushed summary route.
@@ -296,6 +296,15 @@ private extension RideHUDView {
                          onToggle: { togglePause() })
                 .padding(.horizontal, AuraTheme.Spacing.lg)
 
+            // A fixed height, not `containerRelativeFrame(.vertical, count: 4)`. The panel's
+            // contents shrink to fit the height they are given, but only down to a floor
+            // (`InstrumentChassis`), and a quarter of the HUD is under that floor on every
+            // device Aura supports. The panel therefore drew its floor height, 219 pt, while
+            // this VStack reserved 161.75 pt for it on an iPhone SE — so the panel was centred
+            // on the space it had been given and bled ~29 pt past each end of it. Before
+            // ROH-101 the top bleed landed on empty map; the pause row now sits there, and on
+            // an SE the panel covered its bottom 21 pt (and the CLIMB row fell off the bottom
+            // of the screen). Reserving the height the panel actually draws fixes both ends.
             ExploreInstrumentPanel(
                 currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
                 units: settings.units,
@@ -303,7 +312,7 @@ private extension RideHUDView {
                                               elapsed: coordinator.elapsed,
                                               units: settings.units),
                 isPaused: coordinator.isPaused)
-                .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
+                .frame(height: CGFloat(HUDLayoutMetrics.instrumentPanelHeight))
         }
     }
 

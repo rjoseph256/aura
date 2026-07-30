@@ -12,7 +12,7 @@ import SwiftUI
 /// - Turn card driven by a `GuidanceViewModel`, which consumes guidance events from a
 ///   `GuidanceSession` (Mapbox-backed in the app, scripted in tests). The HUD itself
 ///   imports no guidance SDK — only the map renderer.
-/// - Quarter-screen `InstrumentPanel` (hero speed + to-go + ETA) pinned to the bottom.
+/// - `InstrumentPanel` (hero speed + to-go + ETA) pinned to the bottom.
 /// - The ride lifecycle (record, screen-wake, Live Activity, save) is owned by
 ///   `RideSessionCoordinator`; this view keeps guidance, voice, and the map.
 struct NavigateHUDView: View {
@@ -108,8 +108,8 @@ struct NavigateHUDView: View {
             navigateMapView
                 .ignoresSafeArea()
 
-            // Bottom cockpit: crew roster (when hosting) + controls + quarter-screen
-            // instrument panel. Extracted to keep this view's body under the length limit.
+            // Bottom cockpit: crew roster (when hosting) + controls + the instrument
+            // panel. Extracted to keep this view's body under the length limit.
             bottomCockpit
         }
         // Crew membership toasts

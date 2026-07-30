@@ -41,7 +41,7 @@ struct ExploreInstrumentPanel: View {
                                  elevationGainMeters: 103.6),
                 elapsed: 1440, units: .imperial),
             isPaused: false)
-            .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
+            .frame(height: CGFloat(HUDLayoutMetrics.instrumentPanelHeight))
     }
 }
 
@@ -57,6 +57,6 @@ struct ExploreInstrumentPanel: View {
                                  elevationGainMeters: 103.6),
                 elapsed: 1440, units: .imperial),
             isPaused: true)
-            .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
+            .frame(height: CGFloat(HUDLayoutMetrics.instrumentPanelHeight))
     }
 }
