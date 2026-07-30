@@ -14,6 +14,7 @@ struct RideHUDView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(LocationService.self) private var location
     @Environment(SavedPlacesStore.self) private var savedPlaces
+    @Environment(ShareMapProviderBox.self) private var shareMapBox
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var coordinator: RideSessionCoordinator
@@ -197,6 +198,22 @@ struct RideHUDView: View {
         .onChange(of: coordinator.finishedRide) { _, ride in
             guard let ride else { return }
             WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+            // Prefetch the share-map raster. Detached + delayed: request construction walks
+            // the whole track (ShareRouteGeometry.prepare), and the push transition starts on
+            // the next line — neither belongs on this frame. The summary's own request
+            // (t≈0.8s) dedups onto this via the shared provider instance. The `segments`
+            // expression must stay in lockstep with ShareCardContent.routeSegments, or the
+            // cache keys diverge and the prefetch is wasted.
+            let provider = shareMapBox.provider
+            let segments = ride.segments.map { $0.points.map(\.coordinate) }.filter { $0.count > 1 }
+            let style = settings.mapStyle
+            let rideID = ride.id
+            Task.detached(priority: .utility) {
+                try? await Task.sleep(for: .seconds(0.7))
+                guard let request = ShareMapRequest(rideID: rideID, segments: segments,
+                                                    style: style) else { return }
+                _ = await provider.raster(for: request)
+            }
             router.showRideSummary(ride, saveFailed: coordinator.saveFailed)
         }
         .onDisappear {

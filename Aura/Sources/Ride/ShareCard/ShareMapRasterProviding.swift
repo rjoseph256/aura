@@ -8,8 +8,11 @@ import AuraKit
 /// instance identity is load-bearing. The single-flight dedup table lives on the
 /// provider, so the app owns exactly one instance for its whole lifetime and every call
 /// site (ride-end prefetch, summary upgrade, History reopen) must reach that instance.
+/// `Sendable` refinement: the HUDs' detached prefetch tasks capture the existential, and
+/// without it `any ShareMapRasterProviding` cannot cross into the task. It costs conformers
+/// nothing — a `@MainActor` type is implicitly Sendable already.
 @MainActor
-protocol ShareMapRasterProviding {
+protocol ShareMapRasterProviding: Sendable {
     /// The accepted, composited card map — raster plus route ink — or `nil`, which means
     /// exactly: no acceptable map; the card keeps the polyline fallback.
     func raster(for request: ShareMapRequest) async -> UIImage?

@@ -29,6 +29,7 @@ struct NavigateHUDView: View {
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) var settings
     @Environment(LocationService.self) private var location
+    @Environment(ShareMapProviderBox.self) private var shareMapBox
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -241,6 +242,22 @@ struct NavigateHUDView: View {
             // this HUD down. saveFailed is already set by finish() (before finishedRide), so it
             // reads correctly here. (ROH-85)
             WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+            // Prefetch the share-map raster. Detached + delayed: request construction walks
+            // the whole track (ShareRouteGeometry.prepare), and the push transition starts on
+            // the next line — neither belongs on this frame. The summary's own request
+            // (t≈0.8s) dedups onto this via the shared provider instance. The `segments`
+            // expression must stay in lockstep with ShareCardContent.routeSegments, or the
+            // cache keys diverge and the prefetch is wasted.
+            let provider = shareMapBox.provider
+            let segments = ride.segments.map { $0.points.map(\.coordinate) }.filter { $0.count > 1 }
+            let style = settings.mapStyle
+            let rideID = ride.id
+            Task.detached(priority: .utility) {
+                try? await Task.sleep(for: .seconds(0.7))
+                guard let request = ShareMapRequest(rideID: rideID, segments: segments,
+                                                    style: style) else { return }
+                _ = await provider.raster(for: request)
+            }
             router.showRideSummary(ride, saveFailed: coordinator.saveFailed)
         }
         .onChange(of: settings.units) { _, newUnits in
