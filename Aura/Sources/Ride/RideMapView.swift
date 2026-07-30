@@ -10,6 +10,12 @@ struct RideMapView: View {
     /// The recorded ride, split at pauses. One polyline per segment, so the map never
     /// strokes the chord across a stop.
     let segments: [RideSegment]
+    /// Whether the ride is stopped. Styles the run the rider paused in, so the map itself says
+    /// recording has stopped (ROH-105 D5's pure discriminator, computed in `TrackRibbon`).
+    ///
+    /// Required, not defaulted, for the same reason the coordinator's seams are: a silently
+    /// unwired paused signal compiles clean and ships dead. Update the `#Preview` in this file.
+    let isPaused: Bool
     var gems: [Gem] = []
     var seenGemIDs: Set<String> = []
     var onSelectGem: (Gem) -> Void = { _ in }
@@ -24,7 +30,7 @@ struct RideMapView: View {
     @Binding var viewport: Viewport
 
     private var ribbonPieces: [TrackRibbon.Piece] {
-        TrackRibbon.pieces(segments: segments)
+        TrackRibbon.pieces(segments: segments, isPaused: isPaused)
     }
 
     private var detourRouteCoordinates: [CLLocationCoordinate2D] {
@@ -76,12 +82,28 @@ struct RideMapView: View {
                 PolylineAnnotation(lineCoordinates: piece.coordinates.map {
                     CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
                 })
-                .lineColor(StyleColor(detourRoute.isEmpty
-                    ? AuraTheme.routeUIColor
-                    : UIColor(AuraTheme.routeLine.opacity(0.25))))
+                .lineColor(StyleColor(strokeColor(for: piece)))
                 .lineWidth(6)
+                .lineOpacity(piece.style == .paused ? 0.55 : 1)
             }
         }
+    }
+
+    /// The recorded track's stroke. A detour dims the whole ribbon so the bright detour line
+    /// wins; the paused run additionally drops from the mint route colour to neutral grey.
+    ///
+    /// Grey rather than a second hue on purpose: mint against `textSecondary` grey differs in
+    /// **lightness**, so the paused run stays distinguishable to a rider who cannot separate the
+    /// two by colour. `lineDasharray` would have read even better, but it does not exist on
+    /// `PolylineAnnotation` in the pinned MapboxMaps 11.27.0 — it is a layer-level property on
+    /// `PolylineAnnotationGroup`, which would dash every piece and defeat the point.
+    private func strokeColor(for piece: TrackRibbon.Piece) -> UIColor {
+        if piece.style == .paused {
+            return UIColor(AuraTheme.textSecondary)
+        }
+        return detourRoute.isEmpty
+            ? AuraTheme.routeUIColor
+            : UIColor(AuraTheme.routeLine.opacity(0.25))
     }
 
     /// The bright detour route line, drawn on top of the (now-dimmed) recorded track while
@@ -105,6 +127,6 @@ struct RideMapView: View {
                                           longitude: -122.4210 + Double(meters) * 0.00002),
                   elevation: nil, timestamp: Date())
     }
-    return RideMapView(segments: [RideSegment(points: track)], viewport: $viewport)
+    return RideMapView(segments: [RideSegment(points: track)], isPaused: false, viewport: $viewport)
         .environment(SettingsStore())
 }

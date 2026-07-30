@@ -69,6 +69,8 @@ struct RideHUDView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             RideMapView(segments: coordinator.segments,
+                        // Task 13 wires the live pause signal in; this HUD does not yet toggle pause.
+                        isPaused: false,
                         gems: gems?.visiblePins ?? [],
                         seenGemIDs: gems?.seenIDs ?? [],
                         onSelectGem: { gem in gems?.select(gem) },
