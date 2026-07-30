@@ -29,7 +29,8 @@ struct NavigateHUDView: View {
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) var settings
     @Environment(LocationService.self) private var location
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Not `private`: the cockpit row in `NavigateHUDView+Cockpit` animates off it too.
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -39,7 +40,8 @@ struct NavigateHUDView: View {
     @State private var showPermission = false
     /// Measured HUD height, used to cap the group roster at ~40% so a full crew never
     /// pushes the controls/instrument off a short screen. 0 until first layout.
-    @State private var hudHeight: CGFloat = 0
+    /// Not `private`: read by the roster frame in `NavigateHUDView+Cockpit`.
+    @State var hudHeight: CGFloat = 0
 
     // MARK: Guidance
 
@@ -48,23 +50,28 @@ struct NavigateHUDView: View {
     /// DEBUG golden-ride harness, an empty scripted session replaces the engine
     /// entirely (no network, no telemetry, no arrival racing the manual End; the
     /// turn card renders its unavailable state, which nothing asserts).
-    @State private var guidance: GuidanceViewModel
+    /// Not `private`: the cockpit's trip strip and turn card read it across the file split.
+    @State var guidance: GuidanceViewModel
 
     // MARK: Voice
 
-    @State private var isMuted = false
+    /// Not `private`: the mute button lives in `NavigateHUDView+Cockpit`.
+    @State var isMuted = false
     @State private var showEndConfirm = false
     /// Group-ride End/Leave confirmation. Kept separate from `showEndConfirm` so the solo
     /// End alert is byte-for-byte unchanged; only fired when `groupSession != nil`.
     @State private var showGroupEndConfirm = false
-    private let speechSynthesizer = AVSpeechSynthesizer()
+    /// Not `private`: `toggleMute` (in `NavigateHUDView+Cockpit`) cuts off an in-flight prompt.
+    let speechSynthesizer = AVSpeechSynthesizer()
 
     // MARK: Map
 
-    @State private var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
+    /// Not `private`: the recenter/zoom controls in `NavigateHUDView+Cockpit` retarget it.
+    @State var viewport: Viewport = .followPuck(zoom: 16, bearing: .heading)
     /// Live camera for the +/- zoom pill (ROH-57). Written every frame by `.onCameraChanged`;
     /// read only at tap time, so it never re-renders the HUD (see `MapZoomCameraBox`).
-    @State private var cameraBox = MapZoomCameraBox()
+    /// Not `private`: the zoom pill reads it across the file split.
+    @State var cameraBox = MapZoomCameraBox()
     /// Drives peer-dot interpolation, identity, and declutter (ROH-69 / ROH-72). A plain class
     /// held in `@State`; the `TimelineView` clock and `.onChange(of: peers)` drive repaints. Stays
     /// empty (a no-op) whenever `groupSession` is nil.
@@ -265,13 +272,6 @@ struct NavigateHUDView: View {
         .swipeBackEnabled(false)
     }
 
-    /// The formatted trip strip line, recomputed each render from the latest guidance
-    /// update and the current time. nil update (pre-guidance) reads as `.starting`.
-    private var cruisingState: CruisingState {
-        guard let update = guidance.lastUpdate else { return .starting }
-        return CruisingPresenter.state(for: update, units: settings.units, now: Date())
-    }
-
     // MARK: Map view (puck follow + live route polyline + group peer dots)
 
     private var navigateMapView: some View {
@@ -321,8 +321,9 @@ struct NavigateHUDView: View {
     // MARK: End-tap routing (solo vs group)
 
     /// Solo path (groupSession nil) is unchanged: open the solo End alert. On the group
-    /// path, open the host/member confirmation dialog instead.
-    private func onEndTapped() {
+    /// path, open the host/member confirmation dialog instead. Not `private`: the End
+    /// button that calls it lives in `NavigateHUDView+Cockpit`.
+    func onEndTapped() {
         if groupSession != nil {
             showGroupEndConfirm = true
         } else {
@@ -352,9 +353,10 @@ struct NavigateHUDView: View {
     }
 }
 
-/// Cockpit chrome + actions, in an extension so the main type body stays under SwiftLint's
+/// Map plumbing + voice, in an extension so the main type body stays under SwiftLint's
 /// `type_body_length` (the pattern `RideHUDView` uses). Same-file `private` members of
-/// `NavigateHUDView` remain reachable here.
+/// `NavigateHUDView` remain reachable here. The cockpit itself lives in
+/// `NavigateHUDView+Cockpit.swift`.
 private extension NavigateHUDView {
     /// Real Mapbox projection for declutter; nil when the coordinate is off-screen/unavailable.
     func project(_ c: Coordinate, _ proxy: MapProxy) -> ClusterDeclutter.Point2D? {
@@ -372,28 +374,6 @@ private extension NavigateHUDView {
         }
         peerModel.updateSet(peers: groupSession.peers, selfUserID: groupSession.selfUserID,
                             nameMap: groupSession.nameMap, reduceMotion: reduceMotion, now: Date())
-    }
-
-    // MARK: Cluster actions
-
-    /// Re-engages puck-following after the rider has panned the map. Snaps under Reduce
-    /// Motion, flies otherwise.
-    func recenter() {
-        if reduceMotion {
-            viewport = .followPuck(zoom: 16, bearing: .heading)
-        } else {
-            withViewportAnimation(.easeOut(duration: 0.4)) {
-                viewport = .followPuck(zoom: 16, bearing: .heading)
-            }
-        }
-    }
-
-    /// Toggles voice mute; muting also cuts off any in-flight prompt.
-    func toggleMute() {
-        isMuted.toggle()
-        if isMuted {
-            speechSynthesizer.stopSpeaking(at: .immediate)
-        }
     }
 
     // MARK: Voice
@@ -414,80 +394,5 @@ private extension NavigateHUDView {
             ?? AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         speechSynthesizer.speak(utterance)
-    }
-
-    /// Steps the map zoom for a +/- tap (ROH-57). While following the puck it re-follows at the
-    /// new zoom (staying locked on the rider); once the rider has panned off, it zooms around the
-    /// current center instead of snapping back — recenter is the separate control for that. Snaps
-    /// under Reduce Motion, otherwise a quick 0.3s flick (a smaller camera move than recenter's
-    /// re-frame, so a hair snappier on purpose).
-    func zoom(_ direction: MapZoomStep.Direction) {
-        guard cameraBox.zoom.isFinite else { return }
-        let target = MapZoomStep.stepped(from: cameraBox.zoom, direction)
-        let next: Viewport
-        if viewport.followPuck != nil {
-            next = .followPuck(zoom: target, bearing: .heading)
-        } else if let center = cameraBox.center {
-            next = .camera(center: center, zoom: target, bearing: cameraBox.bearing, pitch: cameraBox.pitch)
-        } else {
-            // Panned off the puck but no camera frame yet (pre-first-`onCameraChanged`): do
-            // nothing rather than snap back to the puck, which zoom must never do.
-            return
-        }
-        if reduceMotion {
-            viewport = next
-        } else {
-            withViewportAnimation(.easeOut(duration: 0.3)) { viewport = next }
-        }
-    }
-
-    /// The bottom cockpit: a crew-roster + map-controls row floating above the quarter-screen
-    /// instrument panel (hero speed + to-go + ETA). The roster (only in a live group ride)
-    /// shares that row with the controls as a pill to their left, its bottom edge aligned
-    /// with the End (stop) button — bottom alignment keeps the collapsed one-line pill beside
-    /// the stop button, and expanding it grows upward. `bottomCockpit` sits in a
-    /// `ZStack(alignment: .bottom)` with the turn card as a separate `.overlay(alignment: .top)`
-    /// declared after it, so growth here does not clip or push anything off-screen — a full
-    /// crew instead grows the column tall enough that the turn card draws over the cluster,
-    /// End included, and intercepts its taps. `HUDLayoutMetrics.groupRosterMaxHeightFraction`
-    /// caps the roster at ~40% of the HUD to keep that overlap from happening. Solo rides keep
-    /// the controls right-aligned via the Spacer fallback. (D9 hides the roster once the host
-    /// ends the ride; the solo path never renders it.)
-    @ViewBuilder var bottomCockpit: some View {
-        VStack(spacing: AuraTheme.Spacing.sm) {
-            HStack(alignment: .bottom, spacing: AuraTheme.Spacing.md) {
-                if showsGroupChrome, let groupSession {
-                    GroupRosterSheet(rows: rosterRows(for: groupSession))
-                        .frame(maxHeight: hudHeight > 0
-                               ? hudHeight * HUDLayoutMetrics.groupRosterMaxHeightFraction
-                               : HUDLayoutMetrics.groupRosterFallbackMaxHeight,
-                               alignment: .bottom)
-                } else {
-                    Spacer(minLength: 0)
-                }
-                ControlCluster(
-                    isFollowing: viewport.followPuck != nil,
-                    isMuted: isMuted,
-                    onRecenter: { recenter() },
-                    // Navigate has no mark-this-spot feature, so omit the button entirely rather
-                    // than show it permanently disabled — that also keeps the taller (zoom pill)
-                    // cluster clear of the turn card on a short screen (ROH-57).
-                    showMarkSpot: false,
-                    onToggleMute: { toggleMute() },
-                    onZoomIn: { zoom(.zoomIn) },
-                    onZoomOut: { zoom(.zoomOut) },
-                    onEndRide: { onEndTapped() },
-                    isEndDisabled: groupSession?.isEnding == true)
-            }
-            .padding(.horizontal, AuraTheme.Spacing.lg)
-
-            InstrumentPanel(
-                currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
-                units: settings.units,
-                trip: cruisingState,
-                // Task 13 wires the live pause signal in; this HUD does not yet toggle pause.
-                isPaused: false)
-                .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
-        }
     }
 }
