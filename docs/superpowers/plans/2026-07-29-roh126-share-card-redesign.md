@@ -145,7 +145,8 @@ As rev 1 (`static func path(runs: [[CGPoint]]) -> CGPath?`; nil when no run has 
 
 **Files:** create `Aura/Sources/Ride/ShareCard/ShareCardFileStore.swift`; modify `Aura/Sources/Ride/ShareCard/RideCardRenderer.swift`.
 
-- [ ] File store as rev 1 (`tmp/ShareCard/<rideID>/<presentationUUID>/<generation>/Aura ride.png`; `sweepOtherRides()` off-main, other rides only, > 1 h old).
+- [ ] File store as rev 1 (`tmp/ShareCard/<rideID>/<presentationUUID>/<generation>/Aura ride.png`; `sweepOtherRides()` off-main, other rides only, > 1 h old) — declared **`nonisolated struct ShareCardFileStore: Sendable`** (default MainActor isolation would otherwise make the off-main sweep a compile error, and only once a `@Sendable` closure touches it).
+- [ ] **Remove `ShareCardView.mapImage`'s `= nil` default in this task** (it existed only so Task 8 built before this task updated the call sites; leaving it ships a permanent seam where a forgotten argument silently yields the fallback card).
 - [ ] `RideCardRenderer.make(_ content:, mapImage: UIImage?, title: String, writeTo url: URL) async -> RideShareImage?`:
   - `ImageRenderer` on main; then `Task.detached` for **create-directory-then-encode-then-atomic-write** (a write into a missing directory throws; a failed generation-0 write means Share stays disabled, so directory creation is mandatory, not defensive).
   - `RideShareImage` gains `let title: String`.
@@ -158,24 +159,37 @@ As rev 1 (`static func path(runs: [[CGPoint]]) -> CGPath?`; nil when no run has 
 
 **Files:** create `Aura/Sources/Ride/ShareCard/ShareMapRasterProviding.swift`, `Aura/Sources/Ride/ShareCard/ShareMapSnapshotter.swift`.
 
-The concurrency shapes below are **normative and were compile-review-corrected**; do not
-improvise around them. Background: the SDK's `start` completion and overlay handler are
-non-`@Sendable` closure types invoked **off-main** whenever the attribution text falls to
-`.none` — the *likely* branch at our 360 pt width — and this repo's
-`SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor` makes a naive closure literal compile clean
-while racing. Write both closures **explicitly `@Sendable`** so the compiler surfaces
-every isolation violation, and keep all callback-touched state in one lock-guarded
-nonisolated box.
+The concurrency shapes below are **normative and were compile-review-corrected twice**
+(the second delta review reproduced a livelock and two compile breaks in the first
+correction); do not improvise around them. Background: the SDK's `start` completion and
+overlay handler are non-`@Sendable` closure types invoked **off-main** whenever the
+attribution text falls to `.none` — the *likely* branch at our 360 pt width — and this
+repo's `SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor` makes a naive closure literal compile
+clean while racing. Write all three SDK closures (overlay, completion, and the style
+load's `(Error?) -> Void`) **explicitly `@Sendable`**, and keep all callback-touched
+state in lock-guarded nonisolated boxes.
+
+**Systemic rule (applies to every new app-target declaration in Tasks 9–12):** under
+default MainActor isolation, *every* new type/function is `@MainActor` unless it says
+otherwise, and the compiler only complains once a `@Sendable` closure touches it.
+Anything used off the main actor must be **explicitly `nonisolated`**: `SnapshotBox`,
+the error-flags box, `projectedRuns` (`nonisolated static func`), and Task 9's
+`ShareCardFileStore` (`nonisolated struct ShareCardFileStore: Sendable`). Off-main code
+must not read `@MainActor` statics either — hoist `AuraTheme.routeUIColor.cgColor` /
+`routeCasingUIColor.cgColor` into locals on the main actor before any detached hop
+(today that's only a warning, so a green build will hide it).
 
 - [ ] **Step 1: Seam + box** (as rev 1: `ShareMapRasterProviding` protocol; `@Observable @MainActor ShareMapProviderBox`).
 
 - [ ] **Step 2: The snapshot box** — replaces rev 1's `@MainActor SnapshotAttempt`, which was unbuildable (`withLock` takes a `@Sendable` body that cannot touch main-actor state) and raced:
 
 ```swift
-/// Everything the SDK's off-main callbacks touch, behind one lock. NOT MainActor:
-/// the completion/overlay handler run on Mapbox's compositor thread when the
+/// Everything the SDK's off-main callbacks touch, behind one lock. `nonisolated` is
+/// REQUIRED: without it, default MainActor isolation infers `@MainActor` onto this
+/// class (the `Sendable` conformance does not opt out) and Step 4.7 fails to compile.
+/// The completion/overlay handler run on Mapbox's compositor thread when the
 /// attribution label falls to `.none` (the common case at card width).
-private final class SnapshotBox: @unchecked Sendable {
+private nonisolated final class SnapshotBox: @unchecked Sendable {
     struct State {
         var finished = false
         var capturedRuns: [[CGPoint]] = []
@@ -185,7 +199,10 @@ private final class SnapshotBox: @unchecked Sendable {
         var snapshotter: Snapshotter?
         var continuation: CheckedContinuation<UIImage?, Never>?
     }
-    private let lock = OSAllocatedUnfairLock<State>(initialState: State())
+    // `uncheckedState:`, not `initialState:` — the latter requires State: Sendable,
+    // which stops holding the moment this class is nonisolated (State carries the
+    // non-Sendable Snapshotter and continuation on purpose; the lock is the guarantee).
+    private let lock = OSAllocatedUnfairLock<State>(uncheckedState: State())
 
     func store(snapshotter: Snapshotter, continuation: CheckedContinuation<UIImage?, Never>) {
         lock.withLockUnchecked { $0.snapshotter = snapshotter; $0.continuation = continuation }
@@ -233,29 +250,39 @@ private final class SnapshotBox: @unchecked Sendable {
         if let inFlight, inFlight.key == request.cacheKey { return await inFlight.task.value }
         while let current = inFlight { _ = await current.task.value }   // suspends, no spin
         // No await between the loop exit and this assignment (single-pipeline invariant).
-        let task = Task { [weak self] in await self?.runPipeline(request) ?? nil }
+        let task = Task { [weak self] in await self?.runPipelineReleasingSlot(request) ?? nil }
         inFlight = (request.cacheKey, task)
-        defer { if inFlight?.key == request.cacheKey { inFlight = nil } }
         return await task.value
+    }
+
+    /// Owns the in-flight slot's lifetime: cleared on EVERY exit, including the
+    /// cache-hit and reject early returns. Do not move this into runPipeline —
+    /// runPipeline is nothing but early returns, and a "clear at the end" only runs
+    /// on the full-success path: every failure (offline reject, the headline error
+    /// path) would leave a completed task in the slot forever, wedging same-key
+    /// retries and LIVELOCKING different-key waiters' while-loop on the main actor
+    /// (reproduced in plan delta-review). This is the spec's normative `defer`.
+    private func runPipelineReleasingSlot(_ request: ShareMapRequest) async -> UIImage? {
+        defer { if inFlight?.key == request.cacheKey { inFlight = nil } }
+        return await runPipeline(request)
     }
 }
 ```
 
-  Wait — `defer` here runs when `raster` returns, but *other* same-key callers are inside
-  `await inFlight.task.value`; the entry must outlive the first caller only until the
-  task completes. Pin it the robust way instead: clear the entry **inside the pipeline
-  task** as its last act (`await MainActor.run { self.inFlight = nil }` or since the
-  Task body is @MainActor-isolated via the class, plain `inFlight = nil` at the end of
-  `runPipeline`), and drop the `defer`. Same-key callers each `await task.value`
-  independently — resolved exactly once per caller by the task's single value. Note:
-  `Task.value` of a non-throwing task is **not** a cancellation point (plan erratum b).
+  The `defer` in the wrapper is safe (unlike a `defer` in `raster` itself, which was the
+  rev-1 bug): the slot is cleared exactly when the pipeline task finishes, and same-key
+  callers each `await task.value` independently. Note: `Task.value` of a non-throwing
+  task is **not** a cancellation point (plan erratum b). Also record: **no negative
+  cache** — a rejected pipeline re-runs in full on the next request (e.g. a History
+  open after an offline reject re-runs the ≤10 s pipeline with the hint up); this is
+  the spec's accepted cost, not a bug, and device verification should expect it.
 
 - [ ] **Step 4: The pipeline** (`private func runPipeline(_ request: ShareMapRequest) async -> UIImage?` on the MainActor, split into `< 50`-line helpers for lint). Order, with the review-corrected lines:
   1. `MainActor.assertIsolated()`.
   2. Cache read: `if let data = cache.read(request.cacheKey) { return UIImage(data: data, scale: request.scale) }` — the cache stores the **composited** image; hits return as-is.
   3. Build `Snapshotter(options: MapSnapshotOptions(size: request.size, pixelRatio: request.scale, glyphsRasterizationOptions: GlyphsRasterizationOptions(rasterizationMode: .ideographsRasterizedLocally)))`.
-  4. Error observer **before** the load, token cancelled in a `defer`. Handler is `@Sendable`, writes into a small lock-guarded flags box (same technique as `SnapshotBox`): `.style`/`.source` → set `rejected`; `.tile` → count only (log; edge tiles 404 routinely; variance is the partial-tile gate). The `rejected` flag is read at two points: after the style load, and after the render completes (a style error surfacing mid-render discards the raster — conservative and cheap).
-  5. Style load with its **own** resolve-once latch (a `MapStyleReconciler` completion can fire synchronously; double resume = crash): `snapshotter.load(mapStyle: request.style.mapboxStyle /* via MapStyle+Mapbox */)` raced against a 4 s belt (`DispatchQueue.main.asyncAfter` arm, Home-gate shape). **Never also touch `styleJSON`/`styleURI`.** On belt timeout consult `snapshotter.isStyleLoaded` before rejecting.
+  4. Error observer **before** the load, token cancelled in a `defer`. Handler is `@Sendable`, writes into `private nonisolated final class MapLoadErrorFlags: @unchecked Sendable` — one lock guarding BOTH the `rejected` flag and the `.tile` counter (`initialState:` is fine here, the state is all-Sendable): `.style`/`.source` → set `rejected`; `.tile` → count only (log; edge tiles 404 routinely; variance is the partial-tile gate). The `rejected` flag is read at two points: after the style load, and after the render completes (a style error surfacing mid-render discards the raster — conservative and cheap).
+  5. Style load with its **own** resolve-once latch (a `MapStyleReconciler` completion can fire synchronously; double resume = crash): `snapshotter.load(mapStyle: request.style.mapboxStyle /* via MapStyle+Mapbox */)` — the completion is `((Error?) -> Void)?`; write it `@Sendable`; a **non-nil error → reject**. Raced against a 4 s belt (`DispatchQueue.main.asyncAfter` arm, Home-gate shape). **Never also touch `styleJSON`/`styleURI`.** On belt timeout consult `snapshotter.isStyleLoaded` before rejecting.
   6. Camera (strictly after style): `var cam = snapshotter.camera(for: coords, padding: UIEdgeInsets(top: 24, left: 24, bottom: 40, right: 24), bearing: 0, pitch: 0)`; gate via `ShareCameraValidation.validated(latitude: cam.center?.latitude, longitude: cam.center?.longitude, zoom: cam.zoom)`; on pass, `cam.zoom = validated.zoom` and `snapshotter.setCamera(to: cam)` — **mutate the returned options; do not rebuild them** (the returned `padding` is the sole enforcement of route-clear-of-chrome).
   7. Render:
 
@@ -265,6 +292,8 @@ let raster: UIImage? = await withCheckedContinuation { cont in
     box.store(snapshotter: snapshotter, continuation: cont)
     snapshotter.start(
         overlayHandler: { @Sendable overlay in
+            // projectedRuns MUST be `nonisolated static func` (default isolation would
+            // make it @MainActor and this call a compile error).
             box.capture(Self.projectedRuns(request.route.segments, overlay.pointForCoordinate))
         },
         completion: { @Sendable result in
@@ -306,8 +335,19 @@ guard runs.contains(where: { $0.count >= 2 }) else { return nil }   // no route 
     4. Fallback: `shareImage = await RideCardRenderer.make(content, mapImage: nil, title: title, writeTo: store.url(generation: 0))`.
     5. `guard let request = ShareMapRequest(rideID: ride.id, segments: content.routeSegments, style: settings.mapStyle) else { return }` — **`content.routeSegments`**, the one source of truth.
     6. **Both paths wait out the entrance window before requesting** (review: rev 1 gave the delay to the path without a transition and withheld it from the path with one): `try? await Task.sleep(for: .seconds(0.8))`; `guard !Task.isCancelled else { return }`. (Ride-end: the prefetch fired at +0.7 s is already in flight; this request dedups onto it. History: this is the entrance-animation courtesy delay.)
-    7. `isUpgrading = true`, then in the same task: `async let hintDelay: Void = { try? await Task.sleep(for: .seconds(0.3)); if isUpgrading { showHint = true } }()` — the delay starts **from the `isUpgrading = true` transition** (a sibling `.task` can't see it in time and a warm hit would flash).
-    8. `let raster = await shareMap.provider.raster(for: request)`.
+    7. `isUpgrading = true`, then in the same task (NOT `async let` — an `async let`
+       child is nonisolated and cannot touch `@State`; compile-verified break):
+
+       ```swift
+       let hint = Task {                     // inherits MainActor; @State access legal
+           try? await Task.sleep(for: .seconds(0.3))
+           if isUpgrading { showHint = true }
+       }
+       ```
+
+       The delay starts **from the `isUpgrading = true` transition**; the `if isUpgrading`
+       re-check stays (prevents a late flash after step 10 clears the flags).
+    8. `let raster = await shareMap.provider.raster(for: request)`, then `hint.cancel()`.
     9. `if let raster, !Task.isCancelled, let upgraded = await RideCardRenderer.make(content, mapImage: raster, title: title, writeTo: store.url(generation: 1)) { shareImage = upgraded }` — never assign nil over a working fallback.
     10. `isUpgrading = false; showHint = false` — **both cleared, always** (rev 1 left the spinner on screen forever).
   - Hint view under Share: `if showHint { HStack(spacing: AuraTheme.Spacing.xs) { ProgressView(); Text("Adding your map…") }.font(.caption).foregroundStyle(AuraTheme.secondaryText(contrast)) }`.
