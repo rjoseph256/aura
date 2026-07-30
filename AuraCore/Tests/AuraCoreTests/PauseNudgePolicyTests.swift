@@ -52,4 +52,54 @@ struct PauseNudgePolicyTests {
         #expect(PauseNudgePolicy.rungs.count == 5)
         #expect(PauseNudgePolicy.rungs.last?.after == 7200)
     }
+
+    // MARK: pendingRungs — the feature's only arithmetic
+
+    @Test("A pause scheduled the instant it happens arms the whole ladder, offsets untouched")
+    func aFreshPauseArmsEveryRung() {
+        let pending = PauseNudgePolicy.pendingRungs(elapsedSincePause: 0)
+        #expect(pending.count == 5)
+        #expect(pending.map(\.interval) == [600, 1500, 2700, 4500, 7200])
+        #expect(pending.map(\.rung) == PauseNudgePolicy.rungs)
+    }
+
+    @Test("A rung already past is dropped, and the survivors count from now, not from the pause")
+    func rungsAlreadyPastAreDropped() {
+        // 20 minutes into the stop: the 10-minute rung has gone, and the 25-minute rung is
+        // five minutes away — not twenty-five.
+        let pending = PauseNudgePolicy.pendingRungs(elapsedSincePause: 1200)
+        #expect(pending.map(\.rung.identifier) == ["pause.nudge.2", "pause.nudge.3",
+                                                   "pause.nudge.4", "pause.nudge.5"])
+        #expect(pending.map(\.interval) == [300, 1500, 3300, 6000])
+    }
+
+    @Test("A rung landing exactly now is dropped: a trigger needs a positive interval")
+    func aRungExactlyDueIsDropped() {
+        let pending = PauseNudgePolicy.pendingRungs(elapsedSincePause: 600)
+        #expect(pending.allSatisfy { $0.interval > 0 })
+        #expect(!pending.contains { $0.rung.identifier == "pause.nudge.1" })
+        #expect(pending.count == 4)
+    }
+
+    @Test("A stop that outran the ladder arms nothing rather than scheduling the past")
+    func aStopPastEveryRungArmsNothing() {
+        #expect(PauseNudgePolicy.pendingRungs(elapsedSincePause: 7200).isEmpty)
+        #expect(PauseNudgePolicy.pendingRungs(elapsedSincePause: 86_400).isEmpty)
+    }
+
+    @Test("A negative elapsed is treated as this instant, not as extra runway")
+    func aNegativeElapsedDoesNotPushTheLadderOut() {
+        // A backward wall-clock step between the tap and the schedule call. Clamping keeps the
+        // ladder anchored where it would have been rather than firing an hour late.
+        let pending = PauseNudgePolicy.pendingRungs(elapsedSincePause: -3600)
+        #expect(pending.map(\.interval) == PauseNudgePolicy.rungs.map(\.after))
+    }
+
+    @Test("Every armed interval is positive, whatever the elapsed")
+    func everyArmedIntervalIsPositive() {
+        for elapsed in stride(from: -100.0, through: 7500.0, by: 137) {
+            let pending = PauseNudgePolicy.pendingRungs(elapsedSincePause: elapsed)
+            #expect(pending.allSatisfy { $0.interval > 0 }, "elapsed \(elapsed)")
+        }
+    }
 }

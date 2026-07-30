@@ -133,17 +133,26 @@ public final class RideSessionCoordinator {
         switch authorization {
         case .denied, .restricted:
             return .permissionDenied
+        case .authorized:
+            // Ask now, while the app is foregrounded and the rider is looking at it. A
+            // pause-time request cannot work: a forgotten pause is backgrounded and iOS defers
+            // the alert.
+            //
+            // Only once location is already granted. On a first ride `.notDetermined` means the
+            // location prompt — the one the rider tapped Start expecting — is about to appear,
+            // and stacking an unexplained "Aura Would Like to Send You Notifications" in front
+            // of it is how a rider declines both. They get asked on their second ride instead,
+            // which still precedes any pause they could forget.
+            nudges.prepareAuthorization()
         // .notDetermined proceeds: the location stream's points() requests When-In-Use,
         // which surfaces the system prompt on first use.
-        case .authorized, .notDetermined:
+        case .notDetermined:
             break
         }
 
-        // Ask now, while the app is foregrounded and the rider is looking at it. A pause-time
-        // request cannot work: a forgotten pause is backgrounded and iOS defers the alert.
-        nudges.prepareAuthorization()
         // The one moment the app knows no ride is paused. Clears anything an earlier ride in
-        // this same app session orphaned.
+        // this same app session orphaned. Unconditional across both starting cases: a
+        // `.notDetermined` ride can still reach a pause, so it can still inherit an orphan.
         nudges.cancelForgottenPauseNudges()
 
         self.location = location
@@ -154,6 +163,10 @@ public final class RideSessionCoordinator {
         let now = Date()
         startedAt = now
         elapsed = 0
+        // Reset alongside `elapsed`, for the same reason. `refreshElapsed` only ever raises this
+        // one, so a value left over from a previous ride on a reused coordinator would pin the
+        // chip at that ride's last stop and never fall.
+        currentPauseSeconds = 0
         recorder.start(at: now)
         screen.setKeepAwake(true)
         activity.start(kind: kind, startedAt: now, units: units, destinationName: destinationName)
@@ -195,7 +208,11 @@ public final class RideSessionCoordinator {
     /// Recompute active time: wall-clock since the start, less paused time — including the
     /// pause currently in flight, so the clock stops the moment the rider taps rather than
     /// when the interval eventually closes.
-    private func refreshElapsed(now: Date = Date()) {
+    ///
+    /// Internal rather than private, like `pushActivityUpdate`, so a test can drive a specific
+    /// `now` instead of waiting on the 0.5 s ticker — the only way to pin the stop clock's
+    /// non-decreasing clamp against a backward wall-clock step.
+    func refreshElapsed(now: Date = Date()) {
         guard let startedAt else { return }
         elapsed = max(0, now.timeIntervalSince(startedAt) - recorder.pausedSeconds(asOf: now))
         currentPauseSeconds = max(currentPauseSeconds, recorder.currentPauseSeconds(asOf: now))
@@ -218,6 +235,12 @@ public final class RideSessionCoordinator {
         // `scheduleNudges` below are both synchronous, so neither opens that window.
         pauseObserver?.rideDidSetPaused(true)
         refreshElapsed(now: now)
+        // Belt-and-braces, and honestly labelled as such: `start()` and `resume()` both zero
+        // this, and `recorder.currentPauseSeconds` returns zero whenever no stop is open, so the
+        // value reaching here is already zero on every path today. Deleting this line breaks no
+        // test — the reset that actually carries the behaviour is `resume()`'s. It stays because
+        // the `max` in `refreshElapsed` makes any future path that *does* arrive here dirty fail
+        // permanently rather than for one tick.
         currentPauseSeconds = 0
         screen.setKeepAwake(false)
         flushCheckpoint(at: now)

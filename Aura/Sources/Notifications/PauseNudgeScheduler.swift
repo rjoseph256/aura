@@ -37,28 +37,29 @@ final class PauseNudgeScheduler: NSObject, RideNudgeScheduling {
 
     func scheduleForgottenPauseNudges(startingAt: Date) {
         cancelForgottenPauseNudges()
-        let elapsed = max(0, Date().timeIntervalSince(startingAt))
-        for rung in PauseNudgePolicy.rungs {
-            // Anchor to the tap rather than to now. In practice these are the same instant,
-            // since this is called synchronously from `pause()`; the subtraction only matters
-            // if a future caller schedules retrospectively.
-            let remaining = rung.after - elapsed
-            // A non-repeating time-interval trigger only requires a positive interval. The
-            // 60-second minimum applies to `repeats: true`, which no rung uses.
-            guard remaining > 0 else { continue }
+        // Anchored to the tap rather than to now. In practice these are the same instant, since
+        // this is called synchronously from `pause()`; the elapsed subtraction only matters if a
+        // future caller schedules retrospectively. Which rungs survive that, and what interval
+        // each one gets, is `PauseNudgePolicy.pendingRungs` — host-tested, unlike this file.
+        let pending = PauseNudgePolicy.pendingRungs(
+            elapsedSincePause: Date().timeIntervalSince(startingAt))
+        for item in pending {
             let content = UNMutableNotificationContent()
-            content.title = rung.title
-            content.body = rung.body
+            content.title = item.rung.title
+            content.body = item.rung.body
             content.sound = .default
             let request = UNNotificationRequest(
-                identifier: rung.identifier,
+                identifier: item.rung.identifier,
                 content: content,
-                trigger: UNTimeIntervalNotificationTrigger(timeInterval: remaining, repeats: false))
+                trigger: UNTimeIntervalNotificationTrigger(timeInterval: item.interval,
+                                                           repeats: false))
             center.add(request) { [log] error in
                 if let error { log.error("Nudge add failed: \(error.localizedDescription, privacy: .public)") }
             }
         }
-        log.info("Scheduled pause nudges")
+        // The count, not a bare "scheduled": armed-five and armed-none are the two states worth
+        // telling apart in a device log, and the old wording claimed the former for both.
+        log.info("Armed \(pending.count, privacy: .public) of \(PauseNudgePolicy.rungs.count, privacy: .public) pause nudges")
     }
 
     func cancelForgottenPauseNudges() {
@@ -70,9 +71,17 @@ final class PauseNudgeScheduler: NSObject, RideNudgeScheduling {
 extension PauseNudgeScheduler: UNUserNotificationCenterDelegate {
     /// Without this, iOS shows nothing while the app is active — and a rider paused to read the
     /// map, with the HUD on screen, is exactly that case (ROH-101 P5).
+    ///
+    /// Scoped to this feature's own identifiers. There is no second UserNotifications client in
+    /// the app today, but this is the *app-global* delegate: answering for everything would
+    /// silently decide the foreground behaviour of every notification Aura ever adds, from here.
+    /// Anything else falls through to the system default of showing nothing while active.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async
     -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        guard PauseNudgePolicy.allIdentifiers.contains(notification.request.identifier) else {
+            return []
+        }
+        return [.banner, .sound]
     }
 }

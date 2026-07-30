@@ -45,4 +45,38 @@ public enum PauseNudgePolicy {
     ]
 
     public static var allIdentifiers: [String] { rungs.map(\.identifier) }
+
+    /// A rung that is still ahead of the stop, paired with the interval its trigger needs.
+    public struct PendingRung: Equatable, Sendable {
+        public let rung: Rung
+        /// Seconds from now until this rung should fire.
+        public let interval: TimeInterval
+
+        public init(rung: Rung, interval: TimeInterval) {
+            self.rung = rung
+            self.interval = interval
+        }
+    }
+
+    /// The rungs still ahead of a stop that began `elapsedSincePause` seconds ago.
+    ///
+    /// This is the only arithmetic in the feature, and it lives here rather than in the
+    /// app-target conformer because the app target has no test bundle — and the failure mode of
+    /// getting it wrong is scheduling *nothing*, which is the exact outcome the ladder's design
+    /// note exists to prevent. The conformer is left a loop over this result.
+    ///
+    /// A stop that has already outrun the whole ladder yields an empty array, which is correct:
+    /// every rung's moment has passed, and iOS would reject a non-positive interval anyway.
+    public static func pendingRungs(elapsedSincePause: TimeInterval) -> [PendingRung] {
+        // A negative elapsed means the caller handed us a pause that has not happened yet;
+        // treat it as this instant rather than pushing every rung further out.
+        let elapsed = max(0, elapsedSincePause)
+        return rungs.compactMap { rung in
+            let interval = rung.after - elapsed
+            // A non-repeating time-interval trigger only requires a positive interval. The
+            // 60-second minimum applies to `repeats: true`, which no rung uses.
+            guard interval > 0 else { return nil }
+            return PendingRung(rung: rung, interval: interval)
+        }
+    }
 }
