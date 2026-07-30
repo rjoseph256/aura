@@ -77,7 +77,8 @@ struct NavigateHUDView: View {
         _coordinator = State(initialValue: RideSessionCoordinator(
             kind: .navigate, destinationName: destination?.name,
             screen: ScreenWakeController(), activity: RideLiveActivityController.shared,
-            workout: WorkoutWriter.shared, haptics: HapticPlayer.shared))
+            workout: WorkoutWriter.shared, haptics: HapticPlayer.shared,
+            nudges: PauseNudgeScheduler.shared))
         #if DEBUG
         if SimulatedRideConfig.current != nil {
             _guidance = State(initialValue:

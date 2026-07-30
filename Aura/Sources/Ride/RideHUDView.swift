@@ -58,7 +58,8 @@ struct RideHUDView: View {
         _coordinator = State(initialValue: RideSessionCoordinator(
             kind: .freeRide, destinationName: nil,
             screen: ScreenWakeController(), activity: RideLiveActivityController.shared,
-            workout: WorkoutWriter.shared, guidance: controller, haptics: HapticPlayer.shared))
+            workout: WorkoutWriter.shared, guidance: controller, haptics: HapticPlayer.shared,
+            nudges: PauseNudgeScheduler.shared))
         _showPermission = State(initialValue: false)
         _showEndConfirm = State(initialValue: false)
         _viewport = State(initialValue: .followPuck(zoom: 16, bearing: .heading))

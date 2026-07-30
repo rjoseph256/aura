@@ -5,6 +5,7 @@ import MapboxMaps
 
 @main
 struct AuraApp: App {
+    @UIApplicationDelegateAdaptor(AuraAppDelegate.self) private var appDelegate
     @State private var router: AppRouter
     @State private var auth: AuthStore
     @State private var rideStore: RideStore
@@ -153,6 +154,21 @@ private struct RootView: View {
         // the launch, and cancelled when a ride starts: the sweep is resumable, and the rider's
         // ride owns the device from that moment.
         .task {
+            // Clear any pause nudge an earlier process orphaned. A jetsam kill during a pause,
+            // which is the likely end of a long stop, leaves the ladder scheduled with nobody
+            // left to cancel it.
+            //
+            // Safe **only** because a persisted checkpoint is never resumable: a pause writes a
+            // real row (ROH-107's badge is for exactly that row), so "nothing persists an
+            // in-flight ride" is false — what is true is that nothing restores one. If
+            // checkpoint restore ever lands, this becomes "destroy the nudges for the ride we
+            // just restored" and must move behind that check.
+            //
+            // Idempotent, which matters: this `.task` re-runs on a scene reconnect, the same
+            // hazard the V6 backfill sweep below had to be guarded against.
+            if router.activeRideID == nil {
+                PauseNudgeScheduler.shared.cancelForgottenPauseNudges()
+            }
             guard !rideStore.isEphemeral, backfill == nil else { return }
             let container = rideStore.container
             backfill = Task.detached(priority: .utility) {
