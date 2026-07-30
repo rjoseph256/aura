@@ -37,10 +37,12 @@ private nonisolated final class SnapshotBox: @unchecked Sendable {
     func finish(with image: UIImage?) {
         let cont: CheckedContinuation<UIImage?, Never>? = lock.withLockUnchecked {
             guard !$0.finished else { return nil }
-            // The store-before-start ordering is enforced only by line adjacency in
-            // renderMapRasterWithChrome; a resolver firing before store() would latch
-            // with no continuation to resume and wedge the pipeline permanently.
-            // Debug-only signal — release behavior is identical.
+            // A resolver firing before store() would latch with no continuation to resume
+            // and wedge the pipeline permanently. There are now TWO resolvers and they
+            // are ordered by different things: the completion and the 6 s belt by line
+            // adjacency in renderMapRasterWithChrome, and the cancellation arm by that
+            // method's `MainActor.assertIsolated()` plus its main-queue hop. Neither is
+            // enforced here. Debug-only signal — release behavior is identical.
             if $0.continuation == nil {
                 assertionFailure("SnapshotBox.finish before store(_:continuation:) — latch would wedge")
             }
@@ -86,17 +88,13 @@ private nonisolated final class MapLoadErrorFlags: @unchecked Sendable {
 
 /// Style-load latch outcome. Timeout is distinct from failure on purpose: the caller
 /// consults `isStyleLoaded` back on the main actor, so the belt's timeout closure never
-/// has to capture the non-Sendable snapshotter.
+/// has to capture the non-Sendable snapshotter. `cancelled` is distinct from both so the
+/// reject log says which of the three actually happened.
 private nonisolated enum StyleLoadOutcome: Sendable {
     case loaded
     case failed
     case timedOut
-}
-
-/// Outcome of racing an in-flight pipeline task against the slot watchdog's ceiling.
-private nonisolated enum SlotAwaitOutcome: Sendable {
-    case finished(UIImage?)
-    case ceiling
+    case cancelled
 }
 
 /// The app-lifetime share-map raster provider (spec ROH-126 rev 4): at most one
@@ -106,11 +104,11 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
 /// re-runs in full on the next request — e.g. a History open after an offline reject
 /// re-runs the ≤10 s pipeline with the hint up. That is the spec's accepted cost.
 ///
-/// Instance identity is load-bearing: the single-flight dedup table and the
-/// one-pipeline-at-a-time invariant live on the instance, so a second concrete
-/// instance would silently defeat both. `shared` + `private init` make that a
-/// compile error rather than a code-review catch; stubbing still goes through the
-/// `ShareMapRasterProviding` seam and `ShareMapProviderBox`.
+/// Instance identity is load-bearing: the `SharePipelineSlot` that enforces both
+/// invariants lives on the instance, so a second concrete instance would silently defeat
+/// them. `shared` + `private init` make that a compile error rather than a code-review
+/// catch; stubbing still goes through the `ShareMapRasterProviding` seam and
+/// `ShareMapProviderBox`.
 @MainActor final class ShareMapSnapshotter: ShareMapRasterProviding {
     static let shared = ShareMapSnapshotter()
     private init() {}
@@ -121,14 +119,21 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
     /// `nonisolated` so the detached acceptance step can log too (Logger is Sendable).
     private nonisolated static let log = Logger(subsystem: "app.aura.ios", category: "ShareCard")
 
-    /// `id` is the slot's identity: the watchdog and the pipeline's own defer may
-    /// only clear the slot while it still holds THEIR identity, never a successor's.
-    private struct InFlightSlot {
-        let key: String
-        let id: UUID
-        let task: Task<UIImage?, Never>
-    }
-    private var inFlight: InFlightSlot?
+    /// The single-flight / one-pipeline-at-a-time machine, in AuraKit so it is
+    /// package-testable (`SharePipelineSlotTests`). It used to live inline here, where the
+    /// app target's lack of any unit-test target put it out of reach of a test — which is
+    /// where the review found the ceiling arm clearing the slot out from under a live
+    /// pipeline. The slot now clears only when a pipeline actually unwinds, so the
+    /// contract this class has to hold up is that cancellation is real: see
+    /// `cancelled(before:)` and the two `withTaskCancellationHandler` arms below.
+    private let slot = SharePipelineSlot<UIImage>(onCeiling: { key, isOwner in
+        // The wedge this design cannot recover from is silent otherwise: a pipeline that
+        // ignores cancellation keeps the slot for the life of the process and every later
+        // request just returns nil after its own ceiling. A run of these lines for
+        // different keys is that failure, and the only way it reaches a sysdiagnose.
+        let role = isOwner ? "owner, pipeline cancelled" : "waiter"
+        log.info("share-map ceiling at 20 s (\(role, privacy: .public)) for key \(key, privacy: .public)")
+    })
     private let cache = TerrainSnapshotDiskCache(
         directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appending(path: "ShareCardSnapshots"))   // its own directory — sharing Home's
@@ -145,67 +150,31 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
         if let data = cache.read(request.cacheKey), let image = UIImage(data: data, scale: request.scale) {
             return image
         }
-        // The same-key join is tested EVERY lap, not once before the loop. Two waiters for
-        // the same key queued behind an unrelated pipeline both wake when it clears; one
-        // claims the slot, and a join tested only on entry would leave the other waiting out
-        // its own key's pipeline and then starting a second one for it. On a successful
-        // pipeline the in-pipeline cache read absorbs the duplicate, but a REJECT caches
-        // nothing, so the duplicate ran the full pipeline again with the hint still up.
-        while let current = inFlight {                                  // suspends, no spin
-            if current.key == request.cacheKey {
-                return await boundedValue(of: current.task, slotID: current.id)
-            }
-            _ = await boundedValue(of: current.task, slotID: current.id)
-        }
-        // No await between the loop exit and this assignment (single-pipeline invariant).
-        let slotID = UUID()
-        let task = Task { [weak self] in await self?.runPipelineReleasingSlot(request, slotID: slotID) ?? nil }
-        inFlight = InFlightSlot(key: request.cacheKey, id: slotID, task: task)
-        return await boundedValue(of: task, slotID: slotID)
-    }
-
-    /// Races the pipeline task against a 20 s ceiling. The pipeline's detached steps
-    /// (encode / cache write / prune) are unbounded, and a wedged pipeline would
-    /// otherwise poison this app-lifetime provider for the whole session: the slot
-    /// would never clear and every later request would park behind it forever. On
-    /// ceiling, clear the slot ONLY if it still holds this identity (the pipeline's
-    /// own defer, or a successor claiming the slot, may have raced us) and hand the
-    /// caller nil. Resolve-once latch, same shape as `loadStyle`.
-    private func boundedValue(of task: Task<UIImage?, Never>, slotID: UUID) async -> UIImage? {
-        let outcome: SlotAwaitOutcome = await withCheckedContinuation { cont in
-            let done = OSAllocatedUnfairLock(initialState: false)
-            @Sendable func finishOnce(_ value: SlotAwaitOutcome) {
-                done.withLock { resumed in
-                    if !resumed { resumed = true; cont.resume(returning: value) }
-                }
-            }
-            Task { finishOnce(.finished(await task.value)) }
-            Task {
-                try? await Task.sleep(for: .seconds(20))
-                finishOnce(.ceiling)
-            }
-        }
-        switch outcome {
-        case .finished(let image): return image
-        case .ceiling:
-            if inFlight?.id == slotID { inFlight = nil }
-            return nil
+        // Everything past the fast path — the same-key join, the one-pipeline invariant
+        // and the watchdog ceiling — belongs to the slot.
+        return await slot.run(key: request.cacheKey) { [weak self] in
+            await self?.runPipeline(request) ?? nil
         }
     }
 
-    /// Owns the in-flight slot's lifetime: cleared on EVERY exit, including the
-    /// cache-hit and reject early returns. Do not move this into runPipeline —
-    /// runPipeline is nothing but early returns, and a "clear at the end" only runs
-    /// on the full-success path: every failure (offline reject, the headline error
-    /// path) would leave a completed task in the slot forever, wedging same-key
-    /// retries and LIVELOCKING different-key waiters' while-loop on the main actor
-    /// (reproduced in plan delta-review). This is the spec's normative `defer`.
-    /// Keyed on the slot's IDENTITY, not its cache key: after a watchdog ceiling a
-    /// successor (possibly same-key) may occupy the slot, and a late-finishing wedged
-    /// pipeline must not clear it out from under that successor.
-    private func runPipelineReleasingSlot(_ request: ShareMapRequest, slotID: UUID) async -> UIImage? {
-        defer { if inFlight?.id == slotID { inFlight = nil } }
-        return await runPipeline(request)
+    /// Cancellation stops the pipeline from STARTING an expensive stage. It never
+    /// discards a stage that already finished.
+    ///
+    /// That asymmetry is the rule, and it is load-bearing in both directions. Two review
+    /// passes killed an earlier version of this that checked after the render and after
+    /// acceptance instead: the ceiling is 20 s and the belts are 4 s and 6 s, so a
+    /// pipeline still alive at the ceiling has cleared both by definition and can only be
+    /// in the tail — meaning a late check fires exactly when the raster is already in
+    /// hand. It would have saved a 90×60 downsample and one draw, and thrown away ten
+    /// seconds of style load and SDK render plus the cache write. The spec pins the other
+    /// direction outright (§step 7: the write is "not guarded on cancellation — an
+    /// accepted raster is worth keeping"), and with no negative cache the next request
+    /// would have paid the whole pipeline again. The old abandoning watchdog got this
+    /// right by accident: it let the pipeline finish and warm the cache.
+    private func cancelledBeforeStarting(_ step: String) -> Bool {
+        guard Task.isCancelled else { return false }
+        Self.log.info("share-map reject: cancelled before \(step, privacy: .public)")
+        return true
     }
 
     // MARK: - Pipeline
@@ -232,15 +201,19 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
         let errorToken = snapshotter.onMapLoadingError.observe { @Sendable error in errorFlags.record(error) }
         defer { errorToken.cancel() }
 
-        guard await loadStyle(request.style.mapboxStyle, into: snapshotter) else {
-            Self.log.info("share-map reject: style load failed or timed out")
-            return nil
-        }
+        guard !cancelledBeforeStarting("the style load") else { return nil }
+        guard await loadStyle(request.style.mapboxStyle, into: snapshotter) else { return nil }
         // Rejected read 1 of 2: a style/source error surfaced during the load.
         guard !errorFlags.rejected else {
             Self.log.info("share-map reject: style/source loading error")
             return nil
         }
+        // The only cancellation gate in the pipeline, and it is here because this is the
+        // last point where stopping saves more than it destroys: everything paid for so
+        // far is one style load, and everything ahead is the camera fit (an unbounded
+        // synchronous main-actor walk of every route coordinate) plus the ≤6 s render.
+        // Past the render there is no gate at all — see `cancelledBeforeStarting`.
+        guard !cancelledBeforeStarting("the camera fit and render") else { return nil }
         guard fitCamera(snapshotter, to: request) else {
             Self.log.info("share-map reject: degenerate camera fit")
             return nil
@@ -251,6 +224,10 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
             Self.log.info("share-map reject: render failed, timed out, mid-render error, or no captured route")
             return nil
         }
+        // From here the pipeline runs to completion even when cancelled. It holds no
+        // Snapshotter past this line (`renderMapRasterWithChrome` releases it on the main
+        // actor before returning), so finishing costs the slot a few hundred ms of bounded
+        // CPU and disk and buys a warm cache entry for the next request.
         guard await passesAcceptance(raster, key: request.cacheKey) else {
             Self.log.info("share-map reject: raster failed the non-blank interior check")
             return nil
@@ -269,6 +246,8 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
             return nil
         }
 
+        // Not cancellation-gated, per the spec: "only accepted rasters; not guarded on
+        // cancellation — an accepted raster is worth keeping" (§step 7).
         await persist(composited, key: request.cacheKey)
         Self.log.info("share-map accepted and cached")
         return composited
@@ -279,25 +258,42 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
     /// (the Home-gate shape). Never also touches `styleJSON`/`styleURI`: a second load
     /// parks in `pendingCompletions` and can hang.
     private func loadStyle(_ style: MapboxMaps.MapStyle, into snapshotter: Snapshotter) async -> Bool {
-        let outcome: StyleLoadOutcome = await withCheckedContinuation { cont in
-            let done = OSAllocatedUnfairLock(initialState: false)
-            @Sendable func finishOnce(_ value: StyleLoadOutcome) {
-                done.withLock { resumed in
-                    if !resumed { resumed = true; cont.resume(returning: value) }
+        let latch = ResolveOnceLatch<StyleLoadOutcome>()
+        let outcome = await withTaskCancellationHandler {
+            await withCheckedContinuation { (cont: CheckedContinuation<StyleLoadOutcome, Never>) in
+                latch.attach(cont)
+                snapshotter.load(mapStyle: style) { @Sendable error in
+                    latch.resolve(error == nil ? .loaded : .failed)   // non-nil load error → reject
                 }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { latch.resolve(.timedOut) }
             }
-            snapshotter.load(mapStyle: style) { @Sendable error in
-                finishOnce(error == nil ? .loaded : .failed)   // non-nil load error → reject
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { finishOnce(.timedOut) }
+        } onCancel: {
+            // Reversal of plan erratum (a): the watchdog now cancels rather than
+            // abandoning, and without this the cancel would sit behind the 4 s belt with
+            // the slot still held. Nothing to tear down here — a parked `load` completion
+            // is harmless once the snapshotter is released.
+            latch.resolve(.cancelled)
         }
+        // Each arm logs its own reason. A nil from this pipeline is invisible in the UI by
+        // design, so a reject that cannot be told apart from a hang costs a field
+        // diagnosis — which is why `.cancelled` is a case of its own rather than folded
+        // into `.failed`.
         switch outcome {
-        case .loaded: return true
-        case .failed: return false
+        case .loaded:
+            return true
+        case .failed:
+            Self.log.info("share-map reject: style load returned an error")
+            return false
+        case .cancelled:
+            Self.log.info("share-map reject: style load cancelled by the slot watchdog")
+            return false
         // Belt timeout: the completion may be parked while the style actually loaded —
         // consult `isStyleLoaded` before rejecting (spec step 3). Legal here: this method
         // is back on the main actor after the await.
-        case .timedOut: return snapshotter.isStyleLoaded
+        case .timedOut:
+            let loaded = snapshotter.isStyleLoaded
+            if !loaded { Self.log.info("share-map reject: style load timed out at the 4 s belt") }
+            return loaded
         }
     }
 
@@ -332,22 +328,43 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
     private func renderMapRasterWithChrome(
         _ snapshotter: Snapshotter, request: ShareMapRequest, flags: MapLoadErrorFlags
     ) async -> (raster: UIImage, runs: [[CGPoint]])? {
+        // Load-bearing for the cancellation arm below, not decoration. `onCancel` resolves
+        // the same latch `store` feeds, and the only thing keeping it from resolving
+        // BEFORE `store` — a permanent suspend — is that an already-cancelled `onCancel`
+        // runs synchronously on the cancelling thread, that thread is main because this
+        // method is main-actor, and the `DispatchQueue.main.async` hop therefore cannot be
+        // dequeued until the synchronous store-then-start below has finished. Make this
+        // method `nonisolated` and that chain breaks silently.
+        MainActor.assertIsolated()
         let box = SnapshotBox()
-        let raster: UIImage? = await withCheckedContinuation { cont in
-            box.store(snapshotter: snapshotter, continuation: cont)
-            snapshotter.start(
-                overlayHandler: { @Sendable overlay in
-                    // projectedRuns MUST be `nonisolated static func` (default isolation would
-                    // make it @MainActor and this call a compile error).
-                    box.capture(Self.projectedRuns(request.route.segments, overlay.pointForCoordinate))
-                },
-                completion: { @Sendable result in
-                    box.finish(with: (try? result.get()))
-                })
-            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
-                // Cancel BEFORE the latch resolves-and-releases: finish() first would let the
-                // ref go before cancel() ran (rev 1's bug: cancel() was a guaranteed no-op).
-                box.snapshotterIfUnfinished()?.cancel()   // main thread; may itself fire completion
+        let raster: UIImage? = await withTaskCancellationHandler {
+            await withCheckedContinuation { cont in
+                box.store(snapshotter: snapshotter, continuation: cont)
+                snapshotter.start(
+                    overlayHandler: { @Sendable overlay in
+                        // projectedRuns MUST be `nonisolated static func` (default isolation would
+                        // make it @MainActor and this call a compile error).
+                        box.capture(Self.projectedRuns(request.route.segments, overlay.pointForCoordinate))
+                    },
+                    completion: { @Sendable result in
+                        box.finish(with: (try? result.get()))
+                    })
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
+                    // Cancel BEFORE the latch resolves-and-releases: finish() first would let the
+                    // ref go before cancel() ran (rev 1's bug: cancel() was a guaranteed no-op).
+                    box.snapshotterIfUnfinished()?.cancel()   // main thread; may itself fire completion
+                    box.finish(with: nil)
+                }
+            }
+        } onCancel: {
+            // The 6 s belt's teardown, run early — same two calls in the same
+            // cancel-before-resolve order. Hopped to main for two reasons: `Snapshotter.cancel()`
+            // is main-thread-only and `onCancel` runs on whichever thread cancelled the task,
+            // and the hop puts this strictly after the synchronous store-then-start above.
+            // Without that ordering an already-cancelled task would resolve the latch before
+            // `store` handed it a continuation — the wedge SnapshotBox.finish asserts on.
+            DispatchQueue.main.async {
+                box.snapshotterIfUnfinished()?.cancel()
                 box.finish(with: nil)
             }
         }
