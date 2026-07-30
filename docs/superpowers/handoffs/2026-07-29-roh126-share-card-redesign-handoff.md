@@ -63,11 +63,33 @@ button). Two defects, reported by Andrew:
    prefetch the raster at ride end; hero 48 fits (44 was unforced); stats numerals
    stay Saira; upgrade swap must never nil a working shareImage; single-flight the
    pipeline; layout budget enforced as a package test, not a preview.
-5. **Spec revision 3 written and committed** — adopts all of the above.
-6. **Adversarial spec review, round 3 (delta verification, 2 reviewers) — IN FLIGHT
-   when this was last updated.** This is the loop's third and final iteration; if it
-   returns REVISE on anything structural, surface to Andrew rather than iterating
-   further.
+5. ~~Spec rounds 3/4~~ — spec converged at **revision 4** (round-3 delta returned
+   minimal mechanical fixes, adopted verbatim; the loop's 3-iteration cap was reached
+   and convergence was called by the session — Andrew/Rohun can overrule at PR).
+6. ~~Plan~~ — written, adversarially reviewed twice (rev 2 after skeptic+architecture,
+   rev 3 after a delta re-review that REPRODUCED a livelock in rev 2's coordinator and
+   two MainActor-inference compile breaks). Plan is at
+   `docs/superpowers/plans/2026-07-29-roh126-share-card-redesign.md`, revision 3, with
+   three recorded spec errata in its header.
+7. **Implementation (subagent-driven, two-stage review per group) — largely landed:**
+   - Tasks 1–6 (AuraKit kernels): committed, spec-reviewed with two kill-verified fix
+     loops, quality-**approved**, plus a polish commit (throwing unwraps, internal
+     gridSize). 47 kernel tests green.
+   - Tasks 7–9 (card view, file store, renderer): committed, spec review ✅ with
+     product findings folded into the Task 11 batch.
+   - Task 10 (ShareMapSnapshotter): committed (all normative shapes verbatim);
+     **adversarial architecture review of the landed code IN FLIGHT**.
+   - Tasks 11–12 (flow + wiring + prefetch + fold-ins): committed with two documented
+     deviations (ShareMapRasterProviding refines Sendable — required for the detached
+     prefetch; fold-in A void distribution reinterpreted); **spec review IN FLIGHT**.
+   - Package.resolved churn trap fixed at the root (branch now carries main's slim
+     resolution, which is what swift test regenerates).
+8. Remaining: reconcile the two in-flight reviews → Task 13 full gate → Task 14
+   simulator verification (golden-ride harness; checklist in the plan, including the
+   share-before-upgrade, cache-hit second open, offline-fallback, three styles, seam
+   and slack eyeballs) → whole-branch review on the most capable model → PR
+   (humanizer body, screenshots, time-to-upgrade, plan errata + deviations) → ROH-126
+   to In Review, Rohun reviews.
 5. `superpowers:writing-plans` → bite-sized TDD plan.
 6. Adversarial plan review (2+ reviewers, refuting stance). Fix before executing.
 7. `superpowers:subagent-driven-development` — fresh implementer + reviewer per task.
