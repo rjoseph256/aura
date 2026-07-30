@@ -6,6 +6,11 @@ import CoreText
 /// bundled as test resources — an actual CoreText measurement, not arithmetic over the
 /// spec's own constants (spec ROH-126 rev 4, §Layout).
 final class ShareCardLayoutTests: XCTestCase {
+    /// Measured ceiling for the context row, which is SF (system) at caption/Large: a
+    /// 16.0 pt measured line box plus slack (plan erratum (c)). Measured once rather
+    /// than shipping an SF copy into test resources; both band-budget tests share it.
+    private static let contextCeiling: CGFloat = 16.5
+
     private func lineBox(fontResource: String, size: CGFloat) throws -> CGFloat {
         let url = try XCTUnwrap(Bundle.module.url(forResource: fontResource, withExtension: "ttf"))
         let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor]
@@ -25,10 +30,7 @@ final class ShareCardLayoutTests: XCTestCase {
     func testBandBudgetFitsWithMeasuredSairaLineBoxes() throws {
         let hero = try lineBox(fontResource: "SairaCondensed-Bold", size: ShareCardLayout.heroPointSize)
         let stats = try lineBox(fontResource: "SairaCondensed-SemiBold", size: ShareCardLayout.statsValuePointSize)
-        // Context row is SF (system); its measured box is a 16.0 pt line at caption/Large.
-        // Use a conservative 16.5 rather than shipping an SF copy into test resources.
-        let contextCeiling: CGFloat = 16.5
-        let total = contextCeiling + ShareCardLayout.gapXS + hero + ShareCardLayout.gapSM
+        let total = Self.contextCeiling + ShareCardLayout.gapXS + hero + ShareCardLayout.gapSM
             + ShareCardLayout.sparklineHeight + ShareCardLayout.gapSM + stats
         XCTAssertLessThanOrEqual(total, ShareCardLayout.bandContentHeight,
                                  "band content \(total) exceeds \(ShareCardLayout.bandContentHeight)")
@@ -42,7 +44,7 @@ final class ShareCardLayoutTests: XCTestCase {
     func testNoElevationVariantFits() throws {
         let hero = try lineBox(fontResource: "SairaCondensed-Bold", size: ShareCardLayout.heroPointSize)
         let stats = try lineBox(fontResource: "SairaCondensed-SemiBold", size: ShareCardLayout.statsValuePointSize)
-        let total = 16.5 + ShareCardLayout.gapXS + hero + ShareCardLayout.gapSM + stats
+        let total = Self.contextCeiling + ShareCardLayout.gapXS + hero + ShareCardLayout.gapSM + stats
         XCTAssertLessThanOrEqual(total, ShareCardLayout.bandContentHeight)
     }
 

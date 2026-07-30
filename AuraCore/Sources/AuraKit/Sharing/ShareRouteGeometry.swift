@@ -19,16 +19,29 @@ public enum ShareRouteGeometry {
 
     public static func prepare(segments: [[Coordinate]]) -> Prepared? {
         let clean = segments
-            .map { $0.filter { $0.latitude.isFinite && $0.longitude.isFinite } }
+            .map { $0.filter(isValid) }
             .filter { $0.count > 1 }
         let all = clean.flatMap { $0 }
         guard all.count >= 2 else { return nil }
+        // Defense-in-depth pair: the distinct-quantized guard names the "same point in
+        // content-identity terms" case, but the span guard subsumes it while the quantum
+        // (1e-5°) stays below `minimumSpanDegrees` — it only bites on its own if that
+        // constant ever shrinks.
         guard Set(all.map(quantized)).count >= 2 else { return nil }
         let lats = all.map(\.latitude), lons = all.map(\.longitude)
         guard (lats.max()! - lats.min()!) > minimumSpanDegrees
                 || (lons.max()! - lons.min()!) > minimumSpanDegrees else { return nil }
         let decimated = clean.map(decimate)
         return Prepared(segments: decimated, contentHash: contentHash(of: decimated))
+    }
+
+    /// Finite AND in-range (|lat| <= 90, |lon| <= 180) — the Foundation-only equivalent
+    /// of the `CLLocationCoordinate2DIsValid` check `WorkoutRouteLocations` applies.
+    /// The range check is load-bearing, not cosmetic: quantizing a huge finite double
+    /// (e.g. 1e14) traps on the Int conversion in `quantized`.
+    private static func isValid(_ c: Coordinate) -> Bool {
+        c.latitude.isFinite && c.longitude.isFinite
+            && abs(c.latitude) <= 90 && abs(c.longitude) <= 180
     }
 
     /// Coordinate identity at ~1 m resolution. Numeric on purpose: distinctness and the
@@ -58,8 +71,8 @@ public enum ShareRouteGeometry {
         return keep.sorted().map { points[$0] }
     }
 
-    /// FNV-1a (same constants as `TerrainSnapshotRequest.fnv1a`) fed the quantized
-    /// coordinate ints byte-by-byte — no intermediate string is ever built.
+    /// FNV-1a fed the quantized coordinate ints byte-by-byte — no intermediate string
+    /// is ever built.
     private static func contentHash(of segments: [[Coordinate]]) -> UInt32 {
         var hash: UInt32 = 2_166_136_261
         func feed(_ value: Int) {

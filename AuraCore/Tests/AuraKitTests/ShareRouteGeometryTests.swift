@@ -33,6 +33,46 @@ final class ShareRouteGeometryTests: XCTestCase {
         XCTAssertTrue(prepared.segments.allSatisfy { $0.allSatisfy { $0.latitude.isFinite && $0.longitude.isFinite } })
     }
 
+    /// Mirrors `WorkoutRouteLocationsTests.dropsInvalidCoordinates`: finite-but-out-of-range
+    /// coordinates (|lat| > 90, |lon| > 180) are hygiene failures too, not just NaN/inf.
+    func testDropsOutOfRangeCoordinatesAndKeepsRest() {
+        var pts = line(20)
+        pts.insert(Coordinate(latitude: 200, longitude: 999), at: 5)
+        let prepared = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [pts]))
+        XCTAssertEqual(prepared.segments[0], line(20))
+    }
+
+    func testAllInvalidCoordinatesYieldNil() {
+        // Includes a huge finite value: without the range check this input doesn't just
+        // slip through, it traps on Int conversion inside quantization.
+        let junk = [Coordinate(latitude: 200, longitude: 999),
+                    Coordinate(latitude: -90.0001, longitude: 180.0001),
+                    Coordinate(latitude: 1e14, longitude: 0),
+                    Coordinate(latitude: .nan, longitude: 0)]
+        XCTAssertNil(ShareRouteGeometry.prepare(segments: [junk]))
+    }
+
+    /// Pins the span-epsilon guard: two points DISTINCT at 1e5 quantization (5 quanta
+    /// apart, so the distinct-count guard passes) whose bounding span (~0.00005°, ~5.5 m)
+    /// is below `minimumSpanDegrees` — only the span guard can reject this.
+    func testRejectsSubEpsilonSpanEvenWithDistinctPoints() {
+        let pts = [Coordinate(latitude: 40.44, longitude: -79.99),
+                   Coordinate(latitude: 40.44005, longitude: -79.99)]
+        XCTAssertNil(ShareRouteGeometry.prepare(segments: [pts]))
+    }
+
+    /// Two coordinates that differ by less than the quantization quantum (1e-7° << 1e-5°)
+    /// are the same point in content-identity terms: prepare must return nil even though
+    /// the raw doubles are not identical. The distinct-quantized guard names this case,
+    /// but the span guard mathematically subsumes it (<2 distinct quantized points ⇒ raw
+    /// span < 1e-5° < minimumSpanDegrees), so this test goes red only when BOTH guards
+    /// are deleted — verified; no input can isolate the distinct guard alone.
+    func testRejectsPointsDistinctOnlyBelowQuantum() {
+        let pts = [Coordinate(latitude: 40.44, longitude: -79.99),
+                   Coordinate(latitude: 40.44 + 1e-7, longitude: -79.99)]
+        XCTAssertNil(ShareRouteGeometry.prepare(segments: [pts]))
+    }
+
     func testDecimationCapsAndKeepsExtremes() {
         let pts = loop(5000)
         let prepared = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [pts]))
@@ -52,8 +92,27 @@ final class ShareRouteGeometryTests: XCTestCase {
     }
 
     func testSegmentsStaySeparate() {
-        let prepared = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [line(30), line(30, lat0: 40.5)]))
+        let input = [line(30), line(30, lat0: 40.5)]
+        let prepared = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: input))
         XCTAssertEqual(prepared.segments.count, 2)
+        // Each output segment must be an order-preserving subsequence of ITS OWN input
+        // segment — no points invented, reordered, or leaked across segments.
+        for (out, source) in zip(prepared.segments, input) {
+            XCTAssertTrue(isSubsequence(out, of: source),
+                          "output segment contains points not drawn in order from its input segment")
+        }
+    }
+
+    private func isSubsequence(_ sub: [Coordinate], of full: [Coordinate]) -> Bool {
+        var iterator = full.makeIterator()
+        for point in sub {
+            var found = false
+            while let candidate = iterator.next() {
+                if candidate == point { found = true; break }
+            }
+            if !found { return false }
+        }
+        return true
     }
 
     func testContentHashStableAndSensitive() {
@@ -62,6 +121,22 @@ final class ShareRouteGeometryTests: XCTestCase {
         XCTAssertEqual(a.contentHash, b.contentHash)
         let c = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [line(100, lat0: 40.45)]))
         XCTAssertNotEqual(a.contentHash, c.contentHash)
+    }
+
+    /// Pins the 1e5 quantization scale of the content hash: a ~1.5e-5° move (~1.5 m,
+    /// larger than the 1e-5° quantum) must change the hash; a 1e-7° jitter (GPS noise,
+    /// far below the quantum) must not.
+    func testQuantizationScaleBoundsHashSensitivity() {
+        let base = line(100)
+        var moved = base
+        moved[50] = Coordinate(latitude: moved[50].latitude + 1.5e-5, longitude: moved[50].longitude)
+        var jittered = base
+        jittered[50] = Coordinate(latitude: jittered[50].latitude + 1e-7, longitude: jittered[50].longitude)
+        let a = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [base]))
+        let b = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [moved]))
+        let c = try! XCTUnwrap(ShareRouteGeometry.prepare(segments: [jittered]))
+        XCTAssertNotEqual(a.contentHash, b.contentHash, "a super-quantum move must change the hash")
+        XCTAssertEqual(a.contentHash, c.contentHash, "a sub-quantum jitter must not change the hash")
     }
 
     func testContentHashSensitiveToSegmentBoundaries() {
