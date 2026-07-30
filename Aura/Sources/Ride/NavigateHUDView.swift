@@ -229,18 +229,22 @@ struct NavigateHUDView: View {
             guidance.units = settings.units
             guidance.start(route: route)
         }
-        .onChange(of: coordinator.isRecording) { _, recording in
-            // Stays true across a pause — a paused ride is an active ride, and this flag is
+        .onChange(of: coordinator.isRecording) { _, _ in
+            // Stays non-nil across a pause — a paused ride is an active ride, and this id is
             // the only thing stopping a deep link from tearing the HUD down into `cancel()`,
             // which does not save (spec D6/D7).
-            router.isRideActive = recording
+            router.activeRideID = coordinator.activeRideID
         }
         .onChange(of: coordinator.finishedRide) { _, ride in
             guard let ride else { return }
             // Refresh widgets BEFORE navigating: showRideSummary collapses the path and tears
             // this HUD down. saveFailed is already set by finish() (before finishedRide), so it
             // reads correctly here. (ROH-85)
-            WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+            // `activeRideID: nil` rather than `coordinator.activeRideID`: finishedRide fires after
+            // `recorder.end()` dropped `isRecording`, so no ride is being recorded and this ride
+            // belongs on the glance surfaces again. (Not about `checkpointedAt` — a failed save
+            // leaves that set.)
+            WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil)
             router.showRideSummary(ride, saveFailed: coordinator.saveFailed)
         }
         .onChange(of: settings.units) { _, newUnits in
@@ -250,7 +254,7 @@ struct NavigateHUDView: View {
             guidance.hapticsEnabled = on
         }
         .onDisappear {
-            router.isRideActive = false
+            router.activeRideID = nil
             teardownGuidance()
             coordinator.cancel()
         }

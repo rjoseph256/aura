@@ -7,8 +7,8 @@ import SwiftData
 ///
 /// **Frozen.** V3, V4 and V5 all list this exact class, so adding a property here would
 /// retroactively rehash four schema versions and leave an on-disk V5 store matching none of
-/// them. The current shape is `RideSchemaV6.RideRecord`, which redeclares it; the `RideRecord`
-/// typealias moved there with it.
+/// them. The current shape is `RideSchemaV7.RideRecord`, at the end of a redeclaration chain
+/// (V6 redeclares this one, V7 redeclares V6's) that the `RideRecord` typealias follows.
 public enum RideSchemaV2: VersionedSchema {
     public static let versionIdentifier = Schema.Version(2, 0, 0)
     public static var models: [any PersistentModel.Type] { [RideRecord.self] }

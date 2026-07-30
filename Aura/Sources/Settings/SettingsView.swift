@@ -118,11 +118,18 @@ struct SettingsView: View {
         .scrollContentBackground(.hidden)
         .background(AuraTheme.background.ignoresSafeArea())
         .navigationTitle("Settings")
+        // Settings is only reachable by pushing from Home's control cluster or the first-run
+        // CTA, and Home is buried beneath whatever ride HUD is on the shared NavigationStack
+        // while a ride records; the aura://settings deep link is also dropped while
+        // router.isRideActive. So this screen cannot be on screen with a ride in flight, and
+        // activeRideID is always nil here — investigated for ROH-107 Task 4, not assumed.
+        // (The `.disabled(router.isRideActive)` guards above on sign-out/delete-account are
+        // therefore currently unreachable too; left alone rather than removed in this commit.)
         .onChange(of: settings.weeklyGoalMeters) { _, _ in
-            WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+            WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil)
         }
         .onChange(of: settings.units) { _, _ in
-            WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+            WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil)
         }
     }
 

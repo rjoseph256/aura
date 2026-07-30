@@ -108,3 +108,14 @@ struct RideMapperStoreRoundTripTests {
         #expect(back.flattenedPoints == segmentA + segmentB, "and every point survives, in order")
     }
 }
+
+@Test func checkpointedAtRoundTripsThroughTheRecordAndTheSummary() throws {
+    let stamp = Date(timeIntervalSince1970: 1_600)
+    let ride = Ride(kind: .freeRide, startedAt: Date(timeIntervalSince1970: 1_000),
+                    endedAt: stamp, track: [], stats: nil, pausedSeconds: 0,
+                    checkpointedAt: stamp, routeId: nil, destinationPlaceId: nil)
+    let record = try RideMapper.record(from: ride)
+    #expect(record.checkpointedAt == stamp)
+    #expect(try RideMapper.ride(from: record).checkpointedAt == stamp)
+    #expect(RideMapper.summary(from: record).checkpointedAt == stamp)
+}

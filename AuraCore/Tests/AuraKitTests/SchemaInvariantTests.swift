@@ -9,7 +9,7 @@ import AuraCore
 ///
 /// `.swiftDataSerialized` even though this suite builds no container: `Schema(versionedSchema:)`
 /// materializes entity descriptions, and CoreData caches those process-globally by entity name.
-/// From V6 on this suite materializes `RideSchemaV6.RideRecord` while the migration suites hold
+/// From V6 on this suite materializes `RideSchemaV7.RideRecord` while the migration suites hold
 /// `RideSchemaV2.RideRecord` — the same name, a different class, which is the ROH-65 hazard. It
 /// crashed CI (a malloc abort, in an unrelated suite) before this trait was added; the gate's
 /// own grep does not find this file, because there is no `ModelContainer(` in it.
@@ -17,8 +17,8 @@ import AuraCore
 struct SchemaInvariantTests {
     private var entities: [Schema.Entity] {
         // Always guard the CURRENT schema so every persisted model — including
-        // RideRecord.segmentsData (V6) — is machine-checked for CloudKit compatibility.
-        Schema(versionedSchema: RideSchemaV6.self).entities
+        // RideRecord.checkpointedAt (V7) — is machine-checked for CloudKit compatibility.
+        Schema(versionedSchema: RideSchemaV7.self).entities
     }
 
     @Test func everyAttributeIsOptionalOrDefaulted() {
@@ -58,6 +58,15 @@ struct SchemaInvariantTests {
         #expect(segments?.options.contains(.externalStorage) == true)
         #expect(ride?.attributes.first { $0.name == "trackData" }?
             .options.contains(.externalStorage) == true)
+    }
+
+    /// `checkpointedAt` must be optional: nil is how "the rider ended this ride" is
+    /// representable, and CloudKit requires optionality or a default regardless.
+    @Test func checkpointedAtIsOptional() {
+        let ride = entities.first { $0.name == "RideRecord" }
+        let attribute = ride?.attributes.first { $0.name == "checkpointedAt" }
+        #expect(attribute != nil, "V7 must carry checkpointedAt")
+        #expect(attribute?.isOptional == true)
     }
 
     @Test func resurfaceDefaultsFalse() {

@@ -191,16 +191,20 @@ struct RideHUDView: View {
                 discoverySink: store)
             if outcome == .permissionDenied { showPermission = true }
         }
-        .onChange(of: coordinator.isRecording) { _, recording in
-            router.isRideActive = recording
+        .onChange(of: coordinator.isRecording) { _, _ in
+            router.activeRideID = coordinator.activeRideID
         }
         .onChange(of: coordinator.finishedRide) { _, ride in
             guard let ride else { return }
-            WidgetRefresh.reload(rideStore: rideStore, settings: settings)
+            // `activeRideID: nil` rather than `coordinator.activeRideID`: finishedRide fires after
+            // `recorder.end()` dropped `isRecording`, so no ride is being recorded and this ride
+            // belongs on the glance surfaces again. (Not about `checkpointedAt` — a failed save
+            // leaves that set.)
+            WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil)
             router.showRideSummary(ride, saveFailed: coordinator.saveFailed)
         }
         .onDisappear {
-            router.isRideActive = false
+            router.activeRideID = nil
             coordinator.cancel()
         }
         .toolbar(.hidden, for: .navigationBar)

@@ -5,6 +5,11 @@ import AuraCore
 /// V6 adds `segmentsData` — the ride's track split at every pause — and `pausedSeconds` to
 /// `RideRecord`.
 ///
+/// **Frozen.** V7 redeclares `RideRecord` to add `checkpointedAt`, so adding a property here
+/// would retroactively rehash V6 and leave an on-disk V6 store matching no schema in the plan —
+/// the same trap this file's own comment below describes for V2. The current shape is
+/// `RideSchemaV7.RideRecord`, which is where the `RideRecord` typealias now lives.
+///
 /// **Redeclared, not mutated.** `RideRecord` was a typealias to `RideSchemaV2.RideRecord`, and
 /// V3, V4 and V5 all list that same class. Adding a property to it would retroactively change
 /// the entity hash of V2 through V5, so a store on disk stamped V5 would match no schema in
@@ -19,12 +24,12 @@ import AuraCore
 /// relationships — machine-checked by `SchemaInvariantTests`. Date defaults are the fixed
 /// sentinel, per the V2 comment.
 ///
-/// **No "unfinished ride" flag (ROH-107).** Considered here and deliberately left out. The
-/// production schema is immutable once promoted, ROH-107 has not settled what that state
-/// stores, and it may need no column at all: `RideSummary.endedAt` is already `Date?` and
-/// spec D5 already describes a statless treatment for a nil `endedAt`. What blocks that today
-/// is that Pass 2's checkpoint stamps `endedAt` *because* no surface reads it — an app-side
-/// problem, not a schema one. See decision D-g in the Pass 3 plan.
+/// **No "unfinished ride" flag *at this version*.** It was considered here and deferred, on the
+/// grounds that a nil `endedAt` might carry the state without a column. ROH-107 then found that
+/// a nil cannot distinguish a ride being recorded on another device from an abandoned one, and
+/// cannot say what the recording covers — so `checkpointedAt` landed in V7, one version later.
+/// Read that as the record of why the flag is not in V6, not as a claim that Aura has no such
+/// flag: see `RideSchemaV7` and its spec note.
 public enum RideSchemaV6: VersionedSchema {
     public static let versionIdentifier = Schema.Version(6, 0, 0)
     public static var models: [any PersistentModel.Type] {
@@ -86,7 +91,3 @@ public enum RideSchemaV6: VersionedSchema {
         }
     }
 }
-
-/// The rest of AuraKit refers to the current model as `RideRecord`. Moved here from
-/// `RideSchemaV2`, which keeps its own frozen class for the V2–V5 stages.
-public typealias RideRecord = RideSchemaV6.RideRecord

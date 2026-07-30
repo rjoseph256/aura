@@ -41,7 +41,7 @@ private struct LastRideView: View {
                     RouteThumbnail(coordinates: ride.thumbnailCoordinates).frame(height: 54)
                     Spacer(minLength: 0)
                     distanceHero(ride)
-                    Text("\(ride.startedAt.widgetWeekday) · \(ride.kindCaption)")
+                    secondaryLine(ride, "\(ride.startedAt.widgetWeekday) · \(ride.kindCaption)")
                         .font(.system(size: 11)).foregroundStyle(AuraTheme.textSecondary)
                         .lineLimit(1).minimumScaleFactor(0.8)
                 }
@@ -63,7 +63,7 @@ private struct LastRideView: View {
                         RouteThumbnail(coordinates: ride.thumbnailCoordinates)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         distanceHero(ride)
-                        Text("Last ride · \(ride.startedAt.widgetWeekday)")
+                        secondaryLine(ride, "Last ride · \(ride.startedAt.widgetWeekday)")
                             .font(.system(size: 11)).foregroundStyle(AuraTheme.textSecondary)
                             .lineLimit(1)
                     }
@@ -94,7 +94,8 @@ private struct LastRideView: View {
                     RouteThumbnail(coordinates: ride.thumbnailCoordinates, lineColor: .primary)
                         .frame(width: 34, height: 34)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Last ride · \(ride.startedAt.widgetWeekday)").font(.caption)
+                        secondaryLine(ride, "Last ride · \(ride.startedAt.widgetWeekday)")
+                            .font(.caption)
                         Text(ride.hasStats ? "\(fmt.distanceValue(ride.distanceMeters)) \(fmt.distanceUnit)" : "—")
                             .font(.headline)
                         if ride.hasStats {
@@ -111,6 +112,21 @@ private struct LastRideView: View {
         .containerBackground(.clear, for: .widget)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    /// The low-value caption line each family already spends — "Tue · Explore", "Last ride ·
+    /// Tue" — swapped for the no-end-recorded marker when there is one. The marker is rendered,
+    /// not merely spoken: a sighted rider glancing at the Lock Screen must not see a truncated
+    /// ride looking complete while a VoiceOver user is told the truth. Reusing the line costs
+    /// zero height and truncates no stat, and the marker carries a glyph and words rather than a
+    /// colour, so it survives the accessory families' vibrant/accented rendering.
+    @ViewBuilder
+    private func secondaryLine(_ ride: WidgetSnapshot.LastRide, _ caption: String) -> some View {
+        if ride.isUnfinished {
+            UnfinishedRideBadge(checkpointedAt: ride.checkpointedAt, style: .glance)
+        } else {
+            Text(caption)
+        }
     }
 
     private func distanceHero(_ ride: WidgetSnapshot.LastRide) -> some View {
@@ -139,10 +155,16 @@ private struct LastRideView: View {
 
     private var accessibilityLabel: String {
         guard let ride else { return "No rides yet. Start a ride." }
-        guard ride.hasStats else { return "Last ride, \(ride.startedAt.widgetWeekday)" }
+        // The whole widget is one element, so the marker the view renders has to be repeated
+        // here or it never reaches VoiceOver.
+        let marker = ride.isUnfinished
+            ? ". " + UnfinishedRideCopy.accessibilityLabel(checkpointedAt: ride.checkpointedAt)
+            : ""
+        guard ride.hasStats else { return "Last ride, \(ride.startedAt.widgetWeekday)" + marker }
         return "Last ride, \(ride.startedAt.widgetWeekday), "
             + "\(fmt.distanceValue(ride.distanceMeters)) \(fmt.distanceUnit), "
             + "moving time \(ride.movingTimeText), "
             + "\(fmt.elevationValue(ride.elevationGainMeters)) \(fmt.elevationUnit) climb"
+            + marker
     }
 }

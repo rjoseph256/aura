@@ -32,4 +32,31 @@ struct RideStoreTests {
         try store.delete(id: r.id)
         #expect(try store.allRides().isEmpty)
     }
+
+    /// `RideStore.save`'s update branch is a hand-written field copy. Pass 3 shipped
+    /// `segmentsData` and nearly missed this; a missed copy here means `finish()` never clears
+    /// the marker and every paused ride stays unfinished forever.
+    @Test func savingOverACheckpointClearsCheckpointedAt() throws {
+        let store = try RideStore.inMemory()
+        let id = UUID()
+        let start = Date(timeIntervalSince1970: 1_000)
+        let checkpoint = Ride(id: id, kind: .freeRide, startedAt: start,
+                              endedAt: Date(timeIntervalSince1970: 1_600),
+                              track: [], stats: nil, pausedSeconds: 0,
+                              checkpointedAt: Date(timeIntervalSince1970: 1_600),
+                              routeId: nil, destinationPlaceId: nil)
+        try store.save(checkpoint)
+        #expect(try #require(store.summaries().first).checkpointedAt != nil)
+
+        let finished = Ride(id: id, kind: .freeRide, startedAt: start,
+                            endedAt: Date(timeIntervalSince1970: 2_000),
+                            track: [], stats: nil, pausedSeconds: 0,
+                            checkpointedAt: nil,
+                            routeId: nil, destinationPlaceId: nil)
+        try store.save(finished)
+
+        let rows = try store.summaries()
+        #expect(rows.count == 1, "the upsert must update, not duplicate")
+        #expect(rows[0].checkpointedAt == nil, "the update branch dropped checkpointedAt")
+    }
 }

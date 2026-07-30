@@ -21,9 +21,14 @@ struct ShareCardContentTests {
                    elevation: elevation, timestamp: startedAt)
     }
 
+    /// A **finished** ride. `endedAt` is a real stamp deliberately: it used to be nil, and the
+    /// card's unfinished note now gates on `Ride.isUnfinished`, so a nil here would make every
+    /// case in this file read as unfinished. A fixture must not be the reason a production
+    /// predicate is narrowed.
     private func ride(track: [TrackPoint] = [], stats: RideStats? = nil,
                       destination: String? = nil) -> Ride {
-        Ride(kind: .freeRide, startedAt: startedAt, endedAt: nil, track: track,
+        Ride(kind: .freeRide, startedAt: startedAt,
+             endedAt: startedAt.addingTimeInterval(2_520), track: track,
              stats: stats, destinationName: destination, routeId: nil, destinationPlaceId: nil)
     }
 
@@ -127,6 +132,27 @@ struct ShareCardContentTests {
         #expect(ShareCardContent(ride: ride(stats: stats(), destination: "   "),
                                  units: .imperial).destinationName == nil)
         #expect(ShareCardContent(ride: ride(stats: stats()), units: .imperial).destinationName == nil)
+    }
+
+    /// The card is the only surface other people see, so the marker has to survive the
+    /// projection rather than stopping at the summary sheet — and it has to gate on the same
+    /// predicate that sheet does, since Share is tapped from it. A card that gated on the marker
+    /// alone let a legacy PR #90 row (nil `endedAt`, no marker) be badged in the sheet and posted
+    /// unmarked.
+    @Test func unfinishedReachesTheCardOnTheSamePredicateAsTheSheet() {
+        let stamp = Date(timeIntervalSince1970: 1_750_000_000)
+        let checkpointed = Ride(kind: .freeRide, startedAt: startedAt, endedAt: stamp,
+                                track: [], stats: stats(), checkpointedAt: stamp,
+                                destinationName: nil, routeId: nil, destinationPlaceId: nil)
+        #expect(ShareCardContent(ride: checkpointed, units: .imperial).isUnfinished)
+
+        let legacyDevBuildRow = Ride(kind: .freeRide, startedAt: startedAt, endedAt: nil,
+                                     track: [], stats: stats(), checkpointedAt: nil,
+                                     destinationName: nil, routeId: nil, destinationPlaceId: nil)
+        #expect(ShareCardContent(ride: legacyDevBuildRow, units: .imperial).isUnfinished,
+                "no marker, but no recorded end either — the sheet badges it, so must the card")
+
+        #expect(!ShareCardContent(ride: ride(stats: stats()), units: .imperial).isUnfinished)
     }
 
     @Test func statsNilProducesZeroedStrings() {

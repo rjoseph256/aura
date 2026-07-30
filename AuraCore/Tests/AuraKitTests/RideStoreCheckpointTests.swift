@@ -47,11 +47,13 @@ struct RideStoreCheckpointTests {
                          stats: RideStats(distanceMeters: 10, movingTimeSeconds: 5,
                                           averageSpeedMetersPerSecond: 2,
                                           maxSpeedMetersPerSecond: 3, elevationGainMeters: 1),
+                         checkpointedAt: Date(timeIntervalSince1970: 100),
                          destinationName: "First", routeId: UUID(), destinationPlaceId: UUID())
         try store.save(first)
 
         // Two segments and a non-zero paused total, so the V6 columns differ from the first
         // write too — this is the checkpoint-then-End shape `save`'s doc comment warns about.
+        // `checkpointedAt` goes nil here, as `finish()` clears it — the V7 column.
         let second = Ride(id: id, kind: .navigate, startedAt: Date(timeIntervalSince1970: 500),
                           endedAt: Date(timeIntervalSince1970: 900),
                           segments: [RideSegment(points: [pt(41.0, 500), pt(41.2, 600)]),
@@ -60,6 +62,7 @@ struct RideStoreCheckpointTests {
                                            averageSpeedMetersPerSecond: 6.7,
                                            maxSpeedMetersPerSecond: 12, elevationGainMeters: 45),
                           pausedSeconds: 120,
+                          checkpointedAt: nil,
                           destinationName: "Second", routeId: UUID(),
                           destinationPlaceId: UUID())
         try store.save(second)
@@ -72,6 +75,7 @@ struct RideStoreCheckpointTests {
         #expect(back.flattenedPoints == second.flattenedPoints)
         #expect(back.stats == second.stats)
         #expect(back.pausedSeconds == 120)
+        #expect(back.checkpointedAt == nil, "checkpointedAt is copied on the update path")
         #expect(back.destinationName == "Second")
         #expect(back.routeId == second.routeId)
         #expect(back.destinationPlaceId == second.destinationPlaceId)

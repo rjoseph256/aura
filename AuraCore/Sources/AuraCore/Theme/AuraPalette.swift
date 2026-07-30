@@ -26,6 +26,13 @@ public enum AuraPalette {
     // Cockpit scrim over the map: surface opacity in the non-opaque branch.
     public static let mapScrimOpacity = 0.85
 
+    /// Capsule fill behind the no-end-recorded marker (ROH-107): secondary text at low alpha.
+    /// Deliberately NOT `amber` — amber already carries peer-stopped and `AuraTheme.warning`
+    /// (weak/lost GPS), so a paused ride under a railway bridge would light two amber elements
+    /// meaning different things. Guarded on both the near-black canvas (History, summary sheet)
+    /// and the panel (last-ride card) by `AuraPaletteContrastTests`.
+    public static let unfinishedBadgeFillOpacity = 0.14
+
     // MARK: - Rider identity palette (ROH-72)
     // Muted terrain tones that read as one Aura family on dark terrain, deliberately spanning
     // a wide lightness range so red-green colour-blind riders can still tell them apart.

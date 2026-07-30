@@ -16,29 +16,15 @@ struct LastRideCard: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: AuraTheme.Spacing.lg) {
-                thumbnail
-                    .frame(width: 88, height: 64)
-                    .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.md, style: .continuous))
-
-                VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
-                    Text(title)
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(AuraTheme.textPrimary)
-                        .lineLimit(1)
-                    Text(statsLine)
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(AuraTheme.textSecondary)
-                    Text(relativeDate)
-                        .font(.caption)
-                        .foregroundStyle(AuraTheme.textSecondary)
+            VStack(alignment: .leading, spacing: AuraTheme.Spacing.sm) {
+                cardRow
+                // Full width, under the row rather than inside the text column. That column is
+                // hemmed in by an 88 pt thumbnail and the chevron, and on an iPhone SE at AX5 it
+                // broke the label one syllable per line and pushed the card clean out of the
+                // Home peek. Here it wraps to two lines at worst.
+                if summary.isUnfinished {
+                    UnfinishedRideBadge(checkpointedAt: summary.checkpointedAt)
                 }
-
-                Spacer(minLength: AuraTheme.Spacing.xs)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(AuraTheme.textSecondary)
             }
             .padding(AuraTheme.Spacing.md)
             .background(AuraTheme.surface)
@@ -48,6 +34,33 @@ struct LastRideCard: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityHint("Opens ride history")
+    }
+
+    private var cardRow: some View {
+        HStack(spacing: AuraTheme.Spacing.lg) {
+            thumbnail
+                .frame(width: 88, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.md, style: .continuous))
+
+            VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(AuraTheme.textPrimary)
+                    .lineLimit(1)
+                Text(statsLine)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AuraTheme.textSecondary)
+                Text(relativeDate)
+                    .font(.caption)
+                    .foregroundStyle(AuraTheme.textSecondary)
+            }
+
+            Spacer(minLength: AuraTheme.Spacing.xs)
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AuraTheme.textSecondary)
+        }
     }
 
     // MARK: Thumbnail
