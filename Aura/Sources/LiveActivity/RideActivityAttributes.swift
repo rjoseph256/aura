@@ -31,23 +31,23 @@ public struct RideActivityAttributes: ActivityAttributes {
     /// rule is the whole guarantee (ROH-102 spec D2, invariant 6).
     public struct ContentState: Codable, Hashable, Sendable {
         /// Distance covered so far, in meters.
-        public var distanceMeters: Double
+        public let distanceMeters: Double
         /// Current smoothed speed in meters per second — not the ride average.
-        public var speedMetersPerSecond: Double
+        public let speedMetersPerSecond: Double
         /// Elevation gained so far, in meters.
-        public var elevationGainMeters: Double
+        public let elevationGainMeters: Double
         /// Next-maneuver instruction, e.g. "Right onto Penn Ave". `nil` in free ride, or
         /// before guidance has reported a turn.
-        public var turnInstruction: String?
+        public let turnInstruction: String?
         /// Distance to the next maneuver, in meters. `nil` when there's no active turn.
-        public var turnDistanceMeters: Double?
+        public let turnDistanceMeters: Double?
         /// SF Symbol name for the upcoming maneuver's directional glyph, resolved app-side
         /// via `ManeuverIcon` (so the widget needs no guidance logic). `nil` before a
         /// maneuver / in free ride — the widget falls back to the generic arrow.
-        public var turnGlyphSystemName: String?
+        public let turnGlyphSystemName: String?
         /// What the clock displays. `nil` for an activity started before ROH-102 shipped; every
         /// read site falls back to `attributes.startedAt`, which is the pre-ROH-102 behavior.
-        public var clock: RideActiveClock?
+        public let clock: RideActiveClock?
 
         /// Nothing outside a payload constructs a `ContentState`, so the dedupe's whole
         /// correctness argument — "payload equality implies content equality" — holds for a type

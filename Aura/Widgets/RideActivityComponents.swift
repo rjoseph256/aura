@@ -153,16 +153,29 @@ struct RideStatusPill: View {
 /// `pause.fill` outranks both the maneuver arrow and the bicycle: what the rider needs from a
 /// glance at a paused activity is that it is paused.
 ///
-/// The stale variant exists because `RideStatusPill` is Lock-Screen-only. Without it, a rider in
-/// another app after a jetsam kill sees `pause.fill` beside a still-counting timer indefinitely —
-/// D6's failure on the presentation reached without unlocking. Minimal is a single glyph, so a
-/// glyph is the only channel it has, and it degrades within the same symbol family rather than
-/// switching to a warning glyph: `pause.circle`'s hollow outline reads as the *same* paused state
-/// losing its footing, not as a different (error) state, which a triangle-exclamation glyph would
-/// imply. Solid `pause.fill` is confident, live-and-paused; the outline is that same idea going
-/// quiet. In the minimal presentation, where the glyph carries the whole distinction alone, a
-/// within-family fill/outline contrast reads correctly where a mismatched symbol would not.
-func rideActivityGlyph(nav: Bool, paused: Bool, stale: Bool, turnGlyph: String?) -> String {
+/// Use this overload at every site that wraps the result in `AuraGlyph` — the Lock Screen header,
+/// the Lock Screen navigate turn glyph, and the Dynamic Island's expanded-leading region.
+/// `AuraGlyph` already draws a filled disc with its own stroked circular border and insets the
+/// symbol inside it, so swapping the symbol itself to a `.circle` outline draws a second ring on
+/// top of that enclosure — a donut, not "same state, weakened". These sites also always sit
+/// beside `RideStatusPill`, which already reads `PAUSED · NOT UPDATING` when stale, so the glyph
+/// doesn't need to carry that distinction too — doing so is both redundant and where the donut
+/// looks worst. There is deliberately no `stale` parameter here: paused is `pause.fill`
+/// regardless, so a call site literally cannot pass the wrong thing.
+func rideActivityGlyph(nav: Bool, paused: Bool, turnGlyph: String?) -> String {
+    if paused { return "pause.fill" }
+    return nav ? (turnGlyph ?? "arrow.turn.up.right") : "bicycle"
+}
+
+/// The bare-glyph counterpart for the Dynamic Island's `compactLeading` and `minimal`
+/// presentations, which render a raw `Image(systemName:)` with no `AuraGlyph` enclosure and no
+/// `RideStatusPill` beside them — the glyph is their *only* channel, so it is the only place
+/// staleness may still degrade the glyph itself. It degrades within the same symbol family rather
+/// than switching to a warning glyph: `pause.circle`'s hollow outline reads as the *same* paused
+/// state losing its footing, not as a different (error) state, which a triangle-exclamation glyph
+/// would imply. Solid `pause.fill` is confident, live-and-paused; the outline is that same idea
+/// going quiet.
+func rideActivityBareGlyph(nav: Bool, paused: Bool, stale: Bool, turnGlyph: String?) -> String {
     if paused { return stale ? "pause.circle" : "pause.fill" }
     return nav ? (turnGlyph ?? "arrow.turn.up.right") : "bicycle"
 }

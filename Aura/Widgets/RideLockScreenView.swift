@@ -41,7 +41,7 @@ struct RideLockScreenView: View {
     private var freeRide: some View {
         VStack(alignment: .leading, spacing: 12) {
             header(title: "Explore", glyph: rideActivityGlyph(nav: false, paused: state.isPaused,
-                                                               stale: context.isStale, turnGlyph: nil),
+                                                               turnGlyph: nil),
                    imminent: false)
 
             HStack(alignment: .top, spacing: 12) {
@@ -59,7 +59,7 @@ struct RideLockScreenView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(state.isPaused ? "Explore paused" : "Explore in progress")
+        .accessibilityLabel(freeRideAccessibilityLabel)
     }
 
     // MARK: Navigate
@@ -70,7 +70,6 @@ struct RideLockScreenView: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 AuraGlyph(systemName: rideActivityGlyph(nav: true, paused: state.isPaused,
-                                                        stale: context.isStale,
                                                         turnGlyph: state.turnGlyphSystemName),
                           imminent: imminent, size: 38)
                 VStack(alignment: .leading, spacing: 2) {
@@ -104,9 +103,7 @@ struct RideLockScreenView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(state.isPaused
-                            ? "Navigating, paused. Next: \(instructionText), \(turnDistanceText)"
-                            : "Navigating. Next: \(instructionText), \(turnDistanceText)")
+        .accessibilityLabel(navigateAccessibilityLabel)
     }
 
     private func destinationCell(_ name: String) -> some View {
@@ -146,5 +143,31 @@ struct RideLockScreenView: View {
 
     private var instructionText: String {
         state.turnInstruction ?? "Navigating…"
+    }
+
+    /// Folds `context.isStale` in alongside `isPaused` so VoiceOver distinguishes all four
+    /// states `RideStatusPill` can show. `.accessibilityElement(children: .combine)` followed by
+    /// `.accessibilityLabel` REPLACES the merged children's text rather than adding to it, so the
+    /// pill's own "NOT UPDATING" is never spoken unless it is folded in here — otherwise a rider
+    /// on a jetsam-killed, paused ride hears only "Explore paused," with no hint that nothing is
+    /// updating (spec D6).
+    private var freeRideAccessibilityLabel: String {
+        switch (state.isPaused, context.isStale) {
+        case (true, true): return "Explore paused, not updating"
+        case (true, false): return "Explore paused"
+        case (false, true): return "Explore in progress, not updating"
+        case (false, false): return "Explore in progress"
+        }
+    }
+
+    /// See `freeRideAccessibilityLabel` — same composition rule, applied to the navigate layout.
+    private var navigateAccessibilityLabel: String {
+        let next = "Next: \(instructionText), \(turnDistanceText)"
+        switch (state.isPaused, context.isStale) {
+        case (true, true): return "Navigating, paused, not updating. \(next)"
+        case (true, false): return "Navigating, paused. \(next)"
+        case (false, true): return "Navigating, not updating. \(next)"
+        case (false, false): return "Navigating. \(next)"
+        }
     }
 }

@@ -154,7 +154,7 @@ already reports.
 
 ```swift
 public enum RideActivityPushDecision: Hashable, Sendable {
-    case push(staleDate: Date)
+    case push
     case skip
 }
 
@@ -185,8 +185,10 @@ Rules, in order:
 4. The payload changed and `now - lastPushedAt >= 4` → push. (Today's coalescing cadence.)
 5. Otherwise skip.
 
-`staleDate` is `now + 90` in every case — unchanged from today's `staleInterval`. Revision 1
-invented a 5-minute paused window; with a 60 s heartbeat the existing 90 s window already never
+The decision carries no `staleDate` of its own — that is computed by the controller at push time
+(D5), not decided here. The window is `90 s` in every case, unchanged from today's
+`staleInterval`. Revision 1 invented a 5-minute paused window; with a 60 s heartbeat the existing
+90 s window already never
 expires while the app is alive, in either state, so the wider window bought nothing and cost three
 and a half minutes of false liveness on a dead ride. **This is what makes the policy correct
 whether or not the app keeps background runtime through a long pause** (see D8): alive, the
