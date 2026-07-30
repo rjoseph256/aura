@@ -28,7 +28,10 @@ final class ShareMapRequestTests: XCTestCase {
         XCTAssertNil(ShareMapRequest(rideID: rideID, segments: [offEarth], style: .auraTerrain))
     }
 
-    func testDefaultsComeFromShareCardLayout() throws {
+    func testSizeAndScaleArePinnedToShareCardLayout() throws {
+        // Invariants, not defaults: the initializer takes no size/scale — the card is
+        // fixed-geometry and downstream code treats these as constants (the 90×60
+        // acceptance downsample; MapSnapshotOptions preconditions crash on bad values).
         let request = try request()
         XCTAssertEqual(request.size, ShareCardLayout.mapFieldSize)
         XCTAssertEqual(request.scale, ShareCardLayout.rasterScale)

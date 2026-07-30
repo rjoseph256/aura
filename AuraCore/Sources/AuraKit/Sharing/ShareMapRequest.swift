@@ -21,25 +21,29 @@ public struct ShareMapRequest: Equatable, Sendable {
     /// Hygiene-passed, decimated route — the one geometry the pipeline may use.
     public let route: ShareRouteGeometry.Prepared
     public let style: MapStyle
-    /// Raster size in points (the card's map field).
+    /// Raster size in points — always `ShareCardLayout.mapFieldSize`. Deliberately not
+    /// configurable: the card is fixed-geometry, and downstream code treats this as a
+    /// constant (the 90×60 acceptance downsample; `MapSnapshotOptions` preconditions
+    /// crash outright on bad values).
     public let size: CGSize
-    /// Pixel ratio for the snapshot (pinned to the card's export scale).
+    /// Pixel ratio for the snapshot — always `ShareCardLayout.rasterScale`, for the
+    /// same reason as `size`.
     public let scale: CGFloat
     public let cacheKey: String
 
     /// Fails when the route is degenerate (empty, single point, stationary, non-finite)
     /// — `nil` means: no map request exists; the card keeps the polyline fallback.
-    public init?(rideID: UUID, segments: [[Coordinate]], style: MapStyle,
-                 size: CGSize = ShareCardLayout.mapFieldSize,
-                 scale: CGFloat = ShareCardLayout.rasterScale) {
+    /// Size and scale are pinned internally to the `ShareCardLayout` constants.
+    public init?(rideID: UUID, segments: [[Coordinate]], style: MapStyle) {
         guard let route = ShareRouteGeometry.prepare(segments: segments) else { return nil }
         self.rideID = rideID
         self.route = route
         self.style = style
-        self.size = size
-        self.scale = scale
+        self.size = ShareCardLayout.mapFieldSize
+        self.scale = ShareCardLayout.rasterScale
         self.cacheKey = Self.cacheKey(rideID: rideID, route: route, style: style,
-                                      size: size, scale: scale, compositeVersion: Self.compositeVersion)
+                                      size: self.size, scale: self.scale,
+                                      compositeVersion: Self.compositeVersion)
     }
 
     /// Cache-key identity for a map style. Derived from the AuraKit case — the SDK's

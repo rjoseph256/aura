@@ -9,8 +9,8 @@ import AuraKit
 /// Everything the SDK's off-main callbacks touch, behind one lock. `nonisolated` is
 /// REQUIRED: without it, default MainActor isolation infers `@MainActor` onto this
 /// class (the `Sendable` conformance does not opt out) and Step 4.7 fails to compile.
-/// The completion/overlay handler run on Mapbox's compositor thread when the
-/// attribution label falls to `.none` (the common case at card width).
+/// The completion/overlay handler may arrive on either the SDK's compositor thread
+/// or main — the box handles both.
 private nonisolated final class SnapshotBox: @unchecked Sendable {
     struct State {
         var finished = false
@@ -37,6 +37,13 @@ private nonisolated final class SnapshotBox: @unchecked Sendable {
     func finish(with image: UIImage?) {
         let cont: CheckedContinuation<UIImage?, Never>? = lock.withLockUnchecked {
             guard !$0.finished else { return nil }
+            // The store-before-start ordering is enforced only by line adjacency in
+            // renderMapRasterWithChrome; a resolver firing before store() would latch
+            // with no continuation to resume and wedge the pipeline permanently.
+            // Debug-only signal — release behavior is identical.
+            if $0.continuation == nil {
+                assertionFailure("SnapshotBox.finish before store(_:continuation:) — latch would wedge")
+            }
             $0.finished = true
             let c = $0.continuation; $0.continuation = nil
             return c
@@ -55,10 +62,12 @@ private nonisolated final class SnapshotBox: @unchecked Sendable {
 /// Flags the `onMapLoadingError` observer writes from the SDK's compositor thread — ONE
 /// lock guards both the rejected flag and the tile counter. `nonisolated` is REQUIRED
 /// for the same reason as `SnapshotBox`; `initialState:` is fine here because the state
-/// is all-Sendable. `.style`/`.source` errors reject; `.tile` errors only count (edge
-/// tiles 404 routinely — DEM outside coverage, glyphs — and Home's precedent only logs;
-/// the interior-variance check is the primary defense for partial tiles).
+/// is all-Sendable. `.style`/`.source` errors reject; `.tile` errors only count and log
+/// (edge tiles 404 routinely — DEM outside coverage — and Home's precedent only logs;
+/// the interior-variance check is the primary defense for partial tiles). `.glyphs`/
+/// `.sprite` fall to the `default` branch and are deliberately ignored as cosmetic.
 private nonisolated final class MapLoadErrorFlags: @unchecked Sendable {
+    private static let log = Logger(subsystem: "app.aura.ios", category: "ShareCard")
     private struct State {
         var rejected = false
         var tileErrors = 0
@@ -71,7 +80,7 @@ private nonisolated final class MapLoadErrorFlags: @unchecked Sendable {
             lock.withLock { $0.rejected = true }
         case .tile:
             lock.withLock { $0.tileErrors += 1 }
-            print("[ShareMapSnapshotter] tile load error (non-fatal): \(error.message)")
+            Self.log.warning("share-map tile load error (non-fatal): \(error.message, privacy: .public)")
         default:
             break
         }
@@ -89,14 +98,36 @@ private nonisolated enum StyleLoadOutcome: Sendable {
     case timedOut
 }
 
+/// Outcome of racing an in-flight pipeline task against the slot watchdog's ceiling.
+private nonisolated enum SlotAwaitOutcome: Sendable {
+    case finished(UIImage?)
+    case ceiling
+}
+
 /// The app-lifetime share-map raster provider (spec ROH-126 rev 4): at most one
 /// `Snapshotter` pipeline alive at a time, single-flight per cache key, composited
 /// results disk-cached under `Caches/ShareCardSnapshots`. There is deliberately NO
 /// negative cache: a rejected pipeline (offline, partial tiles, degenerate camera)
 /// re-runs in full on the next request — e.g. a History open after an offline reject
 /// re-runs the ≤10 s pipeline with the hint up. That is the spec's accepted cost.
+///
+/// Instance identity is load-bearing: the single-flight dedup table and the
+/// one-pipeline-at-a-time invariant live on the instance, so a second concrete
+/// instance would silently defeat both. `shared` + `private init` make that a
+/// compile error rather than a code-review catch; stubbing still goes through the
+/// `ShareMapRasterProviding` seam and `ShareMapProviderBox`.
 @MainActor final class ShareMapSnapshotter: ShareMapRasterProviding {
-    private var inFlight: (key: String, task: Task<UIImage?, Never>)?
+    static let shared = ShareMapSnapshotter()
+    private init() {}
+
+    /// `id` is the slot's identity: the watchdog and the pipeline's own defer may
+    /// only clear the slot while it still holds THEIR identity, never a successor's.
+    private struct InFlightSlot {
+        let key: String
+        let id: UUID
+        let task: Task<UIImage?, Never>
+    }
+    private var inFlight: InFlightSlot?
     private let cache = TerrainSnapshotDiskCache(
         directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appending(path: "ShareCardSnapshots"))   // its own directory — sharing Home's
@@ -104,12 +135,50 @@ private nonisolated enum StyleLoadOutcome: Sendable {
                                                       // budgets evict each other's files
 
     func raster(for request: ShareMapRequest) async -> UIImage? {
-        if let inFlight, inFlight.key == request.cacheKey { return await inFlight.task.value }
-        while let current = inFlight { _ = await current.task.value }   // suspends, no spin
+        // Fast path, BEFORE the same-key join and the wait loop: a warm cache hit must
+        // not queue behind an unrelated in-flight pipeline (~10 s worst case, reproduced
+        // in review). Small file read on main — same balance as the in-pipeline read.
+        if let data = cache.read(request.cacheKey) { return UIImage(data: data, scale: request.scale) }
+        if let inFlight, inFlight.key == request.cacheKey {
+            return await boundedValue(of: inFlight.task, slotID: inFlight.id)
+        }
+        while let current = inFlight {                                  // suspends, no spin
+            _ = await boundedValue(of: current.task, slotID: current.id)
+        }
         // No await between the loop exit and this assignment (single-pipeline invariant).
-        let task = Task { [weak self] in await self?.runPipelineReleasingSlot(request) ?? nil }
-        inFlight = (request.cacheKey, task)
-        return await task.value
+        let slotID = UUID()
+        let task = Task { [weak self] in await self?.runPipelineReleasingSlot(request, slotID: slotID) ?? nil }
+        inFlight = InFlightSlot(key: request.cacheKey, id: slotID, task: task)
+        return await boundedValue(of: task, slotID: slotID)
+    }
+
+    /// Races the pipeline task against a 20 s ceiling. The pipeline's detached steps
+    /// (encode / cache write / prune) are unbounded, and a wedged pipeline would
+    /// otherwise poison this app-lifetime provider for the whole session: the slot
+    /// would never clear and every later request would park behind it forever. On
+    /// ceiling, clear the slot ONLY if it still holds this identity (the pipeline's
+    /// own defer, or a successor claiming the slot, may have raced us) and hand the
+    /// caller nil. Resolve-once latch, same shape as `loadStyle`.
+    private func boundedValue(of task: Task<UIImage?, Never>, slotID: UUID) async -> UIImage? {
+        let outcome: SlotAwaitOutcome = await withCheckedContinuation { cont in
+            let done = OSAllocatedUnfairLock(initialState: false)
+            @Sendable func finishOnce(_ value: SlotAwaitOutcome) {
+                done.withLock { resumed in
+                    if !resumed { resumed = true; cont.resume(returning: value) }
+                }
+            }
+            Task { finishOnce(.finished(await task.value)) }
+            Task {
+                try? await Task.sleep(for: .seconds(20))
+                finishOnce(.ceiling)
+            }
+        }
+        switch outcome {
+        case .finished(let image): return image
+        case .ceiling:
+            if inFlight?.id == slotID { inFlight = nil }
+            return nil
+        }
     }
 
     /// Owns the in-flight slot's lifetime: cleared on EVERY exit, including the
@@ -119,8 +188,11 @@ private nonisolated enum StyleLoadOutcome: Sendable {
     /// path) would leave a completed task in the slot forever, wedging same-key
     /// retries and LIVELOCKING different-key waiters' while-loop on the main actor
     /// (reproduced in plan delta-review). This is the spec's normative `defer`.
-    private func runPipelineReleasingSlot(_ request: ShareMapRequest) async -> UIImage? {
-        defer { if inFlight?.key == request.cacheKey { inFlight = nil } }
+    /// Keyed on the slot's IDENTITY, not its cache key: after a watchdog ceiling a
+    /// successor (possibly same-key) may occupy the slot, and a late-finishing wedged
+    /// pipeline must not clear it out from under that successor.
+    private func runPipelineReleasingSlot(_ request: ShareMapRequest, slotID: UUID) async -> UIImage? {
+        defer { if inFlight?.id == slotID { inFlight = nil } }
         return await runPipeline(request)
     }
 
@@ -129,7 +201,9 @@ private nonisolated enum StyleLoadOutcome: Sendable {
     private func runPipeline(_ request: ShareMapRequest) async -> UIImage? {
         MainActor.assertIsolated()
         // The cache stores the COMPOSITED image — a hit returns as-is: it carries no
-        // projected points and never needs a re-composite (spec step 2).
+        // projected points and never needs a re-composite (spec step 2). Kept even
+        // though raster(for:) probes first: a request that queued behind another
+        // pipeline BEFORE its key was cached still hits here instead of re-rendering.
         if let data = cache.read(request.cacheKey) { return UIImage(data: data, scale: request.scale) }
 
         let snapshotter = Snapshotter(options: MapSnapshotOptions(
@@ -147,8 +221,8 @@ private nonisolated enum StyleLoadOutcome: Sendable {
         // Rejected read 1 of 2: a style/source error surfaced during the load.
         guard !errorFlags.rejected else { return nil }
         guard fitCamera(snapshotter, to: request) else { return nil }
-        // Rejected read 2 of 2 sits inside renderBareRaster, after the render resolves.
-        guard let (raster, runs) = await renderBareRaster(snapshotter, request: request, flags: errorFlags)
+        // Rejected read 2 of 2 sits inside renderMapRasterWithChrome, after the render resolves.
+        guard let (raster, runs) = await renderMapRasterWithChrome(snapshotter, request: request, flags: errorFlags)
         else { return nil }
         guard await passesAcceptance(raster) else { return nil }
 
@@ -216,8 +290,9 @@ private nonisolated enum StyleLoadOutcome: Sendable {
 
     /// Render, bounded and resume-once (spec step 5): the box owns everything the SDK's
     /// off-main callbacks touch, and the 6 s timeout arm cancels BEFORE resolving the
-    /// latch.
-    private func renderBareRaster(
+    /// latch. The raster is route-free but NOT chrome-free — it carries the SDK's
+    /// logo/attribution band; the route ink is composited on later.
+    private func renderMapRasterWithChrome(
         _ snapshotter: Snapshotter, request: ShareMapRequest, flags: MapLoadErrorFlags
     ) async -> (raster: UIImage, runs: [[CGPoint]])? {
         let box = SnapshotBox()
@@ -248,7 +323,7 @@ private nonisolated enum StyleLoadOutcome: Sendable {
         return (raster, runs)
     }
 
-    /// Acceptance on bare pixels, off-main (spec step 6): downsample to exactly 90×60
+    /// Acceptance on the pre-composite map raster, off-main (spec step 6): downsample to exactly 90×60
     /// grayscale (size/4 in points) and require interior texture outside the chrome strip.
     private func passesAcceptance(_ raster: UIImage) async -> Bool {
         let width = 90, height = 60
