@@ -11,17 +11,19 @@ struct ExploreInstrumentPanel: View {
     let currentSpeedMetersPerSecond: Double
     let units: DistanceUnits
     let state: ExploreInstrumentState
+    let isPaused: Bool
 
     var body: some View {
         InstrumentChassis(
             currentSpeedMetersPerSecond: currentSpeedMetersPerSecond,
             units: units,
             topLine: nil,
-            columnAccessibilityLabel: state.accessibilityLabel) {
+            columnAccessibilityLabel: state.accessibilityLabel,
+            isPaused: isPaused) {
             VStack(alignment: .leading, spacing: AuraTheme.Spacing.md) {
-                CockpitInstrument(value: state.distance, label: "DISTANCE")
-                CockpitInstrument(value: state.time, label: "TIME")
-                CockpitInstrument(value: state.elevationGain, label: "CLIMB")
+                CockpitInstrument(value: state.distance, label: "DISTANCE", isPaused: isPaused)
+                CockpitInstrument(value: state.time, label: "TIME", isPaused: isPaused)
+                CockpitInstrument(value: state.elevationGain, label: "CLIMB", isPaused: isPaused)
             }
         }
     }
@@ -37,7 +39,24 @@ struct ExploreInstrumentPanel: View {
                 stats: RideStats(distanceMeters: 8046.72, movingTimeSeconds: 1440,
                                  averageSpeedMetersPerSecond: 5.6, maxSpeedMetersPerSecond: 9,
                                  elevationGainMeters: 103.6),
-                elapsed: 1440, units: .imperial))
+                elapsed: 1440, units: .imperial),
+            isPaused: false)
+            .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
+    }
+}
+
+#Preview("Paused") {
+    ZStack(alignment: .bottom) {
+        AuraTheme.background.ignoresSafeArea()
+        ExploreInstrumentPanel(
+            currentSpeedMetersPerSecond: 8.1,
+            units: .imperial,
+            state: ExploreInstrumentState(
+                stats: RideStats(distanceMeters: 8046.72, movingTimeSeconds: 1440,
+                                 averageSpeedMetersPerSecond: 5.6, maxSpeedMetersPerSecond: 9,
+                                 elevationGainMeters: 103.6),
+                elapsed: 1440, units: .imperial),
+            isPaused: true)
             .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
     }
 }

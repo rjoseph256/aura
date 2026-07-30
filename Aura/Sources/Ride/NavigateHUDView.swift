@@ -484,7 +484,9 @@ private extension NavigateHUDView {
             InstrumentPanel(
                 currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
                 units: settings.units,
-                trip: cruisingState)
+                trip: cruisingState,
+                // Task 13 wires the live pause signal in; this HUD does not yet toggle pause.
+                isPaused: false)
                 .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
         }
     }

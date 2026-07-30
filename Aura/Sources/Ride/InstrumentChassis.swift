@@ -16,12 +16,21 @@ struct InstrumentChassis<Column: View>: View {
     let topLine: String?
     /// The composed VoiceOver read for the whole secondary cluster (includes the top line).
     let columnAccessibilityLabel: String
+    /// While paused, the readouts drop to secondary weight so a frozen clock looks deliberately
+    /// frozen rather than broken.
+    ///
+    /// `AuraTheme.textSecondary`, never an opacity multiplier on `textPrimary`:
+    /// `AuraPaletteContrastTests` guards the token against the panel, and it cannot see through
+    /// a composition. This must also stay pure styling — adding a `Text` here would break the
+    /// one-composed-VoiceOver-element invariant documented above.
+    let isPaused: Bool
     @ViewBuilder let column: Column
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
     private var fmt: RideStatsFormatter { RideStatsFormatter(units: units) }
+    private var readoutColor: Color { isPaused ? AuraTheme.textSecondary : AuraTheme.textPrimary }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
@@ -62,7 +71,7 @@ struct InstrumentChassis<Column: View>: View {
         HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.sm) {
             Text(fmt.speedValue(currentSpeedMetersPerSecond))
                 .font(AuraTheme.Typography.speedHero(150, relativeTo: .largeTitle))
-                .foregroundStyle(AuraTheme.textPrimary)
+                .foregroundStyle(readoutColor)
                 .contentTransition(.numericText())
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
@@ -94,12 +103,13 @@ struct InstrumentChassis<Column: View>: View {
 struct CockpitInstrument: View {
     let value: String
     let label: String
+    let isPaused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
                 .font(AuraTheme.Typography.metricCockpit(34, relativeTo: .title2))
-                .foregroundStyle(AuraTheme.textPrimary)
+                .foregroundStyle(isPaused ? AuraTheme.textSecondary : AuraTheme.textPrimary)
                 .contentTransition(.numericText())
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
