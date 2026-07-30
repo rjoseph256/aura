@@ -13,9 +13,9 @@ import AuraKit
 struct ShareCardView: View {
     let content: ShareCardContent
     /// An accepted, composited map raster at exactly `ShareCardLayout.mapFieldSize` @3x,
-    /// or `nil` for the polyline fallback. Optional `var` (implicit `nil` default) only
-    /// until Task 9 updates the call sites; the seam then becomes a required `let`.
-    var mapImage: UIImage?
+    /// or `nil` for the polyline fallback. Required — a defaulted parameter here would be
+    /// a permanent seam where a forgotten argument silently ships the fallback card.
+    let mapImage: UIImage?
 
     /// The card is a fixed PNG viewed at feed-thumbnail scale and can't honor Increase
     /// Contrast, so secondary text uses the high-contrast secondary value always.
@@ -236,14 +236,15 @@ private func previewMapFixture() -> UIImage {
 }
 
 #Preview("Polyline fallback") {
-    ShareCardView(content: ShareCardContent(ride: previewRide(), units: .imperial))
+    ShareCardView(content: ShareCardContent(ride: previewRide(), units: .imperial),
+                  mapImage: nil)
 }
 
 #Preview("No route") {
     ShareCardView(content: ShareCardContent(
         ride: previewRide(distanceMeters: 5000, movingSeconds: 1200, gainMeters: 20,
                           destination: nil, points: 0),
-        units: .imperial))
+        units: .imperial), mapImage: nil)
 }
 
 #Preview("Route, no elevation") {
@@ -251,14 +252,14 @@ private func previewMapFixture() -> UIImage {
     ShareCardView(content: ShareCardContent(
         ride: previewRide(distanceMeters: 6400, movingSeconds: 1800, gainMeters: 55,
                           elevation: false, destination: "Downtown", points: 30),
-        units: .imperial))
+        units: .imperial), mapImage: nil)
 }
 
 #Preview("Long destination") {
     // Context line must tail-truncate on one line, never wrap into the hero's budget.
     ShareCardView(content: ShareCardContent(
         ride: previewRide(destination: "The Frank Curto Overlook at Bigelow Boulevard"),
-        units: .imperial))
+        units: .imperial), mapImage: nil)
 }
 
 #Preview("Worst-case stats") {

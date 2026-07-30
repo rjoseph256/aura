@@ -108,7 +108,10 @@ struct RideSummaryView: View {
             guard ride.stats != nil, shareImage == nil else { return }
             await Task.yield()   // let the entrance animation start before the synchronous render
             let content = ShareCardContent(ride: ride, units: settings.units)
-            shareImage = RideCardRenderer.make(content)
+            let title = "Aura ride · \(content.distanceValue) \(content.distanceUnit) · \(content.dateText)"
+            let store = ShareCardFileStore(rideID: ride.id)
+            shareImage = await RideCardRenderer.make(content, mapImage: nil, title: title,
+                                                     writeTo: store.url(generation: 0))
         }
     }
 
