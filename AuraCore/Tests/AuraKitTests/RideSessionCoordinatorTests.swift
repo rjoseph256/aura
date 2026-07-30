@@ -226,6 +226,114 @@ struct RideSessionCoordinatorTests {
     }
 }
 
+// MARK: - Live Activity clock (ROH-102)
+//
+// Split into its own extension, rather than appended to the struct above, purely to keep
+// `type_body_length` under its threshold; the tests still run as part of the same suite.
+extension RideSessionCoordinatorTests {
+    @Test func pausePushesTheActivityInTheSameTurnWithAPausedClock() throws {
+        let activity = SpyRideActivity()
+        let c = makeCoordinator(screen: SpyScreenWake(), activity: activity)
+        c.start(location: ScriptedLocationProvider([]), saving: try RideStore.inMemory(),
+                units: .metric, authorization: .authorized)
+        let before = activity.updates.count
+
+        c.pause()
+
+        // pause() must push in the same turn as the tap, not wait on the 0.5 s ticker.
+        #expect(activity.updates.count == before + 1)
+        #expect(try #require(activity.updates.last).activeClock.isPaused)
+        c.cancel()
+    }
+
+    @Test func resumePushesTheActivityInTheSameTurnWithARunningClock() throws {
+        let activity = SpyRideActivity()
+        let c = makeCoordinator(screen: SpyScreenWake(), activity: activity)
+        c.start(location: ScriptedLocationProvider([]), saving: try RideStore.inMemory(),
+                units: .metric, authorization: .authorized)
+        c.pause()
+        let before = activity.updates.count
+
+        c.resume()
+
+        #expect(activity.updates.count == before + 1)
+        #expect(try #require(activity.updates.last).activeClock.isPaused == false)
+        c.cancel()
+    }
+
+    @Test func theResumedAnchorShiftsForwardByExactlyTheStopDuration() throws {
+        let activity = SpyRideActivity()
+        let c = makeCoordinator(screen: SpyScreenWake(), activity: activity)
+        c.start(location: ScriptedLocationProvider([]), saving: try RideStore.inMemory(),
+                units: .metric, authorization: .authorized)
+        let started = try #require(c.startedAt)
+
+        c.pushActivityUpdate(now: started.addingTimeInterval(600))
+        guard case .running(let firstAnchor) =
+                try #require(activity.updates.last).activeClock else {
+            Issue.record("expected a running clock before the stop")
+            return
+        }
+
+        // A 240-second stop, driven by injected instants: pause()/resume() calling Date()
+        // internally would make the stop microseconds long and the assertion a tautology.
+        c.pause(at: started.addingTimeInterval(600))
+        c.resume(at: started.addingTimeInterval(840))
+        c.pushActivityUpdate(now: started.addingTimeInterval(900))
+
+        guard case .running(let resumedAnchor) =
+                try #require(activity.updates.last).activeClock else {
+            Issue.record("expected a running clock after the resume")
+            return
+        }
+        #expect(resumedAnchor.timeIntervalSince(firstAnchor) == 240)
+        c.cancel()
+    }
+
+    @Test func thePausedClockIsIdenticalAcrossTwentyTicks() throws {
+        // The highest-value test in this pass. `RideActiveClock.make`'s stability holds only
+        // because pushActivityUpdate passes pausedSeconds(asOf: now) with the SAME now it passes
+        // as now. A pure-function suite that hand-writes both in lockstep proves the arithmetic
+        // and nothing about the wiring, which is the only place the coupling can break.
+        let activity = SpyRideActivity()
+        let c = makeCoordinator(screen: SpyScreenWake(), activity: activity)
+        c.start(location: ScriptedLocationProvider([]), saving: try RideStore.inMemory(),
+                units: .metric, authorization: .authorized)
+        let started = try #require(c.startedAt)
+        let stoppedAt = started.addingTimeInterval(600)
+
+        c.pause(at: stoppedAt)
+        for i in 0..<20 {
+            c.pushActivityUpdate(now: stoppedAt.addingTimeInterval(Double(i) * 0.5))
+        }
+
+        let clocks = activity.updates.suffix(20).map(\.activeClock)
+        #expect(clocks.count == 20)
+        #expect(Set(clocks).count == 1)
+        c.cancel()
+    }
+
+    @Test func thePausePushPrecedesTheCheckpointFlush() async throws {
+        // flushCheckpoint is a full-track encode plus a mirrored write in this same turn, at the
+        // exact instant a jetsam kill is most likely. If the kill lands during it, the activity
+        // must already know about the stop.
+        let order = CallOrder()
+        let activity = SpyRideActivity(order: order)
+        let saving = OrderRecordingRideSaving(order: order, inner: try RideStore.inMemory())
+        let c = makeCoordinator(screen: SpyScreenWake(), activity: activity)
+        // Two points far enough apart to clear RideBackOutGate's 25 m discard floor, or the
+        // pause flushes nothing and there is no ordering to assert.
+        c.start(location: ScriptedLocationProvider([point(40.40, 0), point(40.45, 60)]),
+                saving: saving, units: .metric, authorization: .authorized)
+        await c.streamTask?.value
+
+        c.pause()
+
+        #expect(try #require(activity.lastUpdateSequence) < #require(saving.lastSaveSequence))
+        c.cancel()
+    }
+}
+
 // MARK: - Doubles
 
 @MainActor
@@ -245,19 +353,59 @@ final class SpyRideActivity: RideActivityControlling {
         let stats: RideStats
         let currentSpeedMetersPerSecond: Double
         let maneuver: GuidanceUpdate?
+        let activeClock: RideActiveClock
     }
+    private let order: CallOrder?
     private(set) var started: StartCall?
     private(set) var updates: [UpdateCall] = []
+    private(set) var lastUpdateSequence: Int?
     private(set) var ended = false
+
+    init(order: CallOrder? = nil) { self.order = order }
+
     func start(kind: Ride.Kind, startedAt: Date, units: DistanceUnits, destinationName: String?) {
         started = StartCall(kind: kind, units: units, destinationName: destinationName)
     }
-    func update(stats: RideStats, currentSpeedMetersPerSecond: Double, maneuver: GuidanceUpdate?) {
+    func update(stats: RideStats,
+                currentSpeedMetersPerSecond: Double,
+                maneuver: GuidanceUpdate?,
+                activeClock: RideActiveClock) {
         updates.append(UpdateCall(stats: stats,
                                   currentSpeedMetersPerSecond: currentSpeedMetersPerSecond,
-                                  maneuver: maneuver))
+                                  maneuver: maneuver,
+                                  activeClock: activeClock))
+        lastUpdateSequence = order?.stamp()
     }
     func end() { ended = true }
+}
+
+/// Shared monotonic counter, so a test can assert the relative order of two collaborators'
+/// calls inside one synchronous turn.
+@MainActor
+final class CallOrder {
+    private var next = 0
+    func stamp() -> Int { defer { next += 1 }; return next }
+}
+
+/// Stamps its saves against a shared `CallOrder`, then delegates. Wraps rather than replaces
+/// `RideStore`, so the checkpoint really writes and the discard-floor gate still applies.
+@MainActor
+final class OrderRecordingRideSaving: RideSaving {
+    private let order: CallOrder
+    private let inner: any RideSaving
+    private(set) var lastSaveSequence: Int?
+
+    init(order: CallOrder, inner: any RideSaving) {
+        self.order = order
+        self.inner = inner
+    }
+
+    func save(_ ride: Ride) throws {
+        lastSaveSequence = order.stamp()
+        try inner.save(ride)
+    }
+
+    func discard(id: UUID) throws { try inner.discard(id: id) }
 }
 
 /// Yields a fixed, buffered set of points then finishes, so a test can await the

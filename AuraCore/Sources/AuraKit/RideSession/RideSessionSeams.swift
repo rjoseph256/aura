@@ -14,7 +14,13 @@ public protocol ScreenWakeControlling: AnyObject {
 @MainActor
 public protocol RideActivityControlling: AnyObject {
     func start(kind: Ride.Kind, startedAt: Date, units: DistanceUnits, destinationName: String?)
-    func update(stats: RideStats, currentSpeedMetersPerSecond: Double, maneuver: GuidanceUpdate?)
+    /// `activeClock` is what the widget's clock should display — active time while running, the
+    /// stop's own instant while paused. Built by the coordinator so the app target does no
+    /// arithmetic and the widget none at all.
+    func update(stats: RideStats,
+                currentSpeedMetersPerSecond: Double,
+                maneuver: GuidanceUpdate?,
+                activeClock: RideActiveClock)
     func end()
 }
 

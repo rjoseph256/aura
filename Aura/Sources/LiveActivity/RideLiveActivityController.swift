@@ -64,12 +64,15 @@ final class RideLiveActivityController {
         }
     }
 
-    /// Pushes the latest ride stats (and the next maneuver, in navigate mode). Throttled:
-    /// pushes only when at least `minInterval` has elapsed, or immediately when the turn
-    /// instruction changes — so the activity reflects a new maneuver right away while
+    /// Pushes the latest ride stats, the next maneuver (in navigate mode), and the active clock.
+    /// Throttled: pushes only when at least `minInterval` has elapsed, or immediately when the
+    /// turn instruction changes — so the activity reflects a new maneuver right away while
     /// distance/speed churn stays coalesced. Safe to call every tick; a no-op when no
     /// activity is running.
-    func update(stats: RideStats, currentSpeedMetersPerSecond: Double, maneuver: GuidanceUpdate?) {
+    func update(stats: RideStats,
+                currentSpeedMetersPerSecond: Double,
+                maneuver: GuidanceUpdate?,
+                activeClock: RideActiveClock) {
         guard let activity else { return }
 
         let instruction = maneuver?.instruction
@@ -81,14 +84,15 @@ final class RideLiveActivityController {
         lastPush = now
         lastInstruction = instruction
 
-        let state = RideActivityAttributes.ContentState(
+        let payload = RideActivityPayload(
             distanceMeters: stats.distanceMeters,
             speedMetersPerSecond: currentSpeedMetersPerSecond,
             elevationGainMeters: stats.elevationGainMeters,
             turnInstruction: instruction,
             turnDistanceMeters: maneuver?.distanceToManeuverMeters,
-            // Resolve the directional glyph app-side so the widget stays logic-free.
-            turnGlyphSystemName: ManeuverIcon.symbol(for: maneuver?.maneuver))
+            turnGlyphSystemName: ManeuverIcon.symbol(for: maneuver?.maneuver),
+            clock: activeClock)
+        let state = RideActivityAttributes.ContentState(payload: payload)
         lastState = state
 
         let content = ActivityContent(state: state,
