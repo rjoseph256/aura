@@ -31,17 +31,25 @@ public enum PauseNudgePolicy {
 
     /// 10, 25, 45, 75 and 120 minutes. Ten minutes clears a coffee queue, a mechanical or a
     /// photo stop without firing; the widening gaps stop punishing a rider who paused on purpose.
+    ///
+    /// **The copy says what Aura has not recorded, never that the ride is still paused.** These
+    /// are scheduled once, at the tap, and then fire from the system whether or not the app is
+    /// still alive — and a long stop is the condition most likely to have got the process
+    /// jetsammed (see above). After that the ride is not paused, it is gone, and the later
+    /// rungs are both the most likely to fire orphaned and the most likely to be lying. "Aura
+    /// hasn't recorded anything since you paused 45 minutes ago" is true of a live pause and of
+    /// a dead process alike, and it points at the thing the rider actually cares about.
     public static let rungs: [Rung] = [
-        Rung(after: 600, identifier: "pause.nudge.1", title: "Ride still paused",
-             body: "Your ride has been paused for 10 minutes and isn't recording."),
-        Rung(after: 1500, identifier: "pause.nudge.2", title: "Ride still paused",
-             body: "Your ride has been paused for 25 minutes and isn't recording."),
-        Rung(after: 2700, identifier: "pause.nudge.3", title: "Ride still paused",
-             body: "Your ride has been paused for 45 minutes and isn't recording."),
-        Rung(after: 4500, identifier: "pause.nudge.4", title: "Ride still paused",
-             body: "Your ride has been paused for 75 minutes and isn't recording."),
-        Rung(after: 7200, identifier: "pause.nudge.5", title: "Ride still paused",
-             body: "Your ride has been paused for 2 hours and isn't recording.")
+        Rung(after: 600, identifier: "pause.nudge.1", title: "Aura isn't recording",
+             body: "Aura hasn't recorded anything since you paused 10 minutes ago."),
+        Rung(after: 1500, identifier: "pause.nudge.2", title: "Aura isn't recording",
+             body: "Aura hasn't recorded anything since you paused 25 minutes ago."),
+        Rung(after: 2700, identifier: "pause.nudge.3", title: "Aura isn't recording",
+             body: "Aura hasn't recorded anything since you paused 45 minutes ago."),
+        Rung(after: 4500, identifier: "pause.nudge.4", title: "Aura isn't recording",
+             body: "Aura hasn't recorded anything since you paused 75 minutes ago."),
+        Rung(after: 7200, identifier: "pause.nudge.5", title: "Aura isn't recording",
+             body: "Aura hasn't recorded anything since you paused 2 hours ago.")
     ]
 
     public static var allIdentifiers: [String] { rungs.map(\.identifier) }

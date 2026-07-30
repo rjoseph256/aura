@@ -27,9 +27,19 @@ public enum HUDLayoutMetrics {
     /// ROH-101 inserted a pause row below the control cluster, so on a group navigate ride the
     /// column now stacks a turn card, this roster, a four-entry cluster, the pause row and the
     /// instrument panel. The column does not clip when it overflows: it grows upward and pushes
-    /// the cluster, End included, under the turn card. This fraction is the agreed lever if an
-    /// iPhone SE overflows, and it is pinned by a test so lowering it is a reviewed decision
-    /// rather than something remembered from a device session.
+    /// the cluster, End included, under the turn card. This fraction bounds how much of that a
+    /// long crew list can cause, and it is pinned by a test so changing it is a reviewed
+    /// decision rather than something remembered from a device session.
+    ///
+    /// **It is not a lever on an iPhone SE.** The roster shares an `HStack` with the control
+    /// cluster, so that row is `max(roster, cluster)` — the cap only does anything once the
+    /// roster is the taller of the two. The navigate cluster is about 287 pt (a 113 pt zoom
+    /// pill plus recenter, mute and End at 56 pt each, plus 6 pt of padding compensation),
+    /// against the ~259 pt this fraction allows on the SE's 647 pt HUD. The cap is already
+    /// inert there, so lowering it changes nothing on the one device that would need it. If an
+    /// SE overflows, what has to give is the fixed stack: the instrument panel's height, the
+    /// pause row, or the turn card. `HUDLayoutMetricsTests` pins that relationship too, so this
+    /// paragraph cannot quietly stop being true.
     public static let groupRosterMaxHeightFraction = 0.4
 
     /// Used until the HUD has been measured once.

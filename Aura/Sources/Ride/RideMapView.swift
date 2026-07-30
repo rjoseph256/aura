@@ -69,8 +69,9 @@ struct RideMapView: View {
         }
     }
 
-    /// The recorded track. While a detour is active (`detourRoute` non-empty), it dims to a
-    /// quarter opacity so the bright `detourPolyline` reads as the thing to follow.
+    /// The recorded track. While a detour is active (`detourRoute` non-empty), its *recording*
+    /// pieces dim to a quarter opacity so the bright `detourPolyline` reads as the thing to
+    /// follow; paused pieces keep their grey — see `strokeColor(for:)`.
     @MapContentBuilder
     private var routeRibbon: some MapContent {
         // Keep the emptiness guard: an empty group still creates a Mapbox annotation manager
@@ -89,8 +90,13 @@ struct RideMapView: View {
         }
     }
 
-    /// The recorded track's stroke. A detour dims the whole ribbon so the bright detour line
-    /// wins; the paused run additionally drops from the mint route colour to neutral grey.
+    /// The recorded track's stroke. A **recording** piece is mint, dimmed to a quarter while a
+    /// detour is active so the bright detour line wins. A **paused** piece is neutral grey, and
+    /// is not dimmed by a detour — so while detouring it renders brighter than the live track
+    /// around it. That is deliberate, not an oversight: the detour dim exists to stop a *mint*
+    /// line competing with the mint detour for "the thing to follow", and grey does not compete.
+    /// Stacking the quarter dim on top of the paused run's 0.55 `lineOpacity` would leave it at
+    /// roughly 0.14 alpha, erasing the very distinction the next paragraph argues for.
     ///
     /// Grey rather than a second hue on purpose: mint against `textSecondary` grey differs in
     /// **lightness**, so the paused run stays distinguishable to a rider who cannot separate the

@@ -25,7 +25,18 @@ final class PauseNudgeScheduler: NSObject, RideNudgeScheduling {
     /// the schedule that eventually uses it happens minutes later at a pause. A pause taken
     /// while the prompt is still open still adds its requests: iOS evaluates authorization at
     /// delivery, so they are dropped on a decline and presented on an accept.
+    ///
+    /// Skipped entirely under the golden-ride harness, alongside the ambient-location tier
+    /// `AuraApp.syncLocationActivity` skips for the same reason: a deterministic ride must not
+    /// raise a system prompt. `requestAuthorization` puts a SpringBoard alert over the HUD
+    /// seconds into both `RideE2EUITests` methods, and unlike location there is no
+    /// `xcrun simctl privacy` service that could pre-grant it on a freshly installed app, so
+    /// every tap the test makes afterwards lands on SpringBoard. The pause nudges themselves
+    /// are left wired: the harness never pauses, and adding requests prompts nobody.
     func prepareAuthorization() {
+        #if DEBUG
+        if SimulatedRideConfig.current != nil { return }
+        #endif
         Task { [center, log] in
             do {
                 _ = try await center.requestAuthorization(options: [.alert, .sound])
@@ -72,10 +83,16 @@ extension PauseNudgeScheduler: UNUserNotificationCenterDelegate {
     /// Without this, iOS shows nothing while the app is active — and a rider paused to read the
     /// map, with the HUD on screen, is exactly that case (ROH-101 P5).
     ///
-    /// Scoped to this feature's own identifiers. There is no second UserNotifications client in
-    /// the app today, but this is the *app-global* delegate: answering for everything would
-    /// silently decide the foreground behaviour of every notification Aura ever adds, from here.
-    /// Anything else falls through to the system default of showing nothing while active.
+    /// Scoped to this feature's own identifiers — but scoped in what it *presents*, not in what
+    /// it answers for. This is the app-global delegate, so it decides the foreground behaviour
+    /// of every notification Aura will ever post, and once a delegate is installed there is no
+    /// falling through to a system default. Anything that is not a pause nudge is answered with
+    /// `[]`: nothing shown while the app is active.
+    ///
+    /// That happens to match what an app with no delegate does, so nothing regresses today.
+    /// It is still an app-global decision made here: a future UserNotifications client that
+    /// wants a foreground banner has to add its identifiers to this method, or it will be
+    /// silently suppressed by this line with no error to explain it.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async
     -> UNNotificationPresentationOptions {

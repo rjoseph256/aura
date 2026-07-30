@@ -30,6 +30,7 @@ struct PauseControl: View {
     let onToggle: () -> Bool
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
 
     private var rowHeight: CGFloat { CGFloat(HUDControlMetrics.ride.resolvedHitTarget) }
@@ -44,7 +45,11 @@ struct PauseControl: View {
             control
         }
         .frame(height: rowHeight)
-        .animation(.snappy, value: isPaused)
+        // Gated like every other ride-HUD animation (TurnCardView, DetourOverlay,
+        // ControlCluster, both HUDs). This one earns the gate more than most: the state flip
+        // grows the button across the full screen width and slides the chip in beside it, so
+        // Reduce Motion gets the two states with no travel between them.
+        .animation(reduceMotion ? nil : .snappy, value: isPaused)
     }
 
     private var stateChip: some View {

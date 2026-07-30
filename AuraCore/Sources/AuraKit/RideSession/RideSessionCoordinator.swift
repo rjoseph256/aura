@@ -141,8 +141,13 @@ public final class RideSessionCoordinator {
             // Only once location is already granted. On a first ride `.notDetermined` means the
             // location prompt — the one the rider tapped Start expecting — is about to appear,
             // and stacking an unexplained "Aura Would Like to Send You Notifications" in front
-            // of it is how a rider declines both. They get asked on their second ride instead,
-            // which still precedes any pause they could forget.
+            // of it is how a rider declines both.
+            //
+            // The cost is accepted, not avoided: a rider who pauses and forgets on that very
+            // first ride gets no ladder at all. Nothing has asked yet, so iOS drops the
+            // requests at delivery. From the next ride onward — the first one that starts with
+            // location already decided — the prompt has been shown and the ladder works. One
+            // unprotected ride is the price of not poisoning the location prompt.
             nudges.prepareAuthorization()
         // .notDetermined proceeds: the location stream's points() requests When-In-Use,
         // which surfaces the system prompt on first use.

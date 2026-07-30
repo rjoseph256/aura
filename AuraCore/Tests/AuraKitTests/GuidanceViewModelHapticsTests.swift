@@ -79,6 +79,30 @@ struct GuidanceViewModelHapticsTests {
         #expect(spy.cues.isEmpty)
     }
 
+    @Test func aCrossingTakenWhilePausedDoesNotBurnTheManeuversOnlyBuzz() async {
+        // The pause gate must skip the engine, not just the play. `TurnHapticEngine` fires once
+        // per maneuver key, so a threshold crossing consumed during the stop would spend this
+        // turn's only trigger — and the rider resumes 140 m from a turn they are never buzzed
+        // for. `ScriptedGuidanceSession` replays its script on each `start`, so the second run
+        // is the same maneuver, at the same distance, with the ride recording again.
+        let session = ScriptedGuidanceSession(script: [
+            .progress(.init(distanceToManeuverMeters: 140, instruction: "Right onto Penn Ave"))
+        ])
+        let vm = GuidanceViewModel(session: session)
+        let spy = HapticSpy()
+        vm.haptics = spy
+        vm.hapticsEnabled = true
+
+        vm.rideDidSetPaused(true)
+        await vm.run(route: makeRoute())
+        #expect(spy.cues.isEmpty)
+
+        vm.rideDidSetPaused(false)
+        await vm.run(route: makeRoute())
+        #expect(spy.cues == [.approach],
+                "the crossing taken while paused burned this maneuver's only approach buzz")
+    }
+
     @Test func resumingRestoresTurnHaptics() async {
         let session = ScriptedGuidanceSession(script: [
             .progress(.init(distanceToManeuverMeters: 140, instruction: "Right onto Penn Ave"))

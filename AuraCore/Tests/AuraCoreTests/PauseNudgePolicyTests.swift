@@ -44,7 +44,24 @@ struct PauseNudgePolicyTests {
 
     @Test("No rung claims the ride is still recording")
     func copyIsHonest() {
-        #expect(PauseNudgePolicy.rungs.allSatisfy { $0.body.contains("isn't recording") })
+        #expect(PauseNudgePolicy.rungs.allSatisfy {
+            $0.body.contains("hasn't recorded anything")
+        })
+    }
+
+    @Test("No rung asserts a live pause, which a jetsam kill would make false")
+    func copySurvivesAJetsamKill() {
+        // A long stop is the likeliest end of the app's process, and these fire from the
+        // system after it. "Your ride has been paused for 2 hours" is then a lie told by the
+        // rung most likely to be the one that fires. Every rung states what has NOT been
+        // recorded since the pause instead, which holds whether the ride is paused or gone.
+        for rung in PauseNudgePolicy.rungs {
+            #expect(rung.title == "Aura isn't recording")
+            #expect(rung.body.hasPrefix("Aura hasn't recorded anything since you paused"))
+            #expect(!rung.body.contains("is paused"))
+            #expect(!rung.body.contains("has been paused"))
+            #expect(!rung.body.contains("still paused"))
+        }
     }
 
     @Test("The ladder is bounded, so a jetsam orphan cannot nag forever")

@@ -13,7 +13,10 @@ import AuraKit
 final class HapticPlayer: HapticPlaying {
     static let shared = HapticPlayer()
 
-    /// A firm, crisp tap for an imminent turn.
+    /// The firm, crisp `.rigid` tap. Two cues use it: the single beat for an imminent turn, and
+    /// both beats of `.resume`, which wants the same crispness and would otherwise need a
+    /// third generator with an identical style. Named for its first use; `play(_:)` is the
+    /// authority on what it fires for.
     private let approachGenerator = UIImpactFeedbackGenerator(style: .rigid)
     /// The distinct success rhythm for reaching the destination.
     private let arrivalGenerator = UINotificationFeedbackGenerator()

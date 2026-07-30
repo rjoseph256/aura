@@ -144,11 +144,17 @@ public final class GuidanceViewModel: RidePauseObserving {
         isRerouting = false
         lastUpdate = update
         turn = TurnCardPresenter.state(for: update, units: units)
+        // Same gate as `.spokenInstruction`: a rider who does not need to be told about the
+        // turn does not need to be buzzed about it either (ROH-101 P1).
+        //
+        // The gate has to cover the *engine*, not just the play. `TurnHapticEngine` is
+        // edge-triggered once per maneuver key: feeding it a threshold crossing that happened
+        // during the stop would spend that turn's only trigger on a buzz nobody felt, and the
+        // rider would resume inside the threshold and never be buzzed for it.
+        guard !isPaused else { return }
         let cue = hapticEngine.onProgress(
             distanceToManeuverMeters: update.distanceToManeuverMeters,
             maneuverKey: update.instruction)
-        // Same gate as `.spokenInstruction`: a rider who does not need to be told about the
-        // turn does not need to be buzzed about it either (ROH-101 P1).
-        if hapticsEnabled, !isPaused, let cue { haptics?.play(cue) }
+        if hapticsEnabled, let cue { haptics?.play(cue) }
     }
 }
