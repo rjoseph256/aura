@@ -53,13 +53,14 @@ public struct ShareMapRequest: Equatable, Sendable {
     }
 
     static func cacheKey(rideID: UUID, route: ShareRouteGeometry.Prepared, style: MapStyle,
-                         size: CGSize, scale: CGFloat, compositeVersion: Int) -> String {
+                         size: CGSize, scale: CGFloat,
+                         compositeVersion: Int = ShareMapRequest.compositeVersion) -> String {
         let identity = [
             rideID.uuidString,
             String(route.contentHash),
             styleIdentity(style),
             "v\(compositeVersion)",
-            "\(Int(size.width))x\(Int(size.height))@\(Int(scale))",
+            "\(Int(size.width))x\(Int(size.height))@\(Int(scale))"
         ].joined(separator: "|")
         return "sharemap-\(TerrainSnapshotRequest.fnv1a(identity))"
     }
