@@ -122,9 +122,19 @@ after they leave.
 ## 9. iCloud sync (two devices, same iCloud account)
 
 First provision the schema. On a signed build, run the app once so SwiftData pushes the CloudKit
-schema, then open the CloudKit Dashboard Development environment and confirm the `CD_RideRecord`
-record type and its fields appear. Promote the schema to Production before any TestFlight or App
-Store build, and after promotion only add to it.
+schema, then open the CloudKit Dashboard Development environment and confirm the record types and
+their fields appear. The mirror covers three of them, not just rides: `CD_RideRecord`,
+`CD_SavedPlaceRecord` and `CD_SeenGemRecord` all come from the one
+`ModelConfiguration(cloudKitDatabase:)` in `RideStore.persistent()`.
+
+Promote to Production before any TestFlight or App Store build, and after promotion only add to
+it. That promotion is a hard release gate tracked as
+[ROH-108](https://linear.app/rohun/issue/ROH-108), which carries the console path and the field
+list to read back. Production is immutable from the client, so a build carrying a field production
+lacks cannot export at all, and sync stops in both directions with nothing visible in the app. The
+fields the current gate turns on are `CD_segmentsData` and `CD_pausedSeconds` (schema V6) plus
+`CD_checkpointedAt` (V7). Deploy them together: promoted fields can never be removed, so a partial
+promotion cannot be corrected, only added to.
 
 1. Ride round-trip. Record a ride on Device A. With Device B open on the History tab, the ride
    should appear without relaunching. Check the Plan tab and its weekly ring update too.

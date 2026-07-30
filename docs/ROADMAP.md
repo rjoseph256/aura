@@ -595,11 +595,13 @@ The list, oldest first:
 
   **That promotion is now a hard release gate, tracked as [ROH-108](https://linear.app/rohun/issue/ROH-108).**
   Schema V6 (ROH-100) added `CD_segmentsData` and `CD_pausedSeconds` to `CD_RideRecord`, and
-  the production schema is immutable from the client — so a V6 build shipped before the
-  promotion cannot export at all and sync stops for every V6 user, with no in-app error
-  surface. It blocks the first **TestFlight** build, not only the App Store one: both use the
-  production environment. The issue carries the console path and the dev-build-first
-  prerequisite.
+  V7 (ROH-107) added `CD_checkpointedAt`. The production schema is immutable from the client,
+  so a build shipped before the promotion cannot export at all and sync stops for every user
+  on it, with no in-app error surface. It blocks the first **TestFlight** build, not only the
+  App Store one: both use the production environment. All three fields go in one deploy,
+  because a promoted field can never be removed and a partial promotion can only be added to.
+  The issue carries the console path, the full record-type inventory to read back, and the
+  dev-build-first prerequisite.
 
 Two device-independent test follow-ups from the iCloud review ride along: the
 schema-invariant guard tests (every non-optional `RideRecord` attribute has a default; no
