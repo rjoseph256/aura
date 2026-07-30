@@ -55,4 +55,28 @@ struct PauseControlCopyTests {
         #expect(PauseControlCopy.chipAccessibilityLabel(pausedSeconds: 45)
                 == "Paused for 45 seconds")
     }
+
+    @Test("The chip's VoiceOver read grows an hours field past an hour, matching the clock")
+    func chipAccessibilityLabelGrowsAnHoursField() {
+        #expect(PauseControlCopy.chipAccessibilityLabel(pausedSeconds: 3600)
+                == "Paused for 1 hour")
+        #expect(PauseControlCopy.chipAccessibilityLabel(pausedSeconds: 7200)
+                == "Paused for 2 hours")
+        #expect(PauseControlCopy.chipAccessibilityLabel(pausedSeconds: 3900)
+                == "Paused for 1 hour 5 minutes")
+    }
+
+    @Test("The chip's VoiceOver read omits a zero-valued trailing unit")
+    func chipAccessibilityLabelOmitsZeroTrailingUnit() {
+        #expect(PauseControlCopy.chipAccessibilityLabel(pausedSeconds: 60)
+                == "Paused for 1 minute")
+    }
+
+    @Test("The chip's VoiceOver read uses singular units at exactly one, not a bare plural")
+    func chipAccessibilityLabelSingularUnits() {
+        #expect(PauseControlCopy.chipAccessibilityLabel(pausedSeconds: 61)
+                == "Paused for 1 minute 1 second")
+        #expect(PauseControlCopy.chipAccessibilityLabel(pausedSeconds: 3600)
+                == "Paused for 1 hour")
+    }
 }
