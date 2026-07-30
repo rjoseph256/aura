@@ -7,6 +7,12 @@ public enum RideTestID {
     public static let hudProbe = "ride.hud.probe"
     public static let hudBack = "ride.hud.back"
     public static let hudEnd = "ride.hud.end"
+    /// The cockpit pause/resume control. One identifier for both states — it is one control
+    /// whose label changes (ROH-101 P7); assert the state on `hudPausedBanner`, not on this.
+    public static let hudPause = "ride.hud.pause"
+    /// The PAUSED state chip. Present only while paused, so ROH-103 can assert the state
+    /// rather than inferring it from the control's label.
+    public static let hudPausedBanner = "ride.hud.paused.banner"
     public static let previewStart = "preview.start"
     public static let summaryDistance = "summary.distance"
     public static let historyRow = "history.row"
