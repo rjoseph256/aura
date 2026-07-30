@@ -46,9 +46,28 @@ button). Two defects, reported by Andrew:
    rasters via `TerrainSnapshotDiskCache`); per-ride+generation temp filenames with a
    sweep; `ShareMapRasterProviding` protocol seam; one shared style-resolution helper
    (Home refactored onto it).
-4. **Adversarial spec review, round 2 — IN FLIGHT when this was last updated.** Three
-   fresh reviewers against rev 2, primed with the round-1 findings. Reconcile before
-   planning; re-run the gate if you can't find its results.
+4. ~~Adversarial spec review, round 2~~ — done: REVISE ×3, but the rev-2 core held
+   (band budget re-measured correct from the shipped TTFs; fallback-first kills the
+   dead button). Decisive new findings: the SDK composites our route stroke into the
+   returned raster *before* the completion, so a variance check could never see
+   blankness (fix: capture-only overlay handler, acceptance on bare map interior
+   excluding the bottom chrome strip, composite the route ourselves — which also
+   enables a dark casing under the mint for light basemaps); `Snapshotter` inherits
+   callback-driven `StyleManager.load(mapStyle:completion:)`, eliminating the
+   event-race gate and any new style helper; the specced `withTaskCancellationHandler`
+   shape doesn't compile under Swift 6 (non-Sendable Snapshotter — hop `cancel()` via
+   `Task { @MainActor … }` and use a resolve-once latch); the sweep deleted the open
+   sheet's file (fix: per-ride *directories*, clean leaf filename, sweep on summary
+   entry only, other rides only); cache key needs a route-content hash + authored
+   style version, and reads need `UIImage(data:scale: 3)` or cache hits center-crop;
+   prefetch the raster at ride end; hero 48 fits (44 was unforced); stats numerals
+   stay Saira; upgrade swap must never nil a working shareImage; single-flight the
+   pipeline; layout budget enforced as a package test, not a preview.
+5. **Spec revision 3 written and committed** — adopts all of the above.
+6. **Adversarial spec review, round 3 (delta verification, 2 reviewers) — IN FLIGHT
+   when this was last updated.** This is the loop's third and final iteration; if it
+   returns REVISE on anything structural, surface to Andrew rather than iterating
+   further.
 5. `superpowers:writing-plans` → bite-sized TDD plan.
 6. Adversarial plan review (2+ reviewers, refuting stance). Fix before executing.
 7. `superpowers:subagent-driven-development` — fresh implementer + reviewer per task.
