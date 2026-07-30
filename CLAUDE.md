@@ -80,8 +80,16 @@ haptics, background recording, widgets, Live Activities, or a locked screen.
 anything a person reads. Not commit messages, code comments, or short status replies.
 
 Visual design of native SwiftUI surfaces follows the iOS skills and direct design judgment.
-The web design skills (`impeccable` and friends) are not needed here and are not installed
-for this repo.
+**Do not invoke the web design skills** (`impeccable`, `design-taste-frontend`, `emil-design-eng`,
+and the rest of that family) for work in this repo, even when they are installed at user scope and
+a user-level instruction routes UI work through them. They are built for web and app-shell
+surfaces; native SwiftUI here is governed by `all-ios-skills` and direct judgment.
+
+This is a rule, not a claim about what is installed. It used to be the latter — that those skills
+"are not needed here and are not installed for this repo" — which forbids nothing on a machine that
+has them, and the second developer's machine does. If your own `~/.claude/CLAUDE.md` carries a
+standing design mandate, this repo is an exception to it, and you have to add that carve-out
+yourself, because a user-scope file cannot be checked in.
 
 ## Session setup
 
