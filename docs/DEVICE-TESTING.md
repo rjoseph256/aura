@@ -121,20 +121,33 @@ after they leave.
 
 ## 9. iCloud sync (two devices, same iCloud account)
 
-First provision the schema. On a signed build, run the app once so SwiftData pushes the CloudKit
-schema, then open the CloudKit Dashboard Development environment and confirm the record types and
-their fields appear. The mirror covers three of them, not just rides: `CD_RideRecord`,
-`CD_SavedPlaceRecord` and `CD_SeenGemRecord` all come from the one
+This section runs against the **Development** CloudKit environment, and it does not need the
+production schema promoted first. Neither entitlements file sets `icloud-container-environment`, so
+the environment follows the provisioning profile: an Xcode build on a phone uses Development, and
+only a distribution-signed build uses Production. Two phones on Xcode builds are enough for
+everything below.
+
+To see the schema, run the app once on a signed build so SwiftData pushes it, then open the
+CloudKit Dashboard Development environment. The mirror covers three record types, not just rides:
+`CD_RideRecord`, `CD_SavedPlaceRecord` and `CD_SeenGemRecord` all come from the one
 `ModelConfiguration(cloudKitDatabase:)` in `RideStore.persistent()`.
 
-Promote to Production before any TestFlight or App Store build, and after promotion only add to
-it. That promotion is a hard release gate tracked as
-[ROH-108](https://linear.app/rohun/issue/ROH-108), which carries the console path and the field
-list to read back. Production is immutable from the client, so a build carrying a field production
-lacks cannot export at all, and sync stops in both directions with nothing visible in the app. The
-fields the current gate turns on are `CD_segmentsData` and `CD_pausedSeconds` (schema V6) plus
-`CD_checkpointedAt` (V7). Deploy them together: promoted fields can never be removed, so a partial
-promotion cannot be corrected, only added to.
+Promote to Production before any TestFlight or App Store build, and after promotion only add to it.
+That promotion is a hard release gate tracked as
+[ROH-108](https://linear.app/rohun/issue/ROH-108), which carries the console path and the field list
+to read back. Production is immutable from the client, so a build carrying a field production lacks
+cannot export at all, and sync stops in both directions with nothing visible in the app. Deploy
+every field in one trip: promoted fields can never be removed, so a partial promotion cannot be
+corrected, only added to.
+
+Reading the development field list is not the same as reading the model. CloudKit creates a field
+the first time a record actually carries a value for it, so an attribute nothing has written yet is
+simply absent, and promoting copies that gap into Production. As of 2026-07-29 the container was
+missing three fields for this reason: `CD_segmentsData_ckAsset`, which appears once a segments blob
+is large enough to spill into an asset the way `CD_trackData_ckAsset` already has, and
+`CD_routeId` / `CD_destinationPlaceId`, which `RideRecorder` hardcodes to nil at both write sites
+([ROH-128](https://linear.app/rohun/issue/ROH-128)). Before promoting, diff the console's field list
+against the current schema by hand and exercise whatever is missing.
 
 1. Ride round-trip. Record a ride on Device A. With Device B open on the History tab, the ride
    should appear without relaunching. Check the Plan tab and its weekly ring update too.
