@@ -9,9 +9,13 @@ D9 named but left open. It also picks up three obligations
 Blockers are clear: ROH-100 (schema V6), ROH-105 (dead peer parameters) and ROH-107
 (unfinished-ride treatment) are all merged to main.
 
-**Revision 2.** Three independent reviewers refuted revision 1. Every correction is folded in
-below; the ones that changed a decision rather than a sentence are listed under
-"What revision 1 got wrong", so the reasoning is not lost.
+**Revision 3.** Three independent reviewers refuted revision 1, and two more refuted the plan
+built from revision 2. Every correction is folded in below; the ones that changed a decision
+rather than a sentence are listed under "What earlier revisions got wrong", so the reasoning is
+not lost.
+
+Revision 3's changes are all in P5 and P4: authorization moves to ride start so scheduling can be
+synchronous, and the paused map ribbon is acknowledged as Explore-only because `RideMapView` is.
 
 ## What Pass 4 is
 
@@ -61,9 +65,9 @@ unimplementable:
 ```swift
 @MainActor
 public protocol RideNudgeScheduling: AnyObject {
-    /// Ask the system once, if it has not been asked. Returns whether nudges may be posted.
-    func requestAuthorizationIfNeeded() async -> Bool
-    /// Schedule the ladder, replacing any already scheduled.
+    /// Ask the system once per install, at ride start, while the app is foregrounded.
+    func prepareAuthorization()
+    /// Schedule the ladder, replacing any already scheduled. Synchronous by design.
     func scheduleForgottenPauseNudges(startingAt: Date)
     /// Remove every pending and already delivered nudge.
     func cancelForgottenPauseNudges()
@@ -148,13 +152,19 @@ subtraction. Four signals, then:
 1. **The chip** in the cockpit row, with a live count of the current stop. This is the positive
    signal, and it is the one a VoiceOver rider gets.
 2. **The control** filled mint, reading Resume.
-3. **The map ribbon.** `TrackRibbon.Piece` gains a `style` field (`.recorded` / `.paused`), set by
-   a pure function that takes the paused flag, so the trailing segment of a paused ride strokes
-   differently and the map itself says recording has stopped. This is the discriminator ROH-105's
-   D5 demanded: a unit-tested value in AuraCore rather than another clause in
-   `RideMapView.swift:115`'s ternary, which lives in the app target this repo treats as untestable.
-   Still one piece per segment, so `sourceIndex` stays unique and
+3. **The map ribbon, on Explore only.** `TrackRibbon.Piece` gains a `style` field
+   (`.recorded` / `.paused`), set by a pure function that takes the paused flag, so the trailing
+   run of a paused ride strokes differently and the map itself says recording has stopped. This
+   is the discriminator ROH-105's D5 demanded: a unit-tested value in AuraCore rather than
+   another clause in `RideMapView.swift:115`'s ternary, which lives in the app target this repo
+   treats as untestable. Still one piece per segment, so `sourceIndex` stays unique and
    `TrackRibbonTests.test_sourceIndicesAreUnique` keeps its meaning.
+
+   **`RideMapView` is Explore-only** — its own doc comment says so, and Navigate builds an inline
+   map that strokes the planned route and never the recorded track. So Navigate has three
+   surfaces, not four, and ROH-105 D5's positive-signal requirement is discharged there by the
+   chip and the calmed turn card rather than by the map. Giving Navigate a recorded-track ribbon
+   is real work in the highest-risk view in the app and is not smuggled into this pass.
 4. **The held cockpit**, at secondary weight. `InstrumentChassis` takes an `isPaused` flag; on
    Navigate the turn card takes the same treatment, so a bar-mounted rider does not read a bright
    live turn instruction during a stop.
@@ -169,6 +179,12 @@ Navigate's ARRIVE goes to "–" while paused. `InstrumentPanel.swift:22` already
 `trip.eta ?? "–"`, so this is a fallback that exists, not new behaviour. Revision 1 called a
 dimmed-but-still-counting ETA an acceptable limitation; it is a wrong number in one of only two
 secondary readouts, and after a 45-minute lunch it displays an arrival time in the past.
+
+**Blanking it visually is not enough.** `InstrumentChassis` reads one composed label with
+`children: .ignore`, and `CruisingState.accessibilityLabel` embeds the ETA ("…arriving 11:32
+PM"). Blank the numeral alone and a sighted rider sees "–" while a VoiceOver rider still hears
+the stale arrival time, which is the worse of the two outcomes on the surface this pass claims
+as a first-class signal. `CruisingPresenter` gains a pure ETA-free label for the paused case.
 
 The map is not dimmed by a scrim. Stopping to read the map is one of the commonest reasons to
 stop, and a scrim over dark terrain at night costs real legibility. The ribbon carries the signal
@@ -209,12 +225,29 @@ the HUD on screen, is exactly that case, so the app gains an `AppDelegate` adapt
 delegate. Revision 1 missed this and its device list only checked a locked phone, so the device
 pass would have gone green over it.
 
-**Authorization is settled before anything is scheduled, and the schedule is generation-guarded.**
-`pause()` increments a counter and hands it to a task that awaits `requestAuthorizationIfNeeded()`
-and then schedules only if the counter still matches and the recorder is still paused. Without
-that guard the first pause on every install is inverted: `pause()` releases the wake lock, the
-phone locks, iOS defers the permission alert until the app is active again, and the ladder lands
-after the rider has already resumed, nagging them mid-ride.
+**Authorization is requested at ride start, and scheduling at a pause is synchronous.**
+
+Revision 2 asked for it at the first pause and guarded the resulting async gap with a generation
+counter. The plan review killed that, correctly, on two counts. The smaller one is that the guard
+is instance state on the coordinator while the notification centre is process-global, so a
+stale coordinator whose task resolves late can schedule a ladder into a *different, live* ride.
+The larger one is that the whole approach cannot serve its own use case: a forgotten pause means
+the app is backgrounded, iOS defers the permission alert until it is foregrounded again, and the
+continuation never resumes. The first forgotten pause on every install would get nothing.
+
+So `start()` calls `prepareAuthorization()`, which asks while the app is foregrounded and the
+rider is looking at the screen, and `pause()` schedules synchronously with no await anywhere. The
+generation counter, the suspended task, the cross-coordinator hole and the coordinator retention
+it caused all stop existing rather than being defended against.
+
+The cost is a permission prompt on a rider's first ride rather than their first pause. That is
+the honest trade: the prompt is the price of a feature that works, and asking at a moment the
+rider is holding the phone and looking at it is better for them than asking as they roll to a
+stop at a junction.
+
+A pause taken before authorization resolves still adds its requests. iOS evaluates authorization
+at delivery, so they are dropped if the rider declines and presented if the prompt is still open
+when they accept.
 
 **Scheduling is gated on the discard floor**, the same `RideBackOutGate` check `flushCheckpoint`
 uses. A ride not worth recovering is not worth a notification, and this closes the orphan path
@@ -274,17 +307,29 @@ resume and a second stop, its non-decreasing clamp under a backward clock step, 
 
 Coordinator tests with spies: a haptic on both transitions; the ladder scheduled on a pause above
 the floor and *not* below it; cancelled on `resume()`, `finish()`, `discard()` and `start()`; not
-cancelled on `cancel()`; and the generation guard, by resuming before the authorization task
-completes and asserting nothing is scheduled.
+cancelled on `cancel()`; and authorization prepared at `start()` but not on a denied ride. All of
+these are synchronous now that scheduling is, which is worth stating: the async version's tests
+either deadlocked or passed with the thing they tested deleted.
 
 What none of that covers is whether the two HUDs actually pass the seams, since the tests inject
 their own. Required constructor parameters are the guard, and they are a compile-time one.
 
 No new UI test here. ROH-103 owns the E2E through the paused fixture.
 
-## What revision 1 got wrong
+## What earlier revisions got wrong
 
 Kept short deliberately, because the corrections above are the substance.
+
+From revision 2, caught by the plan review:
+
+- Awaiting authorization inside `pause()` could not serve a forgotten pause at all, because a
+  forgotten pause is by definition backgrounded and iOS defers the alert.
+- The generation guard was instance state protecting process-global notification state, so a
+  stale coordinator could schedule into a live ride.
+- The paused ribbon was specified for both HUDs; `RideMapView` is Explore-only.
+- Blanking Navigate's ARRIVE left VoiceOver reading the stale ETA from the composed label.
+
+From revision 1:
 
 - The nudge seam merged async authorization into a synchronous schedule, breaking the first pause
   on every install.

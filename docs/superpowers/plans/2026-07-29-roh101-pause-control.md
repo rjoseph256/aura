@@ -39,60 +39,51 @@ Discharges ROH-105 D5's "reintroduce a pure discriminator rather than grow the t
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `AuraCore/Tests/AuraCoreTests/TrackRibbonTests.swift`:
+**`TrackRibbonTests` is an XCTest class, not a Swift Testing suite** — it is `import XCTest` /
+`final class TrackRibbonTests: XCTestCase`, and `@Test`/`#expect` will not compile there (a
+`@Test` function inside an `XCTestCase` is a hard macro error). Its `pt(_:_:)` helper already
+exists as a *private method on the class*, so write these as methods, inside the class:
 
 ```swift
-@Test("An unpaused ride styles every piece as recorded")
-func recordedWhenNotPaused() {
-    let segments = [RideSegment(points: [pt(0, 0), pt(0, 1)]),
-                    RideSegment(points: [pt(1, 0), pt(1, 1)])]
-    let pieces = TrackRibbon.pieces(segments: segments, isPaused: false)
-    #expect(pieces.map(\.style) == [.recorded, .recorded])
-}
+    func test_unpausedRideStylesEveryPieceAsRecorded() {
+        let segments = [RideSegment(points: [pt(0, 0), pt(0, 1)]),
+                        RideSegment(points: [pt(1, 0), pt(1, 1)])]
+        let pieces = TrackRibbon.pieces(segments: segments, isPaused: false)
+        XCTAssertEqual(pieces.map(\.style), [.recorded, .recorded])
+    }
 
-@Test("A paused ride styles only the trailing piece as paused")
-func pausedStylesTrailingPieceOnly() {
-    let segments = [RideSegment(points: [pt(0, 0), pt(0, 1)]),
-                    RideSegment(points: [pt(1, 0), pt(1, 1)])]
-    let pieces = TrackRibbon.pieces(segments: segments, isPaused: true)
-    #expect(pieces.map(\.style) == [.recorded, .paused])
-}
+    func test_pausedRideStylesOnlyTheTrailingPiece() {
+        let segments = [RideSegment(points: [pt(0, 0), pt(0, 1)]),
+                        RideSegment(points: [pt(1, 0), pt(1, 1)])]
+        let pieces = TrackRibbon.pieces(segments: segments, isPaused: true)
+        XCTAssertEqual(pieces.map(\.style), [.recorded, .paused])
+    }
 
-@Test("The paused style follows the last drawn piece, not the last segment")
-func pausedFollowsLastDrawnPiece() {
-    // A trailing segment with a single point strokes nothing and is dropped, so the
-    // paused style must land on the piece that is actually drawn last.
-    let segments = [RideSegment(points: [pt(0, 0), pt(0, 1)]),
-                    RideSegment(points: [pt(1, 0)])]
-    let pieces = TrackRibbon.pieces(segments: segments, isPaused: true)
-    #expect(pieces.count == 1)
-    #expect(pieces[0].style == .paused)
-    #expect(pieces[0].sourceIndex == 0)
-}
+    func test_pausedStyleFollowsTheLastDrawnPieceNotTheLastSegment() {
+        // A trailing single-point segment strokes nothing and is dropped, so the paused style
+        // must land on the piece that is actually drawn last.
+        let segments = [RideSegment(points: [pt(0, 0), pt(0, 1)]),
+                        RideSegment(points: [pt(1, 0)])]
+        let pieces = TrackRibbon.pieces(segments: segments, isPaused: true)
+        XCTAssertEqual(pieces.count, 1)
+        XCTAssertEqual(pieces.first?.style, .paused)
+        XCTAssertEqual(pieces.first?.sourceIndex, 0)
+    }
 
-@Test("Paused styling never duplicates a sourceIndex")
-func pausedKeepsSourceIndicesUnique() {
-    let segments = (0..<4).map { i in RideSegment(points: [pt(Double(i), 0), pt(Double(i), 1)]) }
-    let indices = TrackRibbon.pieces(segments: segments, isPaused: true).map(\.sourceIndex)
-    #expect(Set(indices).count == indices.count)
-}
+    func test_pausedStylingKeepsSourceIndicesUnique() {
+        let segments = (0..<4).map { i in
+            RideSegment(points: [pt(Double(i), 0), pt(Double(i), 1)])
+        }
+        let indices = TrackRibbon.pieces(segments: segments, isPaused: true).map(\.sourceIndex)
+        XCTAssertEqual(Set(indices).count, indices.count)
+    }
 
-@Test("An empty ride yields no pieces even when paused")
-func emptyPausedRideYieldsNothing() {
-    #expect(TrackRibbon.pieces(segments: [], isPaused: true).isEmpty)
-}
+    func test_emptyRideYieldsNoPiecesEvenWhenPaused() {
+        XCTAssertTrue(TrackRibbon.pieces(segments: [], isPaused: true).isEmpty)
+    }
 ```
 
-If `pt(_:_:)` does not already exist in this test file, add this helper at file scope. Note the
-label is `elevation:`, not `elevationMeters:`:
-
-```swift
-private func pt(_ lat: Double, _ lon: Double) -> TrackPoint {
-    TrackPoint(coordinate: Coordinate(latitude: lat, longitude: lon),
-               elevation: 250, timestamp: Date(timeIntervalSince1970: 0),
-               speedMetersPerSecond: nil)
-}
-```
+Check `pt`'s actual signature at the top of that class and match it; do not add a second helper.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -214,9 +205,16 @@ struct PauseNudgePolicyTests {
         #expect(zip(offsets, offsets.dropFirst()).allSatisfy { $0 < $1 })
     }
 
-    @Test("Every rung clears the 60 second floor a time-interval trigger requires")
-    func clearsTriggerFloor() {
-        #expect(PauseNudgePolicy.rungs.allSatisfy { $0.after >= 60 })
+    @Test("Every rung is a positive interval, which is all a non-repeating trigger requires")
+    func everyRungIsPositive() {
+        // Not 60 seconds: that floor applies to `repeats: true`, and no rung repeats.
+        #expect(PauseNudgePolicy.rungs.allSatisfy { $0.after > 0 })
+    }
+
+    @Test("The first rung is late enough that an ordinary stop never fires it")
+    func firstRungClearsAnOrdinaryStop() {
+        // A coffee queue, a mechanical or a photo stop must not trigger a nudge.
+        #expect((PauseNudgePolicy.rungs.first?.after ?? 0) >= 600)
     }
 
     @Test("Identifiers are unique, so cancellation removes every rung")
@@ -641,7 +639,10 @@ Extend the existing helper in the pause test file (Task 6 adds `nudges:` to the 
     let c = makeCoordinator(haptics: haptics)
     c.start(location: location, saving: store, units: .metric, authorization: .authorized)
     location.emit(point(40.40, 0))
-    #expect(await waitUntil { c.stats.distanceMeters >= 0 })
+    location.emit(point(40.41, 10))
+    // `> 0`, not `>= 0`: the latter is true on the first poll, so the wait would return before
+    // the emitted points were consumed and the test would assert against an empty recorder.
+    #expect(await waitUntil { c.stats.distanceMeters > 0 })
     c.pause()
     #expect(haptics.cues == [.pause])
 }
@@ -655,7 +656,6 @@ Extend the existing helper in the pause test file (Task 6 adds `nudges:` to the 
     c.pause()
     c.resume()
     #expect(haptics.cues == [.pause, .resume])
-    #expect(RideHapticCue.pause != RideHapticCue.resume)
 }
 
 @Test func redundantTransitionsPlayNothing() async throws {
@@ -750,15 +750,19 @@ In `resume()`, after `recorder.resume(at: now)`:
         haptics.play(.resume)
 ```
 
-- [ ] **Step 6: Update all 14 construction sites**
+- [ ] **Step 6: Update all 16 construction sites**
 
 ```bash
 grep -rn "RideSessionCoordinator(" --include="*.swift" Aura AuraCore | grep -v "class RideSessionCoordinator"
 ```
 
-Every test site gets `haptics: HapticSpy()` (or the target's existing haptic double). The two app sites get `haptics: HapticPlayer.shared`:
-- `Aura/Sources/Ride/RideHUDView.swift:58`
-- `Aura/Sources/Ride/NavigateHUDView.swift:77`
+That returns **16**: fourteen in `AuraCore/Tests/AuraKitTests/` (GoldenRidePlayback 1, Discovery 1,
+Detour 4, Pause 1, CheckpointFlush 1, CoordinatorTests 5, GroupRide/CoordinatorGroupSink 1) plus
+the two app sites. Count them before you start; stopping at fourteen leaves two files broken.
+
+Every test site gets `haptics: HapticSpy()`. The two app sites get `haptics: HapticPlayer.shared`
+(`RideHUDView.swift` and `NavigateHUDView.swift` — find the call, do not trust a line number, since
+earlier tasks have shifted these files).
 
 - [ ] **Step 7: Run the whole suite**
 
@@ -779,11 +783,19 @@ git commit -m "feat(roh-101): confirm pause and resume with distinct haptics"
 
 The most defect-prone task in the plan. Three of the review's blocking findings live here.
 
-**Ordering: run Task 9 before this one.** This task makes `nudges` a required constructor
-parameter, so the two HUDs must pass a real conformer for the app to build, and Task 9 is what
-creates `PauseNudgeScheduler`. Task 9 in turn needs only `PauseNudgePolicy` (Task 2) and the
-seam declared in Step 3 below, so the working order is: Step 3 of this task, then all of Task 9,
-then the rest of this task.
+**Ordering.** This task makes `nudges` a required constructor parameter, so the app cannot build
+until both HUDs pass a real conformer, and Task 9 is what creates `PauseNudgeScheduler`. Run:
+**Steps 1–5 of this task** (protocol, coordinator, published clock, tests), then **Task 9 Steps
+1–4**, then **Step 6 of this task together with Task 9 Step 5** as one commit, then build. Task 9
+Step 5 does *not* re-add `haptics:` — Task 5 already did that.
+
+**Revision note.** An earlier draft awaited `requestAuthorizationIfNeeded()` inside `pause()` and
+guarded the gap with a generation counter. The plan review killed it: a forgotten pause is
+backgrounded, iOS defers the permission alert until the app is foregrounded, so the continuation
+never resumes and the first forgotten pause of every install got nothing. The counter was also
+instance state guarding process-global notification state, so a stale coordinator could schedule
+into a live ride. Authorization now happens at `start()` and scheduling is synchronous, which
+deletes the counter, the task, the retention and the race rather than defending against them.
 
 **Files:**
 - Modify: `AuraCore/Sources/AuraKit/RideSession/RideSessionSeams.swift`
@@ -806,22 +818,12 @@ import Foundation
 
 @MainActor
 final class NudgeSpy: RideNudgeScheduling {
-    var authorized = true
-    /// Held open to model the real async authorization gap: the alert iOS defers until the app
-    /// is active again is exactly the window the generation guard exists for.
-    var authorizationGate: CheckedContinuation<Void, Never>?
+    private(set) var prepareCount = 0
     private(set) var scheduleCount = 0
     private(set) var cancelCount = 0
     private(set) var lastStart: Date?
 
-    func requestAuthorizationIfNeeded() async -> Bool {
-        if authorizationGate != nil { return authorized }
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            authorizationGate = c
-        }
-        return authorized
-    }
-    func openTheGate() { authorizationGate?.resume(); authorizationGate = nil }
+    func prepareAuthorization() { prepareCount += 1 }
     func scheduleForgottenPauseNudges(startingAt: Date) { scheduleCount += 1; lastStart = startingAt }
     func cancelForgottenPauseNudges() { cancelCount += 1 }
 }
@@ -858,8 +860,7 @@ struct RideSessionCoordinatorNudgeTests {
         let c = makeCoordinator(nudges: nudges)
         await ridePastTheDiscardFloor(c, location, store)
         c.pause()
-        nudges.openTheGate()
-        #expect(await waitUntil { nudges.scheduleCount == 1 })
+        #expect(nudges.scheduleCount == 1)
     }
 
     @Test func aPauseBelowTheFloorSchedulesNothing() async throws {
@@ -871,38 +872,29 @@ struct RideSessionCoordinatorNudgeTests {
         c.start(location: ManualLocationProvider(), saving: store, units: .metric,
                 authorization: .authorized)
         c.pause()
-        nudges.openTheGate()
-        await Task.yield()
         #expect(nudges.scheduleCount == 0)
     }
 
-    @Test func resumingBeforeAuthorizationResolvesSchedulesNothing() async throws {
-        // The first pause on every install: the wake lock drops, the phone locks, and iOS
-        // defers the alert until the app is active again. Without the generation guard the
-        // ladder lands after the rider is already riding.
-        let nudges = NudgeSpy(), location = ManualLocationProvider()
+    @Test func startPreparesAuthorizationWhileTheAppIsForegrounded() async throws {
+        // Asking here rather than at the first pause is the whole reason scheduling can be
+        // synchronous: a forgotten pause is backgrounded, and iOS defers the alert until the
+        // app is active again, so a pause-time request would never resolve for the one case
+        // the ladder exists to rescue.
+        let nudges = NudgeSpy()
         let store = try RideStore.inMemory()
         let c = makeCoordinator(nudges: nudges)
-        await ridePastTheDiscardFloor(c, location, store)
-        c.pause()
-        c.resume()
-        nudges.openTheGate()
-        await Task.yield()
-        await Task.yield()
-        #expect(nudges.scheduleCount == 0)
+        c.start(location: ManualLocationProvider(), saving: store, units: .metric,
+                authorization: .authorized)
+        #expect(nudges.prepareCount == 1)
     }
 
-    @Test func aDeclinedPermissionSchedulesNothing() async throws {
-        let nudges = NudgeSpy(), location = ManualLocationProvider()
-        nudges.authorized = false
+    @Test func aDeniedRideNeverAsksForNotifications() async throws {
+        let nudges = NudgeSpy()
         let store = try RideStore.inMemory()
         let c = makeCoordinator(nudges: nudges)
-        await ridePastTheDiscardFloor(c, location, store)
-        c.pause()
-        nudges.openTheGate()
-        await Task.yield()
-        await Task.yield()
-        #expect(nudges.scheduleCount == 0)
+        c.start(location: ManualLocationProvider(), saving: store, units: .metric,
+                authorization: .denied)
+        #expect(nudges.prepareCount == 0)
     }
 
     @Test func resumeCancels() async throws {
@@ -947,15 +939,6 @@ struct RideSessionCoordinatorNudgeTests {
         #expect(nudges.cancelCount == 1)
     }
 
-    @Test func aDeniedRideDoesNotTouchTheNudges() async throws {
-        let nudges = NudgeSpy()
-        let store = try RideStore.inMemory()
-        let c = makeCoordinator(nudges: nudges)
-        c.start(location: ManualLocationProvider(), saving: store, units: .metric,
-                authorization: .denied)
-        #expect(nudges.cancelCount == 0)
-    }
-
     @Test func teardownDoesNotCancel() async throws {
         // A spurious onDisappear on the retained nav root would otherwise silently remove the
         // safety net for a still-paused ride, and pause()'s !isPaused guard means nothing
@@ -965,8 +948,6 @@ struct RideSessionCoordinatorNudgeTests {
         let c = makeCoordinator(nudges: nudges)
         await ridePastTheDiscardFloor(c, location, store)
         c.pause()
-        nudges.openTheGate()
-        #expect(await waitUntil { nudges.scheduleCount == 1 })
         let before = nudges.cancelCount
         c.cancel()
         #expect(nudges.cancelCount == before)
@@ -979,8 +960,6 @@ struct RideSessionCoordinatorNudgeTests {
         await ridePastTheDiscardFloor(c, location, store)
         let before = Date()
         c.pause()
-        nudges.openTheGate()
-        #expect(await waitUntil { nudges.scheduleCount == 1 })
         let start = try #require(nudges.lastStart)
         #expect(start.timeIntervalSince(before) >= 0)
         #expect(start.timeIntervalSince(before) < 5)
@@ -1001,17 +980,17 @@ Append to `RideSessionSeams.swift`:
 /// Schedules and cancels the forgotten-pause notification ladder. The app conforms a
 /// UserNotifications-backed type; the package never imports UserNotifications.
 ///
-/// **Authorization is separate from scheduling on purpose.** Merging them into one synchronous
-/// call is unimplementable: `requestAuthorization` is async, and a pause immediately releases
-/// the wake lock, so on the first pause of an install the phone locks, iOS defers the alert
-/// until the app is active again, and a merged call would schedule the ladder long after the
-/// rider resumed. The coordinator awaits authorization and then re-checks that the same pause
-/// is still in flight before scheduling.
+/// **Authorization happens at ride start, not at the first pause.** `requestAuthorization` is
+/// async and iOS defers its alert while the app is backgrounded — which a forgotten pause always
+/// is, since `pause()` releases the wake lock and the rider walks away. Asking at pause time
+/// therefore cannot serve the one case the ladder exists for: the continuation never resumes.
+/// Asking at `start()`, while the rider is holding the phone and looking at it, lets scheduling
+/// be plain and synchronous.
 @MainActor
 public protocol RideNudgeScheduling: AnyObject {
-    /// Ask the system once per install, if it has not been asked. Returns whether nudges may
-    /// be posted; a declined prompt returns false forever after.
-    func requestAuthorizationIfNeeded() async -> Bool
+    /// Ask the system once per install. Called at ride start, while the app is foregrounded.
+    /// Fire-and-forget: nothing waits on the rider's answer.
+    func prepareAuthorization()
     /// Schedule every rung of `PauseNudgePolicy`, offset from `startingAt`, replacing any
     /// already scheduled.
     func scheduleForgottenPauseNudges(startingAt: Date)
@@ -1022,13 +1001,10 @@ public protocol RideNudgeScheduling: AnyObject {
 
 - [ ] **Step 4: Wire the coordinator**
 
-Stored properties beside the other seams:
+Stored property beside the other seams:
 
 ```swift
     private let nudges: any RideNudgeScheduling
-    /// Incremented on every pause. A schedule that resolves after the rider already resumed
-    /// carries a stale generation and is dropped.
-    private var pauseGeneration = 0
 ```
 
 `init` gains the required parameter after `haptics:`:
@@ -1040,11 +1016,14 @@ Stored properties beside the other seams:
         self.nudges = nudges
 ```
 
-In `start()`, immediately after the authorization `switch` (so a denied ride does not touch it):
+In `start()`, immediately after the authorization `switch` (so a denied ride does neither):
 
 ```swift
+        // Ask now, while the app is foregrounded and the rider is looking at it. A pause-time
+        // request cannot work: a forgotten pause is backgrounded and iOS defers the alert.
+        nudges.prepareAuthorization()
         // The one moment the app knows no ride is paused. Clears anything an earlier ride in
-        // this same app session orphaned — a below-floor swipe-back, or a schedule that raced.
+        // this same app session orphaned.
         nudges.cancelForgottenPauseNudges()
 ```
 
@@ -1057,7 +1036,8 @@ Replace the body of `pause()` with:
         recorder.pause(at: now)
         haptics.play(.pause)
         // Before anything that can yield: an arrival draining after the pause but before
-        // guidance knows about it would end the ride under the rider.
+        // guidance knows about it would end the ride under the rider. `haptics.play` above and
+        // `scheduleNudges` below are both synchronous, so neither opens that window.
         pauseObserver?.rideDidSetPaused(true)
         refreshElapsed(now: now)
         currentPauseSeconds = 0
@@ -1071,19 +1051,9 @@ Replace the body of `pause()` with:
     /// Gated on the same discard floor as `flushCheckpoint`: a ride the app would itself throw
     /// away has no business sending notifications, and that gate is also what stops an
     /// edge-swipe back-out below the floor from orphaning a ladder.
-    ///
-    /// The generation check after the await is load-bearing, not defensive. See
-    /// `RideNudgeScheduling`.
     private func scheduleNudges(from date: Date) {
         guard !RideBackOutGate.canDiscard(distanceMeters: recorder.stats.distanceMeters) else { return }
-        pauseGeneration += 1
-        let generation = pauseGeneration
-        Task { [weak self] in
-            guard let self else { return }
-            let granted = await self.nudges.requestAuthorizationIfNeeded()
-            guard granted, self.pauseGeneration == generation, self.recorder.isPaused else { return }
-            self.nudges.scheduleForgottenPauseNudges(startingAt: date)
-        }
+        nudges.scheduleForgottenPauseNudges(startingAt: date)
     }
 ```
 
@@ -1091,7 +1061,6 @@ In `resume()`, after `recorder.resume(at: now)`:
 
 ```swift
         haptics.play(.resume)
-        pauseGeneration += 1          // invalidates any schedule still awaiting authorization
         nudges.cancelForgottenPauseNudges()
         currentPauseSeconds = 0
 ```
@@ -1099,14 +1068,12 @@ In `resume()`, after `recorder.resume(at: now)`:
 In `finish()`, immediately after the `guard`:
 
 ```swift
-        pauseGeneration += 1
         nudges.cancelForgottenPauseNudges()
 ```
 
 In `discard()`, before the `cancel()` call:
 
 ```swift
-        pauseGeneration += 1
         nudges.cancelForgottenPauseNudges()
 ```
 
@@ -1410,14 +1377,20 @@ final class PauseNudgeScheduler: NSObject, RideNudgeScheduling {
     private override init() { super.init() }
 
     /// The system prompts once per install and returns the stored answer afterwards, so this is
-    /// safe to call on every pause. Requests sound as well as alerts: a silent banner on a
-    /// locked phone is invisible to the rider who needs it.
-    func requestAuthorizationIfNeeded() async -> Bool {
-        do {
-            return try await center.requestAuthorization(options: [.alert, .sound])
-        } catch {
-            log.error("Notification authorization failed: \(error.localizedDescription, privacy: .public)")
-            return false
+    /// safe to call at the start of every ride. Requests sound as well as alerts: a silent
+    /// banner on a locked phone is invisible to the rider who needs it.
+    ///
+    /// Fire-and-forget. Nothing waits on the answer, because the only caller is a ride start and
+    /// the schedule that eventually uses it happens minutes later at a pause. A pause taken
+    /// while the prompt is still open still adds its requests: iOS evaluates authorization at
+    /// delivery, so they are dropped on a decline and presented on an accept.
+    func prepareAuthorization() {
+        Task { [center, log] in
+            do {
+                _ = try await center.requestAuthorization(options: [.alert, .sound])
+            } catch {
+                log.error("Notification authorization failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
@@ -1425,9 +1398,13 @@ final class PauseNudgeScheduler: NSObject, RideNudgeScheduling {
         cancelForgottenPauseNudges()
         let elapsed = max(0, Date().timeIntervalSince(startingAt))
         for rung in PauseNudgePolicy.rungs {
-            // Anchor to the tap, not to now: authorization may have taken a while to resolve.
+            // Anchor to the tap rather than to now. In practice these are the same instant,
+            // since this is called synchronously from `pause()`; the subtraction only matters
+            // if a future caller schedules retrospectively.
             let remaining = rung.after - elapsed
-            guard remaining >= 60 else { continue }   // a time-interval trigger's floor
+            // A non-repeating time-interval trigger only requires a positive interval. The
+            // 60-second minimum applies to `repeats: true`, which no rung uses.
+            guard remaining > 0 else { continue }
             let content = UNMutableNotificationContent()
             content.title = rung.title
             content.body = rung.body
@@ -1513,11 +1490,15 @@ Read `AuraApp.swift:93` and the surrounding `.task` before editing; match how th
 
 - [ ] **Step 5: Point the HUDs at the real scheduler**
 
-In both `RideHUDView.swift:58` and `NavigateHUDView.swift:77`, the coordinator gains:
+Task 5 already added `haptics: HapticPlayer.shared` to both call sites. Add **only** the new
+argument, or you will write a duplicate label and break the build:
 
 ```swift
-            haptics: HapticPlayer.shared, nudges: PauseNudgeScheduler.shared,
+            nudges: PauseNudgeScheduler.shared,
 ```
+
+Do this together with Task 6 Step 6, as one commit — that is the first moment the tree builds
+again, because Task 6 Step 4 is what adds the parameter to `init`.
 
 - [ ] **Step 6: Build**
 
@@ -1618,7 +1599,14 @@ struct PauseControl: View {
     }
 
     private var control: some View {
-        Button(action: onToggle) {
+        // The announcement lives here, not in the two HUDs. This view is in the app target and
+        // can import UIKit freely, and putting it here is what makes spec P7's "written once"
+        // literally true rather than "written once per HUD" (which is twice).
+        Button {
+            let willBePaused = !isPaused
+            onToggle()
+            AccessibilityAnnouncer.announce(PauseControlCopy.announcement(isPaused: willBePaused))
+        } label: {
             HStack(spacing: AuraTheme.Spacing.sm) {
                 Image(systemName: isPaused ? "play.fill" : "pause.fill")
                 Text(PauseControlCopy.buttonLabel(isPaused: isPaused))
@@ -1709,34 +1697,38 @@ In `InstrumentChassis`, add the property after `columnAccessibilityLabel`:
     /// `AuraPaletteContrastTests` guards the token against the panel, and it cannot see through
     /// a composition. This must also stay pure styling — adding a `Text` here would break the
     /// one-composed-VoiceOver-element invariant documented above.
-    var isPaused: Bool = false
+    let isPaused: Bool
 ```
 
-Add a computed colour and use it in both places that currently use `AuraTheme.textPrimary`:
+**No default value, on any of the flags in this task.** Task 5 argues at length that defaulted
+wiring lets a miswired HUD compile clean and ship dead, and these six wiring points carry three of
+the four paused signals with no unit test and no compiler help. A required parameter is the only
+guard available, and the cost is updating the previews in the same files.
+
+Add a computed colour and use it in `speedInstrument`, replacing
+`.foregroundStyle(AuraTheme.textPrimary)` there. That is its only call site in this type:
 
 ```swift
     private var readoutColor: Color { isPaused ? AuraTheme.textSecondary : AuraTheme.textPrimary }
 ```
 
-In `speedInstrument`, replace `.foregroundStyle(AuraTheme.textPrimary)` with `.foregroundStyle(readoutColor)`.
-
-`CockpitInstrument` gains the same flag:
+`CockpitInstrument` is a separate struct in the same file and gains its own required flag:
 
 ```swift
 struct CockpitInstrument: View {
     let value: String
     let label: String
-    var isPaused: Bool = false
+    let isPaused: Bool
 ```
-and its value `Text` uses `.foregroundStyle(isPaused ? AuraTheme.textSecondary : AuraTheme.textPrimary)`.
+with its value `Text` using `.foregroundStyle(isPaused ? AuraTheme.textSecondary : AuraTheme.textPrimary)`.
 
 - [ ] **Step 2: Thread it through Explore**
 
-`ExploreInstrumentPanel` gains `var isPaused: Bool = false`, passes `isPaused: isPaused` to `InstrumentChassis`, and passes `isPaused: isPaused` to each of its three `CockpitInstrument`s.
+`ExploreInstrumentPanel` gains `let isPaused: Bool`, passes it to `InstrumentChassis`, and passes it to each of its three `CockpitInstrument`s.
 
-- [ ] **Step 3: Thread it through Navigate, and blank ARRIVE**
+- [ ] **Step 3: Thread it through Navigate, and blank ARRIVE on both channels**
 
-`InstrumentPanel` gains `var isPaused: Bool = false` and passes it to the chassis. Its column becomes:
+`InstrumentPanel` gains `let isPaused: Bool` and passes it to the chassis. Its column becomes:
 
 ```swift
                 CockpitInstrument(value: trip.distanceRemaining ?? "–", label: "TO GO",
@@ -1748,6 +1740,31 @@ and its value `Text` uses `.foregroundStyle(isPaused ? AuraTheme.textSecondary :
                 CockpitInstrument(value: isPaused ? "–" : (trip.eta ?? "–"), label: "ARRIVE",
                                   isPaused: isPaused)
 ```
+
+**Blanking the numeral is only half of it.** `InstrumentChassis` applies one composed label with
+`children: .ignore`, so the `"–"` is never read and `CruisingState.accessibilityLabel` is — and
+that string embeds the ETA ("On Stedman Street, 7.2 miles to go, arriving 11:32 PM"). Left alone, a
+sighted rider sees "–" while a VoiceOver rider hears an arrival time that has already passed.
+
+Add a pure ETA-free label in `AuraCore/Sources/AuraKit/Guidance/CruisingPresenter.swift` beside the
+existing one, and a test for it in `AuraKitTests`:
+
+```swift
+    /// The same read with the arrival time dropped, for a paused ride whose ETA is no longer
+    /// meaningful. Pure, so the wording is tested rather than eyeballed (ROH-101 P4).
+    public var pausedAccessibilityLabel: String
+```
+
+Build it in the same initializer that builds `accessibilityLabel`, from the same street and
+distance components, simply omitting the arrival clause. Then in `InstrumentPanel`:
+
+```swift
+            columnAccessibilityLabel: isPaused ? trip.pausedAccessibilityLabel
+                                               : trip.accessibilityLabel,
+```
+
+The test asserts the paused label keeps the street and the distance-to-go and contains no
+"arriving".
 
 - [ ] **Step 4: Add a paused preview to each panel**
 
@@ -1783,25 +1800,25 @@ git commit -m "feat(roh-101): hold the cockpit readouts while paused"
 
 - [ ] **Step 1: Write the failing test**
 
-```swift
-@Test("A calmed card drops its imminent-turn emphasis and keeps everything else")
-func calmedDropsEmphasisOnly() {
-    let expanded = TurnCardState(primaryText: "Right onto Penn Ave", distanceText: "90 ft",
-                                 isExpanded: true,
-                                 accessibilityLabel: "In 90 feet, Right onto Penn Ave")
-    let calm = expanded.calmed()
-    #expect(calm.isExpanded == false)
-    #expect(calm.primaryText == expanded.primaryText)
-    #expect(calm.distanceText == expanded.distanceText)
-    #expect(calm.accessibilityLabel == expanded.accessibilityLabel)
-    #expect(calm.maneuver == expanded.maneuver)
-}
+**`TurnCardPresenterTests` is also an XCTest class.** Write these as methods inside it:
 
-@Test("Calming an already calm card changes nothing")
-func calmingIsIdempotent() {
-    let calm = TurnCardState.starting
-    #expect(calm.calmed() == calm)
-}
+```swift
+    func test_calmedDropsTheEmphasisAndKeepsEverythingElse() {
+        let expanded = TurnCardState(primaryText: "Right onto Penn Ave", distanceText: "90 ft",
+                                     isExpanded: true,
+                                     accessibilityLabel: "In 90 feet, Right onto Penn Ave")
+        let calm = expanded.calmed()
+        XCTAssertFalse(calm.isExpanded)
+        XCTAssertEqual(calm.primaryText, expanded.primaryText)
+        XCTAssertEqual(calm.distanceText, expanded.distanceText)
+        XCTAssertEqual(calm.accessibilityLabel, expanded.accessibilityLabel)
+        XCTAssertEqual(calm.maneuver, expanded.maneuver)
+    }
+
+    func test_calmingAnAlreadyCalmCardChangesNothing() {
+        let calm = TurnCardState.starting
+        XCTAssertEqual(calm.calmed(), calm)
+    }
 ```
 
 - [ ] **Step 2: Run to verify failure**
@@ -1835,7 +1852,10 @@ In `RideMapView`, add the parameter next to `segments`:
 ```swift
     /// Whether the ride is stopped. Styles the run the rider paused in, so the map itself says
     /// recording has stopped (ROH-105 D5's pure discriminator, computed in `TrackRibbon`).
-    var isPaused: Bool = false
+    ///
+    /// Required, not defaulted, for the same reason the coordinator's seams are: a silently
+    /// unwired paused signal compiles clean and ships dead. Update the `#Preview` in this file.
+    let isPaused: Bool
 ```
 
 Change `ribbonPieces`:
@@ -1852,24 +1872,28 @@ In `routeRibbon`, replace the `.lineColor(...)` call with a style that honours t
                 .lineColor(StyleColor(strokeColor(for: piece)))
                 .lineWidth(6)
                 .lineOpacity(piece.style == .paused ? 0.55 : 1)
-                // Dashes read as "not being drawn right now" at a glance, and unlike a colour
-                // change they survive a rider who cannot distinguish the two hues.
-                .lineDasharray(piece.style == .paused ? [2, 2] : [])
 ```
 
 and add:
 
 ```swift
     /// The recorded track's stroke. A detour dims the whole ribbon so the bright detour line
-    /// wins; the paused run is dimmed and dashed on top of whichever of those applies.
+    /// wins; the paused run additionally drops from the mint route colour to neutral grey.
+    ///
+    /// Grey rather than a second hue on purpose: mint against `textSecondary` grey differs in
+    /// **lightness**, so the paused run stays distinguishable to a rider who cannot separate the
+    /// two by colour. `lineDasharray` would have read even better, but it does not exist on
+    /// `PolylineAnnotation` in the pinned MapboxMaps 11.27.0 — it is a layer-level property on
+    /// `PolylineAnnotationGroup`, which would dash every piece and defeat the point.
     private func strokeColor(for piece: TrackRibbon.Piece) -> UIColor {
-        detourRoute.isEmpty
+        if piece.style == .paused {
+            return UIColor(AuraTheme.textSecondary)
+        }
+        return detourRoute.isEmpty
             ? AuraTheme.routeUIColor
             : UIColor(AuraTheme.routeLine.opacity(0.25))
     }
 ```
-
-Verify `lineDasharray` and `lineOpacity` exist on `PolylineAnnotation` in the pinned MapboxMaps 11.27.0 before relying on them. If either is unavailable, drop that modifier and carry the paused state on colour alone, then say so in the task report.
 
 - [ ] **Step 5: Run and build**
 
@@ -1924,19 +1948,27 @@ Pass the paused flag to the map and the panel:
                 isPaused: coordinator.isPaused,
 ```
 
-Add to the `RideHUDView` extension:
+Add to the `RideHUDView` extension. The announcement is *not* here — `PauseControl` owns it:
 
 ```swift
-    /// Toggle the pause, then tell VoiceOver what happened. The announcement lives here rather
-    /// than behind a seam because `UIAccessibility` is UIKit and AuraKit does not import it;
-    /// both HUDs call this same shared control, so it is still written once per HUD and never
-    /// duplicated inside the control itself.
     func togglePause() {
-        let wasPaused = coordinator.isPaused
-        if wasPaused { coordinator.resume() } else { coordinator.pause() }
-        AccessibilityAnnouncer.announce(PauseControlCopy.announcement(isPaused: !wasPaused))
+        if coordinator.isPaused { coordinator.resume() } else { coordinator.pause() }
     }
 ```
+
+Also wire the pause observer, which Explore has never set:
+
+```swift
+        // Explore's detour guidance needs the paused flag too, or a rider on a "Take me there"
+        // leg keeps getting turn haptics through a café stop. Navigate already does this at
+        // `NavigateHUDView.swift:207`; Explore never has.
+        coordinator.pauseObserver = guidance
+```
+
+Put it in the appear `.task`, beside `guidance.units = settings.units`. `GuidanceController` must
+conform to `RidePauseObserving` and forward to its in-flight `GuidanceViewModel`; add that
+conformance in `AuraCore/Sources/AuraKit/Gems/Detour/GuidanceController.swift` and cover it with a
+test in `AuraKitTests` asserting a paused controller forwards the flag to the model it built.
 
 - [ ] **Step 2: Add the announcer**
 
@@ -1959,9 +1991,24 @@ enum AccessibilityAnnouncer {
 
 Confirm `AccessibilityNotification.Announcement` and `accessibilitySpeechAnnouncementPriority` against the `ios-accessibility` skill before writing this; if the skill gives a different current spelling, follow the skill and note the difference in the task report.
 
-- [ ] **Step 3: Add the row to Navigate**
+- [ ] **Step 3: Make room in `NavigateHUDView` before adding to it**
 
-In `NavigateHUDView.bottomCockpit`, between the cluster `HStack` and `InstrumentPanel`:
+`NavigateHUDView.swift` is **483** lines and `.swiftlint.yml` sets `file_length` warning at 500,
+which `--strict` promotes to an error. Tasks 5, 6, 8 and this one add roughly twenty lines, so it
+will cross the ceiling and Step 7 will fail.
+
+Move `bottomCockpit` and the cockpit helpers into a new `Aura/Sources/Ride/NavigateHUDView+Cockpit.swift`
+as an `extension NavigateHUDView`, following the pattern `NavigateHUDView+GroupCrew.swift` already
+establishes. Do this as its own commit before touching behaviour:
+
+```bash
+swiftlint lint --strict && wc -l Aura/Sources/Ride/NavigateHUDView.swift
+git commit -am "refactor(roh-101): extract the navigate cockpit to keep the file under the ceiling"
+```
+
+- [ ] **Step 4: Add the row to Navigate**
+
+In `bottomCockpit` (now in the extension file), between the cluster `HStack` and `InstrumentPanel`:
 
 ```swift
             PauseControl(isPaused: coordinator.isPaused,
@@ -1970,34 +2017,54 @@ In `NavigateHUDView.bottomCockpit`, between the cluster `HStack` and `Instrument
                 .padding(.horizontal, AuraTheme.Spacing.lg)
 ```
 
-Pass the flag to the panel and the map, exactly as Explore does, and calm the turn card. Find where `TurnCardView(state:)` is constructed and change the state to:
+Pass `isPaused: coordinator.isPaused` to `InstrumentPanel`, and calm the turn card where
+`TurnCardView(state:)` is constructed:
 
 ```swift
             TurnCardView(state: coordinator.isPaused ? guidance.turn.calmed() : guidance.turn,
 ```
 
+**There is no map to wire on Navigate.** `RideMapView` is Explore-only — its own doc comment says
+so, and Navigate builds an inline `Map` that strokes the planned route and never the recorded
+track. So Navigate carries three paused signals (chip, control, held cockpit plus the calmed turn
+card) and Explore carries four. Do not invent a recorded-track layer in `navigateMapView`; that is
+unscoped work in the riskiest view in the app.
+
 Add the same `togglePause()` to this view's extension.
 
-- [ ] **Step 4: Verify both HUDs are wired**
+- [ ] **Step 5: Verify both HUDs are wired, with a grep that can actually fail**
+
+The obvious check does not work: `grep -n "isPaused"` matches the `PauseControl(isPaused:...)`
+line the step just added, so a HUD with the control wired and the panel left unwired passes. Check
+each wiring point by name instead:
 
 ```bash
-grep -n "PauseControl(" Aura/Sources/Ride/RideHUDView.swift Aura/Sources/Ride/NavigateHUDView.swift
-grep -n "haptics:\|nudges:" Aura/Sources/Ride/RideHUDView.swift Aura/Sources/Ride/NavigateHUDView.swift
-grep -n "isPaused" Aura/Sources/Ride/RideHUDView.swift Aura/Sources/Ride/NavigateHUDView.swift
+for f in Aura/Sources/Ride/RideHUDView.swift Aura/Sources/Ride/NavigateHUDView.swift \
+         Aura/Sources/Ride/NavigateHUDView+Cockpit.swift; do
+  echo "== $f"
+  grep -c "PauseControl(" "$f"
+  grep -c "haptics: HapticPlayer.shared" "$f"
+  grep -c "nudges: PauseNudgeScheduler.shared" "$f"
+  grep -c "isPaused: coordinator.isPaused" "$f"
+done
 ```
-Expected: both files appear in all three greps. If either is missing from any, the feature is dead on that HUD.
 
-- [ ] **Step 5: Build**
+Expected across the Explore file: one `PauseControl(`, one `haptics:`, one `nudges:`, and **three**
+`isPaused: coordinator.isPaused` (control, map, panel). Across the two Navigate files combined:
+one, one, one, and **two** (control, panel). Any lower number is a dead wiring point.
+
+- [ ] **Step 6: Build**
 
 ```bash
 xcodebuild build -project Aura/Aura.xcodeproj -scheme Aura -destination 'platform=iOS Simulator,name=iPhone 17' 2>&1 | tail -5
 ```
 Expected: BUILD SUCCEEDED.
 
-- [ ] **Step 6: Lint and commit**
+- [ ] **Step 7: Lint and commit**
 
 ```bash
 swiftlint lint --strict
+wc -l Aura/Sources/Ride/NavigateHUDView.swift   # must stay under 500
 git add -A
 git commit -m "feat(roh-101): wire the pause control into both ride HUDs"
 ```
@@ -2047,11 +2114,19 @@ struct PauseRemindersRow: View {
                     .foregroundStyle(AuraTheme.accent)
             }
         }
-        .task {
-            status = await UNUserNotificationCenter.current().notificationSettings()
-                .authorizationStatus
+        .task { await refresh() }
+        // Re-read on foreground: the whole point of the row is the rider who taps Open Settings,
+        // grants permission and comes back. Without this they return to a row still saying "Off."
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didBecomeActiveNotification)) { _ in
+            Task { await refresh() }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private func refresh() async {
+        status = await UNUserNotificationCenter.current().notificationSettings()
+            .authorizationStatus
     }
 
     private var detail: String {
@@ -2069,7 +2144,9 @@ struct PauseRemindersRow: View {
 
 - [ ] **Step 2: Add it to Settings**
 
-Place it in the same section as the Health access row. Read `SettingsView.swift` around line 74 and follow the section structure already there.
+Place it in the same section as the Health access row. `SettingsView.swift` has a
+`row(icon:tint:title:)` helper that every sibling in that section uses; render through it rather
+than dropping a bare `HStack` into a styled list, or this row will not match its neighbours.
 
 - [ ] **Step 3: Build**
 
@@ -2092,7 +2169,8 @@ git commit -m "feat(roh-101): a way back from a declined reminder prompt"
 ## Definition of done for the branch
 
 - [ ] `swift test --package-path AuraCore --no-parallel` clean, both totals.
-- [ ] `swiftlint lint --strict` clean from the repo root.
+- [ ] `swiftlint lint --strict` clean from the repo root, and `NavigateHUDView.swift` under 500 lines.
 - [ ] App builds for the simulator.
-- [ ] `grep -c "PauseControl(" ` returns 1 for each HUD file.
+- [ ] Task 13 Step 5's per-wiring-point grep returns the expected count for every line.
 - [ ] Every device-verification item in the spec is either checked on hardware or explicitly listed as outstanding on the PR.
+- [ ] **The PR states the ROH-102 release gate.** The spec makes it a gate, not a preference: until Pass 5 ships, a paused ride's Lock Screen keeps counting and never goes stale, so it tells the rider they are still riding. This branch may merge; the feature must not reach riders ahead of ROH-102.
