@@ -4,12 +4,17 @@ Slice A, Pass 5 of 6 of the segmented-rides epic (ROH-74). The parent design is
 [2026-07-26-segmented-rides-pause-design.md](2026-07-26-segmented-rides-pause-design.md); this
 document resolves its D8. Pass 4 (ROH-101) is merged, so the blocker is clear.
 
-**Revision 2.** Three independent reviewers refuted revision 1. Nine of their findings changed a
-decision rather than a sentence, and two were fatal: revision 1's dedupe could never have fired
-during a pause, and its "immediate" pause push would have been swallowed by the throttle it
-claimed to bypass. Both are recorded under "What revision 1 got wrong" rather than quietly
-deleted. Revision 1 also asserted the parent D8 was factually wrong; revision 2 withdraws that
-claim as unproven in both directions and designs so the answer does not matter.
+**Revision 3.** Three independent reviewers refuted revision 1, and two more refuted the plan built
+from revision 2. Every correction is folded in; the ones that changed a decision rather than a
+sentence are listed under "What earlier revisions got wrong", so the reasoning is not lost.
+
+Revision 2's fatal errors were a dedupe that could never fire during a pause and an "immediate"
+pause push that the throttle would have swallowed. Revision 3's single change of substance is D5:
+revision 2 stamped the dedupe state *after* the push landed, which is both unachievable —
+ActivityKit gives no delivery signal — and a positive feedback loop that would have unbounded the
+push queue and dimmed a live ride. Revision 1 also asserted the parent D8 was factually wrong;
+revision 2 withdrew that claim as unproven in both directions and designed so the answer does not
+matter, which still holds.
 
 ## What Pass 5 is
 
@@ -197,20 +202,54 @@ would be dead code. That is the second fatal defect in revision 1, and it is str
 decision type has no "skip but advance" case, and the controller has exactly one assignment site,
 inside the `.push` branch.
 
-### D5: pushes are serialized, and `lastPayload` means "what the widget has"
+### D5: pushes are serialized for ordering, and the dedupe state is stamped at enqueue
 
-`lastState` is assigned before the push today and independent of it, and the push is an
-unstructured `Task { await activity.update(content) }` with no ordering guarantee between
-successive tasks (`RideLiveActivityController.swift:91-95`). That is harmless while every tick
-pushes unconditionally. Under D4 it is not: `lastPayload` becomes the gate, so if a ticker push
-and the pause push are two racing tasks and the ticker's completes second, the widget ends up
-holding the **running** state while `lastPayload` says paused — and the dedupe then suppresses
-every push until the heartbeat 60 s later. A running clock on the Lock Screen for a minute after
-the rider paused is worse than the 4-second window D4's rule 2 exists to close.
+The push is an unstructured `Task { await activity.update(content) }` today, with no ordering
+guarantee between successive tasks (`RideLiveActivityController.swift:91-95`). That is harmless
+while every tick pushes unconditionally. Under D4 it is not: if a ticker push and the pause push
+are two racing tasks and the ticker's lands second, the widget holds the **running** state while
+the controller believes it pushed paused, and the dedupe then suppresses everything until the
+heartbeat 60 s later.
 
-So the controller drains pushes through a single chained task, and assigns `lastPayload` /
-`lastPushedAt` **after** `await activity.update` returns. Ordering is then guaranteed and the
-dedupe state describes what the widget actually has rather than what the app intended to send.
+So the controller drains pushes through a single chained task. **That is all the chain is for.**
+
+`lastPayload` and `lastPushedAt` are stamped **at enqueue**, inside the `.push` branch. Revision 2
+stamped them after `await activity.update` returned, on the theory that the dedupe state should
+describe what the widget actually has. That was wrong twice over:
+
+- **It is unachievable.** `Activity.update(_:)` is `async` and non-throwing with no return value.
+  It returns when the request is handed off, not when anything renders, and it returns identically
+  when the system has dropped the update against its budget. There is no delivery signal to wait
+  for, so no assignment point can mean "what the widget has."
+- **It fails open under latency, and the failure compounds.** The policy reads that state
+  synchronously on the next tick. With assignment deferred until a push lands, every tick inside
+  the in-flight window decides against pre-push state and enqueues again — an enqueue rate of 2/s
+  against a drain rate of one per round trip. `staleDate` is computed at decision time, so once
+  the backlog exceeds 90 s the content arrives already stale and the Lock Screen reads
+  `PAUSED · NOT UPDATING` on a ride that is perfectly alive. That is D6's failure delivered by
+  D5's own implementation. Every pause and resume also fires its bypass once per tick until the
+  first push lands, spending the update budget at the exact moment the surface most needs to be
+  responsive.
+
+Stamping at enqueue costs nothing the chain was providing: once pushes are serialized, "last
+enqueued" *is* the order the widget will see them in. The throttle then measures wall-clock
+between decisions, which is what bounds frequency, and the pre-D4 code's one-push-per-interval
+behavior is preserved rather than removed.
+
+`staleDate` is computed **inside** the task from a fresh `Date()` immediately before the update,
+not from the decision-time `now`, so a push delayed behind others does not carry a window that has
+already half elapsed.
+
+Two consequences follow, and both are handled rather than noted:
+
+- `end()` joins the same chain. Cancelling the chain does not stop it — `Task.value` is not
+  cancellation-aware and neither is `activity.update`, so queued pushes run regardless. An
+  unchained end can therefore be delivered before an update that was queued ahead of it, landing a
+  stale mid-ride frame on an activity the rider has already finished.
+- The "is this still my activity" guard runs **before** the update, not after. Placed after, it
+  prevents stale bookkeeping but not the stale push itself — and `start()` calls `end()` and then
+  `Activity.request` in one turn, so a previous ride's queued updates would otherwise race
+  alongside a second card.
 
 No new timer. The heartbeat rides the coordinator's existing 0.5 s ticker
 (`RideSessionCoordinator.swift:199-209`), which `stopStreaming()` already cancels
@@ -242,6 +281,13 @@ persisted checkpoint never is.
 `PAUSED · NOT UPDATING` when also stale. The orphan self-labels within 90 s, which is what bounds
 ROH-124 here — not the stale window revision 1 leaned on, which its own pill change had removed.
 
+**The Dynamic Island needs its own staleness channel**, because `RideStatusPill` appears only on
+the Lock Screen (`RideLockScreenView.swift:83,125`). A rider in another app after a jetsam kill
+would otherwise see `pause.fill` beside a still-counting timer indefinitely, which is D6's exact
+failure on the presentation reached without going to the Lock Screen. `context.isStale` is
+available in every presentation, so the compact and minimal glyphs degrade to
+`pause.trianglebadge.exclamationmark` when stale — a glyph, because minimal has no other channel.
+
 The word does the work because the alternative signal cannot. `statOpacity` (`RideLockScreenView.swift:24`)
 is a 0.4 alpha on three numerals that a paused rider already expects to be frozen. Dimming is not
 a word.
@@ -269,12 +315,22 @@ while the Lock Screen kept counting wall-clock.
 
 Beyond the clock:
 
-- **The identity glyph swaps to `pause.fill` in both modes** — Lock Screen header
-  (`RideLockScreenView.swift:42`), compact leading, minimal, and expanded leading
+- **The identity glyph swaps to `pause.fill` in both modes** — the free-ride Lock Screen header
+  (`RideLockScreenView.swift:42`), **the navigate Lock Screen's own `AuraGlyph`**
+  (`RideLockScreenView.swift:68`), compact leading, minimal, and expanded leading
   (`RideLiveActivity.swift:40,56,67`). Note that `:40` is compact **leading**; revision 1 called it
   compact trailing, which for free ride is the timer. Minimal is a single glyph, so it is that
   presentation's only channel, and navigate must swap too or a paused navigate ride is
-  indistinguishable from a running one on every Dynamic Island phone.
+  indistinguishable from a running one on every Dynamic Island phone. `:68` matters most and is
+  the easiest to miss: `header(title:glyph:)` is called only from the free-ride layout, so the
+  navigate Lock Screen builds its glyph directly and a treatment applied only through `header`
+  would leave the paused navigate rider looking at a turn arrow.
+- **Compact trailing has no label channel.** Free ride's compact trailing is a bare timer
+  (`RideLiveActivity.swift:49`), so at a pause the same numeral slot silently changes quantity —
+  `45:12` becomes `0:34` counting up. Nothing can label it in that space. It is read together with
+  compact leading, which is `pause.fill` in the same presentation, and the numeral drops off the
+  mint accent; the pair reads as "paused, 34 seconds". This is a deliberate acceptance, not an
+  oversight, and it is the first thing to look at on the device pass.
 - **The clock's label stops saying `TIME` / `ELAPSED`** while paused (`:100`, and the
   `RideTimerStatCell` label at each call site). It says `PAUSED`. The expanded Dynamic Island has
   no `RideStatusPill` at all, so the label is the only paused signal that presentation gets.
@@ -342,16 +398,28 @@ choosing against a real number.
 - `RideActiveClock` construction: running before any pause; running after one pause with the
   anchor shifted by exactly the paused seconds; the clamp holding under a backward wall-clock step
   so no anchor is ever in the future; paused carrying the stop instant and the frozen active
-  seconds; the anchor never moving backwards across a resume; and — against D3's trap — the paused
-  case being **equal across a span of ticks**.
-- `RideActivityPayload` `Codable` round-trip, and a decode of a payload written without the clock
-  key, so the migration fallback is exercised on a real decoder.
+  seconds; and — against D3's trap — the paused case being **equal across a span of ticks**, plus
+  the running case being equal across a span of ticks while no stop is open.
+- **The coordinator's wiring of that constructor, across a span of ticks.** This is the highest
+  value test in the pass and it is the one a pure-function suite cannot give: `make`'s stability
+  holds only because `pushActivityUpdate` passes `pausedSeconds(asOf: now)` with the same `now` it
+  passes as `now`. A suite that hand-writes both in lockstep proves the arithmetic and nothing
+  about the wiring, which is the only place the coupling can break. Driving twenty ticks through
+  the coordinator after a pause and asserting one distinct clock covers it, and it requires
+  `pause(at:)` / `resume(at:)` to take an injectable instant the way `RideRecorder`'s already do.
+- `RideActivityPayload` `Codable` round-trip. **Not** a decode of a payload missing the clock key:
+  `RideActivityPayload.clock` is non-`Optional`, so a missing key throws by design. The migration
+  fallback lives on `ContentState.clock`, which is `Optional` and which no test target can see —
+  revision 2 promised a test here that could not have been written.
 - `RideActivityPushPolicy.decide` as a decision table: the first push, the turn bypass, the
   paused-ness transition bypass, the 4 s coalescing, the 60 s heartbeat firing on an unchanged
   payload in **both** states, and a skip leaving the caller nothing to advance.
 - Coordinator behavior through `SpyRideActivity`: pause and resume each push in the same turn with
-  the right clock case, the resumed anchor later than the pre-pause one, and the pause push
-  ordered **before** the checkpoint flush.
+  the right clock case, the resumed anchor later than the pre-pause one **by exactly the injected
+  stop duration**, and the pause push ordered **before** the checkpoint flush. The anchor
+  assertion is only meaningful with an injectable instant — `pause()` and `resume()` calling
+  `Date()` internally makes the stop microseconds long, and an assertion that the anchor did not
+  move *backwards* over a zero-length stop passes even if the shift were dropped entirely.
 
 **Not testable, and named rather than pretended:** `ContentState` itself — its `Optional` decode
 and its projection from the payload — because no test target on any platform can see the type
@@ -389,23 +457,57 @@ it here so the divergence is a known debt rather than a surprise found in the su
 
 ## Invariants this design depends on
 
-Each is enforced structurally, not by a comment:
+Most are enforced structurally. The two that are not say so, because an invariant list that
+overstates its own enforcement is worse than one that does not exist.
 
 1. Neither `RideActiveClock` case carries a value that moves while paused. (D3 — the trap that
-   killed revision 1's dedupe.)
-2. The running anchor is never in the future. (D1 — a future anchor counts down.)
+   killed revision 1's dedupe.) **Structural**, and it depends on a caller precondition: `make`
+   must receive `pausedSeconds` measured `asOf` the same `now` it is given. Tested through the
+   coordinator, not only on the pure function, because the wiring is the only place it can break.
+2. The running anchor is never in the future. (D1.) **Structural.**
 3. A skip advances nothing; `lastPayload` and `lastPushedAt` move only inside the `.push` branch.
-   (D4.)
-4. `lastPayload` is assigned only after the push it describes has returned. (D5.)
+   (D4.) **Enforced by the decision type** having no "skip but advance" case, but the assignment
+   site itself is in a file no test target can see.
+4. `lastPayload` and `lastPushedAt` are stamped at enqueue, and the chain — not the assignment
+   point — provides ordering. (D5.) **Structural.** Revision 2's version of this invariant was
+   both unachievable and actively harmful; see D5.
 5. `ContentState` is derived solely from `RideActivityPayload`, so payload equality implies content
-   equality. (D2.)
-6. Every future `ContentState` field is `Optional` or defaulted. (D2 — recorded in the type's doc
-   comment.)
+   equality. (D2.) **Structural**, because the memberwise initializer is `private` — a field set
+   outside a payload is a compile error rather than a silently broken dedupe.
+6. Every future `ContentState` field is `Optional` or defaulted, and no `RideActiveClock` case or
+   associated-value label is ever renamed. (D2.) **A rule in a doc comment, not an enforcement.**
+   `RideActiveClock`'s synthesized `Codable` is a cross-binary wire format the moment this ships:
+   a renamed case makes a new binary throw on bytes an old one wrote, which strands the activity
+   on its last rendered frame exactly as a non-Optional added field would.
 7. The pause push precedes `flushCheckpoint` in `pause()`, which its own doc calls "the expensive
    part … a full-track encode and a mirrored write, in this same turn"
    (`RideSessionCoordinator.swift:231-232`), at the exact instant a jetsam kill is most likely.
+   **Tested**, and the test can genuinely fail.
 
-## What revision 1 got wrong
+## What earlier revisions got wrong
+
+Revision 2, caught by the plan gate:
+
+- **The dedupe would have failed open under push latency, and the failure compounds.** Stamping
+  `lastPayload` after the push landed meant every tick in the in-flight window decided against
+  pre-push state and enqueued again, at 2/s against a drain of one per round trip — while
+  `staleDate`, captured at decision time, aged in the queue until content arrived already stale
+  and dimmed a live ride. (D5.)
+- **It promised a guarantee ActivityKit cannot give.** `Activity.update` returns on hand-off, not
+  on delivery, so no assignment point can mean "what the widget has." (D5.)
+- **`end()` was not on the push chain**, and cancelling the chain does not stop it — neither
+  `Task.value` nor `activity.update` is cancellation-aware — so an end could be delivered ahead of
+  a queued update and land a stale mid-ride frame on a finished ride. (D5.)
+- **The navigate Lock Screen glyph was never swapped.** `header(glyph:)` is called only from the
+  free-ride layout; the navigate layout builds its own, at a line the decision did not list. A
+  paused navigate rider would still have seen a turn arrow. (D7.)
+- **The Dynamic Island had no staleness channel at all**, so D6's confident-PAUSED-on-a-dead-ride
+  failure survived on every presentation short of the Lock Screen. (D6.)
+- **It promised a payload decode test that cannot exist**, because the payload's clock is not
+  Optional. (D10.)
+- **Its invariant list claimed structural enforcement it did not have** for two of seven entries.
+
+Revision 1, caught by the spec gate:
 
 - **The dedupe could never have fired during a pause.** Its anchor moved every tick, so every
   paused push was a distinct state. The scenario it was designed for was the one scenario it
@@ -430,5 +532,6 @@ Each is enforced structurally, not by a comment:
 - **It claimed the Lock Screen and cockpit clocks "agree digit for digit."** Different quantities,
   different formatters. (D1.)
 
-Two of these were fatal on their own. Both came from the spec text rather than from anything an
-implementer would have done wrong, which is the case for the gate.
+Two of these were fatal on their own, and revision 2 added a third that the plan gate caught. All
+of them came from the spec text rather than from anything an implementer would have done wrong,
+which is the case for the gates.
