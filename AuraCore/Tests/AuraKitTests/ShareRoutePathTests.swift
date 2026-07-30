@@ -43,6 +43,53 @@ final class ShareRoutePathTests: XCTestCase {
         XCTAssertEqual(types.filter { $0 == .addLineToPoint }.count, 2)
     }
 
+    private func decompose(_ path: CGPath) -> (moves: Int, lineTargets: [CGPoint]) {
+        var moves = 0
+        var lineTargets: [CGPoint] = []
+        path.applyWithBlock {
+            switch $0.pointee.type {
+            case .moveToPoint: moves += 1
+            case .addLineToPoint: lineTargets.append($0.pointee.points[0])
+            default: break
+            }
+        }
+        return (moves, lineTargets)
+    }
+
+    func testNonFiniteRunHeadDoesNotFuseRunsAcrossPauseGap() {
+        // CoreGraphics silently ignores `move(to:)` with a NaN point; an unfiltered
+        // implementation would then addLine(to: (300,300)) as a continuation of the
+        // FIRST run — a stroke across the pause gap. The NaN-headed run has only one
+        // finite point, so it must be skipped entirely.
+        let runs: [[CGPoint]] = [
+            [CGPoint(x: 10, y: 10), CGPoint(x: 20, y: 20)],
+            [CGPoint(x: CGFloat.nan, y: 5), CGPoint(x: 300, y: 300)]
+        ]
+        let path = try! XCTUnwrap(ShareRoutePath.path(runs: runs))
+        let (moves, lineTargets) = decompose(path)
+        XCTAssertEqual(moves, 1)
+        XCTAssertEqual(lineTargets, [CGPoint(x: 20, y: 20)])
+        XCTAssertFalse(lineTargets.contains(CGPoint(x: 300, y: 300)))
+    }
+
+    func testMidRunNonFinitePointIsDroppedButRunStillStrokes() {
+        // Filtering is per POINT, not per run: a run with 2+ finite points survives a
+        // non-finite sample in the middle.
+        let runs: [[CGPoint]] = [
+            [CGPoint(x: 10, y: 10), CGPoint(x: CGFloat.nan, y: CGFloat.nan), CGPoint(x: 20, y: 20)]
+        ]
+        let path = try! XCTUnwrap(ShareRoutePath.path(runs: runs))
+        let (moves, lineTargets) = decompose(path)
+        XCTAssertEqual(moves, 1)
+        XCTAssertEqual(lineTargets, [CGPoint(x: 20, y: 20)])
+    }
+
+    func testNilWhenOnlyNonFinitePointsRemain() {
+        XCTAssertNil(ShareRoutePath.path(runs: [
+            [CGPoint(x: CGFloat.nan, y: 5), CGPoint(x: 3, y: CGFloat.infinity)]
+        ]))
+    }
+
     func testPointsPassThroughUnchanged() {
         let points = run(3)
         let path = try! XCTUnwrap(ShareRoutePath.path(runs: [points]))

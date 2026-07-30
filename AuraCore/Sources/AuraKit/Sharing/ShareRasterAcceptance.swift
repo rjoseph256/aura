@@ -12,7 +12,7 @@ import Foundation
 /// fixtures here validate the mechanics, not the thresholds' discriminating power.
 public enum ShareRasterAcceptance {
     /// Minimum per-cell grayscale standard deviation for a cell to count as textured.
-    public static let varianceThreshold: Double = 4.0
+    public static let stddevThreshold: Double = 4.0
     /// Minimum fraction of grid cells that must be textured for the raster to pass.
     public static let texturedCellFraction: Double = 0.5
     /// The sampled interior is scored on a 4×4 grid of cells.
@@ -30,7 +30,7 @@ public enum ShareRasterAcceptance {
         width: Int,
         height: Int,
         excludedBottomRows: Int,
-        varianceThreshold: Double = ShareRasterAcceptance.varianceThreshold,
+        stddevThreshold: Double = ShareRasterAcceptance.stddevThreshold,
         texturedCellFraction: Double = ShareRasterAcceptance.texturedCellFraction
     ) -> Bool {
         guard width > 0, height > 0, excludedBottomRows >= 0,
@@ -43,7 +43,7 @@ public enum ShareRasterAcceptance {
             for cellCol in 0..<gridSize {
                 let rows = (cellRow * sampledHeight / gridSize)..<((cellRow + 1) * sampledHeight / gridSize)
                 let cols = (cellCol * width / gridSize)..<((cellCol + 1) * width / gridSize)
-                if standardDeviation(of: pixels, width: width, rows: rows, cols: cols) > varianceThreshold {
+                if standardDeviation(of: pixels, width: width, rows: rows, cols: cols) > stddevThreshold {
                     texturedCells += 1
                 }
             }
@@ -65,6 +65,8 @@ public enum ShareRasterAcceptance {
         let count = Double(rows.count * cols.count)
         guard count > 0 else { return 0 }
         let mean = sum / count
-        return (sumSquares / count - mean * mean).squareRoot()
+        // Clamp non-negative: near-flat cells can go epsilon-negative from FP rounding,
+        // and sqrt(negative) is NaN — a silent false-reject if the threshold is ever near 0.
+        return max(0, sumSquares / count - mean * mean).squareRoot()
     }
 }

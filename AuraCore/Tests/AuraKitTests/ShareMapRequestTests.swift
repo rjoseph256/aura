@@ -21,6 +21,13 @@ final class ShareMapRequestTests: XCTestCase {
         XCTAssertNil(ShareMapRequest(rideID: rideID, segments: [stationary], style: .dark))
     }
 
+    func testNilWhenAllCoordinatesOutOfRange() {
+        // The doc's "degenerate routes never become requests" claim leans on
+        // ShareRouteGeometry.prepare dropping out-of-range coordinates (|lat| > 90).
+        let offEarth = (0..<10).map { Coordinate(latitude: 200 + Double($0), longitude: -79) }
+        XCTAssertNil(ShareMapRequest(rideID: rideID, segments: [offEarth], style: .auraTerrain))
+    }
+
     func testDefaultsComeFromShareCardLayout() {
         let request = request()
         XCTAssertEqual(request.size, ShareCardLayout.mapFieldSize)
@@ -67,6 +74,25 @@ final class ShareMapRequestTests: XCTestCase {
                                           size: ShareCardLayout.mapFieldSize,
                                           scale: ShareCardLayout.rasterScale, compositeVersion: 2)
         XCTAssertNotEqual(v1, v2)
+    }
+
+    func testInitFoldsPublishedCompositeVersionIntoPublicCacheKey() {
+        // Both directions: the PUBLIC key the initializer produces must equal the
+        // composer fed `ShareMapRequest.compositeVersion` (an init hardcoding a stale
+        // version would pass composer-only sensitivity tests), and must differ from
+        // the composer fed the next version.
+        let request = request(style: .dark)
+        let route = ShareRouteGeometry.prepare(segments: [line(50)])!
+        let published = ShareMapRequest.cacheKey(
+            rideID: rideID, route: route, style: .dark,
+            size: ShareCardLayout.mapFieldSize, scale: ShareCardLayout.rasterScale,
+            compositeVersion: ShareMapRequest.compositeVersion)
+        let bumped = ShareMapRequest.cacheKey(
+            rideID: rideID, route: route, style: .dark,
+            size: ShareCardLayout.mapFieldSize, scale: ShareCardLayout.rasterScale,
+            compositeVersion: ShareMapRequest.compositeVersion + 1)
+        XCTAssertEqual(request.cacheKey, published)
+        XCTAssertNotEqual(request.cacheKey, bumped)
     }
 
     func testStyleIdentityTracksAuthoredTerrainVersion() {

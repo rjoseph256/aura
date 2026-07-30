@@ -4,7 +4,8 @@ import AuraCore
 /// A pure description of the share-card map snapshot to render (spec ROH-126 rev 4,
 /// §`ShareMapRasterProviding`). Construction runs the input hygiene
 /// (`ShareRouteGeometry.prepare`) so a request that exists is safe to hand to
-/// `Snapshotter.camera(for:)`; degenerate routes never become requests.
+/// `Snapshotter.camera(for:)`; degenerate routes never become requests, and
+/// out-of-range coordinates are dropped by `ShareRouteGeometry.prepare`.
 ///
 /// `cacheKey` is an FNV-1a digest, filename-safe by construction — raw style URIs
 /// contain `/` and `:`, which silently break `TerrainSnapshotDiskCache`'s

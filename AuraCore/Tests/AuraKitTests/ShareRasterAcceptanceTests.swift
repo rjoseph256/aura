@@ -36,8 +36,15 @@ final class ShareRasterAcceptanceTests: XCTestCase {
 
     func testRejectsCountMismatch() {
         // A CGContext with default bytesPerRow alignment padding produces a buffer larger
-        // than width*height; the guard must reject rather than misread rows.
-        let padded = [UInt8](repeating: 128, count: 96 * height)
+        // than width*height (96 bytes per 90 px row). The fixture is TEXTURED noise on
+        // purpose: the count guard must be an exact match — a relaxed `>=` guard would
+        // misread row offsets on this buffer, still find texture, and wrongly accept.
+        var padded = [UInt8](repeating: 128, count: 96 * height)
+        var state: UInt64 = 7
+        for i in padded.indices {
+            state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            padded[i] = UInt8(truncatingIfNeeded: state >> 33)
+        }
         XCTAssertFalse(ShareRasterAcceptance.accepts(
             pixels: padded, width: width, height: height, excludedBottomRows: excludedRows))
         XCTAssertFalse(ShareRasterAcceptance.accepts(
@@ -87,8 +94,29 @@ final class ShareRasterAcceptanceTests: XCTestCase {
             pixels: buffer, width: width, height: height, excludedBottomRows: excludedRows))
     }
 
+    func testSixOfSixteenCellsRejectsOnTheFourByFourGrid() {
+        // Texture exactly 6 of the 16 grid cells — 3 in the top-left quadrant, 3 in the
+        // bottom-right. On the spec's 4×4 grid that is 6/16 < 0.5 → reject. On a 2×2
+        // grid the same buffer textures 2 of 4 quadrants (0.5) → accept, so this
+        // fixture pins gridSize itself, not just the fraction.
+        var buffer = flat()
+        let sampledHeight = height - excludedRows
+        func cellBounds(_ r: Int, _ c: Int) -> (rows: Range<Int>, cols: Range<Int>) {
+            ((r * sampledHeight / 4)..<((r + 1) * sampledHeight / 4),
+             (c * width / 4)..<((c + 1) * width / 4))
+        }
+        for (r, c) in [(0, 0), (0, 1), (1, 0), (2, 2), (2, 3), (3, 2)] {
+            let bounds = cellBounds(r, c)
+            paintNoise(into: &buffer, rows: bounds.rows, cols: bounds.cols,
+                       seed: UInt64(r * 4 + c + 1))
+        }
+        XCTAssertFalse(ShareRasterAcceptance.accepts(
+            pixels: buffer, width: width, height: height, excludedBottomRows: excludedRows))
+    }
+
     func testThresholdParametersHaveSpecDefaults() {
-        XCTAssertEqual(ShareRasterAcceptance.varianceThreshold, 4.0)
+        XCTAssertEqual(ShareRasterAcceptance.stddevThreshold, 4.0)
         XCTAssertEqual(ShareRasterAcceptance.texturedCellFraction, 0.5)
+        XCTAssertEqual(ShareRasterAcceptance.gridSize, 4)
     }
 }

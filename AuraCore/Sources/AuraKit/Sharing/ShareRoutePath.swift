@@ -6,11 +6,17 @@ import CoreGraphics
 /// never bridged by a line the rider never rode. The caller strokes the single path
 /// twice — casing then mint — and both passes inherit the per-run separation.
 public enum ShareRoutePath {
-    /// `nil` when no run has at least 2 points — nothing strokeable was captured, and
-    /// the pipeline must reject rather than ship a routeless map card. Runs with fewer
-    /// than 2 points are skipped (a lone point has no line to stroke).
+    /// `nil` when no run has at least 2 finite points — nothing strokeable was captured,
+    /// and the pipeline must reject rather than ship a routeless map card. Non-finite
+    /// points are dropped per point, and runs left with fewer than 2 points are skipped
+    /// (a lone point has no line to stroke).
     public static func path(runs: [[CGPoint]]) -> CGPath? {
-        let strokeable = runs.filter { $0.count >= 2 }
+        // Drop non-finite points BEFORE the run test: CoreGraphics silently ignores an
+        // invalid `move(to:)`, so a non-finite run head would fuse two runs into one
+        // stroke across a pause gap — exactly the line this type exists to never draw.
+        let strokeable = runs
+            .map { $0.filter { $0.x.isFinite && $0.y.isFinite } }
+            .filter { $0.count >= 2 }
         guard !strokeable.isEmpty else { return nil }
         let path = CGMutablePath()
         for run in strokeable {
