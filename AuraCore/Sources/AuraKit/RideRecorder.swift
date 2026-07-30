@@ -23,6 +23,13 @@ public final class RideRecorder {
     public var isRecording: Bool { state != .idle }
     public var isPaused: Bool { state == .paused }
 
+    /// The instant the stop in progress began, or nil while recording.
+    ///
+    /// Exposed for `RideActiveClock.paused(since:)`: the Live Activity counts *up* from this
+    /// instant, which is what makes the paused Lock Screen answer "how long have I been stopped"
+    /// with a number that keeps moving even when the app cannot push (spec D1).
+    public var pausedSince: Date? { pauseStartedAt }
+
     /// The ride so far, split at pauses: a pause closes the current segment and a resume
     /// opens the next one, so two points in different segments were never adjacent.
     public private(set) var segments: [RideSegment] = []

@@ -363,4 +363,26 @@ extension RideRecorderPauseTests {
         r.pause(at: at(60))
         #expect(r.currentPauseSeconds(asOf: at(30)) == 0)
     }
+
+    @Test func pausedSinceIsNonNilExactlyWhileAStopIsOpen() {
+        let r = RideRecorder()
+        r.start(at: at(0))
+        #expect(r.pausedSince == nil)
+
+        r.pause(at: at(600))
+        #expect(r.pausedSince == at(600))
+
+        r.resume(at: at(840))
+        #expect(r.pausedSince == nil)
+    }
+
+    @Test func pausedSinceKeepsTheFirstStopInstantWhenPauseIsCalledTwice() {
+        // `pause(at:)` is idempotent and deliberately does not restamp; `pausedSince` must not
+        // either, or the Lock Screen's counting-up stop timer would reset itself mid-stop.
+        let r = RideRecorder()
+        r.start(at: at(0))
+        r.pause(at: at(600))
+        r.pause(at: at(630))
+        #expect(r.pausedSince == at(600))
+    }
 }
