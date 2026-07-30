@@ -1,7 +1,11 @@
 # ROH-126 — Shareable ride card redesign: real map background, distance off the map
 
 **Linear:** [ROH-126](https://linear.app/rohun/issue/ROH-126/redesign-shareable-post-ride-card-real-map-background-distance-off-the)
-**Date:** 2026-07-29 · **Revision 2** (after adversarial review by skeptic / product / architecture lenses; all three returned REVISE against revision 1. This revision reconciles their findings.)
+**Date:** 2026-07-29 · **Revision 3** (rev 1 and rev 2 each drew REVISE from three
+independent adversarial reviewers — skeptic / product / architecture. Rev 2's layout
+budget and fallback-first flow were verified correct in round 2; this revision rebuilds
+the raster-acceptance machinery per the round-2 findings and adopts the reviewers'
+mechanisms wholesale.)
 
 ## Problem
 
@@ -17,48 +21,49 @@ does not match it, and it has two defects the rider actually notices:
 2. **The map background is gone.** The card draws only the bare polyline
    (`RouteThumbnail`, a `Canvas`) on the flat app background. The card's header comment
    is accurate about its narrow claim — a live Mapbox `Map` cannot render inside
-   `ImageRenderer` — but the conclusion that no real map is possible is stale:
-   `MapboxMaps.Snapshotter` renders full styled map rasters offscreen, and the Home
-   screen already ships on it (`MapboxTerrainSnapshotter`).
+   `ImageRenderer` — but the conclusion is stale: `MapboxMaps.Snapshotter` renders full
+   styled map rasters offscreen, and Home already ships on it (`MapboxTerrainSnapshotter`).
 
 ## Goals
 
 - The shared image shows the route on a real map raster, in the rider's chosen map
   style, framed like the summary screen's `StaticRouteMap`.
-- Nothing covers the map. The distance and all text move out of the map field.
+- No Aura content over the map. The distance and all text move out of the map field.
+  (The SDK composites the Mapbox logo + attribution chip into the raster's bottom
+  corners; that is a Mapbox ToS obligation and an acknowledged cost of a real map.)
 - **Share is never slower or less reliable than today.** The Share button enables as
-  fast as it does now (a synchronous fallback render), and the card upgrades in place
-  to the map version when the raster arrives.
-- A raster is used only when it demonstrably rendered map content. Blank or degenerate
-  rasters fall back to the polyline card — this must be enforced by code, not hoped.
-- The fallback card (polyline, no tile) remains deterministic. The map variant's pixels
-  necessarily depend on tile availability; determinism is scoped to the fallback.
+  fast as it does now (the same synchronous fallback render), and the card upgrades in
+  place when a raster is accepted. A failed upgrade can never take Share away.
+- A raster is used only when it demonstrably rendered map content, enforced by
+  sampling **pixels we did not draw** (see acceptance step 6).
+- The fallback card (polyline, no tile) remains deterministic; the map variant's pixels
+  necessarily depend on tile availability.
 
 ## Non-goals
 
-- No visual change to the summary screen. (`RideSummaryView`'s share-image *plumbing*
-  changes — the `.task` orchestration — but nothing the rider sees on that screen.)
+- No visual change to the summary screen except one transient affordance: a quiet
+  progress hint while the map upgrade is in flight (see Share flow).
 - No change to `ShareCardContent`'s existing fields, the share payload type (PNG file
   URL), or `RouteThumbnail`'s other callers (History rows, Last Ride card, widgets).
-- No new user-facing options (no share-style picker).
+- No new user-facing options. No Home-snapshotter refactor (round-2 review showed the
+  proposed shared style helper doesn't type-check against Home's version-bearing string
+  identity; Home's own latent blank-cache bug is tracked separately).
 
 ## Approaches considered
 
-**A. `Snapshotter` raster + all text below the map (chosen).** Render the map field
-offscreen with `MapboxMaps.Snapshotter`, stroke the route in the overlay handler, and
-move the distance/context into the readout band. The map field is fully unobstructed —
-the literal fix for the complaint ("blocking the full map").
+**A. `Snapshotter` raster + all text below the map (chosen).** The map field is fully
+free of Aura content — the literal fix for "blocking the full map."
 
-**B. `Snapshotter` raster + distance on the sanctioned 0.85 scrim.** Restore the
-2026-07-01 design's `mapScrim` block over a *real* map — the app's own map-floating-text
-idiom. Rejected, narrowly: the driving complaint is that the distance tile blocks the
-map, and a 0.85 scrim still occludes what's under it; and the band composition below is
-proven to fit without it, so the scrim buys nothing we need. If the band layout had not
-fit, this was the fallback design.
+**B. `Snapshotter` raster + distance on the sanctioned 0.85 scrim.** The 2026-07-01
+design restored over a real map. Rejected, narrowly: the driving complaint is that the
+distance tile blocks the map, a 0.85 scrim still occludes what's under it, and the band
+composition below is measured to fit without it. Honest ledger: A spends the 56 pt hero
+(→ 48) and B would keep it; A was chosen because the reporter's words were about the
+tile covering the map. A rendered B variant can be produced for PO comparison at PR
+time if wanted.
 
-**C. Mapbox Static Images API.** Server-rendered raster. Rejected: token in a URL, a
-second style pipeline that drifts (the authored `auraTerrain` JSON isn't hosted), weaker
-offline.
+**C. Mapbox Static Images API.** Rejected: token in a URL, a second styling pipeline
+that drifts (the authored `auraTerrain` JSON isn't hosted), weaker offline.
 
 **D. Snapshot the live `StaticRouteMap` view.** Rejected: couples the share image to
 on-screen view size, load timing, and visibility; flaky by construction.
@@ -67,200 +72,251 @@ on-screen view size, load timing, and visibility; flaky by construction.
 
 ### Layout (the numbers are the spec)
 
-Card stays 360×450 pt (1080×1350 @3x). Saira Condensed Bold renders at ≈1.57× line
-height per point size — the budget below uses measured line boxes, not point sizes.
-(Rev 1 failed review here: its band needed ~286 pt in a 220 pt budget.)
+Card stays 360×450 pt (1080×1350 @3x). Saira Condensed's measured line-box ratio is
+**1.574×** the point size (verified from the shipped TTFs in round-2 review); the budget
+uses line boxes, not point sizes.
 
-**Map field: exactly 360×240 pt** — full-bleed top, same height as the summary map, 53%
-of the card (more map than today's inset polyline field). The raster is generated at
-exactly 360×240 pt @3x and drawn with `.frame(width:height:)` — **no `scaledToFill`**,
-so the SDK-composited Mapbox logo/attribution in the raster's bottom corners can never
-be cropped. The field size lives in one constant (`ShareCardLayout.mapFieldSize`) used
-by both the snapshot request and the view.
+**Map field: exactly 360×240 pt** — full-bleed top, same height as the summary map. The
+raster is requested at exactly this size @3x; the constant lives in one place
+(`ShareCardLayout.mapFieldSize`, AuraKit) used by both the snapshot request and the
+view. Drawn `Image(uiImage:).resizable().frame(width:height:).clipped()` — `resizable`
+because a cache round-trip re-materializes at scale 1 (`UIImage(data:)`), and the cache
+read must pass `UIImage(data:scale: 3)`; the exact-size aspect match means stretch
+cannot distort and the SDK's attribution corners cannot be cropped.
 
-**Readout band: 210 pt**, top padding `md` 12 + bottom `lg` 16 → 182 pt of content:
+**Readout band: 210 pt**, horizontal padding `xl` 20 (320 pt content width), top
+padding `md` 12 + bottom `lg` 16 → 182 pt vertical content:
 
 | Row | Content | Line box |
 |---|---|---|
-| Context | date · destination — caption rounded semibold, tracked, `lineLimit(1)` tail-truncated | ~14 |
+| Context | date · destination — caption rounded semibold, tracked, `lineLimit(1)` tail-truncated | 14.1 |
 | (gap xs) | | 4 |
-| Hero | distance `speedHero(44)` + unit inline (`metricCockpit(18)`) | ~69 |
-| (gap sm) | | 8 |
-| Stats row | `42 MIN MOVING · 412 FT CLIMBED` — subheadline rounded semibold, high-contrast secondary; **AURA wordmark trailing** on the same row (`metricCockpit(16)`, tracked) | ~25 |
+| Hero | distance `speedHero(48)` + unit inline (`metricCockpit(18)`) | 75.4 |
 | (gap sm) | | 8 |
 | Sparkline | `ElevationSparkline`, height 40, only when elevation exists | 40 |
-| **Total** | | **168 ≤ 182** ✓ |
+| (gap sm) | | 8 |
+| Stats row | moving time and climbed as **Saira numerals** (`metricCockpit(17, .semibold)`) with rounded small labels, concatenated `Text` runs; **AURA wordmark trailing** (`metricCockpit(16)`, tracking 4) | 26.8 |
+| **Total** | | **176.3 ≤ 182** ✓ |
 
-Without elevation the sparkline row disappears (climbed already lives in the stats
-row) — 120 pt, trivially fits. The hero at 44 pt is smaller than today's 56, traded for
-a map 4× the visual weight; at feed-thumbnail scale (~130 pt wide) 44 pt ≈ 16 pt
-equivalent, comfortably legible. The wordmark moves up to the stats row (~y 350), which
-*improves* its survival of Instagram's 1:1 grid crop (bottom 45 pt cropped) over
-today's bottom anchor; the sparkline is the only thing in the crop zone, and it's
-decorative. A preview-based fitting assertion (`fittingSize.height ≤ 210` at width 360)
-guards the budget against font drift.
+- Hero is 48 (round 2 measured that it fits; rev 2's 44 was an unforced shrink).
+- Stats numerals stay in Saira — the cockpit-numeral rule from DESIGN.md and the
+  2026-07-01 spec; SF Rounded is labels only. At ~130 pt feed-thumbnail scale, 17 pt
+  Saira ≈ 6.1 pt-equivalent vs today's 7.9: partially mitigated by semibold weight and
+  `lineLimit(1) + minimumScaleFactor(0.85)`; the worst measured stats string
+  (`480 MIN MOVING · 12000 FT CLIMBED` + wordmark = 324 pt vs 320) scales to ~0.99.
+  The wordmark gets `layoutPriority(1)` and `fixedSize()`; the stats text yields.
+- Row order puts the sparkline mid-band (uncaptioned — climbed lives in the stats row)
+  and the stats row + wordmark **last**, restoring the wordmark as the card's
+  bottom-anchored sign-off. (Rev 2 justified moving it up by Instagram's 1:1 grid crop;
+  review noted IG grids have been 4:5 since 2025, so the premise is weak — composition
+  wins.) Without elevation, the sparkline row disappears and a `Spacer` keeps the stats
+  row bottom-anchored so the band never shows a dead gap.
+- The vertical budget is enforced by a **package test**: `ShareCardLayout` (AuraKit)
+  exposes the row constants and a pure budget function (line-box arithmetic with the
+  1.574 factor); the view derives its sizes/spacings from the same constants. Honest
+  limit: a font-file swap that changes the ratio is not caught — that constant is
+  asserted against the bundled TTF's metrics in the test comment, no more. Preview
+  checks remain for eyes, not enforcement.
 
-**Variants** (selection logic in one place, from one source of truth):
+**Variants**, selected from one source of truth (`content.routeSegments`, never raw
+`Ride.segments`):
 
-- **Map** — `content.routeSegments` non-empty *and* an accepted raster: raster
-  full-bleed, band below. Nothing drawn over the raster.
-- **Polyline fallback** — route but no accepted raster: `RouteThumbnail` fills the map
-  field (inset `lg` as today), same band. No opaque tile anywhere.
-- **No-route** — unchanged centered composition, except `StatPair` labels use the
-  card's high-contrast secondary (see StatPair note).
+- **Map** — route present and an accepted raster: raster full-bleed, band below.
+- **Polyline fallback** — route, no accepted raster: `RouteThumbnail` in the map field
+  (inset `lg`, 3 pt — the thumbnail idiom; the 5 pt stroke is the *raster* treatment),
+  same band, no opaque tile anywhere.
+- **No-route** — unchanged centered composition; `StatPair` gains an optional
+  `labelColor` (default unchanged) so the card can pass its high-contrast secondary
+  (today's 0.62 labels violate the card's own pinned-contrast rule).
 
-Brand identity with a stock raster in the top half: the mint 5 pt route stroke, Saira
-numerals, the tracked AURA wordmark, and the near-black band. The common case is the
-authored dark terrain style (the app default), which is distinctly Aura's. A rider on
-`.standard` gets a bright map over the dark band — an intentional seam: it's *their*
-map style, matching the summary screen behind the share sheet. (Named as a trade, per
-review; pinning a card-only style was rejected as breaking goal #1.)
+### Route drawing: capture, then composite ourselves
 
-### `ShareMapRasterProviding` (protocol seam) + `ShareMapSnapshotter`
+The SDK composites overlay → logo → attribution *into* the returned image, so a raster
+that contained our route stroke could never be blank-checked (round 2's decisive
+finding). Instead:
 
-Follows the Home pattern (`TerrainSnapshotRendering`): a `@MainActor` protocol in the
-app target, concrete `ShareMapSnapshotter` bound at the view's construction sites, so
-the orchestration is stubbable.
+1. `start(overlayHandler:)`'s handler **draws nothing**. It only captures each
+   segment's projected points via `pointForCoordinate` into `[[CGPoint]]`.
+2. Acceptance (below) runs on the returned raster — bare map + SDK logo/attribution,
+   none of our ink.
+3. On acceptance, we composite the route in our own `UIGraphicsImageRenderer` pass:
+   per-segment paths (never across pause gaps), **casing first** — near-black
+   (`AuraPalette.nearBlack`) 8 pt round-cap stroke — then mint
+   (`AuraTheme.routeUIColor`) 5 pt round-cap on top. The casing is what keeps the route
+   legible on light basemaps (`.standard`), standard cartographic practice. Path
+   building from points is a pure, package-testable function.
+
+### `ShareMapRasterProviding` + `ShareMapSnapshotter`
+
+`@MainActor` protocol seam (the Home `TerrainSnapshotRendering` pattern), injected at
+both construction sites (`AuraApp` ride-end push, `HistoryView` sheet) with **no default
+argument**; the provider must be trivially constructible (no Snapshotter or observers
+in `init`, both sites re-evaluate closures on parent body passes).
 
 ```swift
 @MainActor protocol ShareMapRasterProviding {
-    func raster(segments: [[Coordinate]], size: CGSize, scale: CGFloat,
-                style: AuraKit.MapStyle, cacheKey: String) async -> UIImage?
+    func raster(for request: ShareMapRequest) async -> UIImage?   // accepted+composited, or nil
 }
 ```
 
-`nil` from this seam means exactly one thing: *no acceptable map rendered; use the
-polyline fallback.* (Distinct from `RideCardRenderer`'s `nil`, which disables Share —
-the two never mix because the caller renders the fallback card first; see flow.)
+`nil` means exactly: *no acceptable map; use the polyline fallback.* The concrete
+`ShareMapSnapshotter` is a **single-flight coordinator**: at most one snapshot pipeline
+alive at a time, in-flight dedup by cache key (a second request for the same key awaits
+the first), and every await point checks `Task.isCancelled`. This bounds the
+History-browse pattern (N quick open/close cycles) to one live Snapshotter, not N.
 
-`ShareMapSnapshotter` implementation, in acceptance order — **a raster is rejected
-(`nil`) unless every step passes**:
+Pipeline, in order — reject (`nil`) unless every step passes:
 
-1. **Input hygiene** (pure, package-tested `AuraKit` helpers): take
-   `content.routeSegments` (the *same* filtered source the card's variant logic uses —
-   never raw `Ride.segments`); drop non-finite coordinates; require ≥ 2 distinct
-   coordinates and a bounding span above a small epsilon (a stationary "route" gets no
-   map); decimate each segment to the raster's pixel budget (~600 points/segment,
-   stride) before any Mapbox call.
-2. **Cache read**: `TerrainSnapshotDiskCache` (reused from AuraKit, share-card
-   directory) keyed by ride id + style + field size + scale. Hit → return. This is what
-   makes History browsing cheap after first open.
-3. **Style**: one shared resolution helper (new `MapStyle.snapshotSource` returning
-   `.json(String)` or `.uri(StyleURI)`) mirroring `MapStyle+Mapbox`; the Home
-   snapshotter is refactored onto the same helper so there is one copy of this
-   decision, not three. `.standard` maps to `StyleURI.standard`.
-4. **Style-load gate**: wait for `onStyleLoaded` with a 4 s timeout. **Timeout or
-   `onMapLoadingError` (style/source/tile) → return `nil` without calling `start()`.**
-   (Rev 1 copied Home's gate, which *proceeds* to render on timeout — that ships a
-   blank map as a `.success`; Home's own comment admits "worst case blank". That
-   outcome is exactly what this surface must never produce.)
-5. **Camera**: `snapshotter.camera(for:padding: 24, bearing: 0, pitch: 0)`; **validate**
-   the result — finite center, finite zoom (the Snapshotter variant has no error
-   channel and can return NaN on degenerate input; note `min(zoom, 16)` propagates NaN
-   depending on argument order, so the guard is `zoom.isFinite`, then clamp). Invalid →
-   `nil`.
-6. **Render, bounded**: `start(overlayHandler:)` raced against a 6 s timeout;
-   on timeout call `snapshotter.cancel()` (SDK invokes the completion with an error)
-   and return `nil`. The whole operation cooperates with task cancellation via
-   `withTaskCancellationHandler` → `snapshotter.cancel()`. Strong-capture the
-   snapshotter in the completion (the Home continuation-leak fix). Overlay: stroke each
-   segment separately (never across pause gaps) via `pointForCoordinate`,
-   `AuraTheme.routeUIColor`, **5 pt line width, unscaled** — the overlay context is
-   already in points (rev 1 said "scaled by context scale"; that draws a 15 pt slug) —
-   round caps/joins (matching `RouteThumbnail`'s treatment; `StaticRouteMap` uses Mapbox
-   defaults, a sub-pixel difference at this width).
-7. **Non-blank check** (the decisive backstop for slow-but-not-failing networks, where
-   the style loads and tiles half-arrive): downsample the raster and require pixel
-   variance above a threshold vs. a flat fill. The buffer math is a pure `AuraKit`
-   function over `[UInt8]`, package-tested; the CG downsample wrapper lives with the
-   snapshotter. Fails → `nil`, and **do not cache**.
-8. **Cache write** only after acceptance (never memoize a blank — the Home snapshotter
-   currently *does* cache blank rasters to disk; that latent bug is flagged separately
-   and not widened here).
+1. **Input hygiene** (pure AuraKit, package-tested): from `content.routeSegments`,
+   drop non-finite coordinates; require ≥ 2 distinct coordinates and a bounding span
+   above epsilon; decimate each segment to the raster's pixel budget (~600 pts/segment,
+   stride) **force-including each segment's bbox-extremal points** so framing can't
+   drift from the full track. This hygiene is the real guard for the camera call —
+   `Snapshotter.camera(for:)` is exception-unsafe on degenerate input (unlike
+   `MapboxMap`'s wrapped variants), so garbage must never reach it.
+2. **Cache read**: `TerrainSnapshotDiskCache` in its own directory
+   (`ShareCardSnapshots`), key = ride id + **route-content hash** (over the decimated
+   coordinates — ride rows are upserted/backfilled/CloudKit-merged, so the id alone is
+   not a route identity) + **style identity including version**
+   (`TerrainStyle.authoredStyleIdentity` for `.auraTerrain`; the `StyleURI` raw value
+   otherwise) + field size + scale. Hit → `UIImage(data:scale: 3)` → composite route →
+   return. Prune to a stated budget (24 MB) after every write; prune is
+   least-recently-written (cache reads don't touch mtime) — accepted.
+3. **Style load**: `Snapshotter` inherits `StyleManager.load(mapStyle:completion:)` —
+   callback-driven (no event race, no replay problem) and takes the **existing**
+   `settings.mapStyle.mapboxStyle` from `MapStyle+Mapbox`, so there is no new style
+   resolution copy. A 4 s belt timeout applies; on timeout consult `isStyleLoaded`
+   before rejecting. An `onMapLoadingError` observer is attached **before** the load
+   and stays alive through `start()` (token cancelled in a `defer`); any style/source
+   error → reject; any tile error observed before completion → reject.
+4. **Camera**: `snapshotter.camera(for: coords, padding: UIEdgeInsets(all: 24),
+   bearing: 0, pitch: 0)`; validate via a pure predicate over primitives
+   (`center lat/lon: Double?`, `zoom: Double?` — `CameraOptions` fields are optionals
+   and the degenerate path returns nil or NaN): finite and present, else reject; then
+   clamp zoom ≤ 16 (guard-then-clamp; `min(_:_:)` propagates NaN order-dependently).
+5. **Render, bounded, resume-once**: `start(overlayHandler: capture-only)` raced
+   against a 6 s timeout with an `OSAllocatedUnfairLock` resolve-once latch (the Home
+   gate's `finishOnce` shape) absorbing all three racers — SDK completion, timeout,
+   and cancel-induced completion — so the continuation can never double-resume
+   (`Snapshotter.cancel()` is *documented* to fire the completion with an error, but
+   there is a window where a parked success still arrives; the latch is the guarantee,
+   not the doc). Timeout and task-cancellation both call `cancel()` **hopped to the
+   main actor** (`Task { @MainActor in … }`) — `Snapshotter` is non-Sendable and
+   main-thread-only, and a direct capture in a `@Sendable onCancel` closure does not
+   compile under this repo's Swift 6 / default-MainActor settings. Strong-capture the
+   snapshotter in the completion (the Home continuation-leak fix).
+6. **Acceptance on bare pixels**: downsample the raster's **map interior** — excluding
+   a bottom 30 pt strip that covers the SDK logo (bottom-left) and attribution chip
+   (bottom-right) — and require variance above threshold vs. a flat fill. The sampled
+   region contains nothing we drew (route not yet composited) and no SDK chrome. The
+   buffer math is a pure AuraKit function over `[UInt8]`, package-tested with fixture
+   buffers (flat, flat+noise, real-map crops of all three styles); the threshold is
+   tuned against real captures during device verification. Slow-network partial tiles:
+   the tile-error observer from step 3 is the primary defense; the interior variance
+   check is the backstop.
+7. **Composite route** (casing + mint, above) → **cache write** (only accepted rasters;
+   *not* guarded on cancellation — an accepted raster is worth keeping for the reopen) →
+   return. PNG encode, downsample, cache write, and file I/O run **off the main actor**
+   (the raster and buffers are `Sendable` value data); only `ImageRenderer`,
+   `Snapshotter` calls, and `@State` writes stay on main.
 
-### Share flow — fallback first, upgrade in place
+### Share flow — fallback first, upgrade in place, prefetch ahead
 
-`RideSummaryView`'s `.task` becomes:
+1. **Prefetch**: when a ride ends (the moment `AppRouter` decides to push the summary),
+   fire-and-forget a raster request through the same provider — single-flight dedup
+   makes this safe. By the time the rider can reach Share, the summary's own request is
+   usually a warm-cache hit. History opens don't prefetch; their request starts after
+   the entrance-animation window (the existing `Task.yield` discipline — DESIGN.md's
+   "sanctioned delight moment" must not stutter; today's code already yields before the
+   sync render for exactly this reason).
+2. `.task`: build `ShareCardContent`; render the **fallback card** synchronously (same
+   cost as today's only render — this is why Share's enable time is unchanged); set
+   `shareImage`.
+3. If a route exists: `await` the provider. On acceptance and `!Task.isCancelled`,
+   re-render with the raster and swap — **`if let upgraded { shareImage = upgraded }`**;
+   a failed upgrade render keeps the working fallback (never assign nil over an enabled
+   Share).
+4. While the upgrade is in flight, a quiet one-line hint near the Share button
+   (`ProgressView` + "Adding your map…", caption, high-contrast secondary) shows and
+   then disappears. Share itself is enabled and works throughout.
+5. **Accepted cost, stated**: a rider who shares within the first couple of seconds
+   (or in dead coverage) shares the polyline fallback card. With prefetch this window
+   is mostly gone on the ride-end path; we accept the residue rather than block Share
+   or add retry UI. In weak coverage the card is the fallback every time — also
+   accepted; reopening from History after coverage returns produces the map card.
 
-1. Build `ShareCardContent`; synchronously render the **fallback card**
-   (`RideCardRenderer.make(content, mapImage: nil)`) — sub-frame, exactly today's
-   speed — and set `shareImage`. **Share is enabled from the first frame.**
-2. If `content.routeSegments` is non-empty, `await` the raster from the injected
-   `ShareMapRasterProviding`. On acceptance (and `!Task.isCancelled`), re-render with
-   the raster and swap `shareImage`.
+**Swap-while-sheet-open** is a named risk: replacing `shareImage` swaps the
+`ShareLink`'s item while a share sheet may be presented. Device verification must
+confirm the presented sheet neither dismisses nor changes its payload; if it does, the
+mitigation is a swap latch (defer the upgrade swap until the sheet is dismissed).
 
-This removes rev 1's dead-button window entirely (review: up to 6 s of disabled Share
-with no affordance, and a permanently dead button if `start()` never called back after
-backgrounding — both structurally impossible now: Share never waits on the network).
-If the share sheet is already open during the swap, it keeps its own file — see
-filenames. A raster that arrives after the rider shared the fallback is simply the
-card they get next time; no retry UI.
+### Files
 
-### Filenames (fixes a real cross-ride race)
-
-`RideCardRenderer` currently writes one fixed `tmp/Aura ride.png`. With an async window
-between decision and write, two History sheets in quick succession can interleave —
-preview showing ride B, file containing ride A. Each render now writes
-`Aura ride <rideID> <generation>.png` (generation: fallback=0, map=1); stale share
-PNGs (matched by prefix) are swept on renderer entry; writes are guarded on
-`!Task.isCancelled`. `SharePreview` title becomes `"<distance> <unit> · <date>"`
-instead of the generic "Aura ride".
-
-### StatPair contrast note
-
-The card pins `scrimText` to the high-contrast secondary because a fixed PNG can't
-honor Increase Contrast — but `StatPair` hardcodes `AuraTheme.textSecondary` (0.62)
-labels, so the no-route variant's labels violate the card's own rule today. `StatPair`
-gains an optional `labelColor` (default unchanged) and the card passes the
-high-contrast value.
-
-### ROH-7 (single live renderer)
-
-A `Snapshotter` is an off-map transient raster, the same category Home ships
-(`MapboxTerrainSnapshotter` — "adds no persistent live renderer"). It runs briefly
-alongside the summary's one live `StaticRouteMap`; that concurrency is new and its
-memory spike (raster + SDK attribution composite + `ImageRenderer` pass + `pngData()`)
-is bounded by the acceptance timeouts and measured during device verification.
+Each render writes `tmp/ShareCard/<rideID>/<generation>/Aura ride.png` — the leaf name
+stays clean (it is user-visible in Messages/Mail/Files; rev 2's UUID-bearing filename
+regressed that), and uniqueness comes from the directory. Generation 0 = fallback,
+1 = map. Sweep policy: on **summary entry only** (not per render), delete `ShareCard/`
+subdirectories for *other* rides older than one hour; never the current ride's, and
+never between a swap and its predecessor's release — an open share sheet's file is
+structurally out of the sweep's reach. `RideShareImage` gains a `title` used by
+`SharePreview`: `"Aura ride · <distance> <unit> · <date>"` (keeps the brand token in
+share-sheet metadata).
 
 ### Error handling
 
 | Failure | Behavior |
 |---|---|
-| Offline, style never loads | gate times out → `nil` **before** `start()` → polyline fallback (already shared-able) |
-| Offline, bundled `auraTerrain` style loads but no tiles | `onMapLoadingError` and/or non-blank check → `nil` → fallback |
-| Slow network, tiles partially arrive | non-blank check is the backstop; a partially-blank raster fails variance → `nil` |
-| `start()` never completes (backgrounded mid-render) | 6 s race → `cancel()` → `nil`; Share was never blocked |
-| Degenerate route (stationary, single point, NaN coords) | input hygiene / camera validation → `nil` → fallback |
-| `.standard` misrenders through `Snapshotter` | verified on device; if broken, that style returns `nil` → **polyline fallback** (never a silently different map style than the screen behind it) |
-| `ImageRenderer`/PNG write fails | `nil` share image → Share disabled (unchanged, now only reachable for the sync fallback render) |
+| Offline, remote style never loads | `load` completion errors or 4 s belt fires (and `isStyleLoaded` false) → `nil`; Share already live with fallback |
+| Offline, bundled `auraTerrain` loads, tiles absent | tile-error observer and/or interior-variance reject → `nil` → fallback |
+| Slow network, tiles partial | tile-error observer primary; interior variance backstop → `nil` |
+| `start()` never completes (backgrounding) | 6 s latch race → `cancel()` on main → `nil`; Share unaffected |
+| Degenerate route (stationary, single point, NaN) | hygiene/camera predicate → `nil` → fallback (and camera never sees garbage) |
+| `.standard` misrenders through `Snapshotter` | acceptance rejects → **polyline fallback**, never a different style than the screen behind it |
+| Upgrade render/write fails | fallback `shareImage` kept; Share stays enabled |
+| Initial fallback render fails | Share disabled (today's behavior, unchanged) |
+
+### ROH-7 (single live renderer)
+
+On the ride-end path the HUD's live map is torn down before the summary pushes
+(`RideSummaryRouting.collapsed`), so the steady state is one live `Map`
+(`StaticRouteMap`) plus one transient `Snapshotter` — the same category Home ships.
+Single-flight caps it at one. The snapshot may compete with the on-screen map for
+bandwidth on slow links; prefetch (which usually completes before the summary's map
+mounts) reduces the overlap, and the residue is accepted and measured on device.
 
 ### Testing
 
-- **Package (AuraCore, runs in the agent gate):** existing `ShareCardContent` tests
-  unchanged; new tests for the pure helpers — coordinate hygiene/decimation, camera
-  validation predicate (incl. NaN zoom), non-blank variance function, cache key.
-- **App-target logic behind the seam** (variant selection, upgrade-in-place) is
-  exercised through previews with a stubbed `ShareMapRasterProviding` and verified on
-  device; the repo has no app unit-test target and this change does not add one (named
-  honestly — the pure kernels above carry the automated weight).
-- **Previews:** map variant (fixture image at exactly 360×240@3x), polyline fallback,
-  no-route, route-without-elevation, long destination (truncation), metric + imperial —
-  plus the band fitting assertion (≤ 210 pt).
-- **Device/simulator verification (all required):** golden-ride harness
-  (`-auraSimulatedRide golden …`) to a real summary; pull the written PNG from the app
-  container and inspect at full size **and at ~130 pt thumbnail scale**; share into
-  Messages once; all **three** styles (`auraTerrain`, `dark`, `standard`); airplane
-  mode → confirm the **polyline fallback actually renders** (not a blank map);
-  slow-network (Network Link Conditioner) → confirm the non-blank check rejects a
-  partial raster; measure time-to-upgrade on the ride-end path and record it in the PR.
+- **Package (runs in the agent gate):** existing `ShareCardContent` tests unchanged;
+  new tests — coordinate hygiene/decimation (incl. forced bbox extremes), camera
+  predicate over primitives (nil/NaN/degenerate), interior-variance function (flat,
+  flat+chrome-strip-excluded, real-map fixture crops), cache key (route hash, style
+  version), `ShareCardLayout` budget, route path building from captured points.
+- **Previews** (eyes, not enforcement): map variant (fixture at exactly 360×240@3x),
+  polyline fallback, no-route, route-without-elevation (Spacer anchoring), long
+  destination truncation, worst-case stats string, metric + imperial.
+- **Device/simulator verification (all required; airplane mode is device-only —
+  simulator lacks it; Network Link Conditioner on the host throttles the simulator):**
+  golden-ride harness to a real summary; inspect the written PNG full-size and at
+  ~130 pt thumbnail; **tap Share before the upgrade lands and complete a share to
+  Photos and Messages**; confirm sheet behavior when the swap occurs while presented;
+  **second open of the same ride** (cache-hit path — catches the scale-1 crop class);
+  offline with `auraTerrain` specifically → polyline fallback actually renders; slow
+  network → partial raster rejected; paused multi-segment ride (no stroke across the
+  gap); no-route variant on device; all three styles, including route-casing legibility
+  on `.standard`; assert `cancel()` fires the completion (its contract is doc-only);
+  measure time-to-upgrade on the ride-end path and record it in the PR.
 
 ## Risks
 
-- **Mapbox Standard through `Snapshotter`** — least-exercised path; device-verified,
-  and its failure mode is the fallback card, not a wrong-style map.
-- **Non-blank threshold tuning** — too strict rejects legitimately sparse night-style
-  areas, too loose ships partial rasters. Mitigation: threshold chosen against real
-  captures of all three styles during verification; the pure function makes the
-  boundary testable.
-- **Two Mapbox render paths at once on the summary screen** — transient; measured on
-  device during verification.
+- **Interior-variance threshold** — too strict rejects sparse night-style areas, too
+  loose ships blanks. The sampled region now contains only map pixels (no route, no
+  chrome), which is what makes a workable threshold plausible; tuned against real
+  captures of all three styles, and the pure function keeps the boundary testable.
+- **`Snapshotter.load(mapStyle:)` on this SDK version** — inherited-API behavior on a
+  snapshotter (vs. a map view) is the least-exercised assumption; verified first thing
+  in implementation (it's the pipeline's foundation), with the event-gate as a known
+  fallback shape if it misbehaves.
+- **Swap-while-presented ShareLink behavior** — unverified SwiftUI behavior; named
+  contingency above.
+- **Two Mapbox render paths briefly concurrent** — transient, single-flight-capped,
+  measured on device.
