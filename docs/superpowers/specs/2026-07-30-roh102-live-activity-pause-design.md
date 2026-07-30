@@ -285,8 +285,16 @@ ROH-124 here — not the stale window revision 1 leaned on, which its own pill c
 the Lock Screen (`RideLockScreenView.swift:83,125`). A rider in another app after a jetsam kill
 would otherwise see `pause.fill` beside a still-counting timer indefinitely, which is D6's exact
 failure on the presentation reached without going to the Lock Screen. `context.isStale` is
-available in every presentation, so the compact and minimal glyphs degrade to
-`pause.trianglebadge.exclamationmark` when stale — a glyph, because minimal has no other channel.
+available in every presentation, so the compact and minimal glyphs degrade when stale — a glyph,
+because minimal has no other channel.
+
+The pair is **`pause.fill` fresh, `pause.circle` stale**: same family, solid versus hollow, so the
+degradation reads as the same state weakened rather than as a different state. A warning symbol
+would read as an error. Revision 3 originally specified `pause.trianglebadge.exclamationmark`,
+which **does not exist** in the SF Symbols catalog — verified against the iOS 26.3 runtime's
+`name_availability.plist` during implementation. A nonexistent symbol name compiles fine and
+renders blank, so it would have shipped as an empty Lock Screen glyph. Verify any SF Symbol
+against the runtime plist rather than against recall.
 
 The word does the work because the alternative signal cannot. `statOpacity` (`RideLockScreenView.swift:24`)
 is a 0.4 alpha on three numerals that a paused rider already expects to be frozen. Dimming is not

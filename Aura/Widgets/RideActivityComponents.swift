@@ -156,8 +156,13 @@ struct RideStatusPill: View {
 /// The stale variant exists because `RideStatusPill` is Lock-Screen-only. Without it, a rider in
 /// another app after a jetsam kill sees `pause.fill` beside a still-counting timer indefinitely —
 /// D6's failure on the presentation reached without unlocking. Minimal is a single glyph, so a
-/// glyph is the only channel it has.
+/// glyph is the only channel it has, and it degrades within the same symbol family rather than
+/// switching to a warning glyph: `pause.circle`'s hollow outline reads as the *same* paused state
+/// losing its footing, not as a different (error) state, which a triangle-exclamation glyph would
+/// imply. Solid `pause.fill` is confident, live-and-paused; the outline is that same idea going
+/// quiet. In the minimal presentation, where the glyph carries the whole distinction alone, a
+/// within-family fill/outline contrast reads correctly where a mismatched symbol would not.
 func rideActivityGlyph(nav: Bool, paused: Bool, stale: Bool, turnGlyph: String?) -> String {
-    if paused { return stale ? "pause.trianglebadge.exclamationmark" : "pause.fill" }
+    if paused { return stale ? "pause.circle" : "pause.fill" }
     return nav ? (turnGlyph ?? "arrow.turn.up.right") : "bicycle"
 }
