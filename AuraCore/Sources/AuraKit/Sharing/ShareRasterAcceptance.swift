@@ -12,7 +12,11 @@ import Foundation
 /// fixtures here validate the mechanics, not the thresholds' discriminating power.
 public enum ShareRasterAcceptance {
     /// Minimum per-cell grayscale standard deviation for a cell to count as textured.
-    public static let stddevThreshold: Double = 4.0
+    /// Tuned against a real device capture (ROH-126 verification): a fully-loaded
+    /// authored-dark-terrain raster scores 1.9–5.9 per cell at the 90×60 downsample —
+    /// the initial 4.0 rejected it — while a flat fill scores ~0. 1.0 keeps a wide
+    /// margin in both directions; the capture is pinned as a test fixture.
+    public static let stddevThreshold: Double = 1.0
     /// Minimum fraction of grid cells that must be textured for the raster to pass.
     public static let texturedCellFraction: Double = 0.5
     /// The sampled interior is scored on a 4×4 grid of cells.
@@ -38,17 +42,31 @@ public enum ShareRasterAcceptance {
         let sampledHeight = height - excludedBottomRows
         guard sampledHeight >= gridSize, width >= gridSize else { return false }
 
-        var texturedCells = 0
+        let deviations = cellDeviations(pixels: pixels, width: width, height: height,
+                                        excludedBottomRows: excludedBottomRows)
+        let texturedCells = deviations.filter { $0 > stddevThreshold }.count
+        return Double(texturedCells) / Double(gridSize * gridSize) >= texturedCellFraction
+    }
+
+    /// The per-cell standard deviations `accepts` scores, in row-major cell order.
+    /// Public so the pipeline can log real-capture statistics on rejection — threshold
+    /// tuning happens against these numbers (plan Task 14). Empty on a malformed buffer.
+    public static func cellDeviations(
+        pixels: [UInt8], width: Int, height: Int, excludedBottomRows: Int
+    ) -> [Double] {
+        guard width > 0, height > 0, excludedBottomRows >= 0,
+              pixels.count == width * height else { return [] }
+        let sampledHeight = height - excludedBottomRows
+        guard sampledHeight >= gridSize, width >= gridSize else { return [] }
+        var deviations: [Double] = []
         for cellRow in 0..<gridSize {
             for cellCol in 0..<gridSize {
                 let rows = (cellRow * sampledHeight / gridSize)..<((cellRow + 1) * sampledHeight / gridSize)
                 let cols = (cellCol * width / gridSize)..<((cellCol + 1) * width / gridSize)
-                if standardDeviation(of: pixels, width: width, rows: rows, cols: cols) > stddevThreshold {
-                    texturedCells += 1
-                }
+                deviations.append(standardDeviation(of: pixels, width: width, rows: rows, cols: cols))
             }
         }
-        return Double(texturedCells) / Double(gridSize * gridSize) >= texturedCellFraction
+        return deviations
     }
 
     private static func standardDeviation(

@@ -119,8 +119,42 @@ final class ShareRasterAcceptanceTests: XCTestCase {
     }
 
     func testThresholdParametersHaveSpecDefaults() {
-        XCTAssertEqual(ShareRasterAcceptance.stddevThreshold, 4.0)
+        XCTAssertEqual(ShareRasterAcceptance.stddevThreshold, 1.0)
         XCTAssertEqual(ShareRasterAcceptance.texturedCellFraction, 0.5)
         XCTAssertEqual(ShareRasterAcceptance.gridSize, 4)
+    }
+
+    // MARK: - Real-capture fixture (plan Task 14)
+
+    /// The shipped threshold must accept a real, fully-loaded authored-dark-terrain
+    /// raster (device capture from ROH-126 verification). The same capture REJECTED at
+    /// the pre-tuning 4.0 threshold — asserting both directions pins the discriminating
+    /// band (measured per-cell stddevs 1.9–5.9) so a future re-tuning can't silently
+    /// drift back into rejecting legitimate dark-style maps, and a flat fill (~0) still
+    /// rejects by a wide margin.
+    func testRealDarkTerrainCaptureAcceptsAtShippedThreshold() throws {
+        let pixels = try grayscaleFixture("sharemap-auraterrain-capture")
+        XCTAssertTrue(ShareRasterAcceptance.accepts(
+            pixels: pixels, width: width, height: height, excludedBottomRows: excludedRows))
+        XCTAssertFalse(ShareRasterAcceptance.accepts(
+            pixels: pixels, width: width, height: height, excludedBottomRows: excludedRows,
+            stddevThreshold: 4.0), "the pre-tuning threshold should reject this capture")
+    }
+
+    /// Decodes a fixture PNG and downsamples it exactly as the pipeline does
+    /// (90×60 DeviceGray, `bytesPerRow: width` — no row padding).
+    private func grayscaleFixture(_ name: String) throws -> [UInt8] {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: name, withExtension: "png"))
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        var pixels = [UInt8](repeating: 0, count: width * height)
+        try pixels.withUnsafeMutableBytes { buffer in
+            let context = try XCTUnwrap(CGContext(
+                data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8,
+                bytesPerRow: width, space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGImageAlphaInfo.none.rawValue))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        return pixels
     }
 }

@@ -123,7 +123,8 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
     /// Every reject path logs its reason: a nil from this pipeline is invisible in the
     /// UI by design (the card just stays on the polyline fallback), so without a trace
     /// a rejection is indistinguishable from a hang in the field and in verification.
-    private static let log = Logger(subsystem: "app.aura.ios", category: "ShareCard")
+    /// `nonisolated` so the detached acceptance step can log too (Logger is Sendable).
+    private nonisolated static let log = Logger(subsystem: "app.aura.ios", category: "ShareCard")
 
     /// `id` is the slot's identity: the watchdog and the pipeline's own defer may
     /// only clear the slot while it still holds THEIR identity, never a successor's.
@@ -241,7 +242,7 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
             Self.log.info("share-map reject: render failed, timed out, mid-render error, or no captured route")
             return nil
         }
-        guard await passesAcceptance(raster) else {
+        guard await passesAcceptance(raster, key: request.cacheKey) else {
             Self.log.info("share-map reject: raster failed the non-blank interior check")
             return nil
         }
@@ -349,15 +350,37 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
 
     /// Acceptance on the pre-composite map raster, off-main (spec step 6): downsample to exactly 90×60
     /// grayscale (size/4 in points) and require interior texture outside the chrome strip.
-    private func passesAcceptance(_ raster: UIImage) async -> Bool {
+    /// On rejection, the per-cell deviations are logged — the threshold was tuned against
+    /// these numbers from real captures, and re-tuning needs them visible in the field.
+    private func passesAcceptance(_ raster: UIImage, key: String) async -> Bool {
         let width = 90, height = 60
         let strip = ShareCardLayout.mapChromeStripHeight / ShareCardLayout.mapFieldSize.height
         let excludedBottomRows = Int((strip * CGFloat(height)).rounded(.up))   // 36/240 × 60 → 9
         return await Task.detached(priority: .utility) { () -> Bool in
+            Self.dumpRasterIfRequested(raster, key: key)
             guard let pixels = Self.grayscalePixels(of: raster, width: width, height: height) else { return false }
-            return ShareRasterAcceptance.accepts(pixels: pixels, width: width, height: height,
-                                                 excludedBottomRows: excludedBottomRows)
+            let accepted = ShareRasterAcceptance.accepts(pixels: pixels, width: width, height: height,
+                                                         excludedBottomRows: excludedBottomRows)
+            if !accepted {
+                let cells = ShareRasterAcceptance.cellDeviations(
+                    pixels: pixels, width: width, height: height, excludedBottomRows: excludedBottomRows)
+                let summary = cells.map { String(format: "%.1f", $0) }.joined(separator: " ")
+                Self.log.info("share-map acceptance cells (stddev, threshold \(ShareRasterAcceptance.stddevThreshold)): \(summary, privacy: .public)")
+            }
+            return accepted
         }.value
+    }
+
+    /// Debug escape hatch for threshold tuning: `AURA_SHARE_MAP_DUMP=1` in the
+    /// environment writes every pre-composite raster to tmp/ShareCardDebug/. DEBUG only.
+    private nonisolated static func dumpRasterIfRequested(_ raster: UIImage, key: String) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.environment["AURA_SHARE_MAP_DUMP"] == "1",
+              let data = raster.pngData() else { return }
+        let dir = FileManager.default.temporaryDirectory.appending(path: "ShareCardDebug")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? data.write(to: dir.appending(path: "\(key).png"), options: .atomic)
+        #endif
     }
 
     /// Encode + cache write + prune, off the main actor (spec step 7). Awaited so a
