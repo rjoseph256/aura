@@ -7,7 +7,7 @@ import Observation
 /// a compass pointer offline. It NEVER ends the ride — `onArrive` detaches. See spec R1–R16.
 @MainActor
 @Observable
-public final class GuidanceController: GuidanceControlling {
+public final class GuidanceController: GuidanceControlling, RidePauseObserving {
     public private(set) var phase: DetourPhase = .inactive
     public private(set) var guidance: GuidanceViewModel?
     public private(set) var activeRoute: Route?
@@ -66,6 +66,20 @@ public final class GuidanceController: GuidanceControlling {
 
     public func cancel() { feed(.cancel, origin: nil) }
     public func detach() { feed(.cancel, origin: nil) }   // coordinator-facing; identical (no arrival chip)
+
+    // MARK: - Pause (RidePauseObserving)
+
+    /// The ride's paused state, remembered so a leg that *starts* during a stop starts paused
+    /// too. A rider can pause at a café and then tap "Take me there" on a gem while standing
+    /// still; without this the fresh `GuidanceViewModel` would buzz turn haptics at them.
+    @ObservationIgnored private(set) var isPaused = false
+
+    /// Forwards the ride's pause to the leg in flight. Synchronous, in the same turn as the
+    /// tap, for the reason `RidePauseObserving` documents.
+    public func rideDidSetPaused(_ paused: Bool) {
+        isPaused = paused
+        guidance?.rideDidSetPaused(paused)
+    }
 
     // MARK: - Machine plumbing
 
@@ -149,6 +163,7 @@ public final class GuidanceController: GuidanceControlling {
         vm.units = units
         vm.haptics = haptics
         vm.hapticsEnabled = turnHaptics
+        vm.isPaused = isPaused
         vm.onArrive = { [weak self] in self?.feedInternal(.arrived, origin: nil) }  // detach, never finish (R9)
         vm.start(route: route)
         guidance = vm

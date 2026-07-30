@@ -160,6 +160,39 @@ import AuraCore
         #expect(c.headingArrow != nil)
         #expect((c.headingArrow?.straightLineDistanceMeters ?? 0) > 100)
     }
+
+    // MARK: - Pause forwarding (ROH-101)
+
+    /// The Explore HUD sets the coordinator's `pauseObserver` to the controller, so a pause has
+    /// to reach the `GuidanceViewModel` the controller built for the leg in flight — otherwise
+    /// turn haptics keep firing at a rider standing still.
+    @Test func pauseForwardsToTheLegInFlight() async throws {
+        let g = gem("a")
+        let c = controller(routing: FakeRouting(.success(route(to: g))))
+        c.requestDetour(g, from: origin)
+        await c.awaitState { c.isGuiding }
+        let vm = try #require(c.guidance)
+        #expect(vm.isPaused == false)
+
+        c.rideDidSetPaused(true)
+        #expect(vm.isPaused)
+
+        c.rideDidSetPaused(false)
+        #expect(vm.isPaused == false)
+    }
+
+    /// A rider can pause at a café and only then tap "Take me there". The leg built during that
+    /// stop must start paused rather than buzz at them.
+    @Test func legStartedWhilePausedStartsPaused() async throws {
+        let g = gem("a")
+        let c = controller(routing: FakeRouting(.success(route(to: g))))
+        c.rideDidSetPaused(true)            // paused before any leg exists
+        #expect(c.guidance == nil)
+
+        c.requestDetour(g, from: origin)
+        await c.awaitState { c.isGuiding }
+        #expect(try #require(c.guidance).isPaused)
+    }
 }
 
 extension GuidanceController {

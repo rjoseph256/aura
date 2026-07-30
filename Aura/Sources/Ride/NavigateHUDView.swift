@@ -126,7 +126,11 @@ struct NavigateHUDView: View {
         // moving with it as it resizes, always visible and tappable.
         .overlay(alignment: .top) {
             VStack(spacing: AuraTheme.Spacing.sm) {
-                TurnCardView(state: guidance.turn, reduceMotion: reduceMotion)
+                // Calmed while paused: the expanded card's solid mint fill would otherwise
+                // compete with the mint Resume control directly below it, and a stopped rider
+                // is not about to take the turn. The instruction text stays.
+                TurnCardView(state: coordinator.isPaused ? guidance.turn.calmed() : guidance.turn,
+                             reduceMotion: reduceMotion)
                 if let update = guidance.lastUpdate,
                    let next = TurnCardPresenter.nextManeuver(for: update) {
                     ThenChip(next: next)

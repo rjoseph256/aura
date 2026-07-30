@@ -69,8 +69,7 @@ struct RideHUDView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             RideMapView(segments: coordinator.segments,
-                        // Task 13 wires the live pause signal in; this HUD does not yet toggle pause.
-                        isPaused: false,
+                        isPaused: coordinator.isPaused,
                         gems: gems?.visiblePins ?? [],
                         seenGemIDs: gems?.seenIDs ?? [],
                         onSelectGem: { gem in gems?.select(gem) },
@@ -187,6 +186,12 @@ struct RideHUDView: View {
             // (turn cues own the cockpit) but pins/seen-state are unaffected.
             store.detourActive = { [coordinator] in coordinator.isDetouring }
             guidance.units = settings.units
+            // Explore's detour guidance needs the paused flag too, or a rider on a "Take me
+            // there" leg keeps getting turn haptics through a café stop. Navigate has always
+            // set this; Explore never has. `GuidanceController` forwards to whichever
+            // `GuidanceViewModel` a leg is running (and to one started while paused).
+            // Voice is not in play here: the detour never sets `onSpeak`.
+            coordinator.pauseObserver = guidance
             gems = store
             let outcome = coordinator.start(
                 location: rideLocation, saving: rideStore, units: settings.units,
@@ -269,16 +274,27 @@ private extension RideHUDView {
             }
             .padding(.horizontal, AuraTheme.Spacing.lg)
 
+            PauseControl(isPaused: coordinator.isPaused,
+                         pausedSeconds: coordinator.currentPauseSeconds,
+                         onToggle: { togglePause() })
+                .padding(.horizontal, AuraTheme.Spacing.lg)
+
             ExploreInstrumentPanel(
                 currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
                 units: settings.units,
                 state: ExploreInstrumentState(stats: coordinator.stats,
                                               elapsed: coordinator.elapsed,
                                               units: settings.units),
-                // Task 13 wires the live pause signal in; this HUD does not yet toggle pause.
-                isPaused: false)
+                isPaused: coordinator.isPaused)
                 .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
         }
+    }
+
+    /// Pause/resume from the cockpit row. Just the state change: the VoiceOver announcement is
+    /// posted inside `PauseControl`'s button action, which is shared by both HUDs, so it is
+    /// written once rather than once per HUD.
+    func togglePause() {
+        if coordinator.isPaused { coordinator.resume() } else { coordinator.pause() }
     }
 
     var backButton: some View {

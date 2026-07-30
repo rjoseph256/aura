@@ -105,13 +105,24 @@ extension NavigateHUDView {
             }
             .padding(.horizontal, AuraTheme.Spacing.lg)
 
+            PauseControl(isPaused: coordinator.isPaused,
+                         pausedSeconds: coordinator.currentPauseSeconds,
+                         onToggle: { togglePause() })
+                .padding(.horizontal, AuraTheme.Spacing.lg)
+
             InstrumentPanel(
                 currentSpeedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
                 units: settings.units,
                 trip: cruisingState,
-                // Task 13 wires the live pause signal in; this HUD does not yet toggle pause.
-                isPaused: false)
+                isPaused: coordinator.isPaused)
                 .containerRelativeFrame(.vertical, count: 4, span: 1, spacing: 0)
         }
+    }
+
+    /// Pause/resume from the cockpit row. Just the state change: the VoiceOver announcement is
+    /// posted inside `PauseControl`'s button action, which is shared by both HUDs, so it is
+    /// written once rather than once per HUD.
+    func togglePause() {
+        if coordinator.isPaused { coordinator.resume() } else { coordinator.pause() }
     }
 }
