@@ -119,10 +119,13 @@ extension NavigateHUDView {
         }
     }
 
-    /// Pause/resume from the cockpit row. Just the state change: the VoiceOver announcement is
-    /// posted inside `PauseControl`'s button action, which is shared by both HUDs, so it is
-    /// written once rather than once per HUD.
-    func togglePause() {
+    /// Pause/resume from the cockpit row, returning the resulting state — which is not always
+    /// the flipped one, since both coordinator calls are guarded no-ops with no ride recording.
+    /// Just the state change otherwise: the VoiceOver announcement is posted inside
+    /// `PauseControl`'s button action, which is shared by both HUDs, so it is written once
+    /// rather than once per HUD.
+    func togglePause() -> Bool {
         if coordinator.isPaused { coordinator.resume() } else { coordinator.pause() }
+        return coordinator.isPaused
     }
 }

@@ -16,6 +16,15 @@ import AuraKit
 /// control (R12). Its accessibility label is explicitly "Stop detour" for the same reason.
 struct DetourOverlay: View {
     let controller: GuidanceController
+    /// Whether the ride is stopped. Calms the turn card, for the reason the navigate HUD calms
+    /// its own: the expanded card is a solid mint fill and it would otherwise sit directly above
+    /// the mint Resume pill, shouting the turn at a rider who has stopped. This is the only turn
+    /// card Explore has, and since the pause silences that leg's turn haptics too, an uncalmed
+    /// card would be the one signal left contradicting the paused state.
+    ///
+    /// Required, not defaulted, for the same reason `RideMapView.isPaused` is: a silently
+    /// unwired paused signal compiles clean and ships dead.
+    let isPaused: Bool
     var units: DistanceUnits = .imperial
     var reduceMotion: Bool = false
     var onStop: () -> Void
@@ -30,7 +39,8 @@ struct DetourOverlay: View {
                 switch controller.phase {
                 case .guiding(let gem):
                     if let vm = controller.guidance {
-                        TurnCardView(state: vm.turn, reduceMotion: reduceMotion)
+                        TurnCardView(state: isPaused ? vm.turn.calmed() : vm.turn,
+                                     reduceMotion: reduceMotion)
                     }
                     destinationChip(gem, distance: guidingDistanceText)
                 case .headingOnly(let gem):

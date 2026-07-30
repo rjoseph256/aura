@@ -123,7 +123,8 @@ struct RideHUDView: View {
         // while a detour is active.
         .overlay(alignment: .top) {
             if guidance.isDetouring || guidance.arrivalBanner != nil {
-                DetourOverlay(controller: guidance, units: settings.units,
+                DetourOverlay(controller: guidance, isPaused: coordinator.isPaused,
+                              units: settings.units,
                               reduceMotion: reduceMotion, onStop: { guidance.cancel() })
                     .padding(.top, 8)
             }
@@ -184,6 +185,22 @@ struct RideHUDView: View {
                 haptics: GemHapticPlayer())
             // Arbiter (R7): a detour in flight suppresses the gem peek card + Tier-3 haptic
             // (turn cues own the cockpit) but pins/seen-state are unaffected.
+            //
+            // KNOWN GAP, ROH-101: a detour arrival that lands while the ride is paused is
+            // dropped, and the arbiter is then stuck on for the rest of the ride.
+            // `GuidanceViewModel` `continue`s past `.arrivedAtDestination` while `isPaused`
+            // (deliberate — see spec D7 and the comment there), and the Mapbox session yields
+            // that event once, on the final-waypoint transition, so resuming does not bring it
+            // back. Nothing else advances the phase: the controller's `riderDidUpdate` does
+            // nothing while `.guiding`, because Mapbox is supposed to own arrival. `onArrive`
+            // therefore never fires, the phase stays `.guiding`, `coordinator.isDetouring`
+            // stays true, and this closure keeps returning true — gem peek cards and Tier-3 gem
+            // haptics stay suppressed, and `RideMapView` keeps dimming the recorded track to 25%
+            // under a stale detour polyline, until the rider notices and taps Stop on the detour
+            // chip. Discovery is off with nothing on screen saying so. Narrow to reach (the rider
+            // has to pause inside the gem's arrival radius in the window before Mapbox fires),
+            // but silent when it happens. Re-arming guidance across a pause is out of scope for
+            // this pass; the fix belongs with the device verification of the pause control.
             store.detourActive = { [coordinator] in coordinator.isDetouring }
             guidance.units = settings.units
             // Explore's detour guidance needs the paused flag too, or a rider on a "Take me
@@ -290,11 +307,14 @@ private extension RideHUDView {
         }
     }
 
-    /// Pause/resume from the cockpit row. Just the state change: the VoiceOver announcement is
-    /// posted inside `PauseControl`'s button action, which is shared by both HUDs, so it is
-    /// written once rather than once per HUD.
-    func togglePause() {
+    /// Pause/resume from the cockpit row, returning the resulting state — which is not always
+    /// the flipped one, since both coordinator calls are guarded no-ops with no ride recording.
+    /// Just the state change otherwise: the VoiceOver announcement is posted inside
+    /// `PauseControl`'s button action, which is shared by both HUDs, so it is written once
+    /// rather than once per HUD.
+    func togglePause() -> Bool {
         if coordinator.isPaused { coordinator.resume() } else { coordinator.pause() }
+        return coordinator.isPaused
     }
 
     var backButton: some View {

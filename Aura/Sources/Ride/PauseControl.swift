@@ -20,7 +20,14 @@ struct PauseControl: View {
     let isPaused: Bool
     /// Duration of the stop in progress. Ignored while recording.
     let pausedSeconds: TimeInterval
-    let onToggle: () -> Void
+    /// Pause or resume, returning the ride's paused state **after** the attempt.
+    ///
+    /// It returns rather than being a plain `Void` closure because the coordinator's `pause()`
+    /// and `resume()` are guarded no-ops when no ride is recording — before `start()` lands,
+    /// while the permission sheet is up, in the frame after `finish()`. Announcing the intent
+    /// would tell a VoiceOver rider "Ride paused" with nothing paused; announcing the result
+    /// cannot.
+    let onToggle: () -> Bool
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
@@ -68,9 +75,11 @@ struct PauseControl: View {
         // can import UIKit freely, and putting it here is what makes spec P7's "written once"
         // literally true rather than "written once per HUD" (which is twice).
         Button {
-            let willBePaused = !isPaused
-            onToggle()
-            AccessibilityAnnouncer.announce(PauseControlCopy.announcement(isPaused: willBePaused))
+            let nowPaused = onToggle()
+            // Silence, not a wrong announcement, when the toggle was a guarded no-op: the state
+            // did not move, so there is nothing to report.
+            guard nowPaused != isPaused else { return }
+            AccessibilityAnnouncer.announce(PauseControlCopy.announcement(isPaused: nowPaused))
         } label: {
             HStack(spacing: AuraTheme.Spacing.sm) {
                 Image(systemName: isPaused ? "play.fill" : "pause.fill")
@@ -104,8 +113,8 @@ struct PauseControl: View {
 
 #Preview("Both states") {
     VStack(spacing: 24) {
-        PauseControl(isPaused: false, pausedSeconds: 0, onToggle: {})
-        PauseControl(isPaused: true, pausedSeconds: 252, onToggle: {})
+        PauseControl(isPaused: false, pausedSeconds: 0, onToggle: { true })
+        PauseControl(isPaused: true, pausedSeconds: 252, onToggle: { false })
     }
     .padding()
     .background(AuraTheme.background)
