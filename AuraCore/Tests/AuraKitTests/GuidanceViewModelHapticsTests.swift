@@ -61,4 +61,35 @@ struct GuidanceViewModelHapticsTests {
         #expect(spy.prepareCount == 1)
         vm.stop()
     }
+
+    @Test func pausedFiresNoTurnHaptic() async {
+        // Spoken instructions are already suppressed while paused. Leaving the haptic firing
+        // means a rider at lunch with the phone pocketed still gets buzzed about turns they
+        // are not taking, and on an accidental pause the surviving buzz is what convinces them
+        // nothing is wrong while the voice has gone silent.
+        let session = ScriptedGuidanceSession(script: [
+            .progress(.init(distanceToManeuverMeters: 140, instruction: "Right onto Penn Ave"))
+        ])
+        let vm = GuidanceViewModel(session: session)
+        let spy = HapticSpy()
+        vm.haptics = spy
+        vm.hapticsEnabled = true
+        vm.rideDidSetPaused(true)
+        await vm.run(route: makeRoute())
+        #expect(spy.cues.isEmpty)
+    }
+
+    @Test func resumingRestoresTurnHaptics() async {
+        let session = ScriptedGuidanceSession(script: [
+            .progress(.init(distanceToManeuverMeters: 140, instruction: "Right onto Penn Ave"))
+        ])
+        let vm = GuidanceViewModel(session: session)
+        let spy = HapticSpy()
+        vm.haptics = spy
+        vm.hapticsEnabled = true
+        vm.rideDidSetPaused(true)
+        vm.rideDidSetPaused(false)
+        await vm.run(route: makeRoute())
+        #expect(spy.cues == [.approach])
+    }
 }

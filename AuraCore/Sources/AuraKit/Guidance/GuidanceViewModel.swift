@@ -147,6 +147,8 @@ public final class GuidanceViewModel: RidePauseObserving {
         let cue = hapticEngine.onProgress(
             distanceToManeuverMeters: update.distanceToManeuverMeters,
             maneuverKey: update.instruction)
-        if hapticsEnabled, let cue { haptics?.play(cue) }
+        // Same gate as `.spokenInstruction`: a rider who does not need to be told about the
+        // turn does not need to be buzzed about it either (ROH-101 P1).
+        if hapticsEnabled, !isPaused, let cue { haptics?.play(cue) }
     }
 }
