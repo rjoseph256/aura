@@ -365,7 +365,8 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
                 let cells = ShareRasterAcceptance.cellDeviations(
                     pixels: pixels, width: width, height: height, excludedBottomRows: excludedBottomRows)
                 let summary = cells.map { String(format: "%.1f", $0) }.joined(separator: " ")
-                Self.log.info("share-map acceptance cells (stddev, threshold \(ShareRasterAcceptance.stddevThreshold)): \(summary, privacy: .public)")
+                let threshold = ShareRasterAcceptance.stddevThreshold
+                Self.log.info("share-map acceptance cells (stddev, threshold \(threshold)): \(summary, privacy: .public)")
             }
             return accepted
         }.value
