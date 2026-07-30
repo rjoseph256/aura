@@ -120,6 +120,11 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
     static let shared = ShareMapSnapshotter()
     private init() {}
 
+    /// Every reject path logs its reason: a nil from this pipeline is invisible in the
+    /// UI by design (the card just stays on the polyline fallback), so without a trace
+    /// a rejection is indistinguishable from a hang in the field and in verification.
+    private static let log = Logger(subsystem: "app.aura.ios", category: "ShareCard")
+
     /// `id` is the slot's identity: the watchdog and the pipeline's own defer may
     /// only clear the slot while it still holds THEIR identity, never a successor's.
     private struct InFlightSlot {
@@ -217,14 +222,29 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
         let errorToken = snapshotter.onMapLoadingError.observe { @Sendable error in errorFlags.record(error) }
         defer { errorToken.cancel() }
 
-        guard await loadStyle(request.style.mapboxStyle, into: snapshotter) else { return nil }
+        guard await loadStyle(request.style.mapboxStyle, into: snapshotter) else {
+            Self.log.info("share-map reject: style load failed or timed out")
+            return nil
+        }
         // Rejected read 1 of 2: a style/source error surfaced during the load.
-        guard !errorFlags.rejected else { return nil }
-        guard fitCamera(snapshotter, to: request) else { return nil }
+        guard !errorFlags.rejected else {
+            Self.log.info("share-map reject: style/source loading error")
+            return nil
+        }
+        guard fitCamera(snapshotter, to: request) else {
+            Self.log.info("share-map reject: degenerate camera fit")
+            return nil
+        }
         // Rejected read 2 of 2 sits inside renderMapRasterWithChrome, after the render resolves.
         guard let (raster, runs) = await renderMapRasterWithChrome(snapshotter, request: request, flags: errorFlags)
-        else { return nil }
-        guard await passesAcceptance(raster) else { return nil }
+        else {
+            Self.log.info("share-map reject: render failed, timed out, mid-render error, or no captured route")
+            return nil
+        }
+        guard await passesAcceptance(raster) else {
+            Self.log.info("share-map reject: raster failed the non-blank interior check")
+            return nil
+        }
 
         // Hoisted ON MAIN: the detached composite must not read @MainActor theme statics
         // (today that is only a warning, so a green build would hide the race).
@@ -234,9 +254,13 @@ private nonisolated enum SlotAwaitOutcome: Sendable {
             Self.composite(raster: raster, runs: runs, size: request.size, scale: request.scale,
                            colors: (casing: casing, mint: mint))
         }.value
-        guard let composited else { return nil }   // nil route path → reject BEFORE any cache write
+        guard let composited else {   // nil route path → reject BEFORE any cache write
+            Self.log.info("share-map reject: no strokeable route path at composite")
+            return nil
+        }
 
         await persist(composited, key: request.cacheKey)
+        Self.log.info("share-map accepted and cached")
         return composited
     }
 
