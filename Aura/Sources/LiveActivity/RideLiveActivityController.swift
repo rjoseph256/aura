@@ -7,6 +7,7 @@
 // once ActivityKit ships isolation annotations that make the sends provably safe. See ROH-116.
 @preconcurrency import ActivityKit
 import Foundation
+import os
 import AuraCore
 import AuraKit
 
@@ -23,6 +24,8 @@ final class RideLiveActivityController {
     static let shared = RideLiveActivityController()
     private init() {}
 
+    private let log = Logger(subsystem: "app.aura.ios", category: "live-activity")
+
     private var activity: Activity<RideActivityAttributes>?
     /// The last payload *enqueued*, and when it was decided. Stamped at enqueue, not after the
     /// push lands: `Activity.update` returns on hand-off with no delivery signal, so no
@@ -34,6 +37,12 @@ final class RideLiveActivityController {
     /// Serializes pushes so they land in the order they were decided. Two racing tasks could
     /// otherwise leave the widget holding a running state after a pause was pushed.
     private var pushChain: Task<Void, Never>?
+    /// Ids some path in this process is already ending, so a sweep does not end them a second
+    /// time. Both writers matter (ROH-124 spec D2): `end()` nils `activity` synchronously but
+    /// performs the ActivityKit end later, after draining `pushChain`, and `endOrphans()` claims
+    /// its snapshot before spawning because a cold launch fires two sweeps within milliseconds
+    /// and ActivityKit removes an ended activity from `activities` asynchronously.
+    private var endingIDs: Set<String> = []
 
     /// Begins a Live Activity for a ride, if the rider has them enabled. Best-effort:
     /// a failure here never affects the ride itself.
@@ -41,6 +50,12 @@ final class RideLiveActivityController {
                startedAt: Date,
                units: DistanceUnits,
                destinationName: String?) {
+        // First, so it runs unconditionally (ROH-124 spec D3). Placed after the request instead,
+        // it is skipped when the rider has Live Activities turned off and skipped again when the
+        // request throws, which leaves the ghost to outlive the whole session in both cases. It
+        // does *not* free a slot for the request below: the ends happen in a Task, and this
+        // function never suspends.
+        endOrphans()
         // Defensive: clear any activity a previous ride somehow left running.
         end()
         // Honor the user/system setting — never force-enable.
@@ -123,15 +138,76 @@ final class RideLiveActivityController {
         lastPayload = nil
         lastPushedAt = nil
 
+        let id = activity.id
+        endingIDs.insert(id)
         let previous = pushChain
         pushChain = nil
-        Task { @MainActor in
+        Task { @MainActor [self] in
+            // Released on any exit from this scope. An id left in `endingIDs` is excluded from
+            // every later sweep, so this is the one place that must not be forgotten — though it
+            // cannot help if an await below never resumes at all. Capturing `self` strongly is
+            // deliberate: this is a `static let` singleton that is never deallocated.
+            defer { endingIDs.remove(id) }
             // Drain what is already queued, so the end is the last thing the activity sees.
             await previous?.value
             await activity.end(
                 ActivityContent(state: RideActivityAttributes.ContentState(payload: final),
                                 staleDate: nil),
                 dismissalPolicy: .immediate)
+        }
+    }
+
+    /// Ends every Live Activity this process does not own: what a previous process left behind
+    /// when it was killed mid-ride. Nothing else can reach one. `end()` and `update()` are both
+    /// gated on the in-memory `activity`, which a fresh singleton has lost, so after a jetsam kill
+    /// the ghost outlives every path that could clear it (ROH-124 spec D1).
+    ///
+    /// **Synchronous up to the point the orphan set is fixed, and that is the entire safety
+    /// argument.** The snapshot and the owned-id read happen in one main-actor turn with no
+    /// suspension between them, so no ride can start in the gap and the set captured below can
+    /// never contain an activity this process owns. Do not add an `await` above `orphans`, and do
+    /// not source the owned id from anywhere but `activity?.id`: a ride's `id.uuidString` is a
+    /// different value that matches nothing, which would make *every* activity an orphan,
+    /// including the one the current ride is using.
+    ///
+    /// Sequential on purpose, and not because the parallel form fails to compile — it does
+    /// compile. There is nothing to gain from ending two dying activities at once, and a
+    /// `TaskGroup` would multiply the `sending Activity` pattern ROH-116 was about. The cost is
+    /// head-of-line blocking, recorded under "accepted" below.
+    func endOrphans() {
+        let owned = activity?.id
+        let orphans = Activity<RideActivityAttributes>.activities.filter {
+            // An allow-list, not a deny-list. `.ended` and `.dismissed` are already on their way
+            // out, and `endingIDs.remove` fires when ActivityKit accepts an end rather than when
+            // the entry leaves this list, so re-ending one is pointless. `.pending` is a
+            // scheduled activity this app never requests; if it ever does, sweeping one before it
+            // starts would be a bug, so it is excluded by construction rather than by omission.
+            ($0.activityState == .active || $0.activityState == .stale)
+                && $0.id != owned && !endingIDs.contains($0.id)
+        }
+        guard !orphans.isEmpty else { return }
+        for orphan in orphans { endingIDs.insert(orphan.id) }
+        // The only signal this feature emits. Without it a device pass cannot tell an end that
+        // worked from a sweep that found an empty list, which is the failure mode most likely to
+        // masquerade as success (ROH-124 verification).
+        log.info("Ending \(orphans.count, privacy: .public) orphaned Live Activity(s)")
+
+        Task { @MainActor [self] in
+            // Releases every id this sweep claimed, including any the loop never reached. That
+            // covers an early exit; it does **not** cover an `await` below that never resumes,
+            // because a scope that never exits never runs its `defer`. Accepted: an
+            // `Activity.end` that hangs forever strands the rest of this snapshot in `endingIDs`
+            // for the life of the process, and those ghosts stay until iOS retires them. The
+            // alternative is a per-end timeout, which is more machinery than a hypothetical
+            // deserves.
+            defer { for orphan in orphans { endingIDs.remove(orphan.id) } }
+            for orphan in orphans {
+                // The recovered activity still carries the dead process's last state, and Apple's
+                // guidance for `end` is to pass a final content update rather than nil.
+                await orphan.end(
+                    ActivityContent(state: orphan.content.state, staleDate: nil),
+                    dismissalPolicy: .immediate)
+            }
         }
     }
 }

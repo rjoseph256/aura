@@ -83,6 +83,13 @@ enum AuraTheme {
                                       green: AuraPalette.mint.green,
                                       blue: AuraPalette.mint.blue, alpha: 1)
 
+    /// The share card's route casing as a UIColor: near-black stroked under the mint route
+    /// line so the route stays legible on light basemaps. Built from the same token as
+    /// `background`, so the casing and the app background never drift apart.
+    static let routeCasingUIColor = UIColor(red: AuraPalette.nearBlack.red,
+                                            green: AuraPalette.nearBlack.green,
+                                            blue: AuraPalette.nearBlack.blue, alpha: 1)
+
     // MARK: - Spacing scale (pt)
     enum Spacing {
         static let xs: CGFloat = 4, sm: CGFloat = 8, md: CGFloat = 12, lg: CGFloat = 16

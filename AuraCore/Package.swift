@@ -25,7 +25,10 @@ let package = Package(
                             .process("Resources/golden-ride.gpx"),
                             .process("Resources/golden-ride-paused.gpx")]),
         .testTarget(name: "AuraKitTests", dependencies: ["AuraKit"],
-                    resources: [.copy("Resources/terrain-rgb-fixture.png")]),
+                    resources: [.copy("Resources/terrain-rgb-fixture.png"),
+                                .copy("Resources/SairaCondensed-Bold.ttf"),
+                                .copy("Resources/SairaCondensed-SemiBold.ttf"),
+                                .copy("Resources/sharemap-auraterrain-capture.png")]),
     ],
     swiftLanguageModes: [.v6]
 )

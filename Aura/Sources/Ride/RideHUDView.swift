@@ -14,6 +14,7 @@ struct RideHUDView: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(LocationService.self) private var location
     @Environment(SavedPlacesStore.self) private var savedPlaces
+    @Environment(ShareMapProviderBox.self) private var shareMapBox
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var coordinator: RideSessionCoordinator
@@ -228,6 +229,7 @@ struct RideHUDView: View {
             // belongs on the glance surfaces again. (Not about `checkpointedAt` — a failed save
             // leaves that set.)
             WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil)
+            shareMapBox.prefetchShareMap(for: ride, style: settings.mapStyle)
             router.showRideSummary(ride, saveFailed: coordinator.saveFailed)
         }
         .onDisappear {

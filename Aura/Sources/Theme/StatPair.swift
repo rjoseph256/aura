@@ -11,6 +11,9 @@ struct StatPair: View {
     /// Label font. Defaults to `.caption2` (cockpit/summary rows); the share card passes a
     /// larger size so labels survive feed-thumbnail scale.
     var labelFont: Font = .caption2
+    /// Label color override. Defaults to `nil` (→ `AuraTheme.textSecondary`); the share card
+    /// passes its high-contrast secondary because a fixed PNG can't honor Increase Contrast.
+    var labelColor: Color?
     // Brand (system) font has a fixed size → @ScaledMetric drives Dynamic Type.
     @ScaledMetric(relativeTo: .title2) private var brandValueSize: CGFloat = 21
     // Cockpit (Saira) font self-scales via relativeTo: → plain base size (no @ScaledMetric).
@@ -25,7 +28,7 @@ struct StatPair: View {
                 .foregroundStyle(AuraTheme.textPrimary)
             Text(label)
                 .font(labelFont)
-                .foregroundStyle(AuraTheme.textSecondary)
+                .foregroundStyle(labelColor ?? AuraTheme.textSecondary)
         }
     }
 }

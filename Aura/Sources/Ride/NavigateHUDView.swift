@@ -29,6 +29,7 @@ struct NavigateHUDView: View {
     @Environment(RideStore.self) private var rideStore
     @Environment(SettingsStore.self) var settings
     @Environment(LocationService.self) private var location
+    @Environment(ShareMapProviderBox.self) private var shareMapBox
     /// Not `private`: the cockpit row in `NavigateHUDView+Cockpit` animates off it too.
     @Environment(\.accessibilityReduceMotion) var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -259,6 +260,7 @@ struct NavigateHUDView: View {
             // belongs on the glance surfaces again. (Not about `checkpointedAt` — a failed save
             // leaves that set.)
             WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil)
+            shareMapBox.prefetchShareMap(for: ride, style: settings.mapStyle)
             router.showRideSummary(ride, saveFailed: coordinator.saveFailed)
         }
         .onChange(of: settings.units) { _, newUnits in
