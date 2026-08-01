@@ -211,14 +211,16 @@ struct RideSummaryView: View {
     }
 
     @ViewBuilder private var supportingCells: some View {
-        stat(fmt.minutes(stats.movingTimeSeconds), "moving")
-        stat(fmt.speedValue(stats.maxSpeedMetersPerSecond, decimals: 1), metric ? "km/h top" : "mph top")
+        stat(fmt.minutes(stats.movingTimeSeconds), "moving", id: RideTestID.summaryMoving)
+        stat(fmt.speedValue(stats.maxSpeedMetersPerSecond, decimals: 1),
+             metric ? "km/h top" : "mph top")
     }
 
     /// One value+label metric, left-aligned, combined into a single VoiceOver element.
-    private func stat(_ value: String, _ label: String) -> some View {
+    private func stat(_ value: String, _ label: String, id: String? = nil) -> some View {
         StatPair(value: value, label: label, context: .brand, alignment: .leading)
             .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(id ?? "")
     }
 
     // MARK: Behavior

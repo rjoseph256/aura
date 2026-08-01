@@ -52,6 +52,7 @@ struct InstrumentChassis<Column: View>: View {
                     // instruments read once, not as several mechanical stops.
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(columnAccessibilityLabel)
+                    .accessibilityIdentifier(RideTestID.hudStats)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
@@ -90,6 +91,7 @@ struct InstrumentChassis<Column: View>: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Speed")
         .accessibilityValue(SpeedRailVoice.speedValue(currentSpeedMetersPerSecond, units: units))
+        .accessibilityIdentifier(RideTestID.hudSpeed)
     }
 
     // Opaque surface with rounded top corners + a hairline, bleeding to the bottom edge.

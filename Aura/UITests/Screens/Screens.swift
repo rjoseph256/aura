@@ -41,6 +41,7 @@ struct HistoryScreen {
     var rideRows: XCUIElementQuery {
         app.descendants(matching: .any).matching(identifier: RideTestID.historyRow)
     }
+    var firstRow: XCUIElement { rideRows.firstMatch }
 }
 
 @MainActor
@@ -68,6 +69,22 @@ struct RideScreen {
     var backButton: XCUIElement { app.buttons[RideTestID.hudBack] }
     var endButton: XCUIElement { app.buttons[RideTestID.hudEnd] }
     var endAlert: XCUIElement { app.alerts["End ride?"] }
+    var pauseControl: XCUIElement { app.buttons[RideTestID.hudPause] }
+    var pausedBanner: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: RideTestID.hudPausedBanner).firstMatch
+    }
+    /// The cockpit's hero speed readout. `InstrumentChassis` composes it into one element
+    /// whose value is the spoken speed, e.g. "0 miles per hour" — so a paused reading is a
+    /// `"0 "` prefix in either unit system.
+    var speedValue: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: RideTestID.hudSpeed).firstMatch
+    }
+    /// The composed distance/time/gain column. Its label carries the clock at second
+    /// resolution, which is how the freeze is asserted at the rendered surface rather than
+    /// only on the probe.
+    var statsColumn: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: RideTestID.hudStats).firstMatch
+    }
 
     func probeValues() -> RideTestProbe.Values? { RideTestProbe.parse(probe.label) }
 
@@ -82,6 +99,17 @@ struct RideScreen {
         }
         return false
     }
+
+    /// Polls until the probe's elapsed reading exceeds `seconds` (or fails at `timeout`).
+    /// Real sleep between polls, same rationale as `waitForDistance`.
+    func waitForElapsedToAdvance(beyond seconds: Int, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let values = probeValues(), values.elapsed > seconds { return true }
+            Thread.sleep(forTimeInterval: 1)
+        }
+        return false
+    }
 }
 
 @MainActor
@@ -91,6 +119,9 @@ struct SummaryScreen {
     // Element type of a combined SwiftUI a11y element varies by runtime — query any type.
     var heroDistance: XCUIElement {
         app.descendants(matching: .any).matching(identifier: RideTestID.summaryDistance).firstMatch
+    }
+    var movingStat: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: RideTestID.summaryMoving).firstMatch
     }
     var doneButton: XCUIElement { app.buttons["Done"] }
 }

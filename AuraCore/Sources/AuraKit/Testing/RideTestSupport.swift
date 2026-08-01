@@ -13,8 +13,19 @@ public enum RideTestID {
     /// The PAUSED state chip. Present only while paused, so ROH-103 can assert the state
     /// rather than inferring it from the control's label.
     public static let hudPausedBanner = "ride.hud.paused.banner"
+    /// The cockpit's hero speed readout and its composed stats column, both on
+    /// `InstrumentChassis` and so shared by the Explore and navigate panels. ROH-103 reads
+    /// the rendered values rather than only the probe: the probe attributes a failure to the
+    /// coordinator, these attribute it to the view. Identifiers rather than label queries —
+    /// a raw "Speed" string in a test would survive a rename with no compile break.
+    public static let hudSpeed = "ride.hud.speed"
+    public static let hudStats = "ride.hud.stats"
     public static let previewStart = "preview.start"
     public static let summaryDistance = "summary.distance"
+    /// The summary's moving-time cell. It discriminates a segmented save (≈4 min) from a
+    /// flattened one (≈14 min) — ROH-103's most timing-independent assertion, since moving
+    /// time comes from the fixture's own stamps rather than wall clock.
+    public static let summaryMoving = "summary.moving"
     public static let historyRow = "history.row"
 }
 
