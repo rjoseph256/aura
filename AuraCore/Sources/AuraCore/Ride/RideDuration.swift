@@ -70,7 +70,9 @@ public struct RideDuration: Equatable, Sendable {
         // here. Revision 1 trapped here on the theory that only a degenerate recorder state
         // produces it; tracing `checkpoint(at:)` and `end(at:)` shows neither can (both collapse
         // to a zero interval, not a negative one). The real producer is a backward wall-clock
-        // step, which this repo has open as ROH-130 — and unlike `RideMigrationPlan`'s assertion,
+        // step — the same clock-skew residual ROH-130 documents rather than eliminates, since
+        // `checkpointedAt` stays on the raw wall clock while `endedAt` is monotonic-derived (see
+        // `RideRecorder.end(at:)`) — and unlike `RideMigrationPlan`'s assertion,
         // which runs once over local data inside a migration, this runs inside
         // `RideSummaryView.body` over rows CloudKit mirrored from another device. A trap there
         // fails the summary screen, the UI-test suite, and the device pass for a clock skew the
