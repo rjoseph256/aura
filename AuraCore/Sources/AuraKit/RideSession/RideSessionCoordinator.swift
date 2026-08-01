@@ -81,8 +81,10 @@ public final class RideSessionCoordinator {
     // Stashed at start() for the rest of the ride.
     private var location: (any LocationStreaming)?
     private var saving: (any RideSaving)?
-    // public (not private), like pushActivityUpdate is internal, so a test can read the anchor
-    // the activity's clock is built from.
+    // public (not private), like pushActivityUpdate is internal, so a test can anchor its own
+    // injected instants to the ride's actual start stamp. NOT the Live Activity's anchor — that
+    // is `recorder.anchorStartedAt`, which carries the wallOffset correction this stamp does not
+    // (ROH-130 D2/D5).
     public private(set) var startedAt: Date?
     private var saveToHealth = false
     private var groupSink: (any GroupLocationSink)?

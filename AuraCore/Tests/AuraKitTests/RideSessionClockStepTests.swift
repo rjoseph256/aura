@@ -183,4 +183,35 @@ struct RideSessionClockStepTests {
             #expect(since == clock.now().date, "stop timer opens at zero, step \(step)")
         }
     }
+
+    /// Pins the *running* anchor's clock-step correction. Every other fixture in this file steps
+    /// the clock during a stop; this is the majority case none of them cover — a ride with no
+    /// pause open at all, which is where a navigated rider spends almost the whole ride. That
+    /// rider has no active-time cell on the cockpit, so the Lock Screen's
+    /// `Text(anchor, style: .timer)` is their only reading of active time, and this surface had no
+    /// step coverage until this fixture: `pushActivityUpdate` builds the running anchor from
+    /// `recorder.anchorStartedAt`, which carries `wallOffset`, but passing `recorder.startedAt` —
+    /// the raw, uncorrected stamp — instead compiles, type-checks, and left the entire package and
+    /// app suite green, because every existing Live Activity fixture drives the paused branch.
+    @Test func aStepWhileRunningMovesTheRunningAnchorByTheStepThenSettles() throws {
+        let clock = FakeRideClock(date: Date(timeIntervalSinceReferenceDate: 1_000_000))
+        let (c, activity) = try startedCoordinator(clock: clock)
+        clock.advance(600)
+        tick(c, clock)
+        let before = try #require(activity.clocks.last)
+
+        clock.step = -40
+        clock.advance(0.5)
+        tick(c, clock)
+        let after = try #require(activity.clocks.last)
+
+        guard case .running(let anchor0) = before, case .running(let anchor1) = after else {
+            Issue.record("expected two running clocks"); return
+        }
+        #expect(anchor1.timeIntervalSince(anchor0) == -40, "one step, one anchor move")
+
+        for _ in 0..<5 { clock.advance(0.5); tick(c, clock) }
+        let runningClocks = Set(activity.clocks.filter { !$0.isPaused })
+        #expect(runningClocks.count == 2, "one step costs exactly one push, then it settles")
+    }
 }

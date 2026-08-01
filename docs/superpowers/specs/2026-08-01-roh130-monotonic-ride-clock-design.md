@@ -191,10 +191,16 @@ rider reads as a ride's identity. `endedAt` is rendered nowhere. Its consumers a
 itself, `RideWorkoutGate`'s nil check, `WidgetSnapshot`, and `WorkoutData`'s workout end
 (`WorkoutData.swift:32`). Shifting the one nobody reads is the cheaper correction.
 
-**Residual, stated rather than hidden.** After a backward step, the derived `endedAt` sits up to Δ
-ahead of the current wall clock, and the HealthKit workout's end date shifts by the same Δ — which
-is the correct duration, on a ride whose end instant the system's own clock disagrees about. The
-plan checks that `WorkoutData` and `RideWorkoutGate` tolerate it.
+**Residual, stated rather than hidden.** *(Corrected during the whole-branch review; the original
+wording here implied this was small. It is not bounded at all.)* After a backward step, the
+derived `endedAt` sits ahead of the current wall clock by exactly the size of the step, and that
+step has no upper bound — a rider (or a test rig) turning the clock back in Settings can move it a
+year, not a few seconds. `WorkoutData.swift:32-35` clamps `end >= start`
+(`self.end = max(rawEnd, ride.startedAt)`) but has no upper clamp, so an arbitrarily large
+overshoot reaches `HKWorkoutBuilder` unchecked. Whether HealthKit tolerates a future end date is
+**unconfirmed**: the investigation found no documented rejection, which is absence of evidence,
+not proof it is accepted. If it does reject, `WorkoutWriter.swift:101`'s `catch` swallows the
+failure — a Health workout silently not written, with no in-app signal.
 
 **`checkpoint(at:)` is deliberately left alone.** *(New in revision 3; revision 2 derived both
 boundaries.)* A checkpoint row writes `endedAt` and `checkpointedAt` to the same instant, and
@@ -206,10 +212,24 @@ would break the equality and start showing a duration on a row that has no busin
 `:40` repeats it in the warning before an irreversible all-devices delete. Shifting it by the size
 of a clock step to fix a duration nobody reads would be a bad trade. Both of its stamps stay raw.
 
-Deriving only `end(at:)` also makes `RideDuration`'s `checkpointedAt >= endedAt` disqualifier
-(`RideDuration.swift:41`) strictly *harder* to trip on the save-failure path, because a backward
-step moves the finished ride's `endedAt` later while the restored checkpoint stamp stays where it
-was. That failure — a save-failure summary with no durations — is reachable today and stays out of
+**Direction matters here, and this passage originally got only the backward case right.**
+*(Corrected during the whole-branch review — the paragraph below claimed one direction for both.)*
+Deriving only `end(at:)` moves the finished ride's `endedAt` by the size of the step, in the
+step's direction, while the restored checkpoint stamp — `checkpointedAt`, written before the step
+— stays where it was. For a **backward** step that makes `RideDuration`'s
+`checkpointedAt >= endedAt` disqualifier (`RideDuration.swift:41`) strictly *harder* to trip:
+`endedAt` moves later, away from `checkpointedAt`. For a **forward** step it is the reverse: the
+derived `endedAt` moves *earlier* than the raw wall clock would have produced, while
+`checkpointedAt` is a raw stamp that carries the full forward step, so the gap between them shrinks
+and the disqualifier gets *easier* to trip, not harder.
+
+The trip condition is a forward step, then a pause whose checkpoint write succeeds, where the step
+is larger than the ride time remaining after it, followed by an End whose save throws — the
+published ride's duration then reads nil where the pre-branch raw `endedAt` would have returned
+one. Confirmed with a scratch fixture: step +3600 s at monotonic +600 s, pause (checkpoint
+written), resume, End at monotonic +1200 s, save throws — the summary shows no duration where the
+old raw `endedAt` would have. This **newly widens** ROH-149's reachability rather than narrowing
+it. That failure — a save-failure summary with no durations — is reachable today and stays out of
 scope; it is filed as ROH-149.
 
 ### D4 — Active time keeps exactly one definition, and the guard learns the new way to break it
@@ -429,8 +449,10 @@ Each of these was raised at the gate and is being left, not overlooked.
   cover this; filed as a follow-up.
 - **Group-ride wire timestamps.** Peers exchange wall-clock instants across devices, where a shared
   monotonic base does not exist. Separate problem, separate clock discipline.
-- **`checkpointedAt >= endedAt` on the save-failure path.** Reachable today; D3 makes it harder to
-  reach, not impossible. Filed as a follow-up.
+- **`checkpointedAt >= endedAt` on the save-failure path.** Reachable today. D3 changes its
+  reachability in *both* directions, not just one — harder after a backward step, easier after a
+  forward step (corrected during the whole-branch review; see D3's disqualifier passage). Filed as
+  a follow-up, ROH-149.
 - **Time zone and DST.** `Date` is an absolute instant; neither affects a duration. Worth one note
   for triage: History renders `startedAt` in the *current* zone, so a rider who flew home already
   sees a start time that does not match their memory. That is a display convention, not this bug.
@@ -541,7 +563,7 @@ seconds. Read it off the clock before changing it rather than assuming 60.
 | Risk | Mitigation |
 |---|---|
 | The 2 s threshold is a fudge factor | It is. Its only consumer is the Live Activity anchor (D5), where 2 s is below what the surface renders. It no longer governs anything persisted or rider-facing. |
-| `endedAt` lands ahead of the wall clock after a backward step | Nothing renders it. The plan checks `WorkoutData` and `RideWorkoutGate` tolerate it, and it makes `RideDuration`'s checkpoint disqualifier harder to trip, not easier. |
+| `endedAt` diverges from the wall clock after a step, unboundedly | Nothing renders it. `WorkoutData`/`RideWorkoutGate` tolerate the divergence itself (see D3's residual — HealthKit's tolerance of a future end date is unconfirmed, not proven). The checkpoint disqualifier is direction-dependent, corrected during the whole-branch review: a backward step makes it harder to trip, a forward step makes it *easier* — see D3. |
 | The Live Activity push rate regresses on rides with no step | Fixtures 12–14, driven through the coordinator at production magnitude, plus device step 1. Both earlier versions of this test could not fail — revision 1's because the arithmetic cancelled exactly at `Date` magnitude, revision 2's because it tested a field copy against itself. |
 | An anchor is corrected twice, or not at all | Each stamp carries the offset in force when it was taken (D5), and fixtures 7 and 8 cover step-then-pause in both directions. This is the defect the plan gate found in revision 2 and it had no test at any level. |
 | `align` flaps and pushes every coalescing interval | It is idempotent, so a correction leaves `delta` at zero and the next one has to re-accumulate the whole threshold. Fixture 13 pins that a sub-threshold divergence changes nothing. |
