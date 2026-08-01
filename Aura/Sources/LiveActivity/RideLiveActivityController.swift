@@ -7,6 +7,7 @@
 // once ActivityKit ships isolation annotations that make the sends provably safe. See ROH-116.
 @preconcurrency import ActivityKit
 import Foundation
+import os
 import AuraCore
 import AuraKit
 
@@ -22,6 +23,8 @@ import AuraKit
 final class RideLiveActivityController {
     static let shared = RideLiveActivityController()
     private init() {}
+
+    private let log = Logger(subsystem: "app.aura.ios", category: "live-activity")
 
     private var activity: Activity<RideActivityAttributes>?
     /// The last payload *enqueued*, and when it was decided. Stamped at enqueue, not after the
@@ -140,10 +143,10 @@ final class RideLiveActivityController {
         let previous = pushChain
         pushChain = nil
         Task { @MainActor [self] in
-            // `defer` rather than a trailing statement: an id stranded in `endingIDs` is excluded
-            // from every later sweep for the life of the process, which would blind the one
-            // mechanism that clears ghosts. Capturing `self` strongly is deliberate — this is a
-            // `static let` singleton that is never deallocated.
+            // Released on any exit from this scope. An id left in `endingIDs` is excluded from
+            // every later sweep, so this is the one place that must not be forgotten — though it
+            // cannot help if an await below never resumes at all. Capturing `self` strongly is
+            // deliberate: this is a `static let` singleton that is never deallocated.
             defer { endingIDs.remove(id) }
             // Drain what is already queued, so the end is the last thing the activity sees.
             await previous?.value
@@ -169,21 +172,36 @@ final class RideLiveActivityController {
     ///
     /// Sequential on purpose, and not because the parallel form fails to compile — it does
     /// compile. There is nothing to gain from ending two dying activities at once, and a
-    /// `TaskGroup` would multiply the `sending Activity` pattern ROH-116 was about.
+    /// `TaskGroup` would multiply the `sending Activity` pattern ROH-116 was about. The cost is
+    /// head-of-line blocking, recorded under "accepted" below.
     func endOrphans() {
         let owned = activity?.id
         let orphans = Activity<RideActivityAttributes>.activities.filter {
-            // `.ended`/`.dismissed` are already on their way out, and `endingIDs.remove` fires
-            // when ActivityKit accepts an end rather than when the entry leaves this list.
-            $0.activityState != .ended && $0.activityState != .dismissed
+            // An allow-list, not a deny-list. `.ended` and `.dismissed` are already on their way
+            // out, and `endingIDs.remove` fires when ActivityKit accepts an end rather than when
+            // the entry leaves this list, so re-ending one is pointless. `.pending` is a
+            // scheduled activity this app never requests; if it ever does, sweeping one before it
+            // starts would be a bug, so it is excluded by construction rather than by omission.
+            ($0.activityState == .active || $0.activityState == .stale)
                 && $0.id != owned && !endingIDs.contains($0.id)
         }
         guard !orphans.isEmpty else { return }
         for orphan in orphans { endingIDs.insert(orphan.id) }
+        // The only signal this feature emits. Without it a device pass cannot tell an end that
+        // worked from a sweep that found an empty list, which is the failure mode most likely to
+        // masquerade as success (ROH-124 verification).
+        log.info("Ending \(orphans.count, privacy: .public) orphaned Live Activity(s)")
 
         Task { @MainActor [self] in
+            // Releases every id this sweep claimed, including any the loop never reached. That
+            // covers an early exit; it does **not** cover an `await` below that never resumes,
+            // because a scope that never exits never runs its `defer`. Accepted: an
+            // `Activity.end` that hangs forever strands the rest of this snapshot in `endingIDs`
+            // for the life of the process, and those ghosts stay until iOS retires them. The
+            // alternative is a per-end timeout, which is more machinery than a hypothetical
+            // deserves.
+            defer { for orphan in orphans { endingIDs.remove(orphan.id) } }
             for orphan in orphans {
-                defer { endingIDs.remove(orphan.id) }
                 // The recovered activity still carries the dead process's last state, and Apple's
                 // guidance for `end` is to pass a final content update rather than nil.
                 await orphan.end(

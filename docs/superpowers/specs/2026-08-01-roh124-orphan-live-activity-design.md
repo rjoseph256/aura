@@ -2,7 +2,11 @@
 
 Date: 2026-08-01
 Issue: [ROH-124](https://linear.app/rohun/issue/ROH-124/orphaned-live-activity-survives-a-jetsam-kill-and-never-clears)
-Status: revision 3, after a three-reviewer spec gate and a two-reviewer plan gate.
+Status: revision 4, after a three-reviewer spec gate, a two-reviewer plan gate, and a
+three-reviewer merge gate.
+
+> **The `file:line` citations below were correct against `main` when written and are now stale by
+> a few lines each, because the change this spec describes shifted them. Navigate by symbol name.**
 
 Found by the product-lens reviewer on
 [ROH-107](https://linear.app/rohun/issue/ROH-107). Related to Pass 5
@@ -195,11 +199,29 @@ situation worse before it makes it better. `flushCheckpoint` is called only from
 who never paused has no row, no badge, and no nudge. Today the ghost's frozen distance is the one
 artifact in the system that says the ride happened. The sweep deletes it.
 
-That is accepted here, for two reasons. The number it deletes sits beside a clock that has been
-counting since the process died, so what is being removed is a half-true card the rider cannot
-act on, not a record. And the underlying defect is that nothing persists an unpaused ride, which
-this issue cannot fix without building periodic autosave. **It is [ROH-144](https://linear.app/rohun/issue/ROH-144), filed
-at High, and it is a genuine cost of shipping this one.**
+*Revision 3 accepted this on the grounds that the deleted card is "a half-true card the rider
+cannot act on, not a record." The merge-gate product reviewer refuted both halves and is right.
+`RideActivityPushPolicy.coalesceInterval` is 4 seconds, so the frozen distance is accurate to
+within about four seconds of the moment the process died; only the clock beside it lies. And
+writing that number down, or entering it in Strava, is exactly what a rider does with it.*
+
+So the honest statement is: this change deletes an accurate distance, and offers nothing in its
+place. It ships that way because the alternatives were priced against a wrong description of what
+was being lost, which makes this a decision to re-take rather than one to defend. **Three options,
+for the record:**
+
+1. **Ship silent, as built.** [ROH-144](https://linear.app/rohun/issue/ROH-144) then owns the
+   underlying defect, that nothing persists an unpaused ride.
+2. **Write the recovered ride at sweep time.** `endOrphans()` already holds
+   `orphan.content.state` (distance, elevation gain, clock anchor) and `orphan.attributes.startedAt`
+   at the instant it discards them. That is enough for an interrupted-ride row with a real
+   distance and a real elapsed time, with no autosave, no deep link and no new `ContentState`.
+   Strictly smaller than either alternative rejected below, and it was not considered when they
+   were.
+3. **Keep the ghost until something replaces it**, accepting the lying clock.
+
+Option 1 is what merged, and it is the PO's call to keep or reverse. Option 2 is the one worth
+looking at first.
 
 Two alternatives were rejected. A `widgetURL` plus deep-link route would push a screen onto a
 path whose rules ROH-85 fixed at some cost. A terminal "ride interrupted" `ContentState` would
@@ -250,32 +272,51 @@ becomes permanently unsweepable rather than merely misrendered. The comment gets
 
 ## Verification
 
-The device pass is the gate. `-skipOrphanSweep`, a DEBUG-only launch argument in the idiom of
-`-openURL` (`AuraApp.swift:187-193`), suppresses the launch and foreground call sites so the
-`start()` site can be exercised on its own. Without it, the launch sweep fires on the first frame
-and every later step passes whether or not the other two call sites exist.
+The device pass is the gate. Two DEBUG-only launch arguments make the three call sites separable:
+`-skipOrphanSweep` suppresses launch and foreground, leaving only the sweep inside `start()`, and
+`-skipLaunchOrphanSweep` suppresses launch alone, which is the only way to reach the foreground
+site with a ghost still alive. Neither reaches `start()`. Without them the launch sweep fires on
+the first frame and every later step passes whether or not the other sites exist.
+
+**Watch the log, not just the card.** Each sweep emits
+`Ending N orphaned Live Activity(s)` on subsystem `app.aura.ios`, category `live-activity`. A card
+that disappears with no such line was retired by iOS, not by this code, and that is the failure
+mode most likely to be reported as a pass. Stream it with:
+
+```bash
+xcrun devicectl device console --device <udid> | grep live-activity
+```
 
 1. Start a ride, pause it, confirm the paused Live Activity. Kill the app from Xcode. Confirm at
    90 seconds that the stats dim and the clock keeps counting, which is the baseline this change
    is measured against.
-2. Relaunch. The activity clears immediately. Repeat this step several times, including one
-   deliberately slow cold launch, because ActivityKit may not have restored its list when the
-   launch task runs.
-3. Repeat the kill, then relaunch with `-skipOrphanSweep` and start a new ride. Exactly one Aura
+2. Relaunch **by tapping the Live Activity itself**, which is how a rider actually gets here. The
+   card clears and the log shows one orphan ended. Repeat several times: the launch site sweeps
+   twice, immediately and again two seconds later, because ActivityKit may not have restored its
+   activity list on the first frame. A run where the first sweep logs nothing and the second logs
+   one is a pass, and is the case the delayed pass exists for.
+3. Repeat the kill, relaunch with `-skipLaunchOrphanSweep`, and confirm the ghost is **still
+   there** with no log line. Background the app, foreground it, and confirm it clears with one.
+   This is the only step that proves the foreground site.
+4. Repeat the kill, then relaunch with `-skipOrphanSweep` and start a new ride. Exactly one Aura
    activity may exist afterwards, showing the new ride, and it must still be updating a minute
    later. This is the step that proves the `start()` site.
-4. Repeat the kill, then turn Live Activities off for Aura in Settings. **First record whether the
+5. Repeat the kill, then turn Live Activities off for Aura in Settings. **First record whether the
    ghost survives that toggle.** If iOS ends it there, this step proves nothing and should be
-   struck rather than reported as a pass. If it survives, launch with `-skipOrphanSweep`,
-   re-enable Live Activities, start a ride, and confirm the ghost is gone: that is the only way to
-   observe the sweep running ahead of the `areActivitiesEnabled` guard.
-5. Force quit by swiping up rather than killing from the debugger, then relaunch from the Home
-   Screen and confirm step 2. Step 3 is not reproducible here: launch arguments come from the
-   Xcode scheme at spawn, so a springboard launch cannot carry `-skipOrphanSweep`. The problem
-   statement treats a swipe-up quit and a debugger kill as equivalent and nothing has checked
-   that, which is what this step is for.
-6. Start a ride, background and foreground the app repeatedly, and confirm the live activity is
-   never swept. This is the negative case for the foreground call site.
-7. Kill during a ride that was never paused, relaunch, and look at Home. Expected: the ghost is
-   gone and Home says nothing. Confirming what D4 accepts, so it is a known outcome rather than a
-   surprise found later.
+   struck rather than reported as a pass, and the "runs even when Live Activities are off" half of
+   D3's argument goes with it. If it survives, launch with `-skipOrphanSweep`, re-enable Live
+   Activities, start a ride, and confirm the ghost is gone.
+6. Force quit by swiping up rather than killing from the debugger, then relaunch from the Home
+   Screen and confirm step 2. Steps 3 and 4 are not reproducible here: launch arguments come from
+   the Xcode scheme at spawn, so a springboard launch carries neither flag. The problem statement
+   treats a swipe-up quit and a debugger kill as equivalent and nothing has checked that, which is
+   what this step is for.
+7. Start a ride, background and foreground the app repeatedly, and confirm the live activity is
+   never swept and the log stays silent. This is the negative case for the foreground call site.
+8. Ride, End, tap Done, and immediately start a second ride. Exactly one card, still updating a
+   minute later. This is the `endingIDs` hand-off between `end()` and the `start()` sweep, the
+   most intricate invariant in the change and the one with no automated coverage.
+9. Kill during a ride that was never paused, relaunch, and look at Home. Expected: the ghost is
+   gone and Home says nothing about the ride. Confirming what D4 accepts, so it is a known outcome
+   rather than a surprise found later. Note the distance the card showed before you relaunch: that
+   is the number D4 option 2 would preserve.

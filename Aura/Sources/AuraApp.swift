@@ -150,8 +150,18 @@ private struct RootView: View {
         // Unguarded by ride state on purpose: `endOrphans()` excludes the activity it owns, and
         // `router.activeRideID` lags `coordinator.isRecording` by an update cycle, so it is nil
         // during a window in which a ride is already recording and owns an activity.
+        //
+        // Swept twice: once now, once after a short delay. ActivityKit restores this process's
+        // view of existing activities asynchronously after launch, and a read taken on the first
+        // frame can come back empty — most likely on a phone under the same memory pressure that
+        // caused the kill. Without the second pass the ghost would survive until the rider next
+        // backgrounds and returns, or starts a ride.
         .task {
-            guard !SimulatedRideConfig.currentSuppressesOrphanSweep else { return }
+            #if DEBUG
+            guard !SimulatedRideConfig.currentSuppressesLaunchOrphanSweep else { return }
+            #endif
+            RideLiveActivityController.shared.endOrphans()
+            try? await Task.sleep(for: .seconds(2))
             RideLiveActivityController.shared.endOrphans()
         }
         // Schema V6's segment backfill (ROH-100). Deliberately not in the V5→V6 migration
@@ -225,9 +235,12 @@ private struct RootView: View {
                 // A session that launched before ActivityKit had restored its activity list, or
                 // whose first request threw, would otherwise carry the ghost for the life of the
                 // process (ROH-124). A no-op mid-ride: the running activity is the owned one.
-                if !SimulatedRideConfig.currentSuppressesOrphanSweep {
-                    RideLiveActivityController.shared.endOrphans()
-                }
+                #if DEBUG
+                let suppressed = SimulatedRideConfig.currentSuppressesOrphanSweep
+                #else
+                let suppressed = false
+                #endif
+                if !suppressed { RideLiveActivityController.shared.endOrphans() }
             }
             syncLocationActivity()
         }
