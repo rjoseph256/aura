@@ -218,6 +218,18 @@ for the record:**
    distance and a real elapsed time, with no autosave, no deep link and no new `ContentState`.
    Strictly smaller than either alternative rejected below, and it was not considered when they
    were.
+
+   *Checked after the device pass, because "cheapest" was doing a lot of work in that sentence.
+   Two findings. It is joinable: `RideSessionCoordinator.start` passes one `let now = Date()` to
+   both `recorder.start(at:)` and `activity.start(startedAt:)`, so a ghost's `startedAt` is
+   exactly its ride's start instant and can be matched against an existing checkpoint row rather
+   than duplicating it — which matters, because neither `RideActivityAttributes` nor its
+   `ContentState` carries a ride id. But the payload has no coordinates at all, so the row it
+   writes has a distance and no route, and History and the summary would need a presentation for
+   a ride with no map, which is the same class of work ROH-107 had to do for checkpoints. So
+   option 2 is a stopgap that preserves a number, not a cheap version of ROH-144: periodic
+   autosave writes a real track. Weigh them together in ROH-144 rather than treating this as
+   free.*
 3. **Keep the ghost until something replaces it**, accepting the lying clock.
 
 Option 1 is what merged, and it is the PO's call to keep or reverse. Option 2 is the one worth
