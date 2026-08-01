@@ -3,177 +3,300 @@
 Date: 2026-07-31
 Issue: [ROH-103 — Pass 6, E2E coverage through the paused golden fixture](https://linear.app/rohun/issue/ROH-103/pass-6-e2e-coverage-through-the-paused-golden-fixture)
 Parent spec: `docs/superpowers/specs/2026-07-26-segmented-rides-pause-design.md` (D10)
+Status: revision 2, after a three-reviewer adversarial gate. Revision 1 justified the pass with
+a claim that was false (three of its four "uncovered" behaviors have coordinator-level tests),
+found the segment boundary with a heuristic that fires early under CI load, and put every
+expensive assertion inside the one budget that is scarce. Revision notes are inline.
 
 This is the last pass of Slice A. Passes 1-5 are shipped: the segmented model, the recorder
-state machine, schema V6, the cockpit control, and the Live Activity. Every one of them is
-covered by unit tests. None of them has ever been driven end to end through the real app by
-a test that presses the real button.
+state machine, schema V6, the cockpit control, and the Live Activity.
 
 ## Problem
 
-The pause feature's load-bearing behaviors are the ones a package test cannot reach.
+*(Revised. Revision 1 claimed nothing verified the frozen clock, the zeroed speed, or the
+two-segment save above the recorder. `RideSessionCoordinatorPauseTests` and
+`RideRecorderPauseTests` cover all three, and the pass does not need that argument.)*
 
-`RideRecorderPauseTests` proves the recorder drops points while paused. It does not prove
-that the button in the cockpit is wired to `coordinator.pause()`, that the clock the rider
-watches stops, that the speed hero drops to zero, or that a ride paused across a GPS gap
-saves as two segments instead of one line drawn straight through the stop.
+Four things are genuinely uncovered.
 
-Slice A's whole premise is that the rider's clock becomes honest. Nothing currently
-verifies that claim above the recorder.
+**The button is connected to nothing that a test has ever checked.** No test in `Aura/UITests`
+taps `RideTestID.hudPause`. The path from the control at `RideHUDView.swift:294` through
+`togglePause()` at `RideHUDView.swift:324` to `coordinator.pause()` exists only by inspection.
+There are **two** such paths: `togglePause()` is implemented twice, once in `RideHUDView.swift:322`
+and again in `NavigateHUDView+Cockpit.swift:129`. `RideHUDView.swift:299-307` records that the
+instrument panel already drew over the pause row once, on an iPhone SE.
 
-### What this pass changes about the E2E harness
+**Ending a ride while paused has no end-to-end coverage.** Parent D6's first table row says that
+if the `isRecording` reading regressed, "End does nothing while paused and the ride is
+discarded". That is the invariant whose violation destroys a rider's ride, and pausing then
+ending is an ordinary thing to do — you stop, and then you decide you are done.
 
-The harness (ROH-92, ROH-93) plays `golden-ride.gpx` through the real app and asserts the
-summary and History wiring. `golden-ride-paused.gpx` landed in Pass 1 with frozen literals
-and package-level coverage, but the app cannot play it: `SimulatedRideSupport.rideOverride`
-ignores `SimulatedRideConfig.fixture` and always loads `GoldenRideFixture`
+**Nothing reads a saved paused ride back.** The summary renders `coordinator.finishedRide`
+in memory (`RideSessionCoordinator.swift:378`); the probe reads live recorder state; History is
+asserted for row count. `segmentsData` encode and decode is exercised by package tests over
+constructed rides, never by a ride this app actually recorded.
+
+**The app cannot play the paused fixture.** `SimulatedRideSupport.rideOverride` ignores
+`SimulatedRideConfig.fixture` and always loads `GoldenRideFixture`
 (`SimulatedRideSupport.swift:18`).
+
+What the coordinator tests prove about the recorder, this pass proves about the screen. That is
+different evidence, not more of the same: `RideSessionCoordinatorPauseTests.swift:113` drives
+`c.pause()` directly, and the question here is whether a finger on the control reaches it.
 
 ## Two claims in the issue that cannot be delivered as written
 
-**"The summary leads with active time."** That surface change is D5, and it is tracked as
-ROH-112, which sits in Backlog. The summary shows moving time today
-(`RideSummaryView.swift:214`). *(PO decision, 2026-07-31: assert the moving-time cell
-instead. See D3.)*
+**"The summary leads with active time."** That surface change is parent D5, tracked as ROH-112.
+It is not built on any of its four surfaces. *(PO decision, 2026-07-31: ROH-112 is promoted out
+of Backlog and now blocks ROH-74, so the epic does not close over it. This pass asserts the
+moving-time cell, which is a different and weaker signal — see D3.)*
 
-**"The route draws with a gap rather than a chord."** The ride map is a Mapbox GL surface
-with nothing in the accessibility tree, so no XCUITest can read it. *(PO decision,
-2026-07-31: prove it in the data through the HUD probe, and leave the pixels to a device
-eyeball. See D2.)*
+**"The route draws with a gap rather than a chord."** The ride map is a Mapbox GL surface with
+nothing in the accessibility tree. *(PO decision, 2026-07-31: proved in the data here, with the
+pixels split out as ROH-143, a device pass with a written checklist.)*
 
 ## Decisions
 
-### D1 — The launch argument selects a fixture
+### D1 — An unknown fixture name turns the harness off, not half off
 
-`SimulatedRideSupport.rideOverride` gains a switch on `SimulatedRideConfig.current.fixture`:
-`"golden"` maps to `GoldenRideFixture`, `"paused"` to `PausedGoldenRideFixture`, and any
-other value returns `nil`.
+*(Revised. Revision 1 had `rideOverride` return `nil` for an unknown name and called that
+"degrades to absent". It is not absent — it is a third state.)*
 
-Returning `nil` matches the contract `SimulatedRideConfig` already documents — an unknown or
-malformed value degrades to "absent" and the app rides on real location rather than
-crashing. It also keeps the existing `assertionFailure` for a fixture that is named
-correctly but fails to load, which is a packaging regression rather than a typo.
+Six sites key off `SimulatedRideConfig.current != nil`: the in-memory store
+(`AuraApp.swift:51`), the ambient location tier (`AuraApp.swift:235`), the preview route
+substitution (`RoutePreviewView.swift:271`), scripted guidance (`NavigateHUDView.swift:90`), the
+probe (`SimulatedRideSupport.swift:41`), and the notification-authorization skip
+(`PauseNudgeScheduler.swift:38`). Nilling the provider alone leaves five of them engaged while
+the ride records real GPS. A typo then reads, ninety seconds later, as "distance never reached
+— last probe: d=0".
 
-`PausedGoldenRideFixture` gains the `simulatedProvider(multiplier:)` factory its sibling
-already has.
+So the fixture name is validated where the contract lives:
 
-`RoutePreviewView.swift:269` also names `GoldenRideFixture` directly, for the navigate
-deep-link preview. It stays as it is. The paused fixture is exercised through the free-ride
-path only, because that is the only HUD with a clock (parent spec, Scope: "the navigate
-cockpit renders TO GO and ARRIVE and has no clock at all"), and a paused fixture behind the
-navigate preview would assert nothing the free-ride path does not.
+- `SimulatedRideFixture` is added to `AuraKit/Testing/`: a name-keyed lookup from `"golden"` and
+  `"paused"` to a provider factory. A dictionary in AuraKit rather than a `switch` in the app
+  target, for the reason `PauseNudgePolicy` already documents — the app target has no test
+  bundle, so a `switch` there is untestable by construction.
+- `SimulatedRideConfig.parse` returns `nil` for a name the lookup does not know. All six sites
+  then honor one contract, and an unknown name means real location everywhere.
+- `rideOverride` resolves through the lookup and keeps its existing `assertionFailure` for a
+  name that is known but fails to load, which is a packaging regression rather than a typo.
 
-### D2 — Two new probe fields carry what the screen cannot say
+`PausedGoldenRideFixture` gains the `simulatedProvider(multiplier:)` factory its sibling has.
+`RoutePreviewView` keeps naming `GoldenRideFixture` directly; the preview substitution is the
+navigate deep link's route, not the ride stream.
+
+### D2 — Two probe fields, described for what they actually do
 
 `RideTestProbe` renders an invisible line in the accessibility tree during DEBUG simulated
-rides so tests read raw numbers instead of parsing localized display strings. It carries
-distance, elapsed and elevation gain. It gains two more:
+rides. It carries distance, elapsed and gain, and gains two more:
 
-| Field | Source | Why it has to be here |
+| Field | Source | What it is worth |
 | -- | -- | -- |
-| `s` | `coordinator.currentSpeedMetersPerSecond` | The speed hero is a dial with a formatted label; there is no numeric readout a test can trust across locales. D6 zeroes this on pause, and that behavior is otherwise unobservable above the recorder |
-| `n` | `coordinator.segments.count` | The only reading of "the track has a gap in it" available to a UI test |
+| `s` | `coordinator.currentSpeedMetersPerSecond`, in **decimetres per second** | The rendered speed is also readable (`InstrumentChassis.swift:90-92` exposes an `accessibilityValue`), but that string is formatted and unit-dependent. The probe carries the raw number; the test asserts both — see D5 |
+| `n` | `coordinator.segments.count` | A cheap check that `resume()` ran. **Not** proof of the saved shape: `resume(at:)` appends unconditionally (`RideRecorder.swift:119-127`), so `n == 2` is true before a single post-resume fix, and the saved ride goes through `normalizedSegments`, which drops a trailing empty |
 
-`s` is reported in **decimetres per second** (`Int(speed * 10)`), not truncated metres per
-second. The assertion is that a paused ride reads exactly zero; under metre truncation a
-residual 0.4 m/s also reads zero, so the test would pass on the bug it exists to catch.
-Distance, elapsed and gain keep their existing metre and second truncation — their
-assertions are bands, not equalities.
+*(Revised. Revision 1 called `n` "the only reading of a gap available to a UI test", which its
+own D3 and D5 refute, and justified `s` on a dial and on locales, neither of which exists. The
+decimetre choice stands: `pause(at:)` writes exactly `0`, so any nonzero reading is a real
+defect, and a partial-decay regression is visible at that resolution.)*
 
-Both HUDs already attach the probe (`RideHUDView.swift:94`, `NavigateHUDView.swift:154`) and
-both pass the new values, so the navigate path keeps a probe that parses.
+**`d`, `e` and `g` stay required; `s` and `n` parse as optional.** `RideTestProbe.parse` returns
+nil on any unknown or missing key. Both CI and `scripts/golden-ride.sh` use
+`test-without-building`, so a test bundle from this commit against an app binary from an older
+one is an ordinary developer state, and strict parsing turns that skew into
+`XCTUnwrap` "expected non-nil value" across all three golden tests, naming nothing. The
+compiler already forces both HUD call sites through the `simulatedRideProbe` signature;
+strictness in the parser adds no safety and costs attribution.
 
-### D3 — The summary is asserted on moving time, and the assertion is a band
+`RideTestProbeTests` covers the new line format and an old-format line without `s` or `n`.
 
-The E2E asserts that the summary's moving-time cell falls in a 3-6 minute band.
+### D3 — The discriminating assertions are made in raw metres
 
-The paused fixture's segment-aware moving time is 290 s, which the formatter renders as
-"4 min" (`RideStatsFormatter.swift:39` truncates). Flattened, the same points produce 890 s,
-which renders as "14 min". A band rather than an equality absorbs a dropped boundary point
-without absorbing the bug: the two readings are three times apart.
+*(Revised. Revision 1 put the segmentation proof on the summary's display strings.)*
 
-This is the same regression signal ROH-112's active-time assertion would carry, available a
-release earlier. When ROH-112 lands it owns the active-time assertion, and this one either
-moves or stays beside it — that is ROH-112's call, not this pass's.
+Segmented and flattened are 1883 m against 2391 m, which the formatter renders as 1.2 mi
+against 1.5 mi — three display steps, with rounding eating one on each side. The probe carries
+raw metres, so that is where the proof goes:
 
-The moving cell needs an identifier. `RideTestID.summaryMoving` is added beside
-`summaryDistance`, so a rename breaks the compile in both places rather than failing CI
-silently.
+- **While paused at the boundary, probe distance equals the segment-1 literal exactly** (941 m).
+  `record()` is a no-op while paused, so segment 1 is final at that moment. This one equality
+  catches a tap that lands early (reads low) and one that lands late (reads 1449, the chord
+  included), which is the whole failure family in a single assertion.
+- **Probe elevation gain in a 55-70 band at the end.** Segmented is 58, flattened is 100, and
+  the climb is +2 m per point entirely inside segment 1, so the band detects an early tap within
+  one point. The unpaused golden test already carries a silent-flat guard; this is its
+  counterpart.
+- **Final probe distance in a band holding 1883 and excluding 2391.**
 
-### D4 — The test pauses on a stall, not on a distance threshold
+The summary's display bands stay loose wiring checks, as the existing hero band is. They must
+still exclude the flattened reading (1.5 mi / 2.4 km) rather than merely contain the segmented
+one — a lazy band of 1.0-1.6 mi would admit both.
 
-At a 20x multiplier the fixture replays as 7 s of riding, a 30 s silence, then 7 s of
-riding. `GPXLocationPlayer.schedule` derives playback offsets from the trackpoint stamps
-(`GPXLocationPlayer.swift:16`), and the fixture's two `trkseg`s are 600 s apart, so the stop
-the rider took becomes dead air in the stream.
+**The moving-time cell in a 3-6 minute band.** Segmented moving time is 290 s, rendering as
+"4 min"; flattened is 890 s, rendering as "14 min". This is the design's most robust assertion
+and the only one that is fully independent of when the tap lands: `movingTimeSeconds` is
+computed from the fixture's own timestamps, so any run that recorded the 600 s chord inside a
+segment reports at least ten minutes.
 
-The test rides segment 1, then polls the probe until the distance reading stops changing.
-A stall means the replay is inside that silence with every segment-1 point already
-recorded. Only then does it tap pause.
+**It is not, however, the signal ROH-112's active-time assertion would carry.** Moving time is
+`RideStatsCalculator` walking segments behind a 0.5 m/s gate. Active time is
+`elapsed - pausedSeconds`, a wall-clock ledger in `RideRecorder` that shares no code with it.
+Bugs only the active-time path can have — `end(at:)` failing to bank an open stop,
+`pausedSeconds` lost through `RideMapper` and `RideStore` — are invisible here. Worse, they may
+not be assertable in this harness at all: `GPXLocationPlayer.schedule` yields points with their
+original fixture stamps while `startedAt` and `endedAt` are wall-clock, so a saved harness ride
+has 290 s of moving time and roughly 45 s of active time. ROH-112 inherits a problem nobody has
+yet shown is solvable as a frozen band. Said here so it is not discovered there.
 
-The alternative — pausing once distance crosses some fraction of the segment-1 literal —
-pauses early and drops the tail of the segment, which loosens every downstream band by an
-unknown amount. Waiting for the stall costs about a second of a 30 s window and makes the
-recorded distance land on the frozen literal instead of near it.
+The moving cell needs `RideTestID.summaryMoving`, and the top-speed cell needs
+`RideTestID.summaryTopSpeed` for D5's max-speed band. Identifiers in the shared enum, so a
+rename breaks the compile in both places.
+
+### D4 — The boundary is found by distance, not by a stall
+
+*(Revised. Revision 1 polled until the distance reading stopped changing. That is unsound.)*
+
+`SimulatedLocationProvider.points()` sleeps the nominal inter-point delta and advances `last`
+by the *scheduled* offset, never the real clock (`SimulatedLocationProvider.swift:19-27`), so
+playback stretches under load and never catches up. The suite already budgets about six times
+nominal for a replay (`RideE2EUITests.swift:33-35`). Once effective spacing exceeds the one-second
+poll interval that `Screens.swift:75-84` documents as necessary, two equal reads mean nothing,
+and the detector declares the boundary mid-segment-1. A stall reading is also indistinguishable
+from `d=0` before the first fix.
+
+The replacement is deterministic. Segment 1 is exactly 941.5986 m, `record()` accepts every
+point unconditionally, and the simulated stream is unfiltered, so 941 m is reachable only at the
+30th point and the next increment is +507 m thirty seconds later. `waitForDistance(atLeast: 941)`
+— the helper the suite already has — fires *at* the boundary instead of two or three polls after
+it, and is correct under arbitrary playback stretch.
+
+The multiplier stays at the harness default of **30x**, so the whole replay costs about 30 s.
+Revision 1 dropped to 20x to widen the silence; D5 removes the reason.
 
 Knowing where segment 1 ends needs a frozen number, so `PausedGoldenRideFixture` gains
-`expectedSegmentDistanceMeters: [Double]`, recorded through the procedure the file already
-documents (`GOLDEN_RECORD=1 swift test --filter recordPausedTruthLiterals`) and pasted, never
-recomputed at test time.
+`expectedSegmentDistanceMeters: [Double]`. The recorder that emits the fixture's literals does
+not currently print a per-segment array (`PausedGoldenRideFixtureTests.swift:70-86`), so
+`recordPausedTruthLiterals` is extended in this pass to emit it, and a test asserts the array
+sums to `expectedDistanceMeters`. Three literals that must agree with nothing checking that they
+do is how they drift.
 
-**20x rather than the harness default of 30x.** At 30x the silence is 20 s, and the pause,
-the four assertions taken during it, and the resume all have to fit inside it. At 20x the
-window is 30 s and the whole ride costs 45 s instead of 30. Fifteen seconds of CI buys the
-margin.
+### D5 — Two pauses, because only one of them needs to be inside the window
 
-Missing the window is not a silent failure. A resume that lands after segment 2 has started
-records short, and the closing distance band fails loudly.
+*(Revised. Revision 1 put every clock assertion inside the 30 s replay silence, which is the one
+budget that is scarce.)*
 
-### D5 — What the test asserts, in order
+Only the taps need to land in the silence. The clock and speed assertions do not care where
+playback is, and they are the expensive part. So the free-ride test
+(`testPausedGoldenRideSegmentsAndSummary`, launched onboarded with
+`-auraSimulatedRide paused -auraSimulatedRideMultiplier 30 -auraInMemoryRideStore`, entering
+through Explore) uses two:
 
-`RideE2EUITests.testPausedGoldenRideSegmentsAndSummary`, launched onboarded with
-`-auraSimulatedRide paused -auraSimulatedRideMultiplier 20 -auraInMemoryRideStore`, entering
-through Explore:
+**Pause A — inside the silence, three operations.**
 
-1. Segment 1 records, then the distance reading stalls at the segment-1 literal.
-2. Tapping `ride.hud.pause` shows `ride.hud.paused.banner`.
-3. While paused: the elapsed reading does not advance across several polls, and speed reads
-   exactly zero.
-4. Tapping the control again clears the banner, elapsed advances again, and it never read
-   lower than it did before the pause.
-5. Segment 2 records out. Segment count is 2, and distance falls in a band holding the
-   segmented literal (1883 m) and excluding the flattened one (2391 m).
-6. Ending the ride gives a summary whose hero distance is in the paused fixture's own band
-   and whose moving cell is in the 3-6 minute band.
-7. Done returns Home, and History holds exactly one row.
+1. Ride until probe distance reaches 941 m. Assert probe speed is above zero, which is the
+   positive control: `s == 0` alone passes for a probe wired to a literal, and a dial reading
+   zero while riding is itself a shipping bug.
+2. Tap `ride.hud.pause`; `ride.hud.paused.banner` appears.
+3. Assert probe distance equals 941 exactly (D3).
+4. Tap again; the banner clears. Two taps and two reads, well inside twenty seconds.
 
-Steps 3 and 4 are the pass's reason to exist. Everything else is the wiring that has to hold
-for them to mean anything.
+**Segment 2 records out**, to at least the segmented literal. Assert `n == 2` and the distance
+and gain bands.
 
-**The paused fixture gets its own hero band.** `RideE2EUITests.swift:141-142` documents the
-existing band as shared by both golden rides; 1883 m is a different distance and cannot
-reuse it. The parent spec's D10 called this out.
+**Pause B — after the last point, where no window exists.**
 
-### D6 — Nothing in CI changes
+5. Tap pause. The banner appears, elapsed does not advance across several polls, probe speed
+   reads exactly zero, and the rendered speed value reads zero too. The rendered read is the one
+   that matters to a rider; the probe read is the one that is exact.
+6. Tap resume. Elapsed advances again and never read lower than it did before the pause.
+7. Tap pause once more, then **End the ride from the paused state** — the parent D6 invariant.
+   `normalizedSegments` drops the trailing empty segment, so every band is unchanged.
 
-The workflow (`ci.yml:113`) and `scripts/golden-ride.sh:32` both run
-`-only-testing:AuraUITests/RideE2EUITests`, so a new method in that class is picked up with
-no edit to either.
+**Then the summary and the round trip.**
+
+8. Summary hero distance and moving cell in their bands (D3), plus a max-speed band. Step 7
+   resumes across a 507 m gap, which is the phantom-spike case parent D6 names as "currently
+   uncovered by tests", and the summary renders top speed right there.
+9. Done returns Home. History holds exactly one row — the pause-boundary flush upserts on
+   `ride.id`, so this is the proof that a pause does not duplicate the ride — and that row does
+   not carry `UnfinishedRideCopy.label`. `checkpointedAt` is copied by hand at
+   `RideStore.swift:93`; if that line were dropped, every paused ride would wear the
+   abandoned-ride treatment across History, the last-ride card, the share card and the summary.
+10. Tap the row. `HistoryView.swift:75` re-reads through `store.ride(id:)` and presents
+    `RideSummaryView`, so the same distance and moving bands asserted on that sheet are the
+    **persisted** ride, decoded from `segmentsData`. This is the only step in the pass that
+    proves the save kept its segments.
+
+### D6 — The navigate pause control gets its own short test
+
+*(New. PO decision, 2026-07-31.)*
+
+`togglePause()` has two implementations, `isPaused` feeds two different instrument panels, and
+ROH-101 line 317 explicitly handed this coverage here. Revision 1 declined it on the grounds
+that the navigate cockpit has no clock — true, and it leaves the other six assertions applying.
+
+`testNavigatePauseControlEndsWhilePaused` enters navigate through the preview deep link on the
+**ordinary** golden fixture, since it needs no replay silence: ride, pause, assert the banner
+and zero speed, end from the paused state, and assert the summary appears. About twenty seconds,
+and it covers the second toggle path and the occlusion risk that has already bitten once.
+
+### D7 — The harness stops scheduling nudges
+
+`PauseNudgeScheduler.swift:35` reads: "The pause nudges themselves are left wired: the harness
+never pauses, and adding requests prompts nobody." This pass makes the harness pause, so
+`scheduleForgottenPauseNudges` runs in CI for the first time and adds five
+`UNTimeIntervalNotificationTrigger` requests per run.
+
+It will not prompt, and the first rung is 600 s out. The residual is that a run aborting between
+pause and resume leaves those requests alive in that simulator, to fire ten to a hundred and
+twenty minutes later over whatever is running then. The scheduling is suppressed under the
+harness beside the existing authorization skip, and the stale comment is corrected in the same
+pass rather than left to contradict the code.
+
+### D8 — CI runs the same command, on a longer budget
+
+`ci.yml:113` and `scripts/golden-ride.sh:32` both run
+`-only-testing:AuraUITests/RideE2EUITests`, so new methods are picked up with no edit. What does
+change is the reasoning behind the fifty-minute ceiling: `ci.yml:56` documents it as "TWO
+golden-ride methods, each retried once". There are now four. The comment is updated with the
+count and the added replay time.
+
+`-retry-tests-on-failure -test-iterations 2` (`ci.yml:114`) means a first-run failure retries and
+the job still goes green. With the stall detector gone the only timing-coupled step is Pause A's
+two taps inside a twenty-second silence, but the retry is recorded in the risks table so that
+nobody reads green as "never flaked".
+
+## What a green run proves
+
+**Proven:** the Explore and navigate pause controls are both wired to `coordinator.pause()`; the
+control is reachable and not occluded on the test device; the live active clock freezes, resumes
+and never runs backwards at the rendered surface; the speed readout falls to exactly zero; a ride
+paused across a GPS gap records and **saves** segmented distance, moving time and elevation gain
+rather than flattened; ending from the paused state saves the ride; the pause checkpoint neither
+duplicates the History row nor marks it unfinished.
+
+**Not proven here, and worth writing on the test method so nobody over-reads it:** active time on
+any post-ride surface, because it does not exist yet (ROH-112); `pausedSeconds` surviving
+persistence (D3); the rendered map gap (ROH-143); drift gating during a stop, because the
+fixture's stop is dead air and a regression that split the segment but stopped gating `record()`
+would pass — that rests on `RideRecorderPauseTests` alone; the forgotten-pause nudge ladder;
+haptics; and deep-link protection while paused.
 
 ## Out of scope
 
-- The rendered gap on the map. Pixels, and a device eyeball; the data-level proof is D2.
-- Active time as the summary headline. ROH-112.
-- The Live Activity's paused rendering. ROH-102 owns it, on device.
-- The navigate HUD through the paused fixture. D1.
+- Active time as the summary headline. ROH-112, which now blocks ROH-74.
+- The rendered gap on the map. ROH-143.
+- The Live Activity's paused rendering. ROH-102, on device.
 - Auto-pause and crew-visible paused state. Slices B and C.
 
 ## Risks
 
 | Risk | Mitigation |
 | -- | -- |
-| The pause and resume miss the 30 s replay silence | D4's 20x multiplier; a miss fails the closing distance band rather than passing quietly |
-| A boundary point is dropped and the bands drift | D4 pauses on a stall, so segment 1 is whole; the bands are sized against the flattened reading, which is 27% larger in distance and 3x in moving time |
-| Probe parsing breaks the existing golden rides | `RideTestProbe.parse` is round-tripped in its own package tests and both HUDs pass the new fields; a partial line fails to parse and the existing tests fail loudly |
-| A notification prompt hijacks the run | Already handled at the source: `PauseNudgeScheduler.prepareAuthorization` is a no-op under the simulated harness (`PauseNudgeScheduler.swift:38`) |
-| The paused fixture drifts from its literals | The literals are frozen and recorded, never recomputed at test time — the rule the fixture file already carries |
+| Pause A's taps miss the twenty-second replay silence | D4's deterministic boundary fires at the last segment-1 point rather than two polls later; a miss fails D3's exact-941 equality with a distance in the message, not a vague band |
+| CI's retry flag hides a first-run flake | D8 records it. The alternative — excluding these methods from the retry — trades a hidden flake for a red gate on unrelated PRs, which is the trade the flag was added to make |
+| A stale app binary meets a new test bundle | D2 parses `s` and `n` as optional, so the two shipped golden tests are unaffected by this pass |
+| A typo'd fixture name produces a silently real ride | D1 validates at parse, so all six harness sites turn off together |
+| The three fixture literals drift apart | D4's sum assertion, and the array is emitted by the recorder rather than hand-computed |
+| Orphaned notification requests outlive an aborted run | D7 suppresses scheduling under the harness |
+| An interior empty segment reaches the summary or share card for the first time | D3's exact-941 equality makes a pause before the first fix unreachable; parent D6 declares interior empties legal and `normalizedSegments` preserves them, but only package tests have ever built one |
