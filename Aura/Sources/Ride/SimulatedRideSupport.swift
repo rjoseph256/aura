@@ -41,6 +41,8 @@ private struct SimulatedRideProbe: ViewModifier {
     let distanceMeters: Double
     let elapsed: Double
     let elevationGainMeters: Double
+    let speedMetersPerSecond: Double
+    let segmentCount: Int
 
     func body(content: Content) -> some View {
         #if DEBUG
@@ -48,7 +50,9 @@ private struct SimulatedRideProbe: ViewModifier {
             if SimulatedRideConfig.current != nil {
                 Text(RideTestProbe.line(distanceMeters: distanceMeters,
                                         elapsed: elapsed,
-                                        elevationGainMeters: elevationGainMeters))
+                                        elevationGainMeters: elevationGainMeters,
+                                        speedMetersPerSecond: speedMetersPerSecond,
+                                        segmentCount: segmentCount))
                     .font(.system(size: 8))
                     .opacity(0.02)   // invisible to riders, present in the a11y tree
                     .accessibilityIdentifier(RideTestID.hudProbe)
@@ -65,8 +69,12 @@ extension View {
     /// Attach the golden-ride probe. Safe to leave in the modifier chain
     /// unconditionally; it is a no-op outside DEBUG simulated rides.
     func simulatedRideProbe(distanceMeters: Double, elapsed: Double,
-                            elevationGainMeters: Double) -> some View {
+                            elevationGainMeters: Double,
+                            speedMetersPerSecond: Double,
+                            segmentCount: Int) -> some View {
         modifier(SimulatedRideProbe(distanceMeters: distanceMeters, elapsed: elapsed,
-                                    elevationGainMeters: elevationGainMeters))
+                                    elevationGainMeters: elevationGainMeters,
+                                    speedMetersPerSecond: speedMetersPerSecond,
+                                    segmentCount: segmentCount))
     }
 }

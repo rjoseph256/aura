@@ -25,15 +25,29 @@ public enum RideTestProbe {
         public let distanceMeters: Int
         public let elapsed: Int
         public let elevationGainMeters: Int
+        /// Decimetres per second, not metres: `pause(at:)` writes exactly 0, so the paused
+        /// assertion is an equality, and this resolution also shows a partial-decay
+        /// regression that metre truncation would round into looking correct.
+        public let speedDecimetersPerSecond: Int?
+        /// Live `coordinator.segments.count`. A cheap check that `resume()` ran — NOT proof
+        /// of the saved shape: `resume(at:)` appends unconditionally, and the saved ride goes
+        /// through `normalizedSegments`, which drops a trailing empty. The distance and
+        /// moving-time bands are what prove the segmented save.
+        public let segmentCount: Int?
     }
 
     public static func line(distanceMeters: Double, elapsed: Double,
-                            elevationGainMeters: Double) -> String {
+                            elevationGainMeters: Double,
+                            speedMetersPerSecond: Double, segmentCount: Int) -> String {
         "d=\(Int(distanceMeters));e=\(Int(elapsed));g=\(Int(elevationGainMeters))"
+            + ";s=\(Int(speedMetersPerSecond * 10));n=\(segmentCount)"
     }
 
+    /// `d`, `e` and `g` are required; `s` and `n` are optional so an app binary predating
+    /// ROH-103 still parses. An unknown key is still a hard failure — it means the format
+    /// changed in a way this parser does not understand.
     public static func parse(_ line: String) -> Values? {
-        var d: Int?, e: Int?, g: Int?
+        var d: Int?, e: Int?, g: Int?, s: Int?, n: Int?
         for part in line.split(separator: ";") {
             let pair = part.split(separator: "=", maxSplits: 1)
             guard pair.count == 2, let value = Int(pair[1]) else { return nil }
@@ -41,10 +55,13 @@ public enum RideTestProbe {
             case "d": d = value
             case "e": e = value
             case "g": g = value
+            case "s": s = value
+            case "n": n = value
             default: return nil
             }
         }
         guard let d, let e, let g else { return nil }
-        return Values(distanceMeters: d, elapsed: e, elevationGainMeters: g)
+        return Values(distanceMeters: d, elapsed: e, elevationGainMeters: g,
+                      speedDecimetersPerSecond: s, segmentCount: n)
     }
 }

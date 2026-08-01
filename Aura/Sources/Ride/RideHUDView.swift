@@ -93,7 +93,9 @@ struct RideHUDView: View {
         }
         .simulatedRideProbe(distanceMeters: coordinator.stats.distanceMeters,
                             elapsed: coordinator.elapsed,
-                            elevationGainMeters: coordinator.stats.elevationGainMeters)
+                            elevationGainMeters: coordinator.stats.elevationGainMeters,
+                            speedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
+                            segmentCount: coordinator.segments.count)
         // The active layer: at most one self-dismissing peek card for a newly surfaced gem.
         // Sits up top, just below the back button, so it never covers the speedometer cluster.
         .overlay(alignment: .top) {
