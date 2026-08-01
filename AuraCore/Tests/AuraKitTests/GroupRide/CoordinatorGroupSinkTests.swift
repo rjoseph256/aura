@@ -25,7 +25,8 @@ struct CoordinatorGroupSinkTests {
         let sink = SpyGroupSink()
         let coordinator = RideSessionCoordinator(
             kind: .freeRide, destinationName: nil,
-            screen: SpyScreenWake(), activity: SpyRideActivity(), haptics: HapticSpy(), nudges: NudgeSpy())
+            screen: SpyScreenWake(), activity: SpyRideActivity(), haptics: HapticSpy(),
+            nudges: NudgeSpy(), clock: FakeRideClock())
         let location = ScriptedLocationProvider([
             TrackPoint(coordinate: Coordinate(latitude: 1, longitude: 2),
                        elevation: nil, timestamp: Date(timeIntervalSince1970: 1),

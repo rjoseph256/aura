@@ -19,7 +19,8 @@ import AuraCore
         let spy = SpyGuidance()
         let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                        screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                       guidance: spy, haptics: HapticSpy(), nudges: NudgeSpy())
+                                       guidance: spy, haptics: HapticSpy(), nudges: NudgeSpy(),
+                                       clock: FakeRideClock())
         c.start(location: ScriptedLocationProvider([]), saving: try RideStore.inMemory(),
                 units: .metric, authorization: .authorized)
         c.finish()
@@ -30,7 +31,8 @@ import AuraCore
         let spy = SpyGuidance()
         let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                        screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                       guidance: spy, haptics: HapticSpy(), nudges: NudgeSpy())
+                                       guidance: spy, haptics: HapticSpy(), nudges: NudgeSpy(),
+                                       clock: FakeRideClock())
         c.start(location: ScriptedLocationProvider([]), saving: try RideStore.inMemory(),
                 units: .metric, authorization: .authorized)
         c.cancel()
@@ -41,7 +43,8 @@ import AuraCore
         let spy = SpyGuidance()
         let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                        screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                       guidance: spy, haptics: HapticSpy(), nudges: NudgeSpy())
+                                       guidance: spy, haptics: HapticSpy(), nudges: NudgeSpy(),
+                                       clock: FakeRideClock())
         #expect(c.isDetouring == false)
         spy.detourFlag = true
         #expect(c.isDetouring == true)
@@ -55,7 +58,8 @@ import AuraCore
         let spy = SpyGuidance()
         let coordinator = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                                  screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                                 guidance: spy, haptics: HapticSpy(), nudges: NudgeSpy())
+                                                 guidance: spy, haptics: HapticSpy(), nudges: NudgeSpy(),
+                                       clock: FakeRideClock())
         coordinator.start(location: location, saving: saving, units: .metric,
                           authorization: .authorized)
         await coordinator.streamTask?.value

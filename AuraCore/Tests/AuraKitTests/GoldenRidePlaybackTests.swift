@@ -20,9 +20,13 @@ struct GoldenRidePlaybackTests {
     @Test func goldenRidePlaysThroughCoordinatorAndPersists() async throws {
         let provider = try GoldenRideFixture.simulatedProvider(multiplier: 10_000)
         let store = try RideStore.inMemory()
+        // A frozen fake is enough: every assertion below comes from the fixture's own track
+        // timestamps (distance, elevation, moving time) or from the persisted round trip. None
+        // reads the coordinator's elapsed time, so no wall time needs to pass.
         let coordinator = RideSessionCoordinator(
             kind: .freeRide, destinationName: nil,
-            screen: SpyScreenWake(), activity: SpyRideActivity(), haptics: HapticSpy(), nudges: NudgeSpy())
+            screen: SpyScreenWake(), activity: SpyRideActivity(), haptics: HapticSpy(),
+            nudges: NudgeSpy(), clock: FakeRideClock())
         let outcome = coordinator.start(location: provider, saving: store,
                                         units: .metric, authorization: .authorized)
         #expect(outcome == .started)

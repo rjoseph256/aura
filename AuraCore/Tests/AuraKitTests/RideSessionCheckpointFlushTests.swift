@@ -37,7 +37,8 @@ struct RideSessionCheckpointFlushTests {
     private func makeCoordinator() -> RideSessionCoordinator {
         RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                screen: SpyScreenWake(), activity: SpyRideActivity(),
-                               haptics: HapticSpy(), nudges: NudgeSpy())
+                               haptics: HapticSpy(), nudges: NudgeSpy(),
+                               clock: FakeRideClock())
     }
 
     /// A ride with two fixes — comfortably past the discard floor, so the pause writes a real

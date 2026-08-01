@@ -18,10 +18,12 @@ struct RideSessionCoordinatorTests {
     }
 
     private func makeCoordinator(kind: Ride.Kind = .freeRide, destinationName: String? = nil,
-                                 screen: SpyScreenWake, activity: SpyRideActivity)
+                                 screen: SpyScreenWake, activity: SpyRideActivity,
+                                 clock: FakeRideClock = FakeRideClock())
         -> RideSessionCoordinator {
         RideSessionCoordinator(kind: kind, destinationName: destinationName,
-                               screen: screen, activity: activity, haptics: HapticSpy(), nudges: NudgeSpy())
+                               screen: screen, activity: activity, haptics: HapticSpy(),
+                               nudges: NudgeSpy(), clock: clock)
     }
 
     @Test func rideStoreConformsToRideSaving() throws {
@@ -135,23 +137,27 @@ struct RideSessionCoordinatorTests {
 
     @Test func maneuverFlowsToActivityUpdate() throws {
         let activity = SpyRideActivity()
-        let c = makeCoordinator(screen: SpyScreenWake(), activity: activity)
+        // The push's instant has to come from the same clock the coordinator started the ride on,
+        // or the recorder is asked about a monotonic reading from a different origin.
+        let clock = FakeRideClock()
+        let c = makeCoordinator(screen: SpyScreenWake(), activity: activity, clock: clock)
         c.start(location: ScriptedLocationProvider([]), saving: try RideStore.inMemory(),
                 units: .imperial, authorization: .authorized)
         let update = GuidanceUpdate(distanceToManeuverMeters: 120, instruction: "Right onto Penn Ave")
         c.maneuver = update
-        c.pushActivityUpdate()
+        c.pushActivityUpdate(now: clock.now())
         #expect(activity.updates.last?.maneuver == update)
         c.cancel()
     }
 
     @Test func currentSpeedFlowsToActivityUpdate() async throws {
         let activity = SpyRideActivity()
-        let c = makeCoordinator(screen: SpyScreenWake(), activity: activity)
+        let clock = FakeRideClock()
+        let c = makeCoordinator(screen: SpyScreenWake(), activity: activity, clock: clock)
         c.start(location: ScriptedLocationProvider([point(40.40, 0), point(40.41, 10)]),
                 saving: try RideStore.inMemory(), units: .imperial, authorization: .authorized)
         await c.streamTask?.value
-        c.pushActivityUpdate()
+        c.pushActivityUpdate(now: clock.now())
         // The Live Activity receives the live current speed, not the ride average.
         #expect(c.currentSpeedMetersPerSecond > 0)
         #expect(activity.updates.last?.currentSpeedMetersPerSecond == c.currentSpeedMetersPerSecond)
@@ -162,7 +168,8 @@ struct RideSessionCoordinatorTests {
         let spy = SpyWorkoutWriter()
         let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                        screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                       workout: spy, haptics: HapticSpy(), nudges: NudgeSpy())
+                                       workout: spy, haptics: HapticSpy(), nudges: NudgeSpy(),
+                                       clock: FakeRideClock())
         c.start(location: ScriptedLocationProvider([point(40.40, 0), point(40.41, 10)]),
                 saving: try RideStore.inMemory(), units: .metric,
                 authorization: .authorized, saveToHealth: true)
@@ -176,7 +183,8 @@ struct RideSessionCoordinatorTests {
         let spy = SpyWorkoutWriter()
         let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                        screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                       workout: spy, haptics: HapticSpy(), nudges: NudgeSpy())
+                                       workout: spy, haptics: HapticSpy(), nudges: NudgeSpy(),
+                                       clock: FakeRideClock())
         c.start(location: ScriptedLocationProvider([point(40.40, 0), point(40.41, 10)]),
                 saving: try RideStore.inMemory(), units: .metric,
                 authorization: .authorized, saveToHealth: false)
@@ -189,7 +197,8 @@ struct RideSessionCoordinatorTests {
         let spy = SpyWorkoutWriter()
         let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                        screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                       workout: spy, haptics: HapticSpy(), nudges: NudgeSpy())
+                                       workout: spy, haptics: HapticSpy(), nudges: NudgeSpy(),
+                                       clock: FakeRideClock())
         c.start(location: ScriptedLocationProvider([point(40.40, 0)]),
                 saving: try RideStore.inMemory(), units: .metric,
                 authorization: .authorized, saveToHealth: true)
@@ -203,7 +212,8 @@ struct RideSessionCoordinatorTests {
         let spy = SpyWorkoutWriter()
         let c = RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                        screen: SpyScreenWake(), activity: SpyRideActivity(),
-                                       workout: spy, haptics: HapticSpy(), nudges: NudgeSpy())
+                                       workout: spy, haptics: HapticSpy(), nudges: NudgeSpy(),
+                                       clock: FakeRideClock())
         c.start(location: ScriptedLocationProvider([point(40.40, 0), point(40.41, 10)]),
                 saving: ThrowingRideSaving(), units: .metric,
                 authorization: .authorized, saveToHealth: true)
