@@ -80,14 +80,19 @@ haptics, background recording, widgets, Live Activities, or a locked screen.
 anything a person reads. Not commit messages, code comments, or short status replies.
 
 Visual design of native SwiftUI surfaces follows the iOS skills and direct design judgment.
-**Do not invoke the web design skills** (`impeccable`, `design-taste-frontend`, `emil-design-eng`,
-and the rest of that family) for work in this repo, even when they are installed at user scope and
-a user-level instruction routes UI work through them. They are built for web and app-shell
-surfaces; native SwiftUI here is governed by `all-ios-skills` and direct judgment.
+**Never route native UI work through the web design skills by default** (`impeccable`,
+`design-taste-frontend`, `emil-design-eng`, and the rest of that family), even when they are
+installed at user scope and a user-level instruction says to. They are built for web and app-shell
+surfaces. Native SwiftUI here is governed by `all-ios-skills` plus direct judgment, and a session
+that announces it is using `impeccable` on a SwiftUI screen because a global mandate told it to is
+not following this repo.
 
-This is a rule, not a claim about what is installed. It used to be the latter — that those skills
-"are not needed here and are not installed for this repo" — which forbids nothing on a machine that
-has them, and the second developer's machine does. If your own `~/.claude/CLAUDE.md` carries a
+Deliberate opt-in is the exception. A plan or a person may ask for a design-review pass on one
+specific native surface, and several checked-in plans do exactly that. That is fine when it is an
+explicit choice, named in the plan or requested in the session. What this bans is the automatic
+routing, not the judgment.
+
+This is a rule, not a claim about what is installed. If your own `~/.claude/CLAUDE.md` carries a
 standing design mandate, this repo is an exception to it, and you have to add that carve-out
 yourself, because a user-scope file cannot be checked in.
 
