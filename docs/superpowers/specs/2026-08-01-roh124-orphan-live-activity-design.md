@@ -272,20 +272,40 @@ becomes permanently unsweepable rather than merely misrendered. The comment gets
 
 ## Verification
 
+**Status: partially run on 2026-08-01** (iPhone 13 Pro Max, Debug build of `453efe0`), recorded on
+[ROH-145](https://linear.app/rohun/issue/ROH-145). Proven on hardware: a ghost survives a SIGKILL
+and reports `.active`, which is what makes the allow-list filter match it rather than skip it; the
+launch site ends it (1 ms from the list appearing to the claim, 245 ms to `.dismissed`); and the
+`start()` site ends it independently under `-skipOrphanSweep`. Not yet proven: the foreground site,
+the one-activity-afterwards check, force-quit equivalence, and anything visual. The run stopped
+when the phone stopped allowing new Live Activities altogether, which is why the two silent paths
+in `start()` now log.
+
 The device pass is the gate. Two DEBUG-only launch arguments make the three call sites separable:
 `-skipOrphanSweep` suppresses launch and foreground, leaving only the sweep inside `start()`, and
 `-skipLaunchOrphanSweep` suppresses launch alone, which is the only way to reach the foreground
 site with a ghost still alive. Neither reaches `start()`. Without them the launch sweep fires on
 the first frame and every later step passes whether or not the other sites exist.
 
-**Watch the log, not just the card.** Each sweep emits
-`Ending N orphaned Live Activity(s)` on subsystem `app.aura.ios`, category `live-activity`. A card
-that disappears with no such line was retired by iOS, not by this code, and that is the failure
-mode most likely to be reported as a pass. Stream it with:
+**Watch the log, not just the card.** Each sweep emits `Ending N orphaned Live Activity(s)`, and
+`start()` says why it produced no activity (`No Live Activity: disabled…` or
+`Live Activity request failed…`). A card that disappears with no such line was retired by iOS, not
+by this code, and that is the failure mode most likely to be reported as a pass.
 
 ```bash
-xcrun devicectl device console --device <udid> | grep live-activity
+idevicesyslog -u 00008110-0009554E3ABA801E -p Aura \
+  | grep -E "orphaned Live Activity|No Live Activity|request failed"
 ```
+
+Grep the message text, not the subsystem or category: `idevicesyslog` prints the image name
+(`Aura(Aura.debug.dylib)`), so a filter on `live-activity` matches nothing. `devicectl` has no
+`console` subcommand, and macOS 26 removed `log stream --device-udid`, so this is the tool.
+
+**Three preconditions, each of which cost a wasted run.** The phone must be unlocked and awake, or
+the scene never activates and the ride never starts. **Sleep Focus must be off**: with it on,
+`Activity.request` produces nothing at all. And after launching into a ride, wait for the
+`Requesting an activity` line before killing, which took about 20 seconds on an iPhone 13 Pro Max.
+Kill earlier and there is no ghost, so every later step passes for the wrong reason.
 
 1. Start a ride, pause it, confirm the paused Live Activity. Kill the app from Xcode. Confirm at
    90 seconds that the stats dim and the clock keeps counting, which is the baseline this change
