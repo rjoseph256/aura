@@ -131,13 +131,15 @@ final class RideE2EUITests: XCTestCase {
     }
 
     /// ROH-103: the paused golden ride. Pauses at the fixture's own segment boundary, inside
-    /// the 600 s stop that replays as ~20 s of dead air, so the ride records as two segments
-    /// and the chord across the stop is never drawn.
+    /// the 600 s stop that replays as 30 s of dead air at this test's 20x multiplier, so the
+    /// ride records as two segments and the chord across the stop is never drawn.
     ///
     /// What a green run does NOT prove: active time on any post-ride surface (it does not
-    /// exist yet — ROH-112); `pausedSeconds` surviving persistence; the rendered map gap
-    /// (ROH-143); drift gating during a stop, since this fixture's stop has no fixes in it;
-    /// the nudge ladder; or haptics.
+    /// exist yet — ROH-112); `pausedSeconds` surviving persistence; `segmentsData` holding
+    /// segmented rather than flattened points, because every readout asserted after the save
+    /// comes from the separately-stored `statsData` (see the History re-read below); the
+    /// rendered map gap (ROH-143); drift gating during a stop, since this fixture's stop has
+    /// no fixes in it; the nudge ladder; or haptics.
     @MainActor
     func testPausedGoldenRideSegmentsAndSummary() throws {
         let app = XCUIApplication()
@@ -215,9 +217,14 @@ final class RideE2EUITests: XCTestCase {
         let frozenLabel = ride.statsColumn.label
         XCTAssertEqual(try XCTUnwrap(ride.probeValues()).speedDecimetersPerSecond, 0,
                        "speed hero did not fall to zero on pause")
-        // The rendered readout, not just the probe — this is what the rider sees.
-        XCTAssertTrue(try XCTUnwrap(ride.speedValue.value as? String).hasPrefix("0 "),
-                      "speed readout reads \(ride.speedValue.value ?? "nil") while paused")
+        // The rendered readout, not just the probe — this is what the rider sees. Unwrapped
+        // separately so a missing or non-String value names itself instead of failing with a
+        // bare "expected non-nil value".
+        let speedReadout = try XCTUnwrap(ride.speedValue.value as? String,
+                                         "speed readout carries no string value: "
+                                             + "\(ride.speedValue.value ?? "nil")")
+        XCTAssertTrue(speedReadout.hasPrefix("0 "),
+                      "speed readout reads \(speedReadout) while paused")
         Thread.sleep(forTimeInterval: 4)
         XCTAssertEqual(try XCTUnwrap(ride.probeValues()).elapsed, frozenAt,
                        "the active clock kept running while paused")
@@ -262,8 +269,17 @@ final class RideE2EUITests: XCTestCase {
         XCTAssertFalse(history.firstRow.label.contains(UnfinishedRideCopy.label),
                        "a paused ride is marked unfinished: \(history.firstRow.label)")
 
-        // Tapping re-reads through `store.ride(id:)`, so these bands are the PERSISTED ride
-        // decoded from segmentsData — the only step that proves the save kept its segments.
+        // Tapping re-reads through `store.ride(id:)`, so these bands run against the ride as
+        // PERSISTED and decoded back rather than the in-memory one the first summary was
+        // handed: they prove the save round-trips and its stats survive it.
+        //
+        // They do NOT prove `segmentsData` kept its segments. `RideMapper.record(from:)`
+        // encodes stats into their own blob beside the segments, and `RideSummaryView` renders
+        // `ride.stats ?? .zero` without ever recomputing from segments — so a save that
+        // flattened `segmentsData` while leaving `statsData` segmented reads correctly here.
+        // The only surface derived from the saved segments is the rendered map gap, and that
+        // is deliberately deferred to ROH-143.
+        //
         // The absence check first: without it, a summary left in the hierarchy by a failed
         // dismissal would satisfy every assertion below while proving nothing about the save.
         XCTAssertFalse(summary.title.exists,

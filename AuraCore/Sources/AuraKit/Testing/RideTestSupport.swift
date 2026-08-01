@@ -42,8 +42,13 @@ public enum RideTestProbe {
         public let speedDecimetersPerSecond: Int?
         /// Live `coordinator.segments.count`. A cheap check that `resume()` ran — NOT proof
         /// of the saved shape: `resume(at:)` appends unconditionally, and the saved ride goes
-        /// through `normalizedSegments`, which drops a trailing empty. The distance and
-        /// moving-time bands are what prove the segmented save.
+        /// through `normalizedSegments`, which drops a trailing empty.
+        ///
+        /// The distance and moving-time bands are what prove the RECORDER segmented the ride,
+        /// since a flattened one reads the chord across the stop. Nothing on any post-ride
+        /// surface proves `segmentsData` itself stored segments: `RideMapper` writes stats as
+        /// their own blob and the summary renders those, so the saved segment shape is only
+        /// observable on the rendered map (ROH-143).
         public let segmentCount: Int?
     }
 
