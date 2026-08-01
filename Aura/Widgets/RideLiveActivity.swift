@@ -104,7 +104,7 @@ struct RideLiveActivity: Widget {
                     .foregroundStyle(clock.isPaused ? AuraTheme.textSecondary : AuraTheme.accent)
                     .lineLimit(1)
                     .multilineTextAlignment(.trailing)
-                Text(rideActivityClockLabel(clock, running: "ELAPSED"))
+                Text(rideActivityClockLabel(clock, running: "ACTIVE"))
                     .font(.system(size: 9, weight: .bold))
                     .foregroundStyle(AuraTheme.textSecondary)
             }
