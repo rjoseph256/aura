@@ -3,10 +3,13 @@
 Date: 2026-07-31
 Issue: [ROH-103 — Pass 6, E2E coverage through the paused golden fixture](https://linear.app/rohun/issue/ROH-103/pass-6-e2e-coverage-through-the-paused-golden-fixture)
 Parent spec: `docs/superpowers/specs/2026-07-26-segmented-rides-pause-design.md` (D10)
-Status: revision 2, after a three-reviewer adversarial gate. Revision 1 justified the pass with
-a claim that was false (three of its four "uncovered" behaviors have coordinator-level tests),
-found the segment boundary with a heuristic that fires early under CI load, and put every
-expensive assertion inside the one budget that is scarce. Revision notes are inline.
+Status: revision 3. Revision 2 followed a three-reviewer gate on the spec; revision 3 follows a
+two-reviewer gate on the plan. Revision 1 justified the pass with a claim that was false (three
+of its four "uncovered" behaviors have coordinator-level tests), found the segment boundary with
+a heuristic that fires early under CI load, and put every expensive assertion inside the one
+budget that is scarce. Revision 2 then carried an unfalsifiable max-speed assertion, claimed a
+rendered-clock reading it did not make, and understated Pause A's cost. Revision notes are
+inline.
 
 This is the last pass of Slice A. Passes 1-5 are shipped: the segmented model, the recorder
 state machine, schema V6, the cockpit control, and the Live Activity.
@@ -23,7 +26,7 @@ Four things are genuinely uncovered.
 taps `RideTestID.hudPause`. The path from the control at `RideHUDView.swift:294` through
 `togglePause()` at `RideHUDView.swift:324` to `coordinator.pause()` exists only by inspection.
 There are **two** such paths: `togglePause()` is implemented twice, once in `RideHUDView.swift:322`
-and again in `NavigateHUDView+Cockpit.swift:129`. `RideHUDView.swift:299-307` records that the
+and again in `NavigateHUDView+Cockpit.swift:131`. `RideHUDView.swift:299-307` records that the
 instrument panel already drew over the pause row once, on an iPhone SE.
 
 **Ending a ride while paused has no end-to-end coverage.** Parent D6's first table row says that
@@ -122,10 +125,12 @@ raw metres, so that is where the proof goes:
   `record()` is a no-op while paused, so segment 1 is final at that moment. This one equality
   catches a tap that lands early (reads low) and one that lands late (reads 1449, the chord
   included), which is the whole failure family in a single assertion.
-- **Probe elevation gain in a 55-70 band at the end.** Segmented is 58, flattened is 100, and
-  the climb is +2 m per point entirely inside segment 1, so the band detects an early tap within
-  one point. The unpaused golden test already carries a silent-flat guard; this is its
-  counterpart.
+- **Probe elevation gain in a 55-70 band at the end.** Segmented is 58, flattened is 100. A tap
+  that lands early enough for the +42 m step across the stop to fall inside segment 2 reads 98,
+  and one that lands two points early reads 54, so the band brackets the correct answer from
+  both sides. *(Revision 2 claimed it caught a one-point-early tap; that reads 56, which is
+  inside the band. The exact-941 equality is what catches that case.)* The unpaused golden test
+  already carries a silent-flat guard; this is its counterpart.
 - **Final probe distance in a band holding 1883 and excluding 2391.**
 
 The summary's display bands stay loose wiring checks, as the existing hero band is. They must
@@ -148,9 +153,11 @@ original fixture stamps while `startedAt` and `endedAt` are wall-clock, so a sav
 has 290 s of moving time and roughly 45 s of active time. ROH-112 inherits a problem nobody has
 yet shown is solvable as a frozen band. Said here so it is not discovered there.
 
-The moving cell needs `RideTestID.summaryMoving`, and the top-speed cell needs
-`RideTestID.summaryTopSpeed` for D5's max-speed band. Identifiers in the shared enum, so a
-rename breaks the compile in both places.
+The moving cell needs `RideTestID.summaryMoving`. The cockpit's speed readout and its stats
+column need `RideTestID.hudSpeed` and `RideTestID.hudStats`, rather than being matched on their
+display labels — a raw `"Speed"` string in a query is the failure mode the shared enum exists to
+prevent, and a rename would leave both new tests dead with no compile break. Identifiers in the
+shared enum, applied beside the existing accessibility labels.
 
 ### D4 — The boundary is found by distance, not by a stall
 
@@ -170,8 +177,14 @@ point unconditionally, and the simulated stream is unfiltered, so 941 m is reach
 — the helper the suite already has — fires *at* the boundary instead of two or three polls after
 it, and is correct under arbitrary playback stretch.
 
-The multiplier stays at the harness default of **30x**, so the whole replay costs about 30 s.
-Revision 1 dropped to 20x to widen the silence; D5 removes the reason.
+**The multiplier is 20x for this method**, so the fixture's 600 s stop replays as a 30 s
+silence and the whole ride costs about 45 s. *(Revision 3. Revision 2 put it back to the
+harness default of 30x on the grounds that moving the clock assertions out of the window
+removed the reason for the margin. The plan review priced Pause A honestly: six XCUITest
+round-trips, each paying the idle-wait penalty on a HUD that is never idle — a live Mapbox
+surface, a half-second ticker, and a second-resolution numeric transition on the chip's own
+clock. Fifteen seconds of CI is the cheaper side of that trade, and it makes the "+507 m
+thirty seconds later" reasoning above literally true rather than approximately.)*
 
 Knowing where segment 1 ends needs a frozen number, so `PausedGoldenRideFixture` gains
 `expectedSegmentDistanceMeters: [Double]`. The recorder that emits the fixture's literals does
@@ -208,15 +221,28 @@ and gain bands.
 5. Tap pause. The banner appears, elapsed does not advance across several polls, probe speed
    reads exactly zero, and the rendered speed value reads zero too. The rendered read is the one
    that matters to a rider; the probe read is the one that is exact.
+
+   *(Revision 3: the rendered **clock** is read here too. Revision 2 asserted the clock only
+   through the probe while claiming the freeze was proved "at the rendered surface". The
+   cockpit's stats column composes distance, time and gain into one accessibility label at
+   second resolution, so holding that label across the pause and watching it change after the
+   resume is the rider-visible statement. Both readings are kept: the probe attributes a
+   failure to the coordinator, the label attributes it to the view.)*
 6. Tap resume. Elapsed advances again and never read lower than it did before the pause.
 7. Tap pause once more, then **End the ride from the paused state** — the parent D6 invariant.
    `normalizedSegments` drops the trailing empty segment, so every band is unchanged.
 
 **Then the summary and the round trip.**
 
-8. Summary hero distance and moving cell in their bands (D3), plus a max-speed band. Step 7
-   resumes across a 507 m gap, which is the phantom-spike case parent D6 names as "currently
-   uncovered by tests", and the summary renders top speed right there.
+8. Summary hero distance and moving cell in their bands (D3).
+
+   *(Revision 3 removed a max-speed band here. Revision 2 sold it as covering parent D6's
+   phantom resume spike; both plan reviewers showed it cannot. `RideStatsCalculator.walk`
+   computes max speed strictly inside a segment, and the chord across the stop is 507 m over
+   600 s — 0.85 m/s, slower than every real leg — so segmented and flattened produce the same
+   14.5 mph and the assertion passes under total segmentation failure. The phantom lives on
+   `currentSpeedMetersPerSecond`, which never reaches `RideStats`. The band, its identifier and
+   its accessor are all dropped rather than left looking like coverage.)*
 9. Done returns Home. History holds exactly one row — the pause-boundary flush upserts on
    `ride.id`, so this is the proof that a pause does not duplicate the ride — and that row does
    not carry `UnfinishedRideCopy.label`. `checkpointedAt` is copied by hand at
@@ -295,7 +321,8 @@ haptics; and deep-link protection while paused.
 | -- | -- |
 | Pause A's taps miss the twenty-second replay silence | D4's deterministic boundary fires at the last segment-1 point rather than two polls later; a miss fails D3's exact-941 equality with a distance in the message, not a vague band |
 | CI's retry flag hides a first-run flake | D8 records it. The alternative — excluding these methods from the retry — trades a hidden flake for a red gate on unrelated PRs, which is the trade the flag was added to make |
-| A stale app binary meets a new test bundle | D2 parses `s` and `n` as optional, so the two shipped golden tests are unaffected by this pass |
+| A stale app binary meets a new test bundle | D2 parses `s` and `n` as optional, so the two shipped golden tests are unaffected by this pass. **The reverse skew is not covered**: a new app binary against a pre-ROH-103 test bundle hits the old parser's `default: return nil` and fails all three golden tests unattributably. Both CI and `scripts/golden-ride.sh` build before they test, so it takes a hand-run `test-without-building` to reach |
+| A test asserts what the code does rather than what the rider needs | Revision 3 deleted the max-speed band for exactly this. Every remaining assertion was checked against a deliberately broken variant: the negative control in the plan neuters `togglePause()` and confirms the suite goes red |
 | A typo'd fixture name produces a silently real ride | D1 validates at parse, so all six harness sites turn off together |
 | The three fixture literals drift apart | D4's sum assertion, and the array is emitted by the recorder rather than hand-computed |
 | Orphaned notification requests outlive an aborted run | D7 suppresses scheduling under the harness |

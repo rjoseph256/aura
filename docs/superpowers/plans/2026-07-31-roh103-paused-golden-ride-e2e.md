@@ -35,7 +35,7 @@ The launch argument currently names a fixture that nothing reads: `rideOverride`
 
 **Interfaces:**
 - Consumes: `GoldenRideFixture.simulatedProvider(multiplier:)`, `PausedGoldenRideFixture.track()`, `SimulatedLocationProvider(track:speedMultiplier:)`.
-- Produces: `SimulatedRideFixture.isKnown(_ name: String) -> Bool` and `@MainActor SimulatedRideFixture.provider(named: String, multiplier: Double) throws -> SimulatedLocationProvider?`. `SimulatedRideConfig.parse` returns `nil` for an unknown fixture name. `PausedGoldenRideFixture.simulatedProvider(multiplier:)`.
+- Produces: `SimulatedRideFixture.factories: [String: @MainActor (Double) throws -> SimulatedLocationProvider]`, `SimulatedRideFixture.isKnown(_ name: String) -> Bool`, `@MainActor SimulatedRideFixture.provider(named: String, multiplier: Double) throws -> SimulatedLocationProvider?`. `SimulatedRideConfig.parse` returns `nil` for an unknown fixture name. `PausedGoldenRideFixture.simulatedProvider(multiplier:)`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -62,6 +62,18 @@ struct SimulatedRideFixtureTests {
         #expect(try SimulatedRideFixture.provider(named: "golden", multiplier: 30) != nil)
         #expect(try SimulatedRideFixture.provider(named: "paused", multiplier: 30) != nil)
         #expect(try SimulatedRideFixture.provider(named: "pasued", multiplier: 30) == nil)
+    }
+
+    /// The invariant the two-sources-of-truth version of this file could violate: a name that
+    /// `parse` accepts but the lookup cannot build turns the harness on with no ride stream,
+    /// which is the half-harnessed-on-real-GPS state D1 exists to prevent — reached from the
+    /// other direction.
+    @MainActor
+    @Test func everyKnownNameResolvesToAProvider() throws {
+        for name in SimulatedRideFixture.names {
+            #expect(try SimulatedRideFixture.provider(named: name, multiplier: 30) != nil,
+                    "\(name) is accepted by parse but builds no provider")
+        }
     }
 }
 ```
@@ -100,21 +112,26 @@ import Foundation
 /// name turns the harness off everywhere instead of leaving the app half-harnessed on
 /// real GPS.
 public enum SimulatedRideFixture {
-    /// Every fixture the harness can play, keyed by the launch argument's value.
-    public static let names: Set<String> = ["golden", "paused"]
+    /// One table, not a Set beside a switch. Two sources of truth here would let a name be
+    /// accepted by `SimulatedRideConfig.parse` — turning on all six harness sites — while
+    /// building no ride stream, which is the half-harnessed-on-real-GPS state this validation
+    /// exists to prevent.
+    public static let factories: [String: @MainActor (Double) throws -> SimulatedLocationProvider] = [
+        "golden": { try GoldenRideFixture.simulatedProvider(multiplier: $0) },
+        "paused": { try PausedGoldenRideFixture.simulatedProvider(multiplier: $0) },
+    ]
 
-    public static func isKnown(_ name: String) -> Bool { names.contains(name) }
+    /// Every fixture the harness can play, keyed by the launch argument's value.
+    public static var names: Set<String> { Set(factories.keys) }
+
+    public static func isKnown(_ name: String) -> Bool { factories[name] != nil }
 
     /// The replay stream for `name`, or nil if the name is unknown. Throws only when a
     /// known fixture fails to load, which is a packaging regression.
     @MainActor
     public static func provider(named name: String,
                                 multiplier: Double) throws -> SimulatedLocationProvider? {
-        switch name {
-        case "golden": return try GoldenRideFixture.simulatedProvider(multiplier: multiplier)
-        case "paused": return try PausedGoldenRideFixture.simulatedProvider(multiplier: multiplier)
-        default: return nil
-        }
+        try factories[name]?(multiplier)
     }
 }
 ```
@@ -147,6 +164,17 @@ with:
         // recording real GPS — which reads in CI as "distance never reached" 90 s later.
         guard !fixture.hasPrefix("-"), SimulatedRideFixture.isKnown(fixture) else { return nil }
 ```
+
+Then correct the type's own doc comment, which this step falsifies. Line 5 currently reads
+"Unknown or malformed values degrade to 'absent' (real location) rather than crashing."
+Replace with:
+
+```
+/// Unknown or malformed values — including a fixture name `SimulatedRideFixture` does not
+/// know — degrade to "absent" (real location) rather than crashing.
+```
+
+A plan that spends a whole task correcting one stale comment should not create another.
 
 - [ ] **Step 5: Run the package tests to verify they pass**
 
@@ -307,7 +335,7 @@ Spec D2. The probe is the only place a UI test can read raw, unformatted ride nu
 - Modify: `Aura/Sources/Ride/NavigateHUDView.swift:154-156`
 
 **Interfaces:**
-- Produces: `RideTestProbe.line(distanceMeters:elapsed:elevationGainMeters:speedDecimetersPerSecond:segmentCount:)`; `RideTestProbe.Values` gains `speedDecimetersPerSecond: Int?` and `segmentCount: Int?`; `View.simulatedRideProbe(distanceMeters:elapsed:elevationGainMeters:speedMetersPerSecond:segmentCount:)`.
+- Produces: `RideTestProbe.line(distanceMeters:elapsed:elevationGainMeters:speedMetersPerSecond:segmentCount:)` — note the label is `speedMetersPerSecond` (a `Double`); the ×10 conversion happens inside `line`, and only the *stored* property is named `speedDecimetersPerSecond`. `RideTestProbe.Values` gains `speedDecimetersPerSecond: Int?` and `segmentCount: Int?`; `View.simulatedRideProbe(distanceMeters:elapsed:elevationGainMeters:speedMetersPerSecond:segmentCount:)`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -480,7 +508,15 @@ The compiler finds any site you miss — that is why the signature changed rathe
 Dispatch the builder subagent: build the `Aura` scheme, Debug, iPhone 17 simulator, `CODE_SIGNING_ALLOWED=NO`.
 Expected: BUILD SUCCEEDED.
 
-- [ ] **Step 8: Lint and commit**
+- [ ] **Step 8: Run one shipped golden ride end to end**
+
+This task rewrites a string the two shipped E2Es parse. A compile check does not prove the probe
+still renders and still parses at runtime, and the next executed test is three commits away.
+
+Dispatch the builder subagent: run `-only-testing:AuraUITests/RideE2EUITests/testGoldenRideRecordsToSummaryAndHistory`.
+Expected: PASS.
+
+- [ ] **Step 9: Lint and commit**
 
 ```bash
 scripts/lint.sh
@@ -497,42 +533,81 @@ Spec D3 and D5 assert two summary cells and three ride-screen elements that no s
 **Files:**
 - Modify: `AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift:6-19`
 - Modify: `Aura/Sources/Ride/RideSummaryView.swift:213-222`
+- Modify: `Aura/Sources/Ride/InstrumentChassis.swift` (two identifiers)
 - Modify: `Aura/UITests/Screens/Screens.swift:64-96`
 
 **Interfaces:**
 - Consumes: `RideTestID.hudPause`, `RideTestID.hudPausedBanner` (both already exist).
-- Produces: `RideTestID.summaryMoving`, `RideTestID.summaryTopSpeed`; `RideScreen.pauseControl`, `.pausedBanner`, `.speedValue`, `.waitForElapsedToAdvance(from:timeout:)`; `SummaryScreen.movingStat`, `.topSpeedStat`; `HistoryScreen.firstRow`.
+- Produces: `RideTestID.summaryMoving`, `RideTestID.hudSpeed`, `RideTestID.hudStats`; `RideScreen.pauseControl`, `.pausedBanner`, `.speedValue`, `.statsColumn`, `.waitForElapsedToAdvance(beyond:timeout:)`; `SummaryScreen.movingStat`; `HistoryScreen.firstRow`.
+
+There is deliberately **no** top-speed identifier or accessor. Both plan reviewers showed the
+max-speed assertion they would have served cannot fail: `RideStatsCalculator.walk` computes max
+speed strictly inside a segment, and the chord across the stop is 0.85 m/s — slower than every
+real leg — so segmented and flattened rides report the same 14.5 mph. See spec D5 step 8.
 
 - [ ] **Step 1: Add the identifiers**
 
 In `AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift`, inside `RideTestID`, under `summaryDistance`:
 
 ```swift
-    /// The summary's moving-time and top-speed cells. ROH-103 asserts both: moving time
-    /// discriminates a segmented save (≈4 min) from a flattened one (≈14 min), and top
-    /// speed guards the phantom resume spike (parent spec D6).
+    /// The summary's moving-time cell. It discriminates a segmented save (≈4 min) from a
+    /// flattened one (≈14 min) — ROH-103's most timing-independent assertion, since moving
+    /// time comes from the fixture's own stamps rather than wall clock.
     public static let summaryMoving = "summary.moving"
-    public static let summaryTopSpeed = "summary.topSpeed"
 ```
 
-- [ ] **Step 2: Apply them in the summary**
+and under `hudPausedBanner`:
 
-In `Aura/Sources/Ride/RideSummaryView.swift`, give `stat` an identifier parameter and pass one from each supporting cell. Replace lines 213-222:
+```swift
+    /// The cockpit's hero speed readout and its composed stats column, both on
+    /// `InstrumentChassis` and so shared by the Explore and navigate panels. ROH-103 reads
+    /// the rendered values rather than only the probe: the probe attributes a failure to the
+    /// coordinator, these attribute it to the view. Identifiers rather than label queries —
+    /// a raw "Speed" string in a test would survive a rename with no compile break.
+    public static let hudSpeed = "ride.hud.speed"
+    public static let hudStats = "ride.hud.stats"
+```
+
+- [ ] **Step 2: Apply the summary identifier**
+
+In `Aura/Sources/Ride/RideSummaryView.swift`, give `stat` an identifier parameter. The top-speed
+cell passes `nil` — it needs no identifier, and a nil-able parameter keeps one helper rather than
+two. Replace lines 213-222:
 
 ```swift
     @ViewBuilder private var supportingCells: some View {
         stat(fmt.minutes(stats.movingTimeSeconds), "moving", id: RideTestID.summaryMoving)
         stat(fmt.speedValue(stats.maxSpeedMetersPerSecond, decimals: 1),
-             metric ? "km/h top" : "mph top", id: RideTestID.summaryTopSpeed)
+             metric ? "km/h top" : "mph top")
     }
 
     /// One value+label metric, left-aligned, combined into a single VoiceOver element.
-    private func stat(_ value: String, _ label: String, id: String) -> some View {
+    private func stat(_ value: String, _ label: String, id: String? = nil) -> some View {
         StatPair(value: value, label: label, context: .brand, alignment: .leading)
             .accessibilityElement(children: .combine)
-            .accessibilityIdentifier(id)
+            .accessibilityIdentifier(id ?? "")
     }
 ```
+
+An empty identifier is SwiftUI's no-op, so the top-speed cell is unchanged in the tree.
+
+- [ ] **Step 2b: Apply the cockpit identifiers**
+
+In `Aura/Sources/Ride/InstrumentChassis.swift`, add an identifier beside each existing
+accessibility label. On `speedInstrument`, after `.accessibilityValue(...)` (line 92):
+
+```swift
+        .accessibilityIdentifier(RideTestID.hudSpeed)
+```
+
+and on the composed stats column, after its `.accessibilityLabel(columnAccessibilityLabel)`
+(around line 53):
+
+```swift
+        .accessibilityIdentifier(RideTestID.hudStats)
+```
+
+`InstrumentChassis` will need `import AuraKit` if it does not already have it.
 
 - [ ] **Step 3: Add the screen accessors**
 
@@ -544,10 +619,16 @@ In `Aura/UITests/Screens/Screens.swift`, extend `RideScreen` with:
         app.descendants(matching: .any).matching(identifier: RideTestID.hudPausedBanner).firstMatch
     }
     /// The cockpit's hero speed readout. `InstrumentChassis` composes it into one element
-    /// labelled "Speed" whose value is the spoken speed, e.g. "0 miles per hour" — so a
-    /// paused reading is a `"0 "` prefix in either unit system.
+    /// whose value is the spoken speed, e.g. "0 miles per hour" — so a paused reading is a
+    /// `"0 "` prefix in either unit system.
     var speedValue: XCUIElement {
-        app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Speed")).firstMatch
+        app.descendants(matching: .any).matching(identifier: RideTestID.hudSpeed).firstMatch
+    }
+    /// The composed distance/time/gain column. Its label carries the clock at second
+    /// resolution, which is how the freeze is asserted at the rendered surface rather than
+    /// only on the probe.
+    var statsColumn: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: RideTestID.hudStats).firstMatch
     }
 
     /// Polls until the probe's elapsed reading exceeds `seconds` (or fails at `timeout`).
@@ -567,9 +648,6 @@ and extend `SummaryScreen` with:
 ```swift
     var movingStat: XCUIElement {
         app.descendants(matching: .any).matching(identifier: RideTestID.summaryMoving).firstMatch
-    }
-    var topSpeedStat: XCUIElement {
-        app.descendants(matching: .any).matching(identifier: RideTestID.summaryTopSpeed).firstMatch
     }
 ```
 
@@ -663,9 +741,11 @@ Add to `Aura/UITests/RideE2EUITests.swift`, after `testNavigateGoldenRideEndsToS
     @MainActor
     func testPausedGoldenRideSegmentsAndSummary() throws {
         let app = XCUIApplication()
+        // 20x, not the harness default of 30x: the fixture's 600 s stop then replays as a 30 s
+        // silence, and Pause A's tap-assert-tap sequence has to fit inside it (spec D4).
         app.launchArguments += ["-auraDidCompleteOnboarding", "YES",
                                 "-auraSimulatedRide", "paused",
-                                "-auraSimulatedRideMultiplier", "30",
+                                "-auraSimulatedRideMultiplier", "20",
                                 "-auraInMemoryRideStore"]
         app.launch()
         dismissLocationAlertIfPresent()
@@ -700,21 +780,30 @@ Add to `Aura/UITests/RideE2EUITests.swift`, after `testNavigateGoldenRideEndsToS
                        "distance at the pause is not segment 1")
 
         ride.pauseControl.tap()
-        XCTAssertFalse(ride.pausedBanner.waitForExistence(timeout: 3),
-                       "PAUSED chip survived the resume")
+        // waitForNonExistence, not XCTAssertFalse(waitForExistence:) — the latter asserts
+        // "absent for the whole window", which the chip's removal animation can violate, and
+        // it burns its full timeout on every green run, inside the one scarce budget.
+        XCTAssertTrue(ride.pausedBanner.waitForNonExistence(timeout: 5),
+                      "PAUSED chip survived the resume")
 
         // --- Segment 2 records out. -----------------------------------------------------
+        // total - 60 rather than - 30: a resume that lands one point late drops that point and
+        // finishes at 1851 m, which is a correctly segmented ride with one sample lost. A 30 m
+        // tolerance is narrower than the fixture's 32.5 m point spacing, so it would turn that
+        // harmless case into a 90 s timeout reporting "segment 2 never completed".
         let total = Int(PausedGoldenRideFixture.expectedDistanceMeters)
-        XCTAssertTrue(ride.waitForDistance(atLeast: total - 30, timeout: 90),
+        XCTAssertTrue(ride.waitForDistance(atLeast: total - 60, timeout: 90),
                       "segment 2 never completed — last probe: \(ride.probe.label)")
 
         let afterRide = try XCTUnwrap(ride.probeValues())
         XCTAssertEqual(afterRide.segmentCount, 2, "resume did not open a second segment")
         // Holds the segmented literal (1883 m), excludes the flattened one (2391 m).
-        XCTAssertTrue((total - 30...total + 200).contains(afterRide.distanceMeters),
+        XCTAssertTrue((total - 60...total + 200).contains(afterRide.distanceMeters),
                       "distance \(afterRide.distanceMeters) m is not the segmented total")
-        // Segmented gain is 58 m, flattened 100 m, and the climb is +2 m per point inside
-        // segment 1 — so this band also catches a tap one point early.
+        // Segmented gain is 58 m, flattened 100 m. A tap early enough to push the +42 m step
+        // across the stop into segment 2 reads 98; two points early reads 54. The band brackets
+        // the right answer from both sides — the exact-941 equality above is what catches a
+        // one-point-early tap, which reads 56.
         XCTAssertTrue((55...70).contains(afterRide.elevationGainMeters),
                       "elevation gain \(afterRide.elevationGainMeters) m is not segmented")
 
@@ -723,6 +812,7 @@ Add to `Aura/UITests/RideE2EUITests.swift`, after `testNavigateGoldenRideEndsToS
         XCTAssertTrue(ride.pausedBanner.waitForExistence(timeout: 5), "second pause did not take")
 
         let frozenAt = try XCTUnwrap(ride.probeValues()).elapsed
+        let frozenLabel = ride.statsColumn.label
         XCTAssertEqual(try XCTUnwrap(ride.probeValues()).speedDecimetersPerSecond, 0,
                        "speed hero did not fall to zero on pause")
         // The rendered readout, not just the probe — this is what the rider sees.
@@ -731,12 +821,19 @@ Add to `Aura/UITests/RideE2EUITests.swift`, after `testNavigateGoldenRideEndsToS
         Thread.sleep(forTimeInterval: 4)
         XCTAssertEqual(try XCTUnwrap(ride.probeValues()).elapsed, frozenAt,
                        "the active clock kept running while paused")
+        // The same freeze at the rendered surface. The column composes distance, time and gain
+        // into one label at second resolution, so four seconds of a running clock would change
+        // it. Playback has ended, so distance and gain cannot move it on their own.
+        XCTAssertEqual(ride.statsColumn.label, frozenLabel,
+                       "the cockpit clock kept running while paused")
 
         ride.pauseControl.tap()
+        // Proves the clock restarted AND that it did not come back lower than it went in:
+        // the predicate is `elapsed > frozenAt`, so a backwards jump never satisfies it.
         XCTAssertTrue(ride.waitForElapsedToAdvance(beyond: frozenAt, timeout: 10),
-                      "the clock did not restart on resume")
-        XCTAssertGreaterThanOrEqual(try XCTUnwrap(ride.probeValues()).elapsed, frozenAt,
-                                    "the clock went backwards across the pause")
+                      "the clock did not restart on resume, or came back lower")
+        XCTAssertNotEqual(ride.statsColumn.label, frozenLabel,
+                          "the cockpit clock did not restart on resume")
 
         // --- End from the paused state (parent spec D6's first table row). ---------------
         ride.pauseControl.tap()
@@ -751,9 +848,6 @@ Add to `Aura/UITests/RideE2EUITests.swift`, after `testNavigateGoldenRideEndsToS
         XCTAssertTrue(summary.title.waitForExistence(timeout: 15), "Summary never appeared")
         try Self.assertPausedHeroDistanceInBand(summary)
         try Self.assertMovingTimeIsSegmented(summary)
-        // Resume position-deltas across a 507 m gap; a spike here is parent D6's phantom.
-        let top = try XCTUnwrap(Self.leadingNumber(in: summary.topSpeedStat.label))
-        XCTAssertTrue(top < 60, "top speed \(top) — phantom spike across the resume")
 
         // --- History: one row, not marked unfinished, and it reads back segmented. -------
         summary.doneButton.tap()
@@ -770,9 +864,13 @@ Add to `Aura/UITests/RideE2EUITests.swift`, after `testNavigateGoldenRideEndsToS
 
         // Tapping re-reads through `store.ride(id:)`, so these bands are the PERSISTED ride
         // decoded from segmentsData — the only step that proves the save kept its segments.
+        // The absence check first: without it, a summary left in the hierarchy by a failed
+        // dismissal would satisfy every assertion below while proving nothing about the save.
+        XCTAssertFalse(summary.title.exists,
+                       "a summary is still on screen before the History row was tapped")
         history.firstRow.tap()
         XCTAssertTrue(summary.title.waitForExistence(timeout: 10),
-                      "History detail never appeared")
+                      "History detail never appeared — the row tap did not land")
         try Self.assertPausedHeroDistanceInBand(summary)
         try Self.assertMovingTimeIsSegmented(summary)
     }
@@ -805,6 +903,11 @@ Add to `Aura/UITests/RideE2EUITests.swift`, after `testNavigateGoldenRideEndsToS
     private static func assertMovingTimeIsSegmented(_ summary: SummaryScreen,
                                                     file: StaticString = #filePath,
                                                     line: UInt = #line) throws {
+        // The supporting stats sit below a 240 pt route map, the title block, the hero and the
+        // elevation band, and the History read happens inside a sheet, which insets it further.
+        // The ScrollView's VStack is eager so the cell should be in the tree regardless — one
+        // swipe is insurance against a runtime that prunes off-screen elements.
+        if !summary.movingStat.waitForExistence(timeout: 5) { summary.app.swipeUp() }
         XCTAssertTrue(summary.movingStat.waitForExistence(timeout: 5), "moving cell missing",
                       file: file, line: line)
         let label = summary.movingStat.label
@@ -824,12 +927,37 @@ Dispatch the builder subagent: run `-only-testing:AuraUITests/RideE2EUITests/tes
 
 Expected on a clean tree before Tasks 1-4 land: a compile failure. With them landed, it should PASS. If it fails, read the failure message before changing anything — the assertions are written to name their own cause (`distance at the pause is not segment 1`, `the active clock kept running while paused`).
 
-- [ ] **Step 3: Run the two shipped golden rides to confirm no regression**
+- [ ] **Step 3: Negative control — prove the test can fail for the reason it exists**
+
+Because Tasks 1-5 land first, the only red available in Step 2 is a compile error, which proves
+nothing about the wiring. This pass exists because "the button is connected to nothing that a
+test has ever checked" (spec, Problem), so that claim gets an experiment.
+
+Temporarily neuter the control in `Aura/Sources/Ride/RideHUDView.swift`:
+
+```swift
+    func togglePause() -> Bool {
+        coordinator.isPaused   // ROH-103 NEGATIVE CONTROL — revert immediately
+    }
+```
+
+Dispatch the builder subagent: run `-only-testing:AuraUITests/RideE2EUITests/testPausedGoldenRideSegmentsAndSummary`.
+Expected: **FAIL** at `"PAUSED chip never appeared — the control is not wired"`.
+
+If it passes, stop: the test is not testing what it claims and no amount of green elsewhere fixes
+that. Then revert:
+
+```bash
+git checkout -- Aura/Sources/Ride/RideHUDView.swift
+git diff --exit-code Aura/Sources/Ride/RideHUDView.swift   # must print nothing
+```
+
+- [ ] **Step 4: Run the two shipped golden rides to confirm no regression**
 
 Dispatch the builder subagent: run `-only-testing:AuraUITests/RideE2EUITests` (the whole class).
 Expected: three tests, all PASS.
 
-- [ ] **Step 4: Lint and commit**
+- [ ] **Step 5: Lint and commit**
 
 ```bash
 scripts/lint.sh
@@ -920,8 +1048,9 @@ Replace with:
 ```
 # 50: cold SPM + Mapbox build + boot + FOUR golden-ride methods, each retried once
 # worst-case (ROH-93 added the navigate method; ROH-103 added the paused ride and the
-# navigate pause control). The paused method is the longest at ~30 s of replay. Note the
-# retry flag means a first-run flake still reports green — see the ROH-103 spec, D8.
+# navigate pause control). The paused method is the longest: it replays at 20x rather
+# than 30x to widen the pause window, so ~45 s plus its assertions. Note the retry flag
+# means a first-run flake still reports green — see the ROH-103 spec, D8.
 ```
 
 - [ ] **Step 4: Run the whole class**
@@ -951,3 +1080,14 @@ Spec coverage: D1 → Task 1. D2 → Task 3. D3 → Tasks 4 and 6. D4 → Tasks 
 Type consistency: `SimulatedRideFixture.provider(named:multiplier:)` is called with the same labels in Task 1 Step 6. `RideTestProbe.line` takes `speedMetersPerSecond` (a `Double`) and stores `speedDecimetersPerSecond` (an `Int?`) — the conversion happens once, inside `line`. `simulatedRideProbe` gains `speedMetersPerSecond` and `segmentCount` at both call sites.
 
 Known follow-ups deliberately not in this plan: ROH-112 (active time on post-ride surfaces, now blocking ROH-74), ROH-143 (the rendered map gap, on device).
+
+## Revision note
+
+Revised after a two-reviewer adversarial gate on the plan. What changed: the max-speed assertion
+and its identifier and accessor were deleted as unfalsifiable; `SimulatedRideFixture` became one
+factory table rather than a Set beside a switch, with a test holding them together; the
+segment-2 floor widened from 30 m to 60 m, which is wider than the fixture's point spacing;
+`XCTAssertFalse(waitForExistence:)` became `waitForNonExistence`; the clock freeze is now
+asserted at the rendered surface as well as on the probe, via new `hudSpeed`/`hudStats`
+identifiers replacing a raw label query; the paused method drops to a 20x multiplier; a negative
+control was added; and Task 3 now runs a shipped E2E rather than stopping at a compile check.
