@@ -62,7 +62,15 @@ the stats row and wordmark toward the edge rather than cutting the disclosure of
 
 ## Needs a decision, not a patch
 
-### 1. The card now publishes a labeled map of wherever the rider started. BLOCKING.
+### 1. The card now publishes a labeled map of wherever the rider started. DECIDED: ship as is.
+
+**Decision 2026-07-31, Rohun (PO): ship it, sweep privacy later.** Aura's audience today is the PO
+and a small group of friends, so the people who can see a card already know where he lives. The
+issue is ROH-139, parked in Backlog rather than closed, with the trigger written down: TestFlight
+beyond close friends, App Store submission, or cards being shared publicly by anyone other than
+the PO. The exposure below is unchanged and still applies the day that happens.
+
+The analysis that follows stands as the record of what was traded away.
 
 Before this branch the card drew a bare polyline on a dark background — a shape with no
 coordinate system, genuinely unplaceable. It now draws a real basemap in the rider's chosen
