@@ -37,4 +37,10 @@ struct SimulatedRideConfigTests {
         #expect(SimulatedRideConfig.forcesInMemoryStore(arguments: ["App", "-auraInMemoryRideStore"]))
         #expect(!SimulatedRideConfig.forcesInMemoryStore(arguments: ["App"]))
     }
+
+    @Test func skipOrphanSweepFlag() {
+        #expect(SimulatedRideConfig.suppressesOrphanSweep(arguments: ["App", "-skipOrphanSweep"]))
+        #expect(!SimulatedRideConfig.suppressesOrphanSweep(arguments: ["App"]))
+        #expect(!SimulatedRideConfig.suppressesOrphanSweep(arguments: ["App", "-skipOrphanSweepX"]))
+    }
 }

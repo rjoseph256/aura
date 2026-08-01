@@ -29,6 +29,12 @@ public struct RideActivityAttributes: ActivityAttributes {
     /// content forever. The same applies to `RideActiveClock`'s cases and associated-value labels:
     /// adding is safe, renaming is not. No test target on any platform can see this type, so this
     /// rule is the whole guarantee (ROH-102 spec D2, invariant 6).
+    ///
+    /// It binds the outer `RideActivityAttributes` stored properties below just as tightly, and
+    /// since ROH-124 it also decides whether a ghost can be cleared at all: an activity written by
+    /// a previous binary that this one cannot decode never appears in
+    /// `Activity<RideActivityAttributes>.activities`, so the orphan sweep cannot see it and
+    /// nothing will ever end it.
     public struct ContentState: Codable, Hashable, Sendable {
         /// Distance covered so far, in meters.
         public let distanceMeters: Double
