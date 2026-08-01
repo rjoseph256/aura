@@ -3,7 +3,9 @@
 Date: 2026-08-01
 Issue: [ROH-130 — Active ride time is computed from a non-monotonic wall clock](https://linear.app/rohun/issue/ROH-130/active-ride-time-is-computed-from-a-non-monotonic-wall-clock)
 Parent spec: `docs/superpowers/specs/2026-07-26-segmented-rides-pause-design.md` (D5, D6)
-Status: revision 2, after a three-reviewer gate on revision 1.
+Status: revision 3. Revision 2 followed a three-reviewer gate on the spec; revision 3 follows a
+three-reviewer gate on the plan, which found a defect in revision 2's own D5 and two decisions that
+did more than they needed to. Each correction is marked inline.
 
 Revision 1 proposed re-anchoring the recorder's stored wall stamps — rewriting `startedAt` and
 `pauseStartedAt` in place whenever a clock step was detected, from inside the duration readers. All
@@ -164,11 +166,11 @@ The `max(0,)` floors stay. They are unreachable from a monotonic input, but two 
 (`RideSchemaV7.swift:42`) that no local invariant governs. They are not the same kind of guard as
 the one D6 removes, and the distinction is the point.
 
-### D3 — A finished ride's `endedAt` is derived, so elapsed and paused stay on one clock
+### D3 — A *finished* ride's `endedAt` is derived, so elapsed and paused stay on one clock
 
 The Problem section established that wall-elapsed and wall-paused cancel a step taken during a stop.
 Making `pausedSeconds` monotonic without moving elapsed with it would break that cancellation and
-make a case that is right today wrong. So `end(at:)` and `checkpoint(at:)` emit
+make a case that is right today wrong. So `end(at:)` emits
 
 ```
 endedAt = startedAt + elapsedSeconds(asOf: instant)
@@ -194,10 +196,21 @@ ahead of the current wall clock, and the HealthKit workout's end date shifts by 
 is the correct duration, on a ride whose end instant the system's own clock disagrees about. The
 plan checks that `WorkoutData` and `RideWorkoutGate` tolerate it.
 
-It also makes `RideDuration`'s `checkpointedAt >= endedAt` disqualifier (`RideDuration.swift:41`)
-strictly *harder* to trip than today, because a backward step now moves `endedAt` later rather than
-leaving it behind a raw checkpoint stamp. That failure — a save-failure summary with no durations —
-is reachable today and stays out of scope; it is filed as a follow-up.
+**`checkpoint(at:)` is deliberately left alone.** *(New in revision 3; revision 2 derived both
+boundaries.)* A checkpoint row writes `endedAt` and `checkpointedAt` to the same instant, and
+`RideDuration.init` disqualifies it on exactly that equality — so the row reports no duration at
+all, and there is nothing there for a monotonic correction to fix. Deriving one of the two stamps
+would break the equality and start showing a duration on a row that has no business reporting one.
+`checkpointedAt` is also the only one of these stamps that is *rendered*:
+`UnfinishedRideCopy.swift:29` puts it in front of the rider as "Recording stops at 2:14 PM", and
+`:40` repeats it in the warning before an irreversible all-devices delete. Shifting it by the size
+of a clock step to fix a duration nobody reads would be a bad trade. Both of its stamps stay raw.
+
+Deriving only `end(at:)` also makes `RideDuration`'s `checkpointedAt >= endedAt` disqualifier
+(`RideDuration.swift:41`) strictly *harder* to trip on the save-failure path, because a backward
+step moves the finished ride's `endedAt` later while the restored checkpoint stamp stays where it
+was. That failure — a save-failure summary with no durations — is reachable today and stays out of
+scope; it is filed as ROH-149.
 
 ### D4 — Active time keeps exactly one definition, and the guard learns the new way to break it
 
@@ -205,26 +218,37 @@ is reachable today and stays out of scope; it is filed as a follow-up.
 change rather than being worked around:
 
 ```swift
-public static func activeSeconds(elapsedSeconds: TimeInterval,
+public struct RideElapsed {
+    public let seconds: TimeInterval
+    /// A monotonic measurement — `RideRecorder.elapsedSeconds(asOf:)`.
+    public static func measured(_ seconds: TimeInterval) -> RideElapsed
+    /// The interval between a finished ride's two stamps. Legal for a saved ride and nothing else.
+    public static func betweenStamps(startedAt: Date, endedAt: Date) -> RideElapsed
+}
+
+public static func activeSeconds(elapsed: RideElapsed,
                                  pausedSeconds: TimeInterval) -> TimeInterval {
-    max(0, elapsedSeconds - pausedSeconds)
+    max(0, elapsed.seconds - pausedSeconds)
 }
 ```
 
 Three callers: `RideSessionCoordinator.refreshElapsed`, `RideRecorder.pause(at:)` for the frozen
-paused value, and `RideDuration.init`. The first two pass `elapsedSeconds(asOf:)`, the third passes
-`max(0, endedAt - startedAt)` — which by D3 is the same monotonic quantity.
+paused value, and `RideDuration.init`. The first two pass `.measured(recorder.elapsedSeconds(asOf:))`,
+the third passes `.betweenStamps(startedAt:endedAt:)` — which by D3 is the same monotonic quantity.
 
-The old signature forced its elapsed to come from a `Date` pair. The new one takes a bare
-`TimeInterval` whose clock the type cannot express, so a future author can write
-`activeSeconds(elapsedSeconds: now.timeIntervalSince(startedAt), pausedSeconds:)` for a live clock,
-reintroduce ROH-130, and pass the gate cleanly. I verified this against the script's own `detect()`:
-that expression produces no match today.
+**Why a wrapper and not a bare `TimeInterval`.** *(New in revision 3.)* The old signature forced its
+elapsed to come from a `Date` pair. A bare `TimeInterval` lets a future author write
+`activeSeconds(elapsedSeconds: now.timeIntervalSince(startedAt), …)` for a *live* clock and
+reintroduce ROH-130 while still calling the one definition. Revision 2 answered that with a second
+grep detector; the plan gate refuted it by executing it — `detect()` is line-anchored, the offending
+call wraps across lines under the repo's 140-column limit, and the detector matched only its own
+single-line self-test string. The invariant is "these two numbers came from the same clock", which a
+grep is the wrong tool for.
 
-So the script gains a second detector, with its own self-test in the same style as the first: any
-call to `activeSeconds(elapsedSeconds:` whose argument contains `timeIntervalSince` fails the build.
-Deriving elapsed from a wall pair is legal in exactly one place, `RideDuration.init`, which is
-already the file the script excludes.
+`RideElapsed` does not make the mistake impossible, but it makes it require typing `betweenStamps`
+at a live call site — a loud, single-token, reliably greppable act. So the script's second detector
+becomes: `betweenStamps` may appear only in `RideDuration.swift`, which the script already excludes.
+That is a detector a wrapped line cannot slip past.
 
 `RideDuration` also gains `runningAnchor(startedAt:pausedSeconds:now:)` returning
 `min(now, startedAt + pausedSeconds)`. It lives in `RideDuration.swift` because that file is the
@@ -267,7 +291,7 @@ The fix is to stop deriving either value from `now`:
 **The wall-clock offset.** Anchors built from raw wall stamps are stable, but they never recover from
 a step: the OS renders `now - anchor` on its own wall clock, so after a step the Lock Screen is off
 by Δ for the rest of the ride while the cockpit is right. So the recorder maintains one
-`wallOffset`, added to `startedAt` and `pauseStartedAt` *for these two derived values only*:
+`wallOffset`, applied to `startedAt` and `pauseStartedAt` *for these two derived values only*:
 
 ```
 expected = startedAt + wallOffset + elapsedSeconds(asOf: instant)
@@ -278,6 +302,34 @@ if |delta| > 2s { wallOffset += delta }
 Updated in one explicit method, `align(at:)`, called once per ticker tick from `refreshElapsed` and
 at each pause boundary. Never from a getter. Idempotent: after an update, `expected` recomputes to
 the new offset and `delta` is zero.
+
+**An offset is only valid for a stamp taken before it.** *(New in revision 3. Revision 2 added
+`wallOffset` to both stamps unconditionally, which all three plan reviewers refuted independently,
+and it is the worst defect either gate found.)* `wallOffset` converts a stamp taken on the *old*
+clock onto the current one. `startedAt` always qualifies — `start()` zeroes the offset. `pauseStartedAt`
+does not: it is stamped whenever the rider taps, which may be long after a step has already been
+absorbed, in which case it is *already* on the corrected clock and adding the offset applies the
+step twice. A rider who pauses after a backward step would see the Lock Screen's stop timer open at
+0:40 instead of 0:00, and after a forward step it would open 40 s in the future and count *down* —
+the failure the running branch's `min(now,)` clamp exists to prevent, reintroduced on the branch
+that has no clamp. It is also a regression: today's raw `pausedSince` gets this case right.
+
+So each stamp is stored with the offset in force when it was taken, and the anchor is the
+difference:
+
+```
+anchorStartedAt   = startedAt      + (wallOffset - 0)
+anchorPausedSince = pauseStartedAt + (wallOffset - wallOffsetWhenStopOpened)
+```
+
+which is the general rule; `startedAt`'s stamp-time offset is zero by construction. Because
+`pause(at:)` aligns before it stamps, a stop opened after a step starts with its anchor equal to its
+stamp and only moves on a *later* step.
+
+`make` additionally clamps the paused case's `since` to `min(now, since)`, symmetric with the running
+anchor's clamp. With the rule above it cannot bind, so it costs nothing; it is there because
+`RideInstant.now` reads its two clocks a few instructions apart and a descheduled sample can
+fabricate a small offset out of nothing, and a Lock Screen counting down is worse than a push.
 
 The threshold keeps the offset discrete, which is what keeps the dedupe alive, and its only
 consequence is Lock Screen anchor precision. `ContinuousClock` is not NTP-disciplined, so `delta`
@@ -321,10 +373,13 @@ tests asserting nonsense are worse than red ones.
 So the coordinator gets a real seam:
 
 ```swift
-public protocol RideClocking: Sendable { func now() -> RideInstant }
+public protocol RideClocking { func now() -> RideInstant }
 ```
 
-injected at construction, defaulting to `SystemRideClock()`. Every internal `.now` read goes through
+injected at construction, defaulting to `SystemRideClock()`. Not `Sendable`-constrained *(revision 3;
+revision 2 wrote `: Sendable`)*: every consumer is `@MainActor`, so global-actor isolation already
+covers the stored existential, and requiring `Sendable` would push the test fake — which is a
+mutable box a test drives by hand — into `@unchecked Sendable` for nothing. Every internal `.now` read goes through
 it. Tests inject `FakeRideClock`, which produces coherent pairs from a settable base — one origin
 per test, no mixing possible. The four coordinator test factories
 (`RideSessionCoordinatorTests.swift:20`, `RideSessionCoordinatorPauseTests.swift:18`,
@@ -400,28 +455,49 @@ monotonic readings diverge by a stated amount.
    to `start()`, and `endedAt` has moved. This is the shape revision 1 missed entirely.
 6. `checkpoint(at:)` after a step: same, and the row's `startedAt` still matches.
 
+7. **A step, and then a pause** — the case revision 2's D5 got wrong. The Lock Screen's stop timer
+   opens at zero and the cockpit chip agrees with it.
+8. A step, a pause, and then a *second* step: both anchors move by the second step only.
+
 **Negative controls**, per the ROH-103 lesson that a test which cannot fail proves nothing.
 
-7. Every step fixture asserts the step is present — that its wall delta and monotonic delta disagree
-   by the expected amount — so a shim that quietly made them coherent fails rather than passes.
-8. One test computes the *old* wall-clock expression over fixture 2's readings and asserts it differs
+*(Revision 3 corrects revision 2's claim here. Revision 2 said every step fixture asserts its own
+step is present. That is not achievable for the duration fixtures and the plan gate proved it: a
+stepped instant puts the whole divergence in its wall half, and no duration reads the wall half, so
+substituting a coherent instant leaves those fixtures green. They still catch a production
+regression back to wall subtraction, which is what they are for. What they cannot do is police the
+fixture generator, so the controls below carry that instead.)*
+
+9. One test computes the *old* wall-clock expression over fixture 2's readings and asserts it differs
    from the new result, pinning that the fixture exercises the defect.
+10. One test asserts directly that a stepped instant's wall and monotonic halves disagree by the
+    stated amount, so a generator that quietly made them coherent fails here.
+11. The anchor fixtures (7, 8) *are* wall-sensitive by construction and need no separate control.
 
-**Live Activity stability.** Revision 1's fixture here was the trap: an existing test already asserts
-the paused clock is identical across twenty ticks (`RideSessionCoordinatorTests.swift:293`,
-`RideActiveClockTests.swift:68`), it is green today, and it stays green whether or not the jitter
-exists — because both it and the D7 shim put every reading on `Date`'s coarse grid, which is the
-exact condition that makes the cancellation exact. So:
+**Live Activity stability.** This is where both gates found unfalsifiable tests, from opposite
+directions, so the rule is explicit: **these fixtures run through the coordinator, not through
+`RideActiveClock.make`.** After D5, `make`'s paused branch is a field copy — a pure-function test
+over it asserts that a constant equals itself and cannot fail for any implementation. The place
+stability can actually break is the wiring: whether `activeSecondsAtPause` and `anchorPausedSince`
+hold still while `align` runs and the ticker turns.
 
-9. The stability test runs against a monotonic origin at **production magnitude** (near zero, not
-   near 8e8) with tick intervals that are not exact binary fractions, which is where a mixed-clock
-   derivation loses cancellation. Assert one distinct payload across forty ticks of a stop.
-10. Its negative control: the pre-D5 expression (`activeSeconds` recomputed per tick from a
-    monotonic elapsed and a wall `now`) over the same readings yields more than one distinct value.
-    If this control ever passes, fixture 9 is not testing anything.
-11. A tick carrying a step produces exactly one distinct new payload and a `.push`.
-12. `decide` returns `.push` within one coalesce interval after a backward step (D6), driven on
+12. Forty coordinator ticks across a stop, each running `refreshElapsed` *and* `pushActivityUpdate`,
+    produce one distinct pushed clock. Driven at production magnitude with tick intervals that are
+    not exact binary fractions, because `Date`-magnitude readings on exact half-seconds are the
+    condition under which the old arithmetic cancelled exactly and the old version of this test
+    could not fail.
+13. The same forty ticks with a sub-threshold divergence of 1.9 s still produce one distinct clock,
+    so slew alone cannot make `align` flap and turn a café stop into a push every four seconds.
+14. A tick carrying a real step produces exactly one distinct new clock and a `.push`, and the ticks
+    after it are identical again.
+15. `decide` returns `.push` within one coalesce interval after a backward step (D6), driven on
     `secondsSinceLastPush`.
+
+The four `RideActiveClock` tests that today pin the paused branch's arithmetic
+(`RideActiveClockTests.swift:45,58,68,81`) lose their subject when that arithmetic moves into
+`RideRecorder.pause(at:)`. They move with it, as recorder-level tests in `AuraKitTests` — including
+the "second stop freezes active time net of the first stop" case and the clamp-at-zero case, which
+`RideOpenStop` does not enforce and the recorder now must.
 
 **Regression.** Recorder, coordinator, duration, active-clock, mapper, store and golden-ride suites
 run through the D7 seam. Two suites are edited, not shimmed: `ActiveTimeAgreementTests` and
@@ -432,8 +508,13 @@ only synchronous zeroing on the reused-coordinator path.
 
 ## Device verification
 
-The bug needs a clock change, so the pass is scripted rather than impressionistic. Recorded on the
-issue as the ROH-130 device pass.
+The bug needs a clock change, so the pass is scripted rather than impressionistic.
+
+**It gets its own Linear issue, and the merge does not close it.** *(New in revision 3.)* Nothing
+in the package suite can see the Lock Screen, which is where this change's worst failure mode lives
+and where a navigated ride's only active-time reading is. This repo has also watched a merged PR
+auto-complete a verification issue in Linear that nobody performed, so the device pass is tracked
+separately from ROH-130 rather than as a line in its description.
 
 1. **No-step control first.** Ride two minutes, pause for two minutes, resume, End. With
    `log stream --predicate 'subsystem == "app.aura"'` counting activity updates, confirm the stop
@@ -444,9 +525,13 @@ issue as the ROH-130 device pass.
    keeps moving throughout.
 3. **Forward step during a stop.** Pause, note the chip, set the date forward one minute. Expect: the
    chip keeps counting from where it was, and the TIME cell stays frozen.
-4. **End and read the summary**, then open History. Expect: active equals the last TIME cell reading;
+4. **Step, then pause** — the case revision 2 got wrong, in both directions. While riding, change
+   the date by a minute, wait for the Lock Screen to settle, then pause. Expect: the Lock Screen's
+   stop timer starts at 0:00 and counts *up*. A timer that opens at 0:60, or one that counts down,
+   is the double-correction defect.
+5. **End and read the summary**, then open History. Expect: active equals the last TIME cell reading;
    elapsed equals active plus the stop; and the History row's start time is the one shown at Start.
-   Step 4 is where D3 is observable at all, and revision 1's device pass never opened either screen.
+   Step 5 is where D3 is observable at all, and revision 1's device pass never opened either screen.
 
 iOS's Date & Time picker zeroes the seconds, so the applied step is one minute minus the current
 seconds. Read it off the clock before changing it rather than assuming 60.
@@ -457,7 +542,10 @@ seconds. Read it off the clock before changing it rather than assuming 60.
 |---|---|
 | The 2 s threshold is a fudge factor | It is. Its only consumer is the Live Activity anchor (D5), where 2 s is below what the surface renders. It no longer governs anything persisted or rider-facing. |
 | `endedAt` lands ahead of the wall clock after a backward step | Nothing renders it. The plan checks `WorkoutData` and `RideWorkoutGate` tolerate it, and it makes `RideDuration`'s checkpoint disqualifier harder to trip, not easier. |
-| The Live Activity push rate regresses on rides with no step | Fixture 9 with a production-magnitude origin, plus fixture 10 as its negative control, plus device step 1. Revision 1's version of this test could not fail. |
+| The Live Activity push rate regresses on rides with no step | Fixtures 12–14, driven through the coordinator at production magnitude, plus device step 1. Both earlier versions of this test could not fail — revision 1's because the arithmetic cancelled exactly at `Date` magnitude, revision 2's because it tested a field copy against itself. |
+| An anchor is corrected twice, or not at all | Each stamp carries the offset in force when it was taken (D5), and fixtures 7 and 8 cover step-then-pause in both directions. This is the defect the plan gate found in revision 2 and it had no test at any level. |
+| `align` flaps and pushes every coalescing interval | It is idempotent, so a correction leaves `delta` at zero and the next one has to re-accumulate the whole threshold. Fixture 13 pins that a sub-threshold divergence changes nothing. |
+| The Health workout write silently produces nothing for a backward-stepped ride | `WorkoutWriter`'s `catch` swallows failures, so the plan reads the builder call itself rather than only the two pure types that feed it. If `HKWorkoutBuilder` rejects a future end date, that is a stop-and-report, not a clamp. |
 | `RideInstant` threading misses a call site | Required at every boundary, so a miss is a compile error. The one escape hatch is a build script (D7). |
 | `RideInstant.now` samples two clocks non-atomically | With no stamp mutation and no persisted threshold, a descheduled sample perturbs one reading's pair and nothing else. The only consumer of wall-vs-monotonic agreement is `wallOffset`, which self-corrects on the next tick. |
 | The summary's moving cell still rides the wall clock | Named in scope-out, filed as a follow-up. The summary shows active, elapsed and moving together, so a step makes them disagree until that lands. |
