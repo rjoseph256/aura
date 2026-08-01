@@ -42,7 +42,6 @@ struct RideSummaryView: View {
 
     private var stats: RideStats { ride.stats ?? .zero }
     private var fmt: RideStatsFormatter { RideStatsFormatter(units: settings.units) }
-    private var metric: Bool { settings.units == .metric }
     private var routeSegments: [[Coordinate]] {
         ride.segments.map { $0.points.map(\.coordinate) }.filter { $0.count > 1 }
     }
@@ -275,10 +274,37 @@ struct RideSummaryView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Pure string formatting only — `ViewThatFits` measures its candidates, so this is built more
+    /// than once per body pass and must stay cheap. That is why `RideSummaryStats` takes scalars
+    /// and never touches the track.
     @ViewBuilder private var supportingCells: some View {
-        stat(fmt.minutes(stats.movingTimeSeconds), "moving", id: RideTestID.summaryMoving)
-        stat(fmt.speedValue(stats.maxSpeedMetersPerSecond, decimals: 1),
-             metric ? "km/h top" : "mph top")
+        let summary = RideSummaryStats(duration: ride.duration,
+                                       movingTimeSeconds: stats.movingTimeSeconds,
+                                       maxSpeedMetersPerSecond: stats.maxSpeedMetersPerSecond,
+                                       units: settings.units)
+        activeCell(summary)
+        stat(summary.movingValue, "moving", id: RideTestID.summaryMoving)
+        stat(summary.topSpeedValue, summary.topSpeedLabel)
+    }
+
+    /// Active time, with elapsed as a subordinate caption rather than a fourth peer cell — the
+    /// rider watched active on the HUD, and elapsed only explains the gap when there is one. The
+    /// caption is absent on an unpaused ride, where it would repeat the value above it.
+    private func activeCell(_ summary: RideSummaryStats) -> some View {
+        VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
+            StatPair(value: summary.activeValue, label: "active",
+                     context: .brand, alignment: .leading)
+            if let caption = summary.elapsedCaption {
+                // Contrast-aware, unlike `StatPair`'s own label: this line is the smallest text
+                // in the cell, so it is the first thing Increase Contrast needs to help with.
+                Text(caption)
+                    .font(.caption2)
+                    .foregroundStyle(AuraTheme.secondaryText(contrast))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(summary.activeAccessibilityLabel)
+        .accessibilityIdentifier(RideTestID.summaryActive)
     }
 
     /// One value+label metric, left-aligned, combined into a single VoiceOver element.
@@ -288,8 +314,35 @@ struct RideSummaryView: View {
             .accessibilityIdentifier(id ?? "")
     }
 
-    // MARK: Share-sheet swap latch
+    // MARK: Behavior
 
+    private func startAppearance() {
+        // `revealed` drives the per-section staggered reveal via their .animation(value:)
+        // modifiers, which are themselves nil under Reduce Motion; the count-up animates the
+        // Animatable CountUpText separately, and is skipped on the same terms `heroDistance`
+        // skips it so the two can't disagree about which value is on screen.
+        revealed = true
+        if reduceMotion || ride.isUnfinished {
+            animatedMeters = stats.distanceMeters
+        } else {
+            withAnimation(.easeOut(duration: 0.7)) { animatedMeters = stats.distanceMeters }
+        }
+    }
+
+    /// "Longest ride yet" when this ride's distance is the max across all saved rides (and
+    /// there's more than one). Reads the lightweight `summaries()` projection rather than
+    /// faulting every ride's externally-stored track.
+    private func computeRecord() {
+        let summaries = (try? store.summaries()) ?? []
+        isLongest = RideAggregator.isLongest(rideID: ride.id,
+                                             distanceMeters: stats.distanceMeters,
+                                             among: summaries)
+    }
+}
+
+// MARK: Share-sheet swap latch
+
+extension RideSummaryView {
     /// Assign the upgraded card, unless a share sheet is up — in which case hold it until the
     /// sheet is gone.
     ///
@@ -337,31 +390,6 @@ struct RideSummaryView: View {
                 self.deferredUpgrade = nil
             }
         }
-    }
-
-    // MARK: Behavior
-
-    private func startAppearance() {
-        // `revealed` drives the per-section staggered reveal via their .animation(value:)
-        // modifiers, which are themselves nil under Reduce Motion; the count-up animates the
-        // Animatable CountUpText separately, and is skipped on the same terms `heroDistance`
-        // skips it so the two can't disagree about which value is on screen.
-        revealed = true
-        if reduceMotion || ride.isUnfinished {
-            animatedMeters = stats.distanceMeters
-        } else {
-            withAnimation(.easeOut(duration: 0.7)) { animatedMeters = stats.distanceMeters }
-        }
-    }
-
-    /// "Longest ride yet" when this ride's distance is the max across all saved rides (and
-    /// there's more than one). Reads the lightweight `summaries()` projection rather than
-    /// faulting every ride's externally-stored track.
-    private func computeRecord() {
-        let summaries = (try? store.summaries()) ?? []
-        isLongest = RideAggregator.isLongest(rideID: ride.id,
-                                             distanceMeters: stats.distanceMeters,
-                                             among: summaries)
     }
 }
 

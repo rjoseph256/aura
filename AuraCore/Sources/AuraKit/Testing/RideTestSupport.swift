@@ -27,6 +27,9 @@ public enum RideTestID {
     public static let hudStats = "ride.hud.stats"
     public static let previewStart = "preview.start"
     public static let summaryDistance = "summary.distance"
+    /// The summary's active-time cell. It is one combined element with an explicit label, so the
+    /// label carries both numbers when the ride was paused: "Active time, 38 min. Elapsed, 48 min."
+    public static let summaryActive = "summary.active"
     /// The summary's moving-time cell. It discriminates a segmented save (≈4 min) from a
     /// flattened one (≈14 min) — ROH-103's most timing-independent assertion, since moving
     /// time comes from the fixture's own stamps rather than wall clock.
