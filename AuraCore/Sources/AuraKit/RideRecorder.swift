@@ -267,9 +267,17 @@ public final class RideRecorder {
         let start = startedAt ?? instant.date
         // Derived, not `instant.date`: `endedAt - startedAt` is this ride's elapsed time, and a
         // wall pair spanning a clock step is not (ROH-130 D3). After a backward step this sits
-        // slightly ahead of the current wall clock; nothing renders `endedAt`, and the alternative
-        // is a wrong duration on the number the summary leads with.
+        // slightly ahead of the current wall clock, which the two readers of `endedAt` both
+        // tolerate — and both want, because both use it as the far end of a duration.
+        // `WorkoutData.init(from:)` hands it to HealthKit as the workout's end date, so a
+        // corrected ride banks the right workout length at the cost of ending a few seconds in
+        // the future; `WidgetSnapshot` carries it for the same duration arithmetic. The
+        // alternative is a wrong duration on the number the summary leads with.
         let ended = start.addingTimeInterval(elapsedSeconds(asOf: instant))
+        // Cleared with the stop it belongs to, like the three fields `closePause` clears. Leaving
+        // it set hands the Live Activity's paused payload half a pair: a frozen active time with
+        // no `pausedSince` to go with it.
+        activeSecondsAtPause = nil
         state = .idle
         return Ride(id: rideID, kind: kind, startedAt: start, endedAt: ended,
                     segments: normalizedSegments, stats: stats, pausedSeconds: paused,

@@ -188,6 +188,17 @@ import AuraCore
         #expect(r.activeSecondsAtPause == 840)
     }
 
+    /// Ending while paused clears both halves of the stop. `closePause` clears `pausedSince` and
+    /// its monotonic partner; leaving the frozen active time behind would hand a consumer that
+    /// reads both — as the Live Activity's paused payload does — half a pair.
+    @Test func endingAPausedRideClearsBothHalvesOfTheStop() {
+        let r = startedRecorder()
+        r.pause(at: .coherent(t0.addingTimeInterval(600)))
+        r.end(at: .coherent(t0.addingTimeInterval(900)))
+        #expect(r.activeSecondsAtPause == nil)
+        #expect(r.pausedSince == nil)
+    }
+
     @Test func activeSecondsAtPauseDoesNotMoveDuringTheStopAndClearsOnResume() {
         let r = startedRecorder()
         r.pause(at: .coherent(t0.addingTimeInterval(600)))

@@ -72,7 +72,11 @@ public final class RideSessionCoordinator {
     /// the clock themselves, so without a seam a test could inject instants into `refreshElapsed`
     /// and leave the recorder holding two different monotonic origins — which computes stops of
     /// tens of millions of seconds while `>=` assertions keep passing (ROH-130 D7).
-    @ObservationIgnored private let clock: any RideClocking
+    ///
+    /// Internal rather than private only so the test target's `Date` overloads can refuse to run
+    /// against a real clock — see `RideClockTestSupport.requireFakeClock`. Nothing in the module
+    /// reads it outside this file.
+    @ObservationIgnored let clock: any RideClocking
 
     // Stashed at start() for the rest of the ride.
     private var location: (any LocationStreaming)?

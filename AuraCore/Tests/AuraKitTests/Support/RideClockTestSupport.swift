@@ -73,8 +73,39 @@ extension RideRecorder {
 
 @MainActor
 extension RideSessionCoordinator {
-    func refreshElapsed(now date: Date) { refreshElapsed(now: .coherent(date)) }
-    func pushActivityUpdate(now date: Date) { pushActivityUpdate(now: .coherent(date)) }
-    func pause(at date: Date) { pause(at: .coherent(date)) }
-    func resume(at date: Date) { resume(at: .coherent(date)) }
+    /// **These overloads only work on a `FakeRideClock`, and trap otherwise.**
+    ///
+    /// `.coherent`'s monotonic origin is `timeIntervalSinceReferenceDate` (~8e8);
+    /// `SystemRideClock`'s is process uptime (~0). A coordinator on a real clock that is then
+    /// driven through one of these puts the recorder's start and its reads about 25 years apart
+    /// and computes stops of hundreds of millions of seconds — the exact defect the seam exists to
+    /// prevent, and one that hides behind the `>=`-shaped assertions these suites are full of.
+    ///
+    /// A convention would not hold: `RideSessionCoordinatorPauseTests` legitimately injects a
+    /// `SystemRideClock`, so the hazardous combination is one line away from working code.
+    private func requireFakeClock(_ caller: StaticString = #function) {
+        precondition(clock is FakeRideClock, """
+            \(caller): the `Date` overloads build instants with `RideInstant.coherent`, whose \
+            monotonic origin is ~8e8 seconds away from \(type(of: clock))'s. Mixing them yields \
+            durations in the tens of millions. Inject a `FakeRideClock`, or drive this \
+            coordinator with instants taken from its own clock.
+            """)
+    }
+
+    func refreshElapsed(now date: Date) {
+        requireFakeClock()
+        refreshElapsed(now: .coherent(date))
+    }
+    func pushActivityUpdate(now date: Date) {
+        requireFakeClock()
+        pushActivityUpdate(now: .coherent(date))
+    }
+    func pause(at date: Date) {
+        requireFakeClock()
+        pause(at: .coherent(date))
+    }
+    func resume(at date: Date) {
+        requireFakeClock()
+        resume(at: .coherent(date))
+    }
 }
