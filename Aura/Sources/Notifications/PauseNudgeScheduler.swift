@@ -31,8 +31,11 @@ final class PauseNudgeScheduler: NSObject, RideNudgeScheduling {
     /// raise a system prompt. `requestAuthorization` puts a SpringBoard alert over the HUD
     /// seconds into both `RideE2EUITests` methods, and unlike location there is no
     /// `xcrun simctl privacy` service that could pre-grant it on a freshly installed app, so
-    /// every tap the test makes afterwards lands on SpringBoard. The pause nudges themselves
-    /// are left wired: the harness never pauses, and adding requests prompts nobody.
+    /// every tap the test makes afterwards lands on SpringBoard.
+    /// `scheduleForgottenPauseNudges` is skipped for the same reason. Until ROH-103 the harness
+    /// never paused, so leaving the nudges wired was harmless; the E2E now pauses four times a
+    /// run, and a run that aborts mid-pause would leave its requests alive in that simulator to
+    /// fire ten to a hundred and twenty minutes later, over whatever is running then.
     func prepareAuthorization() {
         #if DEBUG
         if SimulatedRideConfig.current != nil { return }
@@ -47,6 +50,9 @@ final class PauseNudgeScheduler: NSObject, RideNudgeScheduling {
     }
 
     func scheduleForgottenPauseNudges(startingAt: Date) {
+        #if DEBUG
+        if SimulatedRideConfig.current != nil { return }
+        #endif
         cancelForgottenPauseNudges()
         // Anchored to the tap rather than to now. In practice these are the same instant, since
         // this is called synchronously from `pause()`; the elapsed subtraction only matters if a

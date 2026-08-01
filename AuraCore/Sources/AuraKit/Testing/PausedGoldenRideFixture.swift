@@ -23,6 +23,10 @@ import AuraCore
 public enum PausedGoldenRideFixture {
     public static let expectedSegmentCount = 2
     public static let expectedSegmentPointCounts = [30, 30]
+    /// Per-segment distance, so a test can ride to a segment boundary deterministically
+    /// instead of guessing at it (ROH-103 spec D4). Sums to `expectedDistanceMeters`;
+    /// `segmentDistancesSumToTheRideDistance` holds the three literals to that.
+    public static let expectedSegmentDistanceMeters: [Double] = [941.5986388261883, 941.7472293796404]
     public static let expectedPointCount = 60
 
     /// Segment-aware truth: the pause contributes no distance, no moving time, no climb.
@@ -54,5 +58,10 @@ public enum PausedGoldenRideFixture {
                     segments: segments,
                     stats: RideStatsCalculator.stats(segments: segments),
                     routeId: nil, destinationPlaceId: nil)
+    }
+
+    @MainActor
+    public static func simulatedProvider(multiplier: Double) throws -> SimulatedLocationProvider {
+        SimulatedLocationProvider(track: try track(), speedMultiplier: multiplier)
     }
 }

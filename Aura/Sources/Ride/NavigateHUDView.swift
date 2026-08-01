@@ -154,7 +154,9 @@ struct NavigateHUDView: View {
         }
         .simulatedRideProbe(distanceMeters: coordinator.stats.distanceMeters,
                             elapsed: coordinator.elapsed,
-                            elevationGainMeters: coordinator.stats.elevationGainMeters)
+                            elevationGainMeters: coordinator.stats.elevationGainMeters,
+                            speedMetersPerSecond: coordinator.currentSpeedMetersPerSecond,
+                            segmentCount: coordinator.segments.count)
         // Rerouting cue — centered below the turn card
         .overlay(alignment: .top) {
             if guidance.isRerouting {

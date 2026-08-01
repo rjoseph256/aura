@@ -38,6 +38,17 @@ struct SimulatedRideConfigTests {
         #expect(!SimulatedRideConfig.forcesInMemoryStore(arguments: ["App"]))
     }
 
+    @Test func parseAcceptsThePausedFixture() {
+        let config = SimulatedRideConfig.parse(arguments: ["App", "-auraSimulatedRide", "paused"])
+        #expect(config?.fixture == "paused")
+    }
+
+    @Test func parseRejectsAnUnknownFixtureName() {
+        // Spec D1: an unrecognised name must turn the whole harness off, not just the ride
+        // stream — every `current != nil` site keys off it.
+        #expect(SimulatedRideConfig.parse(arguments: ["App", "-auraSimulatedRide", "pasued"]) == nil)
+    }
+
     @Test func skipOrphanSweepFlag() {
         #expect(SimulatedRideConfig.suppressesOrphanSweep(arguments: ["App", "-skipOrphanSweep"]))
         #expect(!SimulatedRideConfig.suppressesOrphanSweep(arguments: ["App"]))

@@ -64,6 +64,20 @@ struct PausedGoldenRideFixtureTests {
         #expect(WorkoutData(from: ride).route.count == PausedGoldenRideFixture.expectedPointCount)
     }
 
+    /// Three literals describe the same track and must agree. Nothing checked that they did.
+    @Test func segmentDistancesSumToTheRideDistance() throws {
+        let perSegment = PausedGoldenRideFixture.expectedSegmentDistanceMeters
+        #expect(perSegment.count == PausedGoldenRideFixture.expectedSegmentCount)
+        #expect(close(perSegment.reduce(0, +), PausedGoldenRideFixture.expectedDistanceMeters))
+
+        // And they are the frozen truth, not a recomputation: each matches the fixture.
+        let segments = try PausedGoldenRideFixture.track().segments
+        for (index, segment) in segments.enumerated() {
+            #expect(close(RideStatsCalculator.stats(segments: [segment]).distanceMeters,
+                          perSegment[index]))
+        }
+    }
+
     /// Re-record helper, mirroring `GoldenRideFixtureTests.recordTruthLiterals`. Run with
     /// GOLDEN_RECORD=1 and paste the printed literals. Skipped otherwise.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["GOLDEN_RECORD"] != nil))
@@ -71,10 +85,14 @@ struct PausedGoldenRideFixtureTests {
         let track = try PausedGoldenRideFixture.track()
         let segmented = RideStatsCalculator.stats(segments: track.segments)
         let flat = RideStatsCalculator.stats(from: track.points)
+        let perSegment = track.segments.map {
+            RideStatsCalculator.stats(segments: [$0]).distanceMeters
+        }
         print("""
         GOLDEN_RECORD (paused) →
             expectedSegmentCount = \(track.segments.count)
             expectedSegmentPointCounts = \(track.segments.map(\.points.count))
+            expectedSegmentDistanceMeters = \(perSegment)
             expectedPointCount = \(track.points.count)
             expectedDistanceMeters = \(segmented.distanceMeters)
             expectedElevationGainMeters = \(segmented.elevationGainMeters)
