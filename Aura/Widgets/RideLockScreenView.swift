@@ -2,6 +2,7 @@ import SwiftUI
 import WidgetKit
 import ActivityKit
 import AuraKit
+import AuraCore
 
 /// The Lock Screen presentation of the in-progress-ride Live Activity — the primary
 /// surface (every device shows it; Dynamic Island is supplementary). Two layouts:
@@ -39,10 +40,13 @@ struct RideLockScreenView: View {
 
     private var freeRide: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header(title: "Explore", glyph: "bicycle", imminent: false)
+            header(title: "Explore", glyph: rideActivityGlyph(nav: false, paused: state.isPaused,
+                                                               turnGlyph: nil),
+                   imminent: false)
 
             HStack(alignment: .top, spacing: 12) {
-                RideTimerStatCell(start: attributes.startedAt, label: "TIME")
+                RideTimerStatCell(clock: state.activeClock(startedAt: attributes.startedAt),
+                                  label: "TIME")
                     .frame(maxWidth: .infinity, alignment: .leading)
                 RideStatCell(value: fmt.distanceValue(state.distanceMeters),
                              label: fmt.distanceUnit.uppercased())
@@ -55,17 +59,18 @@ struct RideLockScreenView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Explore in progress")
+        .accessibilityLabel(freeRideAccessibilityLabel)
     }
 
     // MARK: Navigate
 
     private var navigate: some View {
-        let imminent = rideActivityIsImminent(state.turnDistanceMeters)
+        let imminent = rideActivityIsImminent(state.turnDistanceMeters, isPaused: state.isPaused)
         let turnTint = imminent ? AuraTheme.accent : AuraTheme.textPrimary
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                AuraGlyph(systemName: state.turnGlyphSystemName ?? "arrow.turn.up.right",
+                AuraGlyph(systemName: rideActivityGlyph(nav: true, paused: state.isPaused,
+                                                        turnGlyph: state.turnGlyphSystemName),
                           imminent: imminent, size: 38)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(turnDistanceText)
@@ -80,11 +85,12 @@ struct RideLockScreenView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                RideStatusPill(isStale: context.isStale)
+                RideStatusPill(isPaused: state.isPaused, isStale: context.isStale)
             }
 
             HStack(alignment: .top, spacing: 12) {
-                RideTimerStatCell(start: attributes.startedAt, label: "TIME")
+                RideTimerStatCell(clock: state.activeClock(startedAt: attributes.startedAt),
+                                  label: "TIME")
                     .frame(maxWidth: .infinity, alignment: .leading)
                 RideStatCell(value: fmt.distanceValue(state.distanceMeters),
                              label: fmt.distanceUnit.uppercased())
@@ -97,7 +103,7 @@ struct RideLockScreenView: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Navigating. Next: \(instructionText), \(turnDistanceText)")
+        .accessibilityLabel(navigateAccessibilityLabel)
     }
 
     private func destinationCell(_ name: String) -> some View {
@@ -122,7 +128,7 @@ struct RideLockScreenView: View {
                 .font(.system(.subheadline, design: .rounded).weight(.semibold))
                 .foregroundStyle(AuraTheme.textPrimary)
             Spacer(minLength: 8)
-            RideStatusPill(isStale: context.isStale)
+            RideStatusPill(isPaused: state.isPaused, isStale: context.isStale)
         }
     }
 
@@ -137,5 +143,31 @@ struct RideLockScreenView: View {
 
     private var instructionText: String {
         state.turnInstruction ?? "Navigating…"
+    }
+
+    /// Folds `context.isStale` in alongside `isPaused` so VoiceOver distinguishes all four
+    /// states `RideStatusPill` can show. `.accessibilityElement(children: .combine)` followed by
+    /// `.accessibilityLabel` REPLACES the merged children's text rather than adding to it, so the
+    /// pill's own "NOT UPDATING" is never spoken unless it is folded in here — otherwise a rider
+    /// on a jetsam-killed, paused ride hears only "Explore paused," with no hint that nothing is
+    /// updating (spec D6).
+    private var freeRideAccessibilityLabel: String {
+        switch (state.isPaused, context.isStale) {
+        case (true, true): return "Explore paused, not updating"
+        case (true, false): return "Explore paused"
+        case (false, true): return "Explore in progress, not updating"
+        case (false, false): return "Explore in progress"
+        }
+    }
+
+    /// See `freeRideAccessibilityLabel` — same composition rule, applied to the navigate layout.
+    private var navigateAccessibilityLabel: String {
+        let next = "Next: \(instructionText), \(turnDistanceText)"
+        switch (state.isPaused, context.isStale) {
+        case (true, true): return "Navigating, paused, not updating. \(next)"
+        case (true, false): return "Navigating, paused. \(next)"
+        case (false, true): return "Navigating, not updating. \(next)"
+        case (false, false): return "Navigating. \(next)"
+        }
     }
 }

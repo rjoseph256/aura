@@ -70,7 +70,9 @@ public final class RideSessionCoordinator {
     // Stashed at start() for the rest of the ride.
     private var location: (any LocationStreaming)?
     private var saving: (any RideSaving)?
-    private var startedAt: Date?
+    // public (not private), like pushActivityUpdate is internal, so a test can read the anchor
+    // the activity's clock is built from.
+    public private(set) var startedAt: Date?
     private var saveToHealth = false
     private var groupSink: (any GroupLocationSink)?
     private var discoverySink: (any RideDiscoverySink)?
@@ -230,16 +232,23 @@ public final class RideSessionCoordinator {
     /// The flush is the expensive part (a full-track encode and a mirrored write, in this same
     /// turn). One per manual pause is fine; auto-pause, which fires at every red light, will
     /// have to make it incremental or move it off the tap.
-    public func pause() {
+    public func pause() { pause(at: Date()) }
+
+    func pause(at now: Date) {
         guard recorder.isRecording, !recorder.isPaused else { return }
-        let now = Date()
         recorder.pause(at: now)
         haptics.play(.pause)
         // Before anything that can yield: an arrival draining after the pause but before
-        // guidance knows about it would end the ride under the rider. `haptics.play` above and
-        // `scheduleNudges` below are both synchronous, so neither opens that window.
+        // guidance knows about it would end the ride under the rider. `haptics.play` above,
+        // `pushActivityUpdate` below, and `scheduleNudges` further down are all synchronous, so
+        // none of them opens that window.
         pauseObserver?.rideDidSetPaused(true)
         refreshElapsed(now: now)
+        // Before flushCheckpoint, which is a full-track encode and a mirrored write in this same
+        // turn (see its doc comment) at the instant a jetsam kill is most likely. The rider's
+        // Lock Screen learns about the stop first. Creating a Task does not suspend this
+        // function, so the no-yield window above is unaffected.
+        pushActivityUpdate(now: now)
         // Belt-and-braces, and honestly labelled as such: `start()` and `resume()` both zero
         // this, and `recorder.currentPauseSeconds` returns zero whenever no stop is open, so the
         // value reaching here is already zero on every path today. Deleting this line breaks no
@@ -264,15 +273,17 @@ public final class RideSessionCoordinator {
 
     /// Resume recording: open the next segment and re-acquire the screen. A no-op unless the
     /// ride is paused.
-    public func resume() {
+    public func resume() { resume(at: Date()) }
+
+    func resume(at now: Date) {
         guard recorder.isPaused else { return }
-        let now = Date()
         recorder.resume(at: now)
         haptics.play(.resume)
         nudges.cancelForgottenPauseNudges()
         currentPauseSeconds = 0
         pauseObserver?.rideDidSetPaused(false)
         refreshElapsed(now: now)
+        pushActivityUpdate(now: now)
         screen.setKeepAwake(true)
     }
 
@@ -302,13 +313,21 @@ public final class RideSessionCoordinator {
         }
     }
 
-    /// Pushes current stats + maneuver to the Live Activity. Factored out so a test can
-    /// call it directly instead of waiting on the 0.5 s ticker. The production activity
-    /// conformer throttles internally; test doubles record every call.
-    func pushActivityUpdate() {
+    /// Pushes current stats, the maneuver and the clock. Factored out so a test can call it
+    /// directly instead of waiting on the 0.5 s ticker; `now` is injectable for the same reason.
+    /// The controller decides whether the push actually goes out.
+    ///
+    /// `pausedSeconds(asOf: now)` and `now` must be the same instant — that coupling is what
+    /// keeps the paused clock constant through a stop (`RideActiveClock.make`).
+    func pushActivityUpdate(now: Date = Date()) {
+        guard let startedAt else { return }
         activity.update(stats: recorder.stats,
                         currentSpeedMetersPerSecond: recorder.currentSpeedMetersPerSecond,
-                        maneuver: maneuver)
+                        maneuver: maneuver,
+                        activeClock: .make(startedAt: startedAt,
+                                           pausedSeconds: recorder.pausedSeconds(asOf: now),
+                                           pausedSince: recorder.pausedSince,
+                                           now: now))
     }
 
     /// Idempotent on `isRecording`: the End-ride button and a navigate arrival can both
