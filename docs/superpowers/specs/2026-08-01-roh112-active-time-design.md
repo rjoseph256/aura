@@ -83,8 +83,15 @@ extension RideDuration {
 ```
 
 `RideActiveClock.make` and `refreshElapsed` are rewritten to call it, keeping their existing
-behavior byte-for-byte. A test drives the same inputs through the live path and the finished path
-and asserts equality, following `RideSummaryUnfinishedTests.rideAgreesWithItsSummaryProjection`.
+behavior byte-for-byte. Two guards keep them there: a test driving the same inputs through
+`RideActiveClock.make` and `RideDuration`, and a grep asserting the subtraction appears exactly
+once in the source tree.
+
+`refreshElapsed` gets no direct equality test. Its `startedAt` is private and stamped from
+`Date()` inside `start()`, so a test cannot supply both sides of the comparison; the grep and its
+existing suite (`RideSessionCoordinatorPauseTests`) are what hold it. Said here rather than left
+implied, because a test that claims three callers and checks two is the coverage drift ROH-103's
+review caught twice.
 
 Revision 1 proposed clamping paused into `0...elapsed` here, which disagrees with the two existing
 implementations on a negative `pausedSeconds`. The shared primitive removes the question.
@@ -140,9 +147,9 @@ test:
 
 The `max(0, ...)` on elapsed guards a degenerate recorder state, not a device clock: `startedAt ??
 date` in `checkpoint(at:)` collapses to a zero interval when the recorder never started. It is
-paired with an `assertionFailure` in DEBUG and a `Logger` line in release, following
-`RideMigrationPlan.swift:38`, because a silent clamp is how a future auto-pause accounting bug
-would ship as "active time is a bit low" and never get reported.
+paired with an `assertionFailure`, which is loud in DEBUG and CI and non-fatal in release, exactly
+as `RideMigrationPlan.swift:38` handles an undecodable stats blob. A silent clamp is how a future
+auto-pause accounting bug would ship as "active time is a bit low" and never get reported.
 
 ### D4 — Summary layout: active with a conditional elapsed caption, moving retained
 
@@ -209,8 +216,8 @@ Package tests, which run on the macOS CI host:
 
 * `RideDurationTests`: nil for an unfinished ride (both the checkpoint case and the legacy nil-end
   case), the elapsed clamp, and a pre-pause ride where active equals elapsed.
-* The cross-implementation test from D1: the same inputs through `refreshElapsed`,
-  `RideActiveClock.make` and `RideDuration` agree.
+* The cross-implementation test from D1: `RideActiveClock.make` and `RideDuration` agree on the
+  same inputs, plus the single-definition grep.
 * `RideSummaryStats`: a paused ride renders the caption, an unpaused ride does not, a sub-minute
   pause does not, an unfinished ride renders `—` with no caption, and all three accessibility
   label forms.
