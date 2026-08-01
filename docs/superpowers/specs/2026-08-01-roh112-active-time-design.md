@@ -222,7 +222,7 @@ than contradicted.
 The moving cell is kept because moving time is a real cycling metric that riders arriving from
 Strava or Garmin expect, and the summary is the surface with room for it. *(Corrected in revision
 2: revision 1 justified this by claiming the paused E2E would otherwise have nothing to read.
-That is false. `assertPausedHeroDistanceInBand` (`RideE2EUITests.swift:309-313`) bands the hero
+That is false. `assertPausedHeroDistanceInBand` (`RideE2EUITests.swift:316-331`) bands the hero
 distance specifically to exclude a flattened read, and the in-ride probe checks segment count and
 the gain band. The moving cell is one of four discriminators, not the only one.)* Its identifier,
 label and value expression stay unchanged regardless, so `assertMovingTimeIsSegmented` is
@@ -332,8 +332,10 @@ Device pass, per `CLAUDE.md`'s rule that UI is verified rather than asserted:
 
 * `RideActiveClock.make` and `refreshElapsed` are load-bearing live code being rewritten to route
   through a new primitive for no behavior change. Existing tests (`RideActiveClockTests`,
-  `RideSessionCoordinatorPauseTests`) are the guard, and the rewrite must not touch the clamping
-  comments at `RideActiveClock.swift:44-52`, which document a Live Activity countdown bug.
+  `RideSessionCoordinatorPauseTests`) are the guard. The clamp reasoning at
+  `RideActiveClock.swift:47-53` documents a Live Activity countdown bug and must survive the
+  rewrite; because the anchor changes from an addition to a subtraction, that comment is amended
+  to describe the form actually present rather than left stale.
 * The summary's stat row is the cell ROH-103's CI gate reads. That gate runs with
   `-retry-tests-on-failure -test-iterations 2`, so a layout change that makes the cell
   intermittently unreachable reports as flake rather than as a break.
