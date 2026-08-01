@@ -2,7 +2,7 @@
 
 Date: 2026-08-01
 Issue: [ROH-124](https://linear.app/rohun/issue/ROH-124/orphaned-live-activity-survives-a-jetsam-kill-and-never-clears)
-Status: revision 2, after a three-reviewer adversarial gate.
+Status: revision 3, after a three-reviewer spec gate and a two-reviewer plan gate.
 
 Found by the product-lens reviewer on
 [ROH-107](https://linear.app/rohun/issue/ROH-107). Related to Pass 5
@@ -75,9 +75,10 @@ conclusion holds; only its mechanism was wrong.
 safety argument:
 
 1. Read `Activity<RideActivityAttributes>.activities`.
-2. Compute the orphan set: every activity whose `id` is neither `self.activity?.id` nor a member
-   of `endingIDs` (D2).
-3. Spawn one `Task { @MainActor }` that awaits `end` on each captured activity in turn.
+2. Compute the orphan set: every activity that is not already `.ended` or `.dismissed`, and whose
+   `id` is neither `self.activity?.id` nor a member of `endingIDs` (D2).
+3. Insert those ids into `endingIDs`, then spawn one `Task { @MainActor }` that awaits `end` on
+   each captured activity in turn, removing each id as it completes.
 
 Because steps 1 and 2 contain no suspension point, no ride can start between the snapshot and the
 exclusion, and the set handed to step 3 can never contain an activity this process owns. The
@@ -97,12 +98,15 @@ recovered `Activity` exposes its content, so the payload is reachable, and Apple
 `end(_:dismissalPolicy:)` is to pass a final content update rather than nil. Under `.immediate`
 this is close to invisible, and it costs one line to follow the documented contract.
 
-**Implementation constraint.** The ends run sequentially on the main actor. They must not be
-parallelized with a `TaskGroup` or per-activity detached Tasks: `Activity` is non-Sendable, and
-capturing one in a child task's closure is a hard error rather than the 6.3-only region-isolation
-diagnostic the `@preconcurrency` note at `RideLiveActivityController.swift:1-8` suppresses.
+**Implementation constraint.** The ends run sequentially on the main actor, and must not be
+parallelized with a `TaskGroup` or per-activity detached Tasks. *Revision 2 justified this by
+claiming the parallel form is a hard compile error. A reviewer compiled it clean on the pinned
+6.2.4 toolchain in four configurations, so that is false: region isolation proves the send.* The
+real reasons are that there is nothing to gain from ending two dying activities at once, and that
+the parallel form multiplies exactly the `sending Activity` pattern ROH-116 was filed about and
+ROH-117's canary watches.
 
-## D2 — `endingIDs` closes the window `end()` opens
+## D2 — `endingIDs` is written by both paths that end anything
 
 `end()` nils `self.activity` synchronously (`:121`) and performs the ActivityKit end later,
 inside a Task that first drains `pushChain` (`:126-135`). Between those, the previous ride's
@@ -110,21 +114,41 @@ activity is still in `Activity.activities` and no longer owned, so a sweep in th
 end it out from under `end()`, bypassing the drain that `:129` exists to guarantee.
 
 `end()` therefore inserts the activity's `id` into `endingIDs: Set<String>` before spawning its
-Task and removes it after the end completes. The sweep excludes that set. The invariant is
-readable in one sentence: **the sweep ends only activities no live path in this process is
-already responsible for.**
+Task and removes it when that Task finishes, under `defer` so a path that never resumes normally
+cannot strand an id and blind every later sweep. The sweep excludes that set.
 
-*New in revision 2. Revision 1 asserted a division of labor between `end()` and `endOrphans()`
-that the code does not have.*
+**The sweep writes to it too.** Revision 2 stated the invariant as "the sweep ends only activities
+no live path in this process is already responsible for" and then made the sweep the one live path
+that recorded nothing. A cold launch fires both new call sites within milliseconds (D3), and
+ActivityKit's list removal is asynchronous, so the second sweep's snapshot still contains the
+ghost the first sweep is mid-way through ending. Both reviewers found this. `endOrphans()`
+therefore claims its orphan ids in `endingIDs` before spawning, exactly as `end()` does, and
+releases each as it completes. One set, two writers, one rule.
+
+Excluding `.ended` and `.dismissed` activities from the snapshot covers the tail of the same
+problem: `endingIDs.remove` fires when ActivityKit accepts the end, which is before the entry
+leaves `Activity.activities`.
+
+*New in revision 2, corrected in revision 3. Revision 1 asserted a division of labor between
+`end()` and `endOrphans()` that the code does not have.*
 
 ## D3 — Three call sites, none of them guarded on ride state
 
 **Top of `start()`, before everything.** The sweep runs as the first statement, ahead of the
-`areActivitiesEnabled` guard (`:47`) and ahead of `Activity.request`. A ghost occupies a slot
-against the device's concurrent-activity limit, and `Activity.request` throws when that limit is
-reached, so a sweep placed after a successful request is skipped in the exact case where it was
-needed. The existing defensive `end()` stays for the same-process case, which the sweep
-deliberately leaves to it.
+`areActivitiesEnabled` guard (`:47`) and ahead of `Activity.request`, for one reason: from there
+it runs unconditionally. Placed after a successful request, it is skipped when the rider has Live
+Activities turned off and skipped again when the request throws, leaving the ghost to outlive the
+whole session in both cases. The existing defensive `end()` stays for the same-process case,
+which the sweep deliberately leaves to it.
+
+*Revision 2 also claimed this ordering frees the ghost's slot before `Activity.request` runs, and
+that a slot-exhausted request was the case the ordering existed for. Both plan reviewers refuted
+it independently: `endOrphans()` is synchronous only up to spawning its Task, and `start()` never
+suspends, so no end can execute until after `Activity.request` has already returned. The claim is
+deleted rather than repaired. Recovering a genuinely slot-exhausted request would mean re-issuing
+it once the sweep drains, and with one ghost against Apple's per-app ceiling that case is
+speculative enough to leave alone. It is recorded here so a later reader does not rediscover the
+ordering and assume it was load-bearing.*
 
 **Launch, in its own `.task`.** Not the `.task` at `AuraApp.swift:160`. That closure is
 synchronous end to end, and its `guard backfill == nil` check-then-set is idempotent under scene
@@ -136,10 +160,9 @@ sweeps on one `ModelContainer`.
 whose first `Activity.request` threw, otherwise carries the ghost for the life of the process,
 which on iOS is days.
 
-*Reversal, twice. Revision 1 placed the start sweep after `Activity.request` succeeded, put the
-launch sweep in the backfill's `.task`, and declared a foreground sweep a non-goal on the grounds
-that "a process that is alive owns its activity through the singleton." That is false for any
-session that began with a ghost it never swept.*
+*Reversal. Revision 1 put the launch sweep in the backfill's `.task` and declared a foreground
+sweep a non-goal on the grounds that "a process that is alive owns its activity through the
+singleton." That is false for any session that began with a ghost it never swept.*
 
 No call site guards on `router.activeRideID == nil`. That flag is written by a SwiftUI
 `.onChange(of: coordinator.isRecording)` (`RideHUDView.swift:220-222`,
@@ -175,8 +198,8 @@ artifact in the system that says the ride happened. The sweep deletes it.
 That is accepted here, for two reasons. The number it deletes sits beside a clock that has been
 counting since the process died, so what is being removed is a half-true card the rider cannot
 act on, not a record. And the underlying defect is that nothing persists an unpaused ride, which
-this issue cannot fix without building periodic autosave. **It gets its own issue, filed at High,
-and it is a genuine cost of shipping this one.**
+this issue cannot fix without building periodic autosave. **It is [ROH-144](https://linear.app/rohun/issue/ROH-144), filed
+at High, and it is a genuine cost of shipping this one.**
 
 Two alternatives were rejected. A `widgetURL` plus deep-link route would push a screen onto a
 path whose rules ROH-85 fixed at some cost. A terminal "ride interrupted" `ContentState` would
@@ -190,16 +213,26 @@ suite runs on a macOS host where ActivityKit is unavailable, which is the real c
 SDK. It still cannot verify this change: XCUITest drives the app, not the Lock Screen, and the
 sweep's whole observable effect is on the Lock Screen.*
 
-With D1's policy deleted, this change has no unit-testable surface. That is the honest outcome
-and it is better than the alternative, which was a green test over the half that cannot be wrong.
-What guards it instead:
+With D1's policy deleted, almost nothing here is unit-testable. The one exception is real and a
+reviewer was right to find it: the `-skipOrphanSweep` predicate below has the same shape as
+`SimulatedRideConfig.forcesInMemoryStore(arguments:)`
+(`AuraKit/Testing/SimulatedRideConfig.swift:35-37`), which is host-tested
+(`SimulatedRideConfigTests.swift:36-39`). It goes in the same file, tested the same way, rather
+than being buried as a private computed property in a SwiftUI view.
 
-- The compile-level constraint in D1 is enforced by the toolchain canary
-  (`.github/workflows/ci.yml:117-135`), which builds on Swift 6.3 where the region-isolation
-  diagnostics are active.
-- The existing package suite must stay green, which catches the D2 change to `end()` breaking
-  any coordinator expectation.
-- Everything else is the device pass below.
+Everything else about this change is invisible to CI, and the spec would rather say that than
+pretend otherwise:
+
+- The package suite cannot see any of it. `RideSessionCoordinator`'s tests run against
+  `SpyRideActivity` (`RideSessionCoordinatorTests.swift:346`), and no host target links the app
+  target, so nothing tests the real `end()`. *Revision 2 listed the package suite as a guard here.
+  It is not one.*
+- SwiftLint runs `lint`, not `analyze`, so an unreferenced `endOrphans()` would draw no
+  complaint. That is why the implementation lands as one commit with its call sites rather than
+  as a primitive followed by wiring.
+- The toolchain canary (`.github/workflows/ci.yml:117-135`) catches a region-isolation regression
+  on 6.3, but it is deliberately outside branch protection, so it reports rather than blocks.
+- Everything that matters is the device pass below.
 
 **`RideActivityAttributes`'s decode rule becomes load-bearing for a second reason.** Its comment
 already requires every added field to be Optional or defaulted. A ghost written by the previous
@@ -231,10 +264,16 @@ and every later step passes whether or not the other two call sites exist.
 3. Repeat the kill, then relaunch with `-skipOrphanSweep` and start a new ride. Exactly one Aura
    activity may exist afterwards, showing the new ride, and it must still be updating a minute
    later. This is the step that proves the `start()` site.
-4. Repeat the kill with Live Activities disabled in Settings, launch with `-skipOrphanSweep`,
-   re-enable them, and start a ride. The ghost must be gone.
-5. Force quit by swiping up rather than killing from the debugger, and confirm steps 2 and 3
-   again. The problem statement claims these paths are equivalent; nothing has checked that.
+4. Repeat the kill, then turn Live Activities off for Aura in Settings. **First record whether the
+   ghost survives that toggle.** If iOS ends it there, this step proves nothing and should be
+   struck rather than reported as a pass. If it survives, launch with `-skipOrphanSweep`,
+   re-enable Live Activities, start a ride, and confirm the ghost is gone: that is the only way to
+   observe the sweep running ahead of the `areActivitiesEnabled` guard.
+5. Force quit by swiping up rather than killing from the debugger, then relaunch from the Home
+   Screen and confirm step 2. Step 3 is not reproducible here: launch arguments come from the
+   Xcode scheme at spawn, so a springboard launch cannot carry `-skipOrphanSweep`. The problem
+   statement treats a swipe-up quit and a debugger kill as equivalent and nothing has checked
+   that, which is what this step is for.
 6. Start a ride, background and foreground the app repeatedly, and confirm the live activity is
    never swept. This is the negative case for the foreground call site.
 7. Kill during a ride that was never paused, relaunch, and look at Home. Expected: the ghost is
