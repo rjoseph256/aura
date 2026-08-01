@@ -1,11 +1,19 @@
 #!/usr/bin/env bash
 # Active time has exactly one definition: `RideDuration.activeSeconds`.
 #
-# Four sites compute it — the HUD's, both branches of the Live Activity's, and the finished
+# Three sites compute it — the HUD's, the Live Activity's running branch, and the finished
 # ride's — and parent spec D5 requires that they agree, because the rider must see the same clock
-# after the ride that they watched during it. Two of them were separately-written subtractions
-# until ROH-112, and the rendered one was nearly missed. A comment asking future authors not to
-# re-derive it is the kind of request this repo has watched get ignored, so this is a build gate.
+# after the ride that they watched during it. The Live Activity's paused branch is no longer a
+# fourth: it carries a value `RideRecorder.pause(at:)` froze at the tap rather than computing one.
+# Two of them were separately-written subtractions until ROH-112, and the rendered one was nearly
+# missed. A comment asking future authors not to re-derive it is the kind of request this repo has
+# watched get ignored, so this is a build gate.
+#
+# The second detector — `betweenStamps` — is a different failure: a live caller can derive elapsed
+# from a pair of `Date`s and still call the one definition, which reintroduces ROH-130 while
+# passing every check above. `RideElapsed.betweenStamps` is legal for a finished ride's two stamps
+# and nothing else. It is matched as a bare token on purpose: a regex over the whole call could be
+# walked past by a line wrapped at the 140-column limit, and a single token cannot be.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,7 +24,7 @@ SCAN_ROOTS=(AuraCore/Sources Aura/Sources Aura/Widgets)
 # line that still re-derives active time by subtracting or adding pausedSeconds by hand.
 detect() {
   sed -E 's|//.*$||' | grep -E \
-    '(-[[:space:]]*[A-Za-z_.]*[Pp]ausedSeconds)|(addingTimeInterval\([A-Za-z_.]*[Pp]ausedSeconds)' \
+    '(-[[:space:]]*[A-Za-z_.]*[Pp]ausedSeconds)|(addingTimeInterval\([A-Za-z_.]*[Pp]ausedSeconds)|(betweenStamps)' \
     || true
 }
 
@@ -29,6 +37,10 @@ self_test() {
   [ -n "$(printf '%s\n' "$bad" | detect)" ] || { echo "SELF-TEST FAIL: missed a real re-derivation"; exit 2; }
   local bad_url='x.swift:1:        let x = now.timeIntervalSince(startedAt) - pausedSeconds // see https://example.com/pausedSeconds'
   [ -n "$(printf '%s\n' "$bad_url" | detect)" ] || { echo "SELF-TEST FAIL: missed a re-derivation on a line containing a URL"; exit 2; }
+  local bad_wall='x.swift:1:      elapsed: .betweenStamps(startedAt: startedAt, endedAt: now),'
+  [ -n "$(printf '%s\n' "$bad_wall" | detect)" ] || { echo "SELF-TEST FAIL: missed a wall-derived elapsed"; exit 2; }
+  local ok_mono='x.swift:1:      elapsed: .measured(r.elapsedSeconds(asOf: now)),'
+  [ -z "$(printf '%s\n' "$ok_mono" | detect)" ] || { echo "SELF-TEST FAIL: flagged a monotonic elapsed"; exit 2; }
   local ok='x.swift:1:        // pausedSeconds is subtracted inside RideDuration.activeSeconds'
   [ -z "$(printf '%s\n' "$ok" | detect)" ] || { echo "SELF-TEST FAIL: flagged a comment-only mention"; exit 2; }
 }
@@ -46,7 +58,7 @@ for root in "${SCAN_ROOTS[@]}"; do
 done
 
 offenders=$(grep -rn \
-  -E '(-[[:space:]]*[A-Za-z_.]*[Pp]ausedSeconds)|(addingTimeInterval\([A-Za-z_.]*[Pp]ausedSeconds)' \
+  -E '(-[[:space:]]*[A-Za-z_.]*[Pp]ausedSeconds)|(addingTimeInterval\([A-Za-z_.]*[Pp]ausedSeconds)|(betweenStamps)' \
   --include='*.swift' "${SCAN_ROOTS[@]}" \
   | grep -v 'AuraCore/Sources/AuraCore/Ride/RideDuration.swift' \
   | detect || true)

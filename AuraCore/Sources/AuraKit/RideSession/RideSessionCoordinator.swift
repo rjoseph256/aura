@@ -336,13 +336,20 @@ public final class RideSessionCoordinator {
     /// `pausedSeconds(asOf: now)` and `now` must be the same instant — that coupling is what
     /// keeps the paused clock constant through a stop (`RideActiveClock.make`).
     func pushActivityUpdate(now: RideInstant) {
-        guard let startedAt else { return }
+        // The recorder's anchor stamps, not the coordinator's `startedAt`: these carry the
+        // wall-offset correction, and `startedAt` deliberately does not (ROH-130 D2/D5).
+        guard let anchorStartedAt = recorder.anchorStartedAt else { return }
+        let openStop = recorder.anchorPausedSince.flatMap { since in
+            recorder.activeSecondsAtPause.map {
+                RideOpenStop(since: since, activeSecondsAtPause: $0)
+            }
+        }
         activity.update(stats: recorder.stats,
                         currentSpeedMetersPerSecond: recorder.currentSpeedMetersPerSecond,
                         maneuver: maneuver,
-                        activeClock: .make(startedAt: startedAt,
+                        activeClock: .make(startedAt: anchorStartedAt,
                                            pausedSeconds: recorder.pausedSeconds(asOf: now),
-                                           pausedSince: recorder.pausedSince,
+                                           openStop: openStop,
                                            now: now.date))
     }
 

@@ -180,6 +180,19 @@ import AuraCore
         #expect(r.activeSecondsAtPause == 600)
     }
 
+    /// The agreement `ActiveTimeAgreementTests.pausedClockMatchesPrimitive` used to assert. The
+    /// Live Activity's paused payload carries this value verbatim, so if it disagreed with the one
+    /// definition the Lock Screen and the summary would disagree over the same ride (spec D5).
+    /// Expressible here and not there, because both sides need the recorder's own readings.
+    @Test func theFrozenActiveTimeMatchesThePrimitive() {
+        let r = startedRecorder()
+        let tap = RideInstant.coherent(t0.addingTimeInterval(600))
+        r.pause(at: tap)
+        #expect(r.activeSecondsAtPause == RideDuration.activeSeconds(
+            elapsed: .measured(r.elapsedSeconds(asOf: tap)),
+            pausedSeconds: r.pausedSeconds(asOf: tap)))
+    }
+
     @Test func aSecondStopFreezesActiveTimeNetOfTheFirst() {
         let r = startedRecorder()
         r.pause(at: .coherent(t0.addingTimeInterval(600)))

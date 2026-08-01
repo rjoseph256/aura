@@ -2,14 +2,14 @@ import Testing
 import Foundation
 @testable import AuraCore
 
-/// Both branches of the Live Activity's clock, and the finished ride's, must report the same
-/// active time for the same inputs. Parent spec D5 rests on it: the rider sees the number they
-/// watched when they pressed End.
+/// The Live Activity's rendered clock, and the finished ride's, must report the same active time
+/// for the same inputs. Parent spec D5 rests on it: the rider sees the number they watched when
+/// they pressed End.
 ///
 /// **What this catches and what it does not.** After the rewire both sides of these expectations
 /// call the same function, so this cannot fail for a change to the *definition* of active time —
 /// `RideActiveClockTests` pins that against frozen literals. What it does catch is a re-inline of
-/// either branch of `make` that disagrees *numerically* with the primitive — notably one that
+/// `make`'s running branch that disagrees *numerically* with the primitive — notably one that
 /// drops the primitive's clamp and hands `Text(_, style: .timer)` a future anchor, which makes
 /// the Lock Screen clock count DOWN instead of up. It does NOT catch every re-inline: the
 /// expression revision 1 of this plan left behind,
@@ -26,21 +26,10 @@ struct ActiveTimeAgreementTests {
     let start = Date(timeIntervalSince1970: 1_000_000)
     let pausedCases: [TimeInterval] = [0, 240, 5000]
 
-    @Test("The paused clock's active reading matches the primitive")
-    func pausedClockMatchesPrimitive() {
-        let now = start.addingTimeInterval(900)
-        for paused in pausedCases {
-            let clock = RideActiveClock.make(startedAt: start, pausedSeconds: paused,
-                                             pausedSince: now, now: now)
-            guard case .paused(_, let activeSeconds) = clock else {
-                Issue.record("expected a paused clock for paused: \(paused)")
-                continue
-            }
-            #expect(activeSeconds == RideDuration.activeSeconds(
-                elapsed: .betweenStamps(startedAt: start, endedAt: now),
-                pausedSeconds: paused))
-        }
-    }
+    // The paused branch is no longer expressible here: `make` copies a value the recorder froze at
+    // the tap instead of calling the primitive, so there is nothing to compare it against without
+    // a `RideRecorder`. Its agreement is pinned by
+    // `RideClockStepTests.theFrozenActiveTimeMatchesThePrimitive`, in `AuraKitTests`.
 
     @Test("The running anchor is `now` less the active seconds — this is the branch that renders")
     func runningAnchorMatchesPrimitive() {
@@ -49,7 +38,7 @@ struct ActiveTimeAgreementTests {
         let now = start.addingTimeInterval(900)
         for paused in pausedCases {
             let clock = RideActiveClock.make(startedAt: start, pausedSeconds: paused,
-                                             pausedSince: nil, now: now)
+                                             openStop: nil, now: now)
             guard case .running(let anchor) = clock else {
                 Issue.record("expected a running clock for paused: \(paused)")
                 continue

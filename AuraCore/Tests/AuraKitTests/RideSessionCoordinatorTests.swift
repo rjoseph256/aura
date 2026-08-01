@@ -368,6 +368,9 @@ final class SpyRideActivity: RideActivityControlling {
     private let order: CallOrder?
     private(set) var started: StartCall?
     private(set) var updates: [UpdateCall] = []
+    /// Every clock this spy has been pushed, in order — for the dedupe fixtures, which assert on
+    /// how many *distinct* values a span of ticks produced.
+    private(set) var clocks: [RideActiveClock] = []
     private(set) var lastUpdateSequence: Int?
     private(set) var ended = false
 
@@ -384,6 +387,7 @@ final class SpyRideActivity: RideActivityControlling {
                                   currentSpeedMetersPerSecond: currentSpeedMetersPerSecond,
                                   maneuver: maneuver,
                                   activeClock: activeClock))
+        clocks.append(activeClock)
         lastUpdateSequence = order?.stamp()
     }
     func end() { ended = true }
