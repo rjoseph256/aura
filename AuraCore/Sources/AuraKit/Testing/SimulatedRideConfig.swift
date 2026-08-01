@@ -36,8 +36,29 @@ public struct SimulatedRideConfig: Equatable, Sendable {
         arguments.contains("-auraInMemoryRideStore")
     }
 
+    /// "-skipOrphanSweep" → suppress the launch and foreground orphan-Live-Activity sweeps
+    /// (ROH-124), so a device pass can exercise the sweep inside `start()` on its own. Without
+    /// this, the launch sweep fires on the first frame and clears the ghost before a rider could
+    /// tap Start, and every later step passes whether or not the other call sites exist.
+    /// Deliberately does not reach that third call site.
+    public static func suppressesOrphanSweep(arguments: [String]) -> Bool {
+        arguments.contains("-skipOrphanSweep")
+    }
+
+    /// "-skipLaunchOrphanSweep" → suppress only the launch sweep, leaving the foreground one
+    /// live. Without this the foreground call site cannot be positively verified at all: the only
+    /// way to reach it is with a ghost that survived launch, and the launch sweep would have
+    /// taken it. Implied by `-skipOrphanSweep`, which suppresses both.
+    public static func suppressesLaunchOrphanSweep(arguments: [String]) -> Bool {
+        arguments.contains("-skipLaunchOrphanSweep") || suppressesOrphanSweep(arguments: arguments)
+    }
+
     /// Process-wide values, parsed once. MainActor confines the lazy statics under Swift 6.
     @MainActor public static let current = parse(arguments: ProcessInfo.processInfo.arguments)
     @MainActor public static let currentForcesInMemoryStore =
         forcesInMemoryStore(arguments: ProcessInfo.processInfo.arguments)
+    @MainActor public static let currentSuppressesOrphanSweep =
+        suppressesOrphanSweep(arguments: ProcessInfo.processInfo.arguments)
+    @MainActor public static let currentSuppressesLaunchOrphanSweep =
+        suppressesLaunchOrphanSweep(arguments: ProcessInfo.processInfo.arguments)
 }

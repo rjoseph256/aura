@@ -37,4 +37,22 @@ struct SimulatedRideConfigTests {
         #expect(SimulatedRideConfig.forcesInMemoryStore(arguments: ["App", "-auraInMemoryRideStore"]))
         #expect(!SimulatedRideConfig.forcesInMemoryStore(arguments: ["App"]))
     }
+
+    @Test func skipOrphanSweepFlag() {
+        #expect(SimulatedRideConfig.suppressesOrphanSweep(arguments: ["App", "-skipOrphanSweep"]))
+        #expect(!SimulatedRideConfig.suppressesOrphanSweep(arguments: ["App"]))
+        #expect(!SimulatedRideConfig.suppressesOrphanSweep(arguments: ["App", "-skipOrphanSweepX"]))
+    }
+
+    /// The launch-only flag must imply neither more nor less than it says: it suppresses the
+    /// launch sweep, the broader flag implies it, and neither touches the sweep in `start()`.
+    @Test func skipLaunchOrphanSweepFlag() {
+        #expect(SimulatedRideConfig.suppressesLaunchOrphanSweep(
+            arguments: ["App", "-skipLaunchOrphanSweep"]))
+        // The broad flag implies the narrow one.
+        #expect(SimulatedRideConfig.suppressesLaunchOrphanSweep(arguments: ["App", "-skipOrphanSweep"]))
+        // ...but not the reverse: the foreground sweep stays live under the launch-only flag.
+        #expect(!SimulatedRideConfig.suppressesOrphanSweep(arguments: ["App", "-skipLaunchOrphanSweep"]))
+        #expect(!SimulatedRideConfig.suppressesLaunchOrphanSweep(arguments: ["App"]))
+    }
 }

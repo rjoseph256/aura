@@ -139,6 +139,31 @@ private struct RootView: View {
         .tint(AuraTheme.accent)
         // Launch .task; no ride can be active yet.
         .task { WidgetRefresh.reload(rideStore: rideStore, settings: settings, activeRideID: nil) }
+        // Ghost Live Activities a killed process left behind (ROH-124).
+        //
+        // Its own `.task`, not the backfill one below. That closure is synchronous end to end, and
+        // its `guard backfill == nil` check-then-set is idempotent on a scene reconnect only
+        // because nothing between the read and the write can yield. An `await` added there would
+        // let two invocations both observe nil and spawn two concurrent 50-row backfill sweeps on
+        // one ModelContainer.
+        //
+        // Unguarded by ride state on purpose: `endOrphans()` excludes the activity it owns, and
+        // `router.activeRideID` lags `coordinator.isRecording` by an update cycle, so it is nil
+        // during a window in which a ride is already recording and owns an activity.
+        //
+        // Swept twice: once now, once after a short delay. ActivityKit restores this process's
+        // view of existing activities asynchronously after launch, and a read taken on the first
+        // frame can come back empty — most likely on a phone under the same memory pressure that
+        // caused the kill. Without the second pass the ghost would survive until the rider next
+        // backgrounds and returns, or starts a ride.
+        .task {
+            #if DEBUG
+            guard !SimulatedRideConfig.currentSuppressesLaunchOrphanSweep else { return }
+            #endif
+            RideLiveActivityController.shared.endOrphans()
+            try? await Task.sleep(for: .seconds(2))
+            RideLiveActivityController.shared.endOrphans()
+        }
         // Schema V6's segment backfill (ROH-100). Deliberately not in the V5→V6 migration
         // stage: stages run inside `ModelContainer.init`, which `AuraApp.init()` calls before
         // the first frame, so re-encoding a long ride history there is a watchdog kill that
@@ -207,6 +232,15 @@ private struct RootView: View {
             if phase == .active {
                 WidgetRefresh.reload(rideStore: rideStore, settings: settings,
                                      activeRideID: router.activeRideID)
+                // A session that launched before ActivityKit had restored its activity list, or
+                // whose first request threw, would otherwise carry the ghost for the life of the
+                // process (ROH-124). A no-op mid-ride: the running activity is the owned one.
+                #if DEBUG
+                let suppressed = SimulatedRideConfig.currentSuppressesOrphanSweep
+                #else
+                let suppressed = false
+                #endif
+                if !suppressed { RideLiveActivityController.shared.endOrphans() }
             }
             syncLocationActivity()
         }
