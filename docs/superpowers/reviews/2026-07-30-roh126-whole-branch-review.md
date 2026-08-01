@@ -110,18 +110,34 @@ guarded by `shareImage == nil` and gets exactly one attempt, and a ceiling retur
 indistinguishably from "no acceptable map" — so a rider who locks the phone during the
 window loses the map for that whole presentation with no retry.
 
-### 3. Swap-while-sheet-open is still unverified.
+### 3. Swap-while-sheet-open — RESOLVED by the 2026-07-31 device pass. Latch built.
 
 The spec named this a risk requiring device verification AND designed the mitigation (a swap
-latch) for if it failed. Verification was deferred; the latch was not built. The ride-end path
-is engineered to land the swap ~8 s after the summary appears, squarely inside the window
-where a rider may already have tapped Share.
+latch) for if it failed. Verification was deferred and the latch was not built.
 
-Deliberately not patched. There is no clean way to observe a `ShareLink`'s presentation state,
-so any latch written now guesses at UI state that the device pass was supposed to establish.
-Guessing here risks pinning the fallback card permanently for a rider who taps Share once.
-This is the top item on the device pass, and if the sheet does misbehave the latch design is
-already in the spec.
+**The device pass saw it happen.** On a run where the log recorded
+`share-card SWAPPED to map generation 1`, the presented share sheet dismissed itself. A control
+run through the same flow on a ride whose route is degenerate — so `ShareMapRequest.init?`
+returns nil, no pipeline runs and no swap occurs — held its sheet open across an eight-frame
+burst at identical luma. Same app, same flow; the difference was a swap landing underneath.
+
+The latch is now built (`RideSummaryView.applyOrDeferUpgrade` / `beginShareSheetWatch`): an
+upgrade that resolves while a sheet is up is held in `deferredUpgrade` and applied on dismissal.
+It reads presentation state from UIKit because `ShareLink` exposes no binding to observe, and
+the watch is bounded on both ends so a sheet that never appears cannot strand the upgrade.
+
+**What is verified and what is not.** The non-regression path is verified on device: with no
+sheet open the upgrade applies normally (`share-map accepted and cached` at 21:05:12, card
+upgraded to the map variant). The deferral path itself was NOT reproduced under instrumentation.
+The window is roughly 200 ms wide on this hardware — the upgrade resolves ~1.3–1.5 s after the
+summary appears on wifi (0.8 s of that is the deliberate sleep), and a share sheet takes about
+as long to present, so the swap normally completes first. Under heavy throttling the pipeline
+rejects instead of swapping, so there is no swap to race. The latch is therefore a defensive
+fix against an observed-once failure, not a fix with a reproduced before/after.
+
+Timing figures worth keeping: the PR's "~8 s to map upgrade" is a cold simulator number. On
+device it is ~1.5 s warm-tile, which makes the fallback flash far less visible than the spec
+feared — and is why neither a human nor scripted automation could hit the race by hand.
 
 ### 4. Coverage stops exactly where the risk starts.
 

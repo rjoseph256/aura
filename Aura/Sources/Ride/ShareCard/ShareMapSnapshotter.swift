@@ -173,7 +173,7 @@ private nonisolated enum StyleLoadOutcome: Sendable {
     /// right by accident: it let the pipeline finish and warm the cache.
     private func cancelledBeforeStarting(_ step: String) -> Bool {
         guard Task.isCancelled else { return false }
-        Self.log.info("share-map reject: cancelled before \(step, privacy: .public)")
+        Self.log.notice("share-map reject: cancelled before \(step, privacy: .public)")
         return true
     }
 
@@ -205,7 +205,7 @@ private nonisolated enum StyleLoadOutcome: Sendable {
         guard await loadStyle(request.style.mapboxStyle, into: snapshotter) else { return nil }
         // Rejected read 1 of 2: a style/source error surfaced during the load.
         guard !errorFlags.rejected else {
-            Self.log.info("share-map reject: style/source loading error")
+            Self.log.notice("share-map reject: style/source loading error")
             return nil
         }
         // The only cancellation gate in the pipeline, and it is here because this is the
@@ -215,13 +215,13 @@ private nonisolated enum StyleLoadOutcome: Sendable {
         // Past the render there is no gate at all — see `cancelledBeforeStarting`.
         guard !cancelledBeforeStarting("the camera fit and render") else { return nil }
         guard fitCamera(snapshotter, to: request) else {
-            Self.log.info("share-map reject: degenerate camera fit")
+            Self.log.notice("share-map reject: degenerate camera fit")
             return nil
         }
         // Rejected read 2 of 2 sits inside renderMapRasterWithChrome, after the render resolves.
         guard let (raster, runs) = await renderMapRasterWithChrome(snapshotter, request: request, flags: errorFlags)
         else {
-            Self.log.info("share-map reject: render failed, timed out, mid-render error, or no captured route")
+            Self.log.notice("share-map reject: render failed, timed out, mid-render error, or no captured route")
             return nil
         }
         // From here the pipeline runs to completion even when cancelled. It holds no
@@ -229,7 +229,7 @@ private nonisolated enum StyleLoadOutcome: Sendable {
         // actor before returning), so finishing costs the slot a few hundred ms of bounded
         // CPU and disk and buys a warm cache entry for the next request.
         guard await passesAcceptance(raster, key: request.cacheKey) else {
-            Self.log.info("share-map reject: raster failed the non-blank interior check")
+            Self.log.notice("share-map reject: raster failed the non-blank interior check")
             return nil
         }
 
@@ -242,14 +242,14 @@ private nonisolated enum StyleLoadOutcome: Sendable {
                            colors: (casing: casing, mint: mint))
         }.value
         guard let composited else {   // nil route path → reject BEFORE any cache write
-            Self.log.info("share-map reject: no strokeable route path at composite")
+            Self.log.notice("share-map reject: no strokeable route path at composite")
             return nil
         }
 
         // Not cancellation-gated, per the spec: "only accepted rasters; not guarded on
         // cancellation — an accepted raster is worth keeping" (§step 7).
         await persist(composited, key: request.cacheKey)
-        Self.log.info("share-map accepted and cached")
+        Self.log.notice("share-map accepted and cached")
         return composited
     }
 
@@ -282,17 +282,17 @@ private nonisolated enum StyleLoadOutcome: Sendable {
         case .loaded:
             return true
         case .failed:
-            Self.log.info("share-map reject: style load returned an error")
+            Self.log.notice("share-map reject: style load returned an error")
             return false
         case .cancelled:
-            Self.log.info("share-map reject: style load cancelled by the slot watchdog")
+            Self.log.notice("share-map reject: style load cancelled by the slot watchdog")
             return false
         // Belt timeout: the completion may be parked while the style actually loaded —
         // consult `isStyleLoaded` before rejecting (spec step 3). Legal here: this method
         // is back on the main actor after the await.
         case .timedOut:
             let loaded = snapshotter.isStyleLoaded
-            if !loaded { Self.log.info("share-map reject: style load timed out at the 4 s belt") }
+            if !loaded { Self.log.notice("share-map reject: style load timed out at the 4 s belt") }
             return loaded
         }
     }
@@ -395,7 +395,7 @@ private nonisolated enum StyleLoadOutcome: Sendable {
                     pixels: pixels, width: width, height: height, excludedBottomRows: excludedBottomRows)
                 let summary = cells.map { String(format: "%.1f", $0) }.joined(separator: " ")
                 let threshold = ShareRasterAcceptance.stddevThreshold
-                Self.log.info("share-map acceptance cells (stddev, threshold \(threshold)): \(summary, privacy: .public)")
+                Self.log.notice("share-map acceptance cells (stddev, threshold \(threshold)): \(summary, privacy: .public)")
             }
             return accepted
         }.value
