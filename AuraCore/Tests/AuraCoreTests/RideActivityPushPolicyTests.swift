@@ -18,14 +18,14 @@ struct RideActivityPushPolicyTests {
     @Test("The first push always goes")
     func firstPush() {
         #expect(RideActivityPushPolicy.decide(
-            last: nil, next: payload(), lastPushedAt: nil, now: t0) == .push)
+            last: nil, next: payload(), secondsSinceLastPush: nil) == .push)
     }
 
     @Test("An unchanged payload inside the coalescing window is skipped")
     func unchangedIsSkipped() {
         #expect(RideActivityPushPolicy.decide(
             last: payload(), next: payload(),
-            lastPushedAt: t0, now: t0.addingTimeInterval(2)) == .skip)
+            secondsSinceLastPush: 2) == .skip)
     }
 
     @Test("An unchanged payload past the coalescing window is still skipped")
@@ -33,24 +33,24 @@ struct RideActivityPushPolicyTests {
         // This is the dedupe: ~600 identical pushes across a 40-minute stop become heartbeats.
         #expect(RideActivityPushPolicy.decide(
             last: payload(), next: payload(),
-            lastPushedAt: t0, now: t0.addingTimeInterval(30)) == .skip)
+            secondsSinceLastPush: 30) == .skip)
     }
 
     @Test("A changed payload is coalesced to the 4-second cadence")
     func changedIsCoalesced() {
         #expect(RideActivityPushPolicy.decide(
             last: payload(distance: 1), next: payload(distance: 2),
-            lastPushedAt: t0, now: t0.addingTimeInterval(2)) == .skip)
+            secondsSinceLastPush: 2) == .skip)
         #expect(RideActivityPushPolicy.decide(
             last: payload(distance: 1), next: payload(distance: 2),
-            lastPushedAt: t0, now: t0.addingTimeInterval(4)) == .push)
+            secondsSinceLastPush: 4) == .push)
     }
 
     @Test("A changed turn instruction bypasses the cadence")
     func turnChangeBypasses() {
         #expect(RideActivityPushPolicy.decide(
             last: payload(turn: "Left onto Liberty"), next: payload(turn: "Right onto Penn"),
-            lastPushedAt: t0, now: t0.addingTimeInterval(0.5)) == .push)
+            secondsSinceLastPush: 0.5) == .push)
     }
 
     @Test("A pause bypasses the cadence, so the tap reaches the Lock Screen in the same turn")
@@ -59,24 +59,24 @@ struct RideActivityPushPolicyTests {
         // the 4-second window changed nothing at all.
         #expect(RideActivityPushPolicy.decide(
             last: payload(paused: false), next: payload(paused: true),
-            lastPushedAt: t0, now: t0.addingTimeInterval(0.5)) == .push)
+            secondsSinceLastPush: 0.5) == .push)
     }
 
     @Test("A resume bypasses the cadence too")
     func resumeTransitionBypasses() {
         #expect(RideActivityPushPolicy.decide(
             last: payload(paused: true), next: payload(paused: false),
-            lastPushedAt: t0, now: t0.addingTimeInterval(0.5)) == .push)
+            secondsSinceLastPush: 0.5) == .push)
     }
 
     @Test("The heartbeat fires on an unchanged paused payload")
     func heartbeatWhilePaused() {
         #expect(RideActivityPushPolicy.decide(
             last: payload(paused: true), next: payload(paused: true),
-            lastPushedAt: t0, now: t0.addingTimeInterval(59)) == .skip)
+            secondsSinceLastPush: 59) == .skip)
         #expect(RideActivityPushPolicy.decide(
             last: payload(paused: true), next: payload(paused: true),
-            lastPushedAt: t0, now: t0.addingTimeInterval(60)) == .push)
+            secondsSinceLastPush: 60) == .push)
     }
 
     @Test("The heartbeat is not gated on paused: a running ride with no new fixes stays fresh")
@@ -86,11 +86,32 @@ struct RideActivityPushPolicyTests {
         // healthy ride go stale and tell the rider the app had died.
         #expect(RideActivityPushPolicy.decide(
             last: payload(paused: false), next: payload(paused: false),
-            lastPushedAt: t0, now: t0.addingTimeInterval(60)) == .push)
+            secondsSinceLastPush: 60) == .push)
     }
 
     @Test("The heartbeat beats the stale window, so an alive ride never dims in either state")
     func heartbeatOutrunsStaleWindow() {
         #expect(RideActivityPushPolicy.heartbeatInterval < RideActivityPushPolicy.staleInterval)
+    }
+
+    /// A backward system clock step used to drive `now - lastPushedAt` negative, which failed
+    /// every time-gated branch at once — so the clock correction, the distance, the speed and the
+    /// elevation all froze on the Lock Screen for the size of the step plus the coalescing
+    /// interval, with no stale dimming because `staleDate` had moved out by the same amount.
+    /// Measured monotonically, a step cannot reach this decision at all (ROH-130 D6).
+    @Test func aCoalescedChangePushesOnElapsedMonotonicTimeAlone() {
+        let last = RideActivityPayload(distanceMeters: 100, clock: .running(anchor: .init()))
+        var next = last
+        next.distanceMeters = 200
+        #expect(RideActivityPushPolicy.decide(last: last, next: next,
+                                              secondsSinceLastPush: 4.0) == .push)
+        #expect(RideActivityPushPolicy.decide(last: last, next: next,
+                                              secondsSinceLastPush: 3.9) == .skip)
+    }
+
+    @Test func theFirstPushNeedsNoElapsedTime() {
+        let next = RideActivityPayload(clock: .running(anchor: .init()))
+        #expect(RideActivityPushPolicy.decide(last: nil, next: next,
+                                              secondsSinceLastPush: nil) == .push)
     }
 }

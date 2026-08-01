@@ -26,19 +26,20 @@ public enum RideActivityPushPolicy {
     /// never dims and a dead one confesses within the window.
     public static let staleInterval: TimeInterval = 90
 
+    /// `secondsSinceLastPush` is nil before the first push of an activity.
+    ///
+    /// A `TimeInterval` rather than two `Date`s: the caller measures it on the monotonic clock, so
+    /// a system clock step cannot make it negative and stall every gate below (ROH-130 D6).
     public static func decide(last: RideActivityPayload?,
                               next: RideActivityPayload,
-                              lastPushedAt: Date?,
-                              now: Date) -> RideActivityPushDecision {
-        guard let last, let lastPushedAt else { return .push }
-
-        let sinceLastPush = now.timeIntervalSince(lastPushedAt)
+                              secondsSinceLastPush: TimeInterval?) -> RideActivityPushDecision {
+        guard let last, let secondsSinceLastPush else { return .push }
         // A new maneuver and a pause/resume are both state the rider is waiting to see, so
         // neither waits on the coalescing cadence.
         if next.turnInstruction != last.turnInstruction { return .push }
         if next.clock.isPaused != last.clock.isPaused { return .push }
-        if sinceLastPush >= heartbeatInterval { return .push }
-        if next != last && sinceLastPush >= coalesceInterval { return .push }
+        if secondsSinceLastPush >= heartbeatInterval { return .push }
+        if next != last && secondsSinceLastPush >= coalesceInterval { return .push }
         return .skip
     }
 }
