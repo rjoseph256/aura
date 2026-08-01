@@ -53,8 +53,11 @@ jobs:
     # Keep the original display name — branch protection / required checks key on it.
     name: App build (xcodebuild)
     runs-on: macos-15
-    # 50: cold SPM + Mapbox build + boot + TWO golden-ride methods, each retried once
-    # worst-case (ROH-93 added the navigate method).
+    # 50: cold SPM + Mapbox build + boot + FOUR golden-ride methods, each retried once
+    # worst-case (ROH-93 added the navigate method; ROH-103 added the paused ride and the
+    # navigate pause control). The paused method is the longest: it replays at 20x rather
+    # than 30x to widen the pause window, so ~45 s plus its assertions. Note the retry flag
+    # means a first-run flake still reports green — see the ROH-103 spec, D8.
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4

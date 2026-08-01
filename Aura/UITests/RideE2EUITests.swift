@@ -334,6 +334,54 @@ final class RideE2EUITests: XCTestCase {
                       file: file, line: line)
     }
 
+    /// ROH-103: the navigate cockpit's pause control. `togglePause()` is implemented twice —
+    /// here and in RideHUDView — and `isPaused` feeds a different instrument panel on this
+    /// path, which has already drawn over the pause row once on an iPhone SE. The ordinary
+    /// golden fixture, because nothing here needs the paused fixture's replay silence.
+    @MainActor
+    func testNavigatePauseControlEndsWhilePaused() throws {
+        let app = XCUIApplication()
+        let previewLink = "aura://preview?lat=\(GoldenRideFixture.startLatitude)" +
+            "&lng=\(GoldenRideFixture.startLongitude)&name=Golden%20Loop"
+        app.launchArguments += ["-auraDidCompleteOnboarding", "YES",
+                                "-auraSimulatedRide", "golden",
+                                "-auraSimulatedRideMultiplier", "30",
+                                "-auraInMemoryRideStore",
+                                "-openURL", previewLink]
+        app.launch()
+        dismissLocationAlertIfPresent()
+
+        let preview = PreviewScreen(app: app)
+        XCTAssertTrue(preview.waitForStartEnabled(timeout: 15),
+                      "Start RIDE never enabled — fixture route did not load/select")
+        preview.startRide.tap()
+
+        let ride = RideScreen(app: app)
+        XCTAssertTrue(ride.probe.waitForExistence(timeout: 15),
+                      "HUD probe missing — simulated-ride hook did not engage in navigate")
+        // Far enough in to be recording, and well short of the fixture's end.
+        XCTAssertTrue(ride.waitForDistance(atLeast: 300, timeout: 60),
+                      "navigate ride never recorded — last probe: \(ride.probe.label)")
+
+        ride.pauseControl.tap()
+        XCTAssertTrue(ride.pausedBanner.waitForExistence(timeout: 5),
+                      "PAUSED chip never appeared — the navigate control is not wired")
+        XCTAssertEqual(try XCTUnwrap(ride.probeValues()).speedDecimetersPerSecond, 0,
+                       "speed hero did not fall to zero on the navigate path")
+        XCTAssertTrue(try XCTUnwrap(ride.speedValue.value as? String).hasPrefix("0 "),
+                      "navigate speed readout reads \(ride.speedValue.value ?? "nil") while paused")
+
+        // End from the paused state, via the navigate control cluster.
+        ride.endButton.tap()
+        XCTAssertTrue(ride.endAlert.waitForExistence(timeout: 10),
+                      "End did nothing while paused on the navigate path")
+        ride.endAlert.buttons["End ride"].tap()
+
+        let summary = SummaryScreen(app: app)
+        XCTAssertTrue(summary.title.waitForExistence(timeout: 15),
+                      "Summary never appeared after ending a paused navigate ride")
+    }
+
     /// First decimal number found after the first comma-space (locale label like
     /// "Distance, 1.8 miles"); tolerant of grouping-free decimals.
     private static func leadingNumber(in label: String) -> Double? {
