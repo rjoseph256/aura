@@ -120,6 +120,9 @@ struct SummaryScreen {
     var heroDistance: XCUIElement {
         app.descendants(matching: .any).matching(identifier: RideTestID.summaryDistance).firstMatch
     }
+    var activeStat: XCUIElement {
+        app.descendants(matching: .any).matching(identifier: RideTestID.summaryActive).firstMatch
+    }
     var movingStat: XCUIElement {
         app.descendants(matching: .any).matching(identifier: RideTestID.summaryMoving).firstMatch
     }

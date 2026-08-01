@@ -274,6 +274,7 @@ final class RideE2EUITests: XCTestCase {
         XCTAssertTrue(summary.title.waitForExistence(timeout: 15), "Summary never appeared")
         try Self.assertPausedHeroDistanceInBand(summary)
         try Self.assertMovingTimeIsSegmented(summary)
+        try Self.assertActiveIsNotTheMovingNumber(summary)
 
         // --- History: one row, not marked unfinished, and it reads back segmented. -------
         summary.doneButton.tap()
@@ -308,6 +309,7 @@ final class RideE2EUITests: XCTestCase {
                       "History detail never appeared — the row tap did not land")
         try Self.assertPausedHeroDistanceInBand(summary)
         try Self.assertMovingTimeIsSegmented(summary)
+        try Self.assertActiveIsNotTheMovingNumber(summary)
     }
 
     /// The paused fixture's own hero band: 1883 m is 1.2 mi / 1.9 km. It must EXCLUDE the
@@ -328,6 +330,49 @@ final class RideE2EUITests: XCTestCase {
             XCTAssertTrue((1.05...1.35).contains(value), "miles out of band: \(label)",
                           file: file, line: line)
         }
+    }
+
+    /// The summary's active cell is fed the ride's own timestamps, not `movingTimeSeconds`.
+    ///
+    /// **Falsifiable because the two are measured on different clocks here.** Moving time is
+    /// frozen at `PausedGoldenRideFixture.expectedMovingTimeSeconds` (290 s, from the GPX stamps)
+    /// and renders "4 min". Active time is real wall clock — only the *location* stream replays
+    /// at 20x — so the ~890 s fixture plays in ~45 s, minus the three pause dwells, and the cell
+    /// renders "0 min" or "1 min". A cell still wired to `movingTimeSeconds` reads 4 in both and
+    /// fails.
+    ///
+    /// **What it does NOT prove.** It cannot tell active from elapsed. Their difference here is
+    /// the tester's dwell, a handful of seconds, and whole-minute truncation renders both as
+    /// "0 min" — which is also why the elapsed caption is absent on this run and cannot be
+    /// asserted. `RideDurationTests` and `RideSummaryStatsTests` cover the subtraction.
+    ///
+    /// Note for anyone reading a screenshot of this run: moving time EXCEEDS active time on this
+    /// fixture, inverting the production invariant `moving ≤ active ≤ elapsed`, for the same
+    /// two-clocks reason. That is the harness, not a defect.
+    @MainActor
+    private static func assertActiveIsNotTheMovingNumber(_ summary: SummaryScreen,
+                                                         file: StaticString = #filePath,
+                                                         line: UInt = #line) throws {
+        // No swipe here: `assertMovingTimeIsSegmented` runs first and may already have scrolled,
+        // and the active cell sits ABOVE the moving cell in both `ViewThatFits` candidates, so a
+        // second swipe would scroll away from it. The ScrollView's VStack is eager, so the
+        // element is in the tree either way.
+        XCTAssertTrue(summary.activeStat.waitForExistence(timeout: 5), "active cell missing",
+                      file: file, line: line)
+        let activeLabel = summary.activeStat.label
+        let movingLabel = summary.movingStat.label
+        let active = try XCTUnwrap(leadingNumber(in: activeLabel),
+                                   "no number in active label: \(activeLabel)",
+                                   file: file, line: line)
+        let moving = try XCTUnwrap(leadingNumber(in: movingLabel),
+                                   "no number in moving label: \(movingLabel)",
+                                   file: file, line: line)
+        XCTAssertNotEqual(active, moving,
+                          "active reads \(activeLabel), moving reads \(movingLabel). Either the "
+                          + "active cell is being handed movingTimeSeconds, or playback stretched "
+                          + "~5x under CI load and active genuinely reached \(moving) min — "
+                          + "check the run duration before assuming the former.",
+                          file: file, line: line)
     }
 
     /// Segmented moving time is 290 s → "4 min"; flattened is 890 s → "14 min". The band is
