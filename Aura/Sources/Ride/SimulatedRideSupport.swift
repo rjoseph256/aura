@@ -15,8 +15,15 @@ enum SimulatedRideSupport {
                                    authorization: LocationAuthorization)? {
         guard let sim = SimulatedRideConfig.current else { return nil }
         do {
-            return (try GoldenRideFixture.simulatedProvider(multiplier: sim.speedMultiplier),
-                    .authorized)
+            // The name is validated in `SimulatedRideConfig.parse`, so `current` being
+            // non-nil already means the lookup knows it; the nil branch below is
+            // unreachable and asserts rather than riding on real GPS.
+            guard let provider = try SimulatedRideFixture.provider(
+                named: sim.fixture, multiplier: sim.speedMultiplier) else {
+                assertionFailure("Simulated ride fixture not in the registry: \(sim.fixture)")
+                return nil
+            }
+            return (provider, .authorized)
         } catch {
             // Defensive-only: the fixture is always bundled; a packaging regression
             // fails loudly in Debug instead of silently riding on GPS.

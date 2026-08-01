@@ -55,4 +55,9 @@ public enum PausedGoldenRideFixture {
                     stats: RideStatsCalculator.stats(segments: segments),
                     routeId: nil, destinationPlaceId: nil)
     }
+
+    @MainActor
+    public static func simulatedProvider(multiplier: Double) throws -> SimulatedLocationProvider {
+        SimulatedLocationProvider(track: try track(), speedMultiplier: multiplier)
+    }
 }
