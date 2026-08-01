@@ -48,11 +48,20 @@ public enum RideActiveClock: Codable, Hashable, Sendable {
 
     /// Build the clock from values that do not move between events.
     ///
-    /// **Nothing here is derived from `now` except the two clamps.** The controller skips a push
-    /// when the whole payload is unchanged, which is what keeps a forty-minute café stop to one
-    /// heartbeat push a minute. Recomputing either case's value per tick from a monotonic elapsed
-    /// and a wall `now` — which cannot be sampled at the same instant — makes every payload
-    /// distinct and pushes every coalescing interval instead (ROH-130 D5).
+    /// **The paused case's fields are copied, not computed; the running anchor is built from
+    /// stamps.** The controller skips a push when the whole payload is unchanged, which is what
+    /// keeps a forty-minute café stop to one heartbeat push a minute.
+    ///
+    /// What is banned, and enforced: a value derived from a **wall** elapsed. `now` and a monotonic
+    /// reading cannot be sampled at the same instant, so a payload built that way is distinct every
+    /// tick and pushes every coalescing interval (ROH-130 D5).
+    /// `scripts/check-single-active-definition.sh`'s `betweenStamps` detector is what rejects it.
+    ///
+    /// A recompute that is monotonic on *both* sides would in fact be stable — both terms come from
+    /// one `RideInstant`, so they cancel — and neither a fixture nor the guard script would flag it.
+    /// It is avoided anyway, because it re-couples the payload to the tick rate for no benefit. No
+    /// test pins that distinction and none can: `FakeRideClock` cannot model the two-syscall
+    /// incoherence of a real `RideInstant.now`, so this shape is held by this comment.
     ///
     /// A real clock step moves `startedAt` and `openStop.since` through the recorder's
     /// `wallOffset`, which emits exactly one push and lets the Lock Screen correct itself.

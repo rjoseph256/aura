@@ -333,8 +333,11 @@ public final class RideSessionCoordinator {
     /// directly instead of waiting on the 0.5 s ticker; `now` is injectable for the same reason.
     /// The controller decides whether the push actually goes out.
     ///
-    /// `pausedSeconds(asOf: now)` and `now` must be the same instant — that coupling is what
-    /// keeps the paused clock constant through a stop (`RideActiveClock.make`).
+    /// What keeps the paused clock constant through a stop is that both of its fields were frozen
+    /// at the tap — `anchorPausedSince` and `activeSecondsAtPause`, neither of which moves while
+    /// the stop is open. The old coupling between `pausedSeconds(asOf: now)` and `now` went with
+    /// the arithmetic it protected: the paused branch no longer reads `pausedSeconds` at all, and
+    /// that argument now feeds only the running anchor (ROH-130 D5).
     func pushActivityUpdate(now: RideInstant) {
         // The recorder's anchor stamps, not the coordinator's `startedAt`: these carry the
         // wall-offset correction, and `startedAt` deliberately does not (ROH-130 D2/D5).

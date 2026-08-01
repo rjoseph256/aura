@@ -95,11 +95,21 @@ struct RideSessionClockStepTests {
 
     // MARK: Live Activity payload stability
 
-    /// The push dedupe compares whole payloads, so a clock that moves by a rounding error every
-    /// tick turns a forty-minute café stop from one push a minute into one every four seconds.
-    /// Driven at production magnitude on tick intervals that are not exact binary fractions,
-    /// because `Date`-magnitude readings on exact half-seconds are the condition under which the
-    /// old arithmetic cancelled exactly and the old version of this test could not fail.
+    /// The push dedupe compares whole payloads, so a clock that moves every tick turns a
+    /// forty-minute café stop from one push a minute into one every four seconds.
+    ///
+    /// **What this pins, measured rather than assumed:** that neither field of the paused payload
+    /// is a raw per-tick reading. A `since` of `now`, or an `activeSeconds` carrying
+    /// `pausedSeconds(asOf: now)` unmodified, goes red here.
+    ///
+    /// **What it does not catch:** a per-tick *recomputation* that happens to cancel on a coherent
+    /// clock. Restoring the old `betweenStamps(startedAt, now) - pausedSeconds` arithmetic, and
+    /// deriving `since` as `now - currentPauseSeconds`, were both mutated in and both stayed green
+    /// through this fixture. `aSubThresholdDivergenceChangesNothing` below is the discriminating
+    /// one for that class: its slew moves the wall half off the monotonic timeline, so anything
+    /// recomputed from a wall reading stops cancelling and the payload flaps. The odd tick interval
+    /// here is production realism, not a discriminator — the old arithmetic survives this fixture
+    /// at any interval.
     @Test func thePausedClockIsIdenticalAcrossFortyTicks() throws {
         let clock = FakeRideClock(date: Date(timeIntervalSinceReferenceDate: 1_000_000))
         let (c, activity) = try startedCoordinator(clock: clock)
