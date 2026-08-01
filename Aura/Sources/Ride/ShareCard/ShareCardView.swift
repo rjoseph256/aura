@@ -5,14 +5,20 @@ import AuraKit
 
 /// The shareable 4:5 ride card, rendered offscreen by `RideCardRenderer` into a PNG.
 /// A static projection of `ShareCardContent`: no animation, and the renderer pins
-/// `dynamicTypeSize` so the pixel output is invariant. Uses only Canvas-based renderers
-/// (`RouteThumbnail`, `ElevationSparkline`) so it draws correctly through `ImageRenderer`;
-/// the Mapbox map cannot render offscreen.
+/// `dynamicTypeSize` so the pixel output is invariant. The map field shows a pre-rendered
+/// `Snapshotter` raster when one was accepted (`mapImage`); a live Mapbox `Map` still
+/// cannot render through `ImageRenderer`, so the fallback draws the Canvas-based
+/// `RouteThumbnail` instead. Geometry comes from `ShareCardLayout` (AuraKit), whose
+/// package test measures the band budget against the shipped Saira faces.
 struct ShareCardView: View {
     let content: ShareCardContent
+    /// An accepted, composited map raster at exactly `ShareCardLayout.mapFieldSize` @3x,
+    /// or `nil` for the polyline fallback. Required — a defaulted parameter here would be
+    /// a permanent seam where a forgotten argument silently ships the fallback card.
+    let mapImage: UIImage?
 
     /// The card is a fixed PNG viewed at feed-thumbnail scale and can't honor Increase
-    /// Contrast, so text over the scrim uses the high-contrast secondary value always.
+    /// Contrast, so secondary text uses the high-contrast secondary value always.
     private let scrimText = Color(white: AuraPalette.textSecondaryWhiteHighContrast)
     private var hasRoute: Bool { !content.routeSegments.isEmpty }
     private var hasElevation: Bool { !content.elevationSamples.isEmpty }
@@ -21,111 +27,160 @@ struct ShareCardView: View {
         Group {
             if hasRoute {
                 VStack(alignment: .leading, spacing: 0) {
-                    routeField
+                    mapField
                     readoutBand
                 }
             } else {
                 noRouteBody
             }
         }
-        .frame(width: 360, height: 450)
+        .frame(width: ShareCardLayout.cardSize.width, height: ShareCardLayout.cardSize.height)
         .background(AuraTheme.background)
     }
 
-    // MARK: Route field (dominant, full-bleed)
+    // MARK: Map field (full-bleed top, nothing of ours over it)
 
-    private var routeField: some View {
-        ZStack(alignment: .bottomLeading) {
-            RouteThumbnail(segments: content.routeSegments,
-                           lineColor: AuraTheme.routeLine, lineWidth: 3)
-                .padding(AuraTheme.Spacing.lg)
-            overlayBlock
-                .padding(AuraTheme.Spacing.lg)
-        }
-        .frame(maxWidth: .infinity)
-        .frame(height: 250)
-    }
-
-    private var overlayBlock: some View {
-        VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
-            Text(contextLine)
-                .font(.system(.caption, design: .rounded).weight(.semibold))
-                .tracking(1.5)
-                .foregroundStyle(scrimText)
-            HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.xs) {
-                Text(content.distanceValue)
-                    .font(AuraTheme.Typography.speedHero(56))
-                    .foregroundStyle(AuraTheme.textPrimary)
-                Text(content.distanceUnit)
-                    .font(AuraTheme.Typography.metricCockpit(22, face: .semibold, relativeTo: .title2))
-                    .foregroundStyle(scrimText)
+    private var mapField: some View {
+        Group {
+            if let mapImage {
+                // `resizable` is load-bearing: a disk-cache round-trip re-materializes at
+                // scale 1 unless re-wrapped, and the exact 360×240 aspect match means the
+                // stretch cannot distort and the SDK's attribution corners can't be cropped.
+                Image(uiImage: mapImage)
+                    .resizable()
+            } else {
+                RouteThumbnail(segments: content.routeSegments,
+                               lineColor: AuraTheme.routeLine, lineWidth: 3)
+                    .padding(AuraTheme.Spacing.lg)
             }
         }
-        .padding(.horizontal, AuraTheme.Spacing.md)
-        .padding(.vertical, AuraTheme.Spacing.sm)
-        .background(AuraTheme.surface,
-                    in: RoundedRectangle(cornerRadius: AuraTheme.Radius.md, style: .continuous))
+        .frame(width: ShareCardLayout.mapFieldSize.width,
+               height: ShareCardLayout.mapFieldSize.height)
+        .clipped()
     }
 
-    // MARK: Readout band
+    // MARK: Readout band (all text lives here, below the map)
 
     private var readoutBand: some View {
-        VStack(alignment: .leading, spacing: AuraTheme.Spacing.lg) {
-            if hasElevation { elevationBlock }
-            metricsRow
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 0) {
+            contextRow
             unfinishedNote
-            wordmark
+            heroRow
+                .padding(.top, ShareCardLayout.gapXS)
+            if hasElevation {
+                ElevationSparkline(elevations: content.elevationSamples,
+                                   stroke: AuraTheme.accent,
+                                   fill: AuraTheme.accent.opacity(0.18),
+                                   lineWidth: 2)
+                    .frame(height: sparklineHeight)
+                    .padding(.top, ShareCardLayout.gapSM)
+                // Bottom-anchors the stats row, absorbing the small budget slack; the
+                // fixed gaps around the sparkline stay exactly as budgeted.
+                Spacer(minLength: ShareCardLayout.gapSM)
+            } else {
+                // No sparkline: the band's slack becomes one hero→stats void. That void is
+                // spec-sanctioned; the device check owns the final call (plan erratum e).
+                Spacer(minLength: ShareCardLayout.gapSM)
+            }
+            statsRow
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .padding(.horizontal, AuraTheme.Spacing.xl)
-        .padding(.vertical, AuraTheme.Spacing.lg)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.horizontal, ShareCardLayout.bandHorizontalPadding)
+        .padding(.top, ShareCardLayout.bandTopPadding)
+        .padding(.bottom, ShareCardLayout.bandBottomPadding)
     }
 
-    private var elevationBlock: some View {
-        VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
-            HStack(spacing: AuraTheme.Spacing.xs) {
-                Image(systemName: "arrow.up.forward")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(AuraTheme.accent)
-                Text("\(content.climbedValue) \(content.climbedUnit) climbed")
-                    .font(.system(.caption, design: .rounded).weight(.semibold))
-                    .foregroundStyle(scrimText)
-            }
-            ElevationSparkline(elevations: content.elevationSamples,
-                               stroke: AuraTheme.accent,
-                               fill: AuraTheme.accent.opacity(0.18),
-                               lineWidth: 2)
-                .frame(height: 48)
-        }
-    }
-
-    private var metricsRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.xxl) {
-            StatPair(value: content.movingTime, label: "moving", context: .cockpit,
-                     labelFont: .system(.subheadline, design: .rounded))
-            if !hasElevation {
-                StatPair(value: "\(content.climbedValue) \(content.climbedUnit)",
-                         label: "climbed", context: .cockpit,
-                         labelFont: .system(.subheadline, design: .rounded))
-            }
-        }
+    private var contextRow: some View {
+        Text(contextLine)
+            .font(.system(.caption, design: .rounded).weight(.semibold))
+            .tracking(1.5)
+            .lineLimit(1)
+            .foregroundStyle(scrimText)
     }
 
     /// A footnote, not a headline: the card should still read as a ride worth posting, while
-    /// not passing a truncated distance off as the whole ride to people who cannot check.
+    /// not passing a truncated distance off as the whole ride to people who cannot check
+    /// (ROH-107). It sits directly under the context line, in the metadata zone and directly
+    /// above the distance it qualifies — not at the band's foot, where it would read as a
+    /// caption on the AURA sign-off.
+    /// The row's height is pinned, not measured: a `Label`'s height is the taller of its
+    /// symbol and its text, and the SF Symbol here is the taller of the two. Pinning keeps
+    /// the band's budget a fact rather than a prediction — see `unfinishedNoteHeight`.
     @ViewBuilder
     private var unfinishedNote: some View {
         if content.isUnfinished {
             Label(UnfinishedRideCopy.label, systemImage: "clock")
                 .font(.system(.caption2, design: .rounded).weight(.semibold))
+                .lineLimit(1)
+                .foregroundStyle(scrimText)
+                .frame(height: ShareCardLayout.unfinishedNoteHeight, alignment: .leading)
+                .padding(.top, ShareCardLayout.gapXS)
+        }
+    }
+
+    /// The band is a fixed budget, so the note's line is bought from the sparkline rather
+    /// than grown into the map field. Unfinished is the rare state; a shorter profile there
+    /// costs less than a smaller hero or a clipped stats row, and the package budget test
+    /// pins both variants.
+    private var sparklineHeight: CGFloat {
+        content.isUnfinished
+            ? ShareCardLayout.sparklineHeightUnfinished
+            : ShareCardLayout.sparklineHeight
+    }
+
+    private var heroRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.xs) {
+            Text(content.distanceValue)
+                .font(AuraTheme.Typography.speedHero(ShareCardLayout.heroPointSize))
+                .foregroundStyle(AuraTheme.textPrimary)
+            Text(content.distanceUnit)
+                .font(AuraTheme.Typography.metricCockpit(ShareCardLayout.heroUnitPointSize,
+                                                         face: .semibold))
                 .foregroundStyle(scrimText)
         }
     }
 
+    private var statsRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            statsText
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer(minLength: AuraTheme.Spacing.sm)
+            wordmark
+                .fixedSize()
+                .layoutPriority(1)
+        }
+    }
+
+    /// Moving time and climbed as one concatenated run: Saira numerals (the cockpit-numeral
+    /// rule), SF Rounded labels.
+    private var statsText: Text {
+        let valueFont = AuraTheme.Typography.metricCockpit(ShareCardLayout.statsValuePointSize,
+                                                           face: .semibold)
+        let labelFont = Font.system(size: ShareCardLayout.statsLabelPointSize,
+                                    weight: .semibold, design: .rounded)
+        return Text(movingValue).font(valueFont).foregroundStyle(AuraTheme.textPrimary)
+            + Text(" MIN MOVING · ").font(labelFont).foregroundStyle(scrimText)
+            + Text(content.climbedValue).font(valueFont).foregroundStyle(AuraTheme.textPrimary)
+            // The unit stays lowercase ("m", "ft") — uppercasing metric "m" into a bare
+            // "M" reads ambiguous next to MIN (Tasks 7–9 product review).
+            + Text(" \(content.climbedUnit) CLIMBED")
+                .font(labelFont).foregroundStyle(scrimText)
+    }
+
+    /// `RideStatsFormatter.minutes` returns "<n> min" (e.g. "42 min"); the stats row needs
+    /// the bare numeral for the Saira run — its own label supplies "MIN MOVING". Dropping
+    /// the formatter's " min" suffix here keeps `ShareCardContent` untouched (spec non-goal).
+    private var movingValue: String {
+        content.movingTime.hasSuffix(" min")
+            ? String(content.movingTime.dropLast(4))
+            : content.movingTime
+    }
+
     private var wordmark: some View {
         Text("AURA")
-            .font(AuraTheme.Typography.metricCockpit(18, face: .semibold, relativeTo: .callout))
+            .font(AuraTheme.Typography.metricCockpit(ShareCardLayout.wordmarkPointSize,
+                                                     face: .semibold, relativeTo: .callout))
             .tracking(4)
             .foregroundStyle(AuraTheme.textPrimary)
     }
@@ -151,10 +206,12 @@ struct ShareCardView: View {
             HStack(spacing: AuraTheme.Spacing.xxl) {
                 StatPair(value: content.movingTime, label: "moving",
                          context: .cockpit, alignment: .center,
-                         labelFont: .system(.subheadline, design: .rounded))
+                         labelFont: .system(.subheadline, design: .rounded),
+                         labelColor: scrimText)
                 StatPair(value: "\(content.climbedValue) \(content.climbedUnit)",
                          label: "climbed", context: .cockpit, alignment: .center,
-                         labelFont: .system(.subheadline, design: .rounded))
+                         labelFont: .system(.subheadline, design: .rounded),
+                         labelColor: scrimText)
             }
             Spacer()
             unfinishedNote
@@ -174,69 +231,103 @@ struct ShareCardView: View {
     }
 }
 
-// Every finished-ride preview stamps a real `endedAt`. They used to pass nil, which under the
-// wider `isUnfinished` gate would have marked all four — and a preview fixture must never be the
-// reason a production predicate is narrowed. Only the "No end recorded" preview is unfinished.
-#Preview("Route + elevation") {
-    ShareCardView(content: ShareCardContent(
-        ride: Ride(kind: .navigate, startedAt: Date(timeIntervalSince1970: 1_782_907_200),
-                   endedAt: Date(timeIntervalSince1970: 1_782_909_720),
-                   track: (0..<40).map { i in
-                       TrackPoint(coordinate: Coordinate(latitude: 40.44 + Double(i) * 0.001,
-                                                         longitude: -79.99 + Double(i) * 0.0012),
-                                  elevation: 240 + 30 * sin(Double(i) / 4), timestamp: Date())
-                   },
-                   stats: RideStats(distanceMeters: 8046, movingTimeSeconds: 2520,
-                                    averageSpeedMetersPerSecond: 5, maxSpeedMetersPerSecond: 9,
-                                    elevationGainMeters: 73),
-                   destinationName: "Millvale", routeId: nil, destinationPlaceId: nil),
-        units: .imperial))
+// MARK: - Preview fixtures
+
+/// Finished by default. `isUnfinished` is `checkpointedAt != nil || endedAt == nil`, so leaving
+/// `endedAt` nil here would stamp the note on every preview — and a preview fixture must never
+/// be the reason a production predicate gets narrowed (ROH-107). Only "No end recorded" opts in.
+private func previewRide(distanceMeters: Double = 8046, movingSeconds: Double = 2520,
+                         gainMeters: Double = 73, elevation: Bool = true,
+                         destination: String? = "Millvale", points: Int = 40,
+                         endedAt: Date? = Date(timeIntervalSince1970: 1_782_909_720),
+                         checkpointedAt: Date? = nil) -> Ride {
+    Ride(kind: .navigate, startedAt: Date(timeIntervalSince1970: 1_782_907_200),
+         endedAt: endedAt,
+         track: (0..<points).map { i in
+             TrackPoint(coordinate: Coordinate(latitude: 40.44 + Double(i) * 0.001,
+                                               longitude: -79.99 + Double(i) * 0.0012),
+                        elevation: elevation ? 240 + 30 * sin(Double(i) / 4) : nil,
+                        timestamp: Date())
+         },
+         stats: RideStats(distanceMeters: distanceMeters, movingTimeSeconds: movingSeconds,
+                          averageSpeedMetersPerSecond: 5, maxSpeedMetersPerSecond: 9,
+                          elevationGainMeters: gainMeters),
+         checkpointedAt: checkpointedAt,
+         destinationName: destination, routeId: nil, destinationPlaceId: nil)
+}
+
+/// A stand-in for an accepted Snapshotter raster: a muted gradient at the exact request
+/// geometry (360×240 pt @3x) so the preview exercises the resizable/clipped raster path.
+private func previewMapFixture() -> UIImage {
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = ShareCardLayout.rasterScale
+    return UIGraphicsImageRenderer(size: ShareCardLayout.mapFieldSize, format: format).image { ctx in
+        let colors = [UIColor(red: 0.16, green: 0.28, blue: 0.24, alpha: 1).cgColor,
+                      UIColor(red: 0.04, green: 0.07, blue: 0.09, alpha: 1).cgColor]
+        guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                        colors: colors as CFArray, locations: [0, 1]) else { return }
+        ctx.cgContext.drawLinearGradient(
+            gradient, start: .zero,
+            end: CGPoint(x: ShareCardLayout.mapFieldSize.width,
+                         y: ShareCardLayout.mapFieldSize.height),
+            options: [])
+    }
+}
+
+#Preview("Map raster") {
+    ShareCardView(content: ShareCardContent(ride: previewRide(), units: .imperial),
+                  mapImage: previewMapFixture())
+}
+
+#Preview("Polyline fallback") {
+    ShareCardView(content: ShareCardContent(ride: previewRide(), units: .imperial),
+                  mapImage: nil)
 }
 
 #Preview("No route") {
     ShareCardView(content: ShareCardContent(
-        ride: Ride(kind: .freeRide, startedAt: Date(timeIntervalSince1970: 1_782_907_200),
-                   endedAt: Date(timeIntervalSince1970: 1_782_908_400),
-                   track: [], stats: RideStats(distanceMeters: 5000,
-                   movingTimeSeconds: 1200, averageSpeedMetersPerSecond: 4,
-                   maxSpeedMetersPerSecond: 7, elevationGainMeters: 20),
-                   destinationName: nil, routeId: nil, destinationPlaceId: nil),
-        units: .imperial))
+        ride: previewRide(distanceMeters: 5000, movingSeconds: 1200, gainMeters: 20,
+                          destination: nil, points: 0),
+        units: .imperial), mapImage: nil)
 }
 
 #Preview("No end recorded") {
+    // The tightest budget case for the note: map raster + sparkline, where the band pays for
+    // the extra line out of the sparkline's height rather than growing.
+    // A checkpoint row carries the flush instant in BOTH fields, per
+    // `RideRecorder.checkpoint(at:)` — `endedAt` is the pause, not nil.
     ShareCardView(content: ShareCardContent(
-        ride: Ride(kind: .freeRide, startedAt: Date(timeIntervalSince1970: 1_782_907_200),
-                   // A checkpoint row carries the flush instant in BOTH fields, per
-                   // `RideRecorder.checkpoint(at:)` — `endedAt` is the pause, not nil.
-                   endedAt: Date(timeIntervalSince1970: 1_782_914_400),
-                   track: (0..<40).map { i in
-                       TrackPoint(coordinate: Coordinate(latitude: 40.44 + Double(i) * 0.001,
-                                                         longitude: -79.99 + Double(i) * 0.0012),
-                                  elevation: 240 + 30 * sin(Double(i) / 4), timestamp: Date())
-                   },
-                   stats: RideStats(distanceMeters: 8046, movingTimeSeconds: 2520,
-                                    averageSpeedMetersPerSecond: 5, maxSpeedMetersPerSecond: 9,
-                                    elevationGainMeters: 73),
-                   checkpointedAt: Date(timeIntervalSince1970: 1_782_914_400),
-                   destinationName: nil, routeId: nil, destinationPlaceId: nil),
-        units: .imperial))
+        ride: previewRide(destination: nil,
+                          endedAt: Date(timeIntervalSince1970: 1_782_914_400),
+                          checkpointedAt: Date(timeIntervalSince1970: 1_782_914_400)),
+        units: .imperial), mapImage: previewMapFixture())
 }
 
 #Preview("Route, no elevation") {
-    // Exercises the routed layout's climbed-fallback branch (metricsRow shows a second
-    // StatPair) when the track has coordinates but no elevation samples.
+    // Exercises the Spacer anchoring: no sparkline, stats row still bottom-anchored.
     ShareCardView(content: ShareCardContent(
-        ride: Ride(kind: .navigate, startedAt: Date(timeIntervalSince1970: 1_782_907_200),
-                   endedAt: Date(timeIntervalSince1970: 1_782_909_000),
-                   track: (0..<30).map { i in
-                       TrackPoint(coordinate: Coordinate(latitude: 40.44 + Double(i) * 0.001,
-                                                         longitude: -79.99 + Double(i) * 0.0012),
-                                  elevation: nil, timestamp: Date())
-                   },
-                   stats: RideStats(distanceMeters: 6400, movingTimeSeconds: 1800,
-                                    averageSpeedMetersPerSecond: 4, maxSpeedMetersPerSecond: 8,
-                                    elevationGainMeters: 55),
-                   destinationName: "Downtown", routeId: nil, destinationPlaceId: nil),
-        units: .imperial))
+        ride: previewRide(distanceMeters: 6400, movingSeconds: 1800, gainMeters: 55,
+                          elevation: false, destination: "Downtown", points: 30),
+        units: .imperial), mapImage: nil)
+}
+
+#Preview("Long destination") {
+    // Context line must tail-truncate on one line, never wrap into the hero's budget.
+    ShareCardView(content: ShareCardContent(
+        ride: previewRide(destination: "The Frank Curto Overlook at Bigelow Boulevard"),
+        units: .imperial), mapImage: nil)
+}
+
+#Preview("Worst-case stats") {
+    // 480 MIN MOVING · 12000 ft CLIMBED — the hand-measured width case the spec covers by
+    // preview: the stats run scales (≥0.85) rather than clipping, wordmark holds fixed.
+    ShareCardView(content: ShareCardContent(
+        ride: previewRide(distanceMeters: 160_934, movingSeconds: 28_800, gainMeters: 3657.6),
+        units: .imperial),
+                  mapImage: previewMapFixture())
+}
+
+#Preview("Metric") {
+    ShareCardView(content: ShareCardContent(ride: previewRide(), units: .metric),
+                  mapImage: previewMapFixture())
 }

@@ -13,6 +13,9 @@ struct AuraApp: App {
     @State private var settings = SettingsStore(defaults: .standard, sync: UbiquitousKeyValueStore())
     @State private var location = LocationService()
     @State private var weather = WeatherStore(provider: WeatherKitProvider())
+    /// The app's ONE share-map provider: the single-flight dedup table lives on the
+    /// instance, so the ride-end prefetch and the summary's own request must share it.
+    @State private var shareMapBox = ShareMapProviderBox(provider: ShareMapSnapshotter.shared)
 
     init() {
         AuraApp.configureMapbox()
@@ -37,6 +40,7 @@ struct AuraApp: App {
                 .environment(settings)
                 .environment(location)
                 .environment(weather)
+                .environment(shareMapBox)
                 .preferredColorScheme(.dark)
                 .onOpenURL { router.handle(url: $0) }
         }
