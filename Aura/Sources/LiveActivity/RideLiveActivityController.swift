@@ -58,8 +58,14 @@ final class RideLiveActivityController {
         endOrphans()
         // Defensive: clear any activity a previous ride somehow left running.
         end()
-        // Honor the user/system setting — never force-enable.
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        // Honor the user/system setting — never force-enable. Logged because from outside the
+        // process this is indistinguishable from a request that threw, and both look identical to
+        // "the feature is broken": a ride runs with no Live Activity and nothing says why. That
+        // ambiguity stopped ROH-145's device pass partway through.
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            log.notice("No Live Activity: disabled for this app or by the system")
+            return
+        }
 
         let attributes = RideActivityAttributes(
             mode: mode, startedAt: startedAt, units: units, destinationName: destinationName)
@@ -72,6 +78,10 @@ final class RideLiveActivityController {
             lastPayload = payload
             lastPushedAt = startedAt
         } catch {
+            // Still best-effort — the ride is unaffected — but no longer silent. `.targetMaximumExceeded`
+            // here is the one case where a ghost this sweep has claimed but not yet ended could
+            // cost the ride its Live Activity, and without this line that would be invisible.
+            log.error("Live Activity request failed: \(error.localizedDescription, privacy: .public)")
             activity = nil
             lastPayload = nil
             lastPushedAt = nil
