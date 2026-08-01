@@ -36,8 +36,9 @@ struct ActiveTimeAgreementTests {
                 Issue.record("expected a paused clock for paused: \(paused)")
                 continue
             }
-            #expect(activeSeconds == RideDuration.activeSeconds(startedAt: start, asOf: now,
-                                                                pausedSeconds: paused))
+            #expect(activeSeconds == RideDuration.activeSeconds(
+                elapsed: .betweenStamps(startedAt: start, endedAt: now),
+                pausedSeconds: paused))
         }
     }
 
@@ -54,8 +55,9 @@ struct ActiveTimeAgreementTests {
                 continue
             }
             #expect(now.timeIntervalSince(anchor)
-                    == RideDuration.activeSeconds(startedAt: start, asOf: now,
-                                                  pausedSeconds: paused))
+                    == RideDuration.activeSeconds(
+                        elapsed: .betweenStamps(startedAt: start, endedAt: now),
+                        pausedSeconds: paused))
         }
     }
 
@@ -64,7 +66,8 @@ struct ActiveTimeAgreementTests {
         let end = start.addingTimeInterval(2880)
         let d = try #require(RideDuration(startedAt: start, endedAt: end,
                                           checkpointedAt: nil, pausedSeconds: 600))
-        #expect(d.activeSeconds == RideDuration.activeSeconds(startedAt: start, asOf: end,
-                                                              pausedSeconds: 600))
+        #expect(d.activeSeconds == RideDuration.activeSeconds(
+            elapsed: .betweenStamps(startedAt: start, endedAt: end),
+            pausedSeconds: 600))
     }
 }

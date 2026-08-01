@@ -40,8 +40,9 @@ public enum RideActiveClock: Codable, Hashable, Sendable {
                             pausedSeconds: TimeInterval,
                             pausedSince: Date?,
                             now: Date) -> RideActiveClock {
-        let activeSeconds = RideDuration.activeSeconds(startedAt: startedAt, asOf: now,
-                                                       pausedSeconds: pausedSeconds)
+        let activeSeconds = RideDuration.activeSeconds(
+            elapsed: .betweenStamps(startedAt: startedAt, endedAt: now),
+            pausedSeconds: pausedSeconds)
         if let pausedSince {
             return .paused(since: pausedSince, activeSeconds: activeSeconds)
         }
