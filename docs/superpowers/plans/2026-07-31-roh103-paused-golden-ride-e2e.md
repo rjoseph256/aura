@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Spec: `docs/superpowers/specs/2026-07-31-roh103-paused-golden-ride-e2e-design.md` (revision 2). Parent: `docs/superpowers/specs/2026-07-26-segmented-rides-pause-design.md`.
+- Spec: `docs/superpowers/specs/2026-07-31-roh103-paused-golden-ride-e2e-design.md` (revision 3). Parent: `docs/superpowers/specs/2026-07-26-segmented-rides-pause-design.md`.
 - Fixture literals are **frozen and recorded, never recomputed at test time**. Refresh only via `GOLDEN_RECORD=1 swift test --filter recordPausedTruthLiterals` and paste.
 - Package code lives in `AuraCore/` (targets `AuraCore` and `AuraKit`); app code in `Aura/Sources/`; UI tests in `Aura/UITests/`. The app target has no test bundle, so any logic that needs testing goes in `AuraKit`.
 - The package builds on a macOS host in CI, so iOS-only CoreLocation APIs must stay `#if os(iOS)`-guarded. Nothing in this plan touches them.
@@ -37,7 +37,7 @@ The launch argument currently names a fixture that nothing reads: `rideOverride`
 - Consumes: `GoldenRideFixture.simulatedProvider(multiplier:)`, `PausedGoldenRideFixture.track()`, `SimulatedLocationProvider(track:speedMultiplier:)`.
 - Produces: `SimulatedRideFixture.factories: [String: @MainActor (Double) throws -> SimulatedLocationProvider]`, `SimulatedRideFixture.isKnown(_ name: String) -> Bool`, `@MainActor SimulatedRideFixture.provider(named: String, multiplier: Double) throws -> SimulatedLocationProvider?`. `SimulatedRideConfig.parse` returns `nil` for an unknown fixture name. `PausedGoldenRideFixture.simulatedProvider(multiplier:)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `AuraCore/Tests/AuraKitTests/SimulatedRideFixtureTests.swift`:
 
@@ -68,15 +68,27 @@ struct SimulatedRideFixtureTests {
     /// `parse` accepts but the lookup cannot build turns the harness on with no ride stream,
     /// which is the half-harnessed-on-real-GPS state D1 exists to prevent — reached from the
     /// other direction.
+    ///
+    /// The falsifiable half is `parse`, not the lookup: `provider(named:)` returns a
+    /// non-optional factory's result, so `!= nil` for a key drawn from `names` holds by
+    /// construction. What can break is `parse` validating against anything other than this
+    /// table. The build is still exercised inside the loop — the factory throws if a known
+    /// fixture's GPX is not bundled.
     @MainActor
-    @Test func everyKnownNameResolvesToAProvider() throws {
+    @Test func parseAcceptsEveryRegisteredFixtureName() throws {
         for name in SimulatedRideFixture.names {
-            #expect(try SimulatedRideFixture.provider(named: name, multiplier: 30) != nil,
-                    "\(name) is accepted by parse but builds no provider")
+            let config = SimulatedRideConfig.parse(arguments: ["App", "-auraSimulatedRide", name])
+            #expect(config?.fixture == name,
+                    "\(name) is in the registry but `parse` does not accept it")
+            _ = try SimulatedRideFixture.provider(named: name, multiplier: 30)
         }
     }
 }
 ```
+
+*(Corrected at the whole-branch review. As first written this method asserted
+`provider(named:) != nil` for every key in `names`, which cannot fail — the same class as the
+assertion an earlier gate on this branch deleted.)*
 
 Append to `AuraCore/Tests/AuraKitTests/SimulatedRideConfigTests.swift`:
 
@@ -93,12 +105,12 @@ Append to `AuraCore/Tests/AuraKitTests/SimulatedRideConfigTests.swift`:
     }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `cd AuraCore && swift test --filter SimulatedRide`
 Expected: FAIL — `cannot find 'SimulatedRideFixture' in scope`, and `parseRejectsAnUnknownFixtureName` fails because `parse` accepts any non-flag string.
 
-- [ ] **Step 3: Write the registry**
+- [x] **Step 3: Write the registry**
 
 Create `AuraCore/Sources/AuraKit/Testing/SimulatedRideFixture.swift`:
 
@@ -145,7 +157,7 @@ Append to `AuraCore/Sources/AuraKit/Testing/PausedGoldenRideFixture.swift`, insi
     }
 ```
 
-- [ ] **Step 4: Validate the name in `parse`**
+- [x] **Step 4: Validate the name in `parse`**
 
 In `AuraCore/Sources/AuraKit/Testing/SimulatedRideConfig.swift`, replace the fixture guard (line 23-24):
 
@@ -176,14 +188,14 @@ Replace with:
 
 A plan that spends a whole task correcting one stale comment should not create another.
 
-- [ ] **Step 5: Run the package tests to verify they pass**
+- [x] **Step 5: Run the package tests to verify they pass**
 
 Run: `cd AuraCore && swift test --filter SimulatedRide`
 Expected: PASS, all cases.
 
 Note: `swift test` prints TWO totals (Swift Testing and XCTest). Read both.
 
-- [ ] **Step 6: Resolve the app's override through the registry**
+- [x] **Step 6: Resolve the app's override through the registry**
 
 In `Aura/Sources/Ride/SimulatedRideSupport.swift`, replace the body of `rideOverride()` (lines 16-25):
 
@@ -224,12 +236,12 @@ with:
 
 The argument label is `multiplier:`, matching the registry signature in Step 3.
 
-- [ ] **Step 7: Build the app to verify the call site compiles**
+- [x] **Step 7: Build the app to verify the call site compiles**
 
 Dispatch the `apple-platform-build-tools:builder` subagent: build the `Aura` scheme, Debug, for an iPhone 17 simulator, `CODE_SIGNING_ALLOWED=NO`.
 Expected: BUILD SUCCEEDED.
 
-- [ ] **Step 8: Lint and commit**
+- [x] **Step 8: Lint and commit**
 
 ```bash
 scripts/lint.sh
@@ -250,7 +262,7 @@ The E2E finds the fixture's segment boundary by riding to a known distance (spec
 **Interfaces:**
 - Produces: `PausedGoldenRideFixture.expectedSegmentDistanceMeters: [Double]`, used by Task 6.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `AuraCore/Tests/AuraKitTests/PausedGoldenRideFixtureTests.swift`, inside the struct:
 
@@ -270,12 +282,12 @@ Append to `AuraCore/Tests/AuraKitTests/PausedGoldenRideFixtureTests.swift`, insi
     }
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [x] **Step 2: Run it to verify it fails**
 
 Run: `cd AuraCore && swift test --filter segmentDistancesSumToTheRideDistance`
 Expected: FAIL — `type 'PausedGoldenRideFixture' has no member 'expectedSegmentDistanceMeters'`.
 
-- [ ] **Step 3: Extend the recorder**
+- [x] **Step 3: Extend the recorder**
 
 In `AuraCore/Tests/AuraKitTests/PausedGoldenRideFixtureTests.swift`, inside `recordPausedTruthLiterals`, add above the `print`:
 
@@ -291,13 +303,13 @@ and add this line to the printed block, directly under `expectedSegmentPointCoun
             expectedSegmentDistanceMeters = \(perSegment)
 ```
 
-- [ ] **Step 4: Record the literal**
+- [x] **Step 4: Record the literal**
 
 Run: `cd AuraCore && GOLDEN_RECORD=1 swift test --filter recordPausedTruthLiterals`
 
 Copy the printed `expectedSegmentDistanceMeters` array **verbatim**. Do not round it, and do not compute it by hand — the fixture file's own rule (`PausedGoldenRideFixture.swift:16-18`) forbids that.
 
-- [ ] **Step 5: Paste it into the fixture**
+- [x] **Step 5: Paste it into the fixture**
 
 In `AuraCore/Sources/AuraKit/Testing/PausedGoldenRideFixture.swift`, directly under `expectedSegmentPointCounts`:
 
@@ -308,12 +320,12 @@ In `AuraCore/Sources/AuraKit/Testing/PausedGoldenRideFixture.swift`, directly un
     public static let expectedSegmentDistanceMeters: [Double] = [<paste>, <paste>]
 ```
 
-- [ ] **Step 6: Run the package tests to verify they pass**
+- [x] **Step 6: Run the package tests to verify they pass**
 
 Run: `cd AuraCore && swift test --filter PausedGoldenRideFixture`
 Expected: PASS. Both totals.
 
-- [ ] **Step 7: Lint and commit**
+- [x] **Step 7: Lint and commit**
 
 ```bash
 scripts/lint.sh
@@ -337,7 +349,7 @@ Spec D2. The probe is the only place a UI test can read raw, unformatted ride nu
 **Interfaces:**
 - Produces: `RideTestProbe.line(distanceMeters:elapsed:elevationGainMeters:speedMetersPerSecond:segmentCount:)` — note the label is `speedMetersPerSecond` (a `Double`); the ×10 conversion happens inside `line`, and only the *stored* property is named `speedDecimetersPerSecond`. `RideTestProbe.Values` gains `speedDecimetersPerSecond: Int?` and `segmentCount: Int?`; `View.simulatedRideProbe(distanceMeters:elapsed:elevationGainMeters:speedMetersPerSecond:segmentCount:)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Replace the body of `AuraCore/Tests/AuraKitTests/RideTestProbeTests.swift` with:
 
@@ -382,12 +394,12 @@ struct RideTestProbeTests {
 }
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `cd AuraCore && swift test --filter RideTestProbe`
 Expected: FAIL — extra argument `speedMetersPerSecond` in call.
 
-- [ ] **Step 3: Extend the probe**
+- [x] **Step 3: Extend the probe**
 
 In `AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift`, replace `RideTestProbe`'s `Values`, `line` and `parse`:
 
@@ -439,12 +451,12 @@ public enum RideTestProbe {
 }
 ```
 
-- [ ] **Step 4: Run the package tests to verify they pass**
+- [x] **Step 4: Run the package tests to verify they pass**
 
 Run: `cd AuraCore && swift test --filter RideTestProbe`
 Expected: PASS, five cases.
 
-- [ ] **Step 5: Thread the values through the view modifier**
+- [x] **Step 5: Thread the values through the view modifier**
 
 In `Aura/Sources/Ride/SimulatedRideSupport.swift`, add the two stored properties to `SimulatedRideProbe`, pass them to `RideTestProbe.line`, and extend the `View` extension. The struct becomes:
 
@@ -492,7 +504,7 @@ extension View {
 }
 ```
 
-- [ ] **Step 6: Update both HUD call sites**
+- [x] **Step 6: Update both HUD call sites**
 
 `Aura/Sources/Ride/RideHUDView.swift:94` and `Aura/Sources/Ride/NavigateHUDView.swift:154` each call `.simulatedRideProbe(...)`. Add the two arguments to both, reading from the same coordinator the existing arguments read:
 
@@ -503,12 +515,12 @@ extension View {
 
 The compiler finds any site you miss — that is why the signature changed rather than gaining defaults.
 
-- [ ] **Step 7: Build to verify both HUDs compile**
+- [x] **Step 7: Build to verify both HUDs compile**
 
 Dispatch the builder subagent: build the `Aura` scheme, Debug, iPhone 17 simulator, `CODE_SIGNING_ALLOWED=NO`.
 Expected: BUILD SUCCEEDED.
 
-- [ ] **Step 8: Run one shipped golden ride end to end**
+- [x] **Step 8: Run one shipped golden ride end to end**
 
 This task rewrites a string the two shipped E2Es parse. A compile check does not prove the probe
 still renders and still parses at runtime, and the next executed test is three commits away.
@@ -516,7 +528,7 @@ still renders and still parses at runtime, and the next executed test is three c
 Dispatch the builder subagent: run `-only-testing:AuraUITests/RideE2EUITests/testGoldenRideRecordsToSummaryAndHistory`.
 Expected: PASS.
 
-- [ ] **Step 9: Lint and commit**
+- [x] **Step 9: Lint and commit**
 
 ```bash
 scripts/lint.sh
@@ -545,7 +557,7 @@ max-speed assertion they would have served cannot fail: `RideStatsCalculator.wal
 speed strictly inside a segment, and the chord across the stop is 0.85 m/s — slower than every
 real leg — so segmented and flattened rides report the same 14.5 mph. See spec D5 step 8.
 
-- [ ] **Step 1: Add the identifiers**
+- [x] **Step 1: Add the identifiers**
 
 In `AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift`, inside `RideTestID`, under `summaryDistance`:
 
@@ -568,7 +580,7 @@ and under `hudPausedBanner`:
     public static let hudStats = "ride.hud.stats"
 ```
 
-- [ ] **Step 2: Apply the summary identifier**
+- [x] **Step 2: Apply the summary identifier**
 
 In `Aura/Sources/Ride/RideSummaryView.swift`, give `stat` an identifier parameter. The top-speed
 cell passes `nil` — it needs no identifier, and a nil-able parameter keeps one helper rather than
@@ -591,7 +603,7 @@ two. Replace lines 213-222:
 
 An empty identifier is SwiftUI's no-op, so the top-speed cell is unchanged in the tree.
 
-- [ ] **Step 2b: Apply the cockpit identifiers**
+- [x] **Step 2b: Apply the cockpit identifiers**
 
 In `Aura/Sources/Ride/InstrumentChassis.swift`, add an identifier beside each existing
 accessibility label. On `speedInstrument`, after `.accessibilityValue(...)` (line 92):
@@ -609,7 +621,7 @@ and on the composed stats column, after its `.accessibilityLabel(columnAccessibi
 
 `InstrumentChassis` will need `import AuraKit` if it does not already have it.
 
-- [ ] **Step 3: Add the screen accessors**
+- [x] **Step 3: Add the screen accessors**
 
 In `Aura/UITests/Screens/Screens.swift`, extend `RideScreen` with:
 
@@ -657,12 +669,12 @@ and extend `HistoryScreen` with:
     var firstRow: XCUIElement { rideRows.firstMatch }
 ```
 
-- [ ] **Step 4: Build for testing to verify both targets compile**
+- [x] **Step 4: Build for testing to verify both targets compile**
 
 Dispatch the builder subagent: `build-for-testing`, `Aura` scheme, Debug, iPhone 17 simulator, `CODE_SIGNING_ALLOWED=NO`.
 Expected: BUILD SUCCEEDED (the UI-test target compiles against the new `RideTestID` members).
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 scripts/lint.sh
@@ -679,7 +691,7 @@ Spec D7. `PauseNudgeScheduler`'s comment says the nudges are safe to leave wired
 **Files:**
 - Modify: `Aura/Sources/Notifications/PauseNudgeScheduler.swift:29-35` (the comment) and `:49` (the guard)
 
-- [ ] **Step 1: Correct the comment**
+- [x] **Step 1: Correct the comment**
 
 In `Aura/Sources/Notifications/PauseNudgeScheduler.swift`, replace the final sentence of `prepareAuthorization`'s doc comment — "The pause nudges themselves are left wired: the harness never pauses, and adding requests prompts nobody." — with:
 
@@ -690,7 +702,7 @@ In `Aura/Sources/Notifications/PauseNudgeScheduler.swift`, replace the final sen
 /// fire ten to a hundred and twenty minutes later, over whatever is running then.
 ```
 
-- [ ] **Step 2: Skip scheduling under the harness**
+- [x] **Step 2: Skip scheduling under the harness**
 
 At the top of `scheduleForgottenPauseNudges(startingAt:)`, before `cancelForgottenPauseNudges()`:
 
@@ -700,12 +712,12 @@ At the top of `scheduleForgottenPauseNudges(startingAt:)`, before `cancelForgott
         #endif
 ```
 
-- [ ] **Step 3: Build**
+- [x] **Step 3: Build**
 
 Dispatch the builder subagent: build the `Aura` scheme, Debug, iPhone 17 simulator, `CODE_SIGNING_ALLOWED=NO`.
 Expected: BUILD SUCCEEDED.
 
-- [ ] **Step 4: Lint and commit**
+- [x] **Step 4: Lint and commit**
 
 ```bash
 scripts/lint.sh
@@ -725,14 +737,14 @@ Spec D5. Two pauses: one inside the fixture's replay silence carrying only taps,
 **Interfaces:**
 - Consumes: everything produced by Tasks 1-4.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `Aura/UITests/RideE2EUITests.swift`, after `testNavigateGoldenRideEndsToSummaryAndHistory`:
 
 ```swift
     /// ROH-103: the paused golden ride. Pauses at the fixture's own segment boundary, inside
-    /// the 600 s stop that replays as ~20 s of dead air, so the ride records as two segments
-    /// and the chord across the stop is never drawn.
+    /// the 600 s stop that replays as 30 s of dead air at this test's 20x multiplier, so the
+    /// ride records as two segments and the chord across the stop is never drawn.
     ///
     /// What a green run does NOT prove: active time on any post-ride surface (it does not
     /// exist yet — ROH-112); `pausedSeconds` surviving persistence; the rendered map gap
@@ -862,8 +874,12 @@ Add to `Aura/UITests/RideE2EUITests.swift`, after `testNavigateGoldenRideEndsToS
         XCTAssertFalse(history.firstRow.label.contains(UnfinishedRideCopy.label),
                        "a paused ride is marked unfinished: \(history.firstRow.label)")
 
-        // Tapping re-reads through `store.ride(id:)`, so these bands are the PERSISTED ride
-        // decoded from segmentsData — the only step that proves the save kept its segments.
+        // Tapping re-reads through `store.ride(id:)`, so these bands run against the ride as
+        // PERSISTED and decoded back: they prove the save round-trips and its stats survive it.
+        // They do NOT prove segmentsData kept its segments — RideMapper stores stats in their
+        // own blob and RideSummaryView renders `ride.stats ?? .zero` without recomputing, so a
+        // save that flattened the segments alone reads correctly here. The saved segment shape
+        // is only visible on the rendered map gap, deferred to ROH-143.
         // The absence check first: without it, a summary left in the hierarchy by a failed
         // dismissal would satisfy every assertion below while proving nothing about the save.
         XCTAssertFalse(summary.title.exists,
@@ -921,13 +937,13 @@ Add to `Aura/UITests/RideE2EUITests.swift`, after `testNavigateGoldenRideEndsToS
 
 `leadingNumber(in:)` is `private static` on this class already; leave it as is.
 
-- [ ] **Step 2: Run it to verify it fails for the right reason**
+- [x] **Step 2: Run it to verify it fails for the right reason**
 
 Dispatch the builder subagent: run `-only-testing:AuraUITests/RideE2EUITests/testPausedGoldenRideSegmentsAndSummary` on an iPhone 17 simulator.
 
 Expected on a clean tree before Tasks 1-4 land: a compile failure. With them landed, it should PASS. If it fails, read the failure message before changing anything — the assertions are written to name their own cause (`distance at the pause is not segment 1`, `the active clock kept running while paused`).
 
-- [ ] **Step 3: Negative control — prove the test can fail for the reason it exists**
+- [x] **Step 3: Negative control — prove the test can fail for the reason it exists**
 
 Because Tasks 1-5 land first, the only red available in Step 2 is a compile error, which proves
 nothing about the wiring. This pass exists because "the button is connected to nothing that a
@@ -952,12 +968,12 @@ git checkout -- Aura/Sources/Ride/RideHUDView.swift
 git diff --exit-code Aura/Sources/Ride/RideHUDView.swift   # must print nothing
 ```
 
-- [ ] **Step 4: Run the two shipped golden rides to confirm no regression**
+- [x] **Step 4: Run the two shipped golden rides to confirm no regression**
 
 Dispatch the builder subagent: run `-only-testing:AuraUITests/RideE2EUITests` (the whole class).
 Expected: three tests, all PASS.
 
-- [ ] **Step 5: Lint and commit**
+- [x] **Step 5: Lint and commit**
 
 ```bash
 scripts/lint.sh
@@ -975,7 +991,7 @@ Spec D6 and D8. `togglePause()` has a second implementation in `NavigateHUDView+
 - Modify: `Aura/UITests/RideE2EUITests.swift` (add one method)
 - Modify: `.github/workflows/ci.yml:56` (the budget comment)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `Aura/UITests/RideE2EUITests.swift`:
 
@@ -1029,12 +1045,12 @@ Add to `Aura/UITests/RideE2EUITests.swift`:
     }
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Dispatch the builder subagent: run `-only-testing:AuraUITests/RideE2EUITests/testNavigatePauseControlEndsWhilePaused`.
 Expected: PASS. A failure at the PAUSED chip means the navigate pause row is occluded or unwired — that is the bug this test exists for, so investigate rather than loosening the assertion.
 
-- [ ] **Step 3: Update the CI budget comment**
+- [x] **Step 3: Update the CI budget comment**
 
 In `.github/workflows/ci.yml`, line 56 reads:
 
@@ -1053,17 +1069,17 @@ Replace with:
 # means a first-run flake still reports green — see the ROH-103 spec, D8.
 ```
 
-- [ ] **Step 4: Run the whole class**
+- [x] **Step 4: Run the whole class**
 
 Dispatch the builder subagent: run `-only-testing:AuraUITests/RideE2EUITests`.
 Expected: four tests, all PASS.
 
-- [ ] **Step 5: Run the full package suite**
+- [x] **Step 5: Run the full package suite**
 
 Run: `cd AuraCore && swift test`
 Expected: PASS. Read BOTH printed totals.
 
-- [ ] **Step 6: Lint and commit**
+- [x] **Step 6: Lint and commit**
 
 ```bash
 scripts/lint.sh

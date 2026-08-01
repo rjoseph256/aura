@@ -182,6 +182,17 @@ final class RideE2EUITests: XCTestCase {
                        "distance at the pause is not segment 1")
 
         ride.pauseControl.tap()
+        // The equality above guards the pause tap; this one guards the resume, which nothing
+        // else does. Segment 2's points arrive 0.25 s apart at 20x, so a resume that lands
+        // after the silence has run out finds the stream already flowing and this read runs
+        // away from the boundary immediately. Without it that run either passes on a single
+        // surviving point or burns the full 90 s below reporting "segment 2 never completed",
+        // which reads as a segmentation defect rather than the timing one it is.
+        XCTAssertLessThanOrEqual(try XCTUnwrap(ride.probeValues()).distanceMeters, boundary + 66,
+                                 "the resume landed after the replay silence was already spent "
+                                     + "— segment 2 was under way before the tap. This is a "
+                                     + "consumed replay window, not a segmentation failure")
+
         // waitForNonExistence, not XCTAssertFalse(waitForExistence:) — the latter asserts
         // "absent for the whole window", which the chip's removal animation can violate, and
         // it burns its full timeout on every green run, inside the one scarce budget.
@@ -199,7 +210,10 @@ final class RideE2EUITests: XCTestCase {
 
         let afterRide = try XCTUnwrap(ride.probeValues())
         XCTAssertEqual(afterRide.segmentCount, 2, "resume did not open a second segment")
-        // Holds the segmented literal (1883 m), excludes the flattened one (2391 m).
+        // Holds the segmented literal (1883 m). It does NOT exclude the flattened one on its
+        // own: `waitForDistance(atLeast: 1823)` returns mid-segment-2 in a flattened run, so
+        // 2391 is never the sampled value here. The flattened case is caught by `n == 2` and
+        // by the gain band below.
         XCTAssertTrue((total - 60...total + 200).contains(afterRide.distanceMeters),
                       "distance \(afterRide.distanceMeters) m is not the segmented total")
         // Segmented gain is 58 m, flattened 100 m. A tap early enough to push the +42 m step
@@ -214,6 +228,11 @@ final class RideE2EUITests: XCTestCase {
         XCTAssertTrue(ride.pausedBanner.waitForExistence(timeout: 5), "second pause did not take")
 
         let frozenAt = try XCTUnwrap(ride.probeValues()).elapsed
+        // Existence first: `statsColumn` is a `firstMatch`, so an identifier that stopped
+        // resolving would hand both reads `""` and the freeze equality below would pass on
+        // two empty strings.
+        XCTAssertTrue(ride.statsColumn.waitForExistence(timeout: 5),
+                      "cockpit stats column missing — its label cannot prove the clock froze")
         let frozenLabel = ride.statsColumn.label
         XCTAssertEqual(try XCTUnwrap(ride.probeValues()).speedDecimetersPerSecond, 0,
                        "speed hero did not fall to zero on pause")
@@ -312,9 +331,11 @@ final class RideE2EUITests: XCTestCase {
     }
 
     /// Segmented moving time is 290 s → "4 min"; flattened is 890 s → "14 min". The band is
-    /// wide enough to absorb a boundary point and nowhere near the flattened reading. This is
-    /// the only assertion here that is fully independent of when the tap landed, because
-    /// movingTimeSeconds comes from the fixture's own stamps rather than wall clock.
+    /// wide enough to absorb a boundary point and nowhere near the flattened reading. It is the
+    /// only assertion here that is independent of *playback stretch* — movingTimeSeconds comes
+    /// from the fixture's own stamps rather than the wall clock — but not of when the tap
+    /// landed: a tap on the wrong side of the boundary moves which points fall in which
+    /// segment, and the band absorbs that rather than being immune to it.
     @MainActor
     private static func assertMovingTimeIsSegmented(_ summary: SummaryScreen,
                                                     file: StaticString = #filePath,
@@ -368,8 +389,13 @@ final class RideE2EUITests: XCTestCase {
                       "PAUSED chip never appeared — the navigate control is not wired")
         XCTAssertEqual(try XCTUnwrap(ride.probeValues()).speedDecimetersPerSecond, 0,
                        "speed hero did not fall to zero on the navigate path")
-        XCTAssertTrue(try XCTUnwrap(ride.speedValue.value as? String).hasPrefix("0 "),
-                      "navigate speed readout reads \(ride.speedValue.value ?? "nil") while paused")
+        // Unwrapped with its own message, as on the Explore path: a missing or non-String
+        // value names itself instead of failing with a bare "expected non-nil value".
+        let speedReadout = try XCTUnwrap(ride.speedValue.value as? String,
+                                         "speed readout carries no string value: "
+                                             + "\(ride.speedValue.value ?? "nil")")
+        XCTAssertTrue(speedReadout.hasPrefix("0 "),
+                      "navigate speed readout reads \(speedReadout) while paused")
 
         // End from the paused state, via the navigate control cluster.
         ride.endButton.tap()

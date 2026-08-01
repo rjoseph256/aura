@@ -22,10 +22,11 @@ public struct SimulatedRideConfig: Equatable, Sendable {
         guard let index = arguments.firstIndex(of: "-auraSimulatedRide"),
               arguments.indices.contains(index + 1) else { return nil }
         let fixture = arguments[index + 1]
-        // Spec D1: an unknown name must read as "no harness" at all six `current != nil`
-        // sites, not just at the ride stream. Otherwise a typo gives you the in-memory
-        // store, the probe, scripted guidance and no ambient location tier, over a ride
-        // recording real GPS — which reads in CI as "distance never reached" 90 s later.
+        // Spec D1: an unknown name must read as "no harness" at every `current != nil` site,
+        // not just at the ride stream. Otherwise a typo gives you the probe, scripted guidance
+        // and no ambient location tier, over a ride recording real GPS — which reads in CI as
+        // "distance never reached" 90 s later. (The in-memory store is not one of those sites;
+        // it keys off its own `-auraInMemoryRideStore` flag.)
         guard !fixture.hasPrefix("-"), SimulatedRideFixture.isKnown(fixture) else { return nil }
         var multiplier = defaultMultiplier
         if let mIndex = arguments.firstIndex(of: "-auraSimulatedRideMultiplier"),

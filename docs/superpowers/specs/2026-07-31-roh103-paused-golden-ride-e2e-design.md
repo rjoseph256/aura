@@ -39,6 +39,13 @@ in memory (`RideSessionCoordinator.swift:378`); the probe reads live recorder st
 asserted for row count. `segmentsData` encode and decode is exercised by package tests over
 constructed rides, never by a ride this app actually recorded.
 
+*(Revision 3, reconciled with D5 step 10: this pass closes the round-trip half of that gap and
+not the segment-blob half. Tapping the History row re-reads the ride through `store.ride(id:)`,
+so the summary bands then run against a ride that was encoded, saved and decoded — but every
+band reads `statsData`, which `RideMapper` stores beside the segments, so a save that flattened
+`segmentsData` alone still passes. Reading the saved **segments** back needs a surface derived
+from them, which is the rendered gap deferred to ROH-143.)*
+
 **The app cannot play the paused fixture.** `SimulatedRideSupport.rideOverride` ignores
 `SimulatedRideConfig.fixture` and always loads `GoldenRideFixture`
 (`SimulatedRideSupport.swift:18`).
@@ -65,13 +72,18 @@ pixels split out as ROH-143, a device pass with a written checklist.)*
 *(Revised. Revision 1 had `rideOverride` return `nil` for an unknown name and called that
 "degrades to absent". It is not absent — it is a third state.)*
 
-Six sites key off `SimulatedRideConfig.current != nil`: the in-memory store
-(`AuraApp.swift:51`), the ambient location tier (`AuraApp.swift:235`), the preview route
-substitution (`RoutePreviewView.swift:271`), scripted guidance (`NavigateHUDView.swift:90`), the
-probe (`SimulatedRideSupport.swift:41`), and the notification-authorization skip
-(`PauseNudgeScheduler.swift:38`). Nilling the provider alone leaves five of them engaged while
-the ride records real GPS. A typo then reads, ninety seconds later, as "distance never reached
-— last probe: d=0".
+Six sites key off `SimulatedRideConfig.current != nil`: the ride stream itself
+(`SimulatedRideSupport.rideOverride`, `SimulatedRideSupport.swift:16`), the ambient location tier
+(`AuraApp.swift:235`), the preview route substitution (`RoutePreviewView.swift:269`), scripted
+guidance (`NavigateHUDView.swift:90`), the probe (`SimulatedRideSupport.swift:50`), and the
+notification-authorization skip (`PauseNudgeScheduler.swift:41`). D7 adds a seventh in this pass,
+the nudge-scheduling skip (`PauseNudgeScheduler.swift:54`).
+
+The in-memory store (`AuraApp.swift:51`) is **not** one of them: it reads
+`SimulatedRideConfig.currentForcesInMemoryStore`, parsed from its own `-auraInMemoryRideStore`
+flag, and every UI-test launch passes that flag separately (ROH-95). Nilling the provider alone
+leaves five of the `current != nil` sites engaged while the ride records real GPS. A typo then
+reads, ninety seconds later, as "distance never reached — last probe: d=0".
 
 So the fixture name is validated where the contract lives:
 
@@ -79,8 +91,10 @@ So the fixture name is validated where the contract lives:
   `"paused"` to a provider factory. A dictionary in AuraKit rather than a `switch` in the app
   target, for the reason `PauseNudgePolicy` already documents — the app target has no test
   bundle, so a `switch` there is untestable by construction.
-- `SimulatedRideConfig.parse` returns `nil` for a name the lookup does not know. All six sites
-  then honor one contract, and an unknown name means real location everywhere.
+- `SimulatedRideConfig.parse` returns `nil` for a name the lookup does not know. Every
+  `current != nil` site then honors one contract, and an unknown name means real location
+  everywhere. The in-memory store is unaffected, because it never read `current` in the first
+  place — a typo'd fixture name still gets you an empty store, which is harmless.
 - `rideOverride` resolves through the lookup and keeps its existing `assertionFailure` for a
   name that is known but fails to load, which is a packaging regression rather than a typo.
 
@@ -104,12 +118,20 @@ decimetre choice stands: `pause(at:)` writes exactly `0`, so any nonzero reading
 defect, and a partial-decay regression is visible at that resolution.)*
 
 **`d`, `e` and `g` stay required; `s` and `n` parse as optional.** `RideTestProbe.parse` returns
-nil on any unknown or missing key. Both CI and `scripts/golden-ride.sh` use
-`test-without-building`, so a test bundle from this commit against an app binary from an older
-one is an ordinary developer state, and strict parsing turns that skew into
-`XCTUnwrap` "expected non-nil value" across all three golden tests, naming nothing. The
-compiler already forces both HUD call sites through the `simulatedRideProbe` signature;
-strictness in the parser adds no safety and costs attribution.
+nil on any unknown or missing key, so a required field is a required field for *every* caller of
+the parser. The two shipped golden tests never read `s` or `n`; requiring them would make a
+probe-format problem in fields those tests do not use fail them anyway, at
+`XCTUnwrap` "expected non-nil value" with nothing in the message. Optional parsing keeps the
+failure where the field is actually read, on the assertion that names it.
+
+*(Revision 3. Revision 2 justified this with binary/bundle skew — a new test bundle against an
+older app binary. The risks table below correctly calls that unreachable in practice: both
+`ci.yml` and `scripts/golden-ride.sh` run `build-for-testing` immediately before
+`test-without-building`, so it takes a hand-run command to produce. The lenient parser is still
+right; it is right about attribution, not about skew.)*
+
+The compiler already forces both HUD call sites through the `simulatedRideProbe` signature, so
+strictness in the parser adds no safety on top of that.
 
 `RideTestProbeTests` covers the new line format and an old-format line without `s` or `n`.
 
@@ -139,9 +161,12 @@ one — a lazy band of 1.0-1.6 mi would admit both.
 
 **The moving-time cell in a 3-6 minute band.** Segmented moving time is 290 s, rendering as
 "4 min"; flattened is 890 s, rendering as "14 min". This is the design's most robust assertion
-and the only one that is fully independent of when the tap lands: `movingTimeSeconds` is
-computed from the fixture's own timestamps, so any run that recorded the 600 s chord inside a
-segment reports at least ten minutes.
+and the only one independent of *playback stretch*: `movingTimeSeconds` is computed from the
+fixture's own timestamps rather than the wall clock, so any run that recorded the 600 s chord
+inside a segment reports at least ten minutes however slowly the replay ran. It is **not**
+independent of when the tap lands — a tap on the wrong side of the boundary changes which points
+fall in which segment, and the band is wide enough to absorb that rather than immune to it. So
+the band is not evidence for widening it further.
 
 **It is not, however, the signal ROH-112's active-time assertion would carry.** Moving time is
 `RideStatsCalculator` walking segments behind a 0.5 m/s gate. Active time is
@@ -201,7 +226,7 @@ budget that is scarce.)*
 Only the taps need to land in the silence. The clock and speed assertions do not care where
 playback is, and they are the expensive part. So the free-ride test
 (`testPausedGoldenRideSegmentsAndSummary`, launched onboarded with
-`-auraSimulatedRide paused -auraSimulatedRideMultiplier 30 -auraInMemoryRideStore`, entering
+`-auraSimulatedRide paused -auraSimulatedRideMultiplier 20 -auraInMemoryRideStore`, entering
 through Explore) uses two:
 
 **Pause A — inside the silence, three operations.**
@@ -211,7 +236,10 @@ through Explore) uses two:
    zero while riding is itself a shipping bug.
 2. Tap `ride.hud.pause`; `ride.hud.paused.banner` appears.
 3. Assert probe distance equals 941 exactly (D3).
-4. Tap again; the banner clears. Two taps and two reads, well inside twenty seconds.
+4. Tap again; the banner clears, and one more probe read confirms the resume did not land after
+   the silence was spent — segment 2's points arrive 0.25 s apart at 20x, so a late resume is
+   already several points in and reads well past the boundary. Two taps and three reads, inside
+   the 30 s silence.
 
 **Segment 2 records out**, to at least the segmented literal. Assert `n == 2` and the distance
 and gain bands.
@@ -249,9 +277,18 @@ and gain bands.
    `RideStore.swift:93`; if that line were dropped, every paused ride would wear the
    abandoned-ride treatment across History, the last-ride card, the share card and the summary.
 10. Tap the row. `HistoryView.swift:75` re-reads through `store.ride(id:)` and presents
-    `RideSummaryView`, so the same distance and moving bands asserted on that sheet are the
-    **persisted** ride, decoded from `segmentsData`. This is the only step in the pass that
-    proves the save kept its segments.
+    `RideSummaryView`, so the same distance and moving bands asserted on that sheet run against
+    the ride as **persisted and decoded back** rather than the in-memory one the first summary
+    was handed. That is what the step proves: the ride round-trips through the store with its
+    stats intact.
+
+    *(Revision 3. Revision 2 called this "decoded from `segmentsData`" and "the only step in
+    the pass that proves the save kept its segments". It is neither. `RideMapper.record(from:)`
+    encodes stats into their own blob beside the segments, and `RideSummaryView` renders
+    `ride.stats ?? .zero` without recomputing from segments — so a save that flattened
+    `segmentsData` while leaving `statsData` segmented passes every assertion here. **No step in
+    this pass proves the saved segment blob kept its shape.** The only surface derived from it
+    is the rendered map gap, deferred to ROH-143.)*
 
 ### D6 — The navigate pause control gets its own short test
 
@@ -289,7 +326,7 @@ count and the added replay time.
 
 `-retry-tests-on-failure -test-iterations 2` (`ci.yml:114`) means a first-run failure retries and
 the job still goes green. With the stall detector gone the only timing-coupled step is Pause A's
-two taps inside a twenty-second silence, but the retry is recorded in the risks table so that
+two taps inside a thirty-second silence, but the retry is recorded in the risks table so that
 nobody reads green as "never flaked".
 
 ## What a green run proves
@@ -297,9 +334,14 @@ nobody reads green as "never flaked".
 **Proven:** the Explore and navigate pause controls are both wired to `coordinator.pause()`; the
 control is reachable and not occluded on the test device; the live active clock freezes, resumes
 and never runs backwards at the rendered surface; the speed readout falls to exactly zero; a ride
-paused across a GPS gap records and **saves** segmented distance, moving time and elevation gain
-rather than flattened; ending from the paused state saves the ride; the pause checkpoint neither
-duplicates the History row nor marks it unfinished.
+paused across a GPS gap **records** segmented distance, moving time and elevation gain rather
+than flattened, and **saves** the segmented distance and moving time; ending from the paused
+state saves the ride; the pause checkpoint neither duplicates the History row nor marks it
+unfinished.
+
+Elevation gain sits on the recorded side only. The one gain assertion is the 55-70 band on the
+live probe before End; `RideSummaryView` has no numeric gain readout at all (gain renders inside
+the profile chart), so no post-save surface carries it.
 
 **Not proven here, and worth writing on the test method so nobody over-reads it:** active time on
 any post-ride surface, because it does not exist yet (ROH-112); `pausedSeconds` surviving
@@ -319,11 +361,11 @@ haptics; and deep-link protection while paused.
 
 | Risk | Mitigation |
 | -- | -- |
-| Pause A's taps miss the twenty-second replay silence | D4's deterministic boundary fires at the last segment-1 point rather than two polls later; a miss fails D3's exact-941 equality with a distance in the message, not a vague band |
+| Pause A's taps miss the thirty-second replay silence | D4's deterministic boundary fires at the last segment-1 point rather than two polls later; a pause tap that misses fails D3's exact-941 equality with a distance in the message, not a vague band, and a resume tap that misses fails the `boundary + 66` ceiling immediately after it rather than timing out ninety seconds later against the wrong cause |
 | CI's retry flag hides a first-run flake | D8 records it. The alternative — excluding these methods from the retry — trades a hidden flake for a red gate on unrelated PRs, which is the trade the flag was added to make |
 | A stale app binary meets a new test bundle | D2 parses `s` and `n` as optional, so the two shipped golden tests are unaffected by this pass. **The reverse skew is not covered**: a new app binary against a pre-ROH-103 test bundle hits the old parser's `default: return nil` and fails all three golden tests unattributably. Both CI and `scripts/golden-ride.sh` build before they test, so it takes a hand-run `test-without-building` to reach |
-| A test asserts what the code does rather than what the rider needs | Revision 3 deleted the max-speed band for exactly this. Every remaining assertion was checked against a deliberately broken variant: the negative control in the plan neuters `togglePause()` and confirms the suite goes red |
-| A typo'd fixture name produces a silently real ride | D1 validates at parse, so all six harness sites turn off together |
+| A test asserts what the code does rather than what the rider needs | Revision 3 deleted the max-speed band for exactly this. One negative control was run, and it establishes exactly one thing: neutering `RideHUDView.togglePause()` turns the free-ride method red at `"PAUSED chip never appeared — the control is not wired"`. Because `continueAfterFailure = false`, the run stops there, so no assertion after it was exercised against a broken build, and the navigate path's separate `togglePause()` (`NavigateHUDView+Cockpit.swift:131`) got no negative control at all. The claim this row supports is "the Explore pause control is provably load-bearing", not "every assertion is" |
+| A typo'd fixture name produces a silently real ride | D1 validates at parse, so every site keyed on `current != nil` turns off together. The in-memory store does not: it reads its own `-auraInMemoryRideStore` flag, so a typo leaves an empty store over real GPS rather than a half-harnessed one — no prompt-free ride, no probe, no scripted guidance |
 | The three fixture literals drift apart | D4's sum assertion, and the array is emitted by the recorder rather than hand-computed |
 | Orphaned notification requests outlive an aborted run | D7 suppresses scheduling under the harness |
 | An interior empty segment reaches the summary or share card for the first time | D3's exact-941 equality makes a pause before the first fix unreachable; parent D6 declares interior empties legal and `normalizedSegments` preserves them, but only package tests have ever built one |

@@ -19,6 +19,11 @@ public enum RideTestID {
     /// coordinator, these attribute it to the view. Identifiers rather than label queries —
     /// a raw "Speed" string in a test would survive a rename with no compile break.
     public static let hudSpeed = "ride.hud.speed"
+    /// Both identifiers are applied inside `InstrumentChassis`, which is shared, so this one
+    /// names whatever column the host HUD supplied: Explore's DISTANCE/TIME/CLIMB and
+    /// navigate's TO GO/ARRIVE. Only the Explore column carries the active clock, so the
+    /// clock-freeze assertions that read this label are meaningful on that path alone — the
+    /// navigate column would hold its label across a pause whether the clock froze or not.
     public static let hudStats = "ride.hud.stats"
     public static let previewStart = "preview.start"
     public static let summaryDistance = "summary.distance"
