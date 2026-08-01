@@ -1,9 +1,16 @@
-# Active time on every post-ride surface (ROH-112) — design
+# Active time on the ride summary (ROH-112) — design
 
 Date: 2026-08-01
 Issue: [ROH-112 — Show active time (not moving time) on every surface that reports a ride's duration](https://linear.app/rohun/issue/ROH-112/show-active-time-not-moving-time-on-every-surface-that-reports-a-rides)
 Parent spec: `docs/superpowers/specs/2026-07-26-segmented-rides-pause-design.md` (D5)
-Status: revision 1.
+Status: revision 2, after a three-reviewer gate on revision 1.
+
+Revision 1 moved five surfaces to active time. The gate established that this makes the number
+worse for a rider who does not press Pause, which is the majority path, and the PO narrowed the
+scope on 2026-08-01 to the ride summary alone. Revision 1 also rested on a premise the recorder
+contradicts (D2), claimed a formatter that one surface does not use, justified keeping the moving
+cell with a test claim that is false, and proposed an XCUITest assertion that could not fail. Each
+is corrected inline below.
 
 Slice A of the pause epic is shipped through Pass 6. The recorder accumulates `pausedSeconds`,
 schema V6 persists it, the cockpit shows a paused state, and the Live Activity honors it. No
@@ -11,38 +18,109 @@ post-ride surface reads any of it.
 
 ## Problem
 
-Parent D5 decided that a finished ride leads with **active** time, `elapsed - paused`, because that is
-the number the rider was watching on the HUD when they pressed End. Moving time appears on no
+Parent D5 decided that a finished ride leads with **active** time, `elapsed - paused`, because that
+is the number the rider was watching on the HUD when they pressed End. Moving time appears on no
 live screen, so leading with it shows the rider a number they never saw.
 
-None of that was built. Every surface that reports a finished ride's duration still reports
-`RideStats.movingTimeSeconds`:
+The ride summary is the surface that decision was about, and it was never built. ROH-101 deferred
+it here (`2026-07-29-roh101-pause-control-design.md:404`), so `RideSummaryView.swift:279` still
+renders `RideStats.movingTimeSeconds`. A rider can pause for a twenty-minute coffee and no
+post-ride screen records that they were out longer than they were pedaling.
 
-| Surface | Site |
-| -- | -- |
-| Ride summary | `RideSummaryView.swift:279` |
-| Share card | `ShareCardContent.swift:38`, rendered at `ShareCardView.swift:163` and `:207` |
-| History row caption | `HistoryView.swift:171` |
-| Home last-ride card | `LastRideCard.swift:104` |
-| Widget last-ride card | `LastRideWidget.swift:72`, `:103`, `:166` |
+### Why the other four surfaces are not in this pass
 
-Two of those are not in the issue's own list. The ride summary is the surface that decision was
-actually about, and ROH-101 deferred it here (`2026-07-29-roh101-pause-control-design.md:404`).
-The Home last-ride card was missed entirely, and it sits one tap above a History row that would
-otherwise report the same ride differently.
+*(New in revision 2. Revision 1 moved all five.)*
 
-The rider-visible consequence today: pause for a twenty-minute coffee and nothing anywhere
-records that you were out for longer than you were pedaling. The paused time is stored and
-never shown.
+`RideStatsCalculator` gates moving time at 0.5 m/s (`RideStatsCalculator.swift:25`), so moving
+time **already** excludes an unpaused café stop, a red light, and a mechanical. Active time
+excludes only the stops the rider manually pressed. The parent spec says in its own scope section
+(`2026-07-26-segmented-rides-pause-design.md:35-39`) that the stops a rider will not press a
+button for are precisely the common ones.
+
+So on the majority path, active time is a worse number than moving time. A twenty-minute coffee
+with no pause pressed reads 46 min in History today and would read 68 min after the change, and
+every ride already in History would restate upward on upgrade with nothing in the app to explain
+why.
+
+The summary is the one surface with room to show active, elapsed and moving together, where the
+rider can see all three and compare them. A History row, a widget cell, and a share card each show
+one number with no context, so moving out from under moving time there trades a good default for a
+worse one. Those four hold until auto-pause (Slice B) makes active time the better number on the
+majority path, tracked as a follow-up issue.
+
+This is a deliberate override of parent D5's "all four move to active-with-elapsed"
+(`2026-07-26-segmented-rides-pause-design.md:234-238`), taken by the PO on 2026-08-01, not a
+reading of its intent.
 
 ## Decisions
 
-Numbered D1 onward for this spec. Every reference to the pause epic's own numbering is written
-as "parent D5" and so on.
+Numbered D1 onward for this spec. References to the pause epic's numbering are written as
+"parent D5".
 
-### D1 — One pure type computes both numbers
+### D1 — One shared primitive, so "active" cannot drift
 
-`RideDuration` in `AuraCore/Sources/AuraCore/Ride/RideDuration.swift`, beside `RideActiveClock`:
+*(New in revision 2. Revision 1 promised non-drift and enforced it with a doc comment.)*
+
+Active time is computed in three places after this pass, and would have been four:
+
+| Site | Role |
+| -- | -- |
+| `RideSessionCoordinator.refreshElapsed` (`:224`) | the number the rider watches on the HUD |
+| `RideActiveClock.make` (`:43`) | the Live Activity and Dynamic Island clock |
+| `RideDuration` (new) | the finished ride, on the summary |
+
+The first two are today the same expression, `max(0, now - startedAt - pausedSeconds)`, written
+out twice. Since "the rider sees the same clock after the ride that they saw during it" is the
+whole justification for this change, that agreement is an invariant and gets a mechanism rather
+than a promise:
+
+```swift
+extension RideDuration {
+    /// The one definition of active time. Every clock in the app routes through it.
+    public static func activeSeconds(startedAt: Date, asOf now: Date,
+                                     pausedSeconds: TimeInterval) -> TimeInterval
+}
+```
+
+`RideActiveClock.make` and `refreshElapsed` are rewritten to call it, keeping their existing
+behavior byte-for-byte. A test drives the same inputs through the live path and the finished path
+and asserts equality, following `RideSummaryUnfinishedTests.rideAgreesWithItsSummaryProjection`.
+
+Revision 1 proposed clamping paused into `0...elapsed` here, which disagrees with the two existing
+implementations on a negative `pausedSeconds`. The shared primitive removes the question.
+
+### D2 — `checkpointedAt` is a marker, never a clock; unfinished rides show no duration
+
+*(Rewritten in revision 2. Revision 1 claimed an unfinished ride has no `endedAt` and fell back to
+`checkpointedAt`. Both halves were wrong.)*
+
+`RideRecorder.checkpoint(at:)` stamps `endedAt` **and** `checkpointedAt` to the same instant
+(`RideRecorder.swift:170-173`), and says so in its own doc comment. The parent spec already
+recorded this as a Pass 2 correction (`2026-07-26-segmented-rides-pause-design.md:378-382`). So:
+
+* No row the app can write has `endedAt == nil && checkpointedAt != nil`. Revision 1's fallback
+  was unreachable, and the test it proposed for that fallback would have pinned a state nothing
+  produces, which is the unfalsifiable-assertion defect this repo keeps catching.
+* The state that does occur is **both non-nil**: `RideSessionCoordinator.finish()`'s save-failure
+  branch publishes a ride whose `endedAt` is the End tap and whose `checkpointedAt` is an earlier
+  flush (`RideSessionCoordinator.swift:376`).
+
+`RideDuration` therefore never reads `checkpointedAt` as a time. It reads it as a disqualifier:
+
+**`RideDuration` is nil for any unfinished ride**, using the existing `isUnfinished` predicate
+(`Ride.swift`, `RideSummary.swift:63`). The checkpoint is written at the *pause*, so a rider who
+paused at minute 30, resumed, rode to minute 90, and was then killed has a row whose `endedAt` is
+minute 30. Printing "30 min active" under a badge reading "No end recorded" is confidently wrong in
+a way the badge does not cover, and a rider reads that badge as "the last bit is missing", not "two
+thirds of this ride is missing". The moving cell still reports what was actually recorded, and the
+badge carries the rest.
+
+This also removes the hazard the architecture review flagged: a future author cannot read this spec
+as licence to prefer `checkpointedAt`, because no rule here uses it as a clock.
+
+### D3 — `RideDuration` for a finished ride
+
+`AuraCore/Sources/AuraCore/Ride/RideDuration.swift`, beside `RideActiveClock`:
 
 ```swift
 public struct RideDuration: Equatable, Sendable {
@@ -52,49 +130,23 @@ public struct RideDuration: Equatable, Sendable {
 }
 ```
 
-with `Ride.duration` and `RideSummary.duration` as the two call-site conveniences. It is the
-finished-ride counterpart of `RideActiveClock`, which does the same subtraction while the ride is
-running, and its doc comment says so. The two definitions of "active" must never drift, because
-the whole point of parent D5 is that the rider sees the same clock after the ride that they saw
-during it.
+with `Ride.duration` and `RideSummary.duration` as call-site conveniences. Rules, each pinned by a
+test:
 
-The initializer is failable. `nil` means the ride has no usable end at all, which is the only
-case any surface renders as unavailable.
+* `nil` when the ride is unfinished, per D2. That is the only unavailable case.
+* `elapsedSeconds = max(0, endedAt - startedAt)`.
+* `activeSeconds` comes from D1's shared primitive with `now: endedAt`.
+* A ride recorded before pause existed has `pausedSeconds == 0`, so active equals elapsed.
 
-Rules, each pinned by a test:
+The `max(0, ...)` on elapsed guards a degenerate recorder state, not a device clock: `startedAt ??
+date` in `checkpoint(at:)` collapses to a zero interval when the recorder never started. It is
+paired with an `assertionFailure` in DEBUG and a `Logger` line in release, following
+`RideMigrationPlan.swift:38`, because a silent clamp is how a future auto-pause accounting bug
+would ship as "active time is a bit low" and never get reported.
 
-* End is `endedAt ?? checkpointedAt`. `nil` when both are nil.
-* `elapsedSeconds = max(0, end - startedAt)`, so a backward device-clock step reads zero rather
-  than a negative clock.
-* Paused is clamped into `0...elapsedSeconds` before subtracting, so `activeSeconds` can never be
-  negative and never exceed elapsed, whatever a corrupt or future-dated `pausedSeconds` says.
-* A ride recorded before pause existed has `pausedSeconds == 0`, so active equals elapsed. That is
-  truthful: no pauses were recorded.
+### D4 — Summary layout: active with a conditional elapsed caption, moving retained
 
-### D2 — Unfinished rides fall back to the checkpoint
-
-An unfinished ride has no `endedAt`, so parent D5's literal reading ("elapsed and active are
-unavailable") would blank the duration on a recovered ride that can honestly report one.
-`checkpointedAt` is when recording stopped, which is the most the app knows, and the row already
-carries the unfinished badge (ROH-107) telling the rider the ride was cut short. Using it costs
-nothing and reads better than a dash.
-
-Rows with neither timestamp are the legacy PR #90 dev-build rows, which wrote a nil `endedAt` and
-no marker. Those are the only rows that render unavailable.
-
-### D3 — Constrained surfaces show active alone; only the summary shows the pair
-
-Parent D5 says the same pair is used everywhere a ride's duration is shown. Its goal is that one ride
-cannot report three different durations, and showing one consistently-defined number achieves
-that. Printing two clocks in a History caption or a 92 pt widget stat cell does not fit, and
-would cost the widget its climb cell.
-
-So: the summary shows active with elapsed beneath it. The share card, both last-ride cards, and
-the History caption each show active alone. Moving time survives on the ride summary only.
-
-### D4 — The summary keeps its moving cell, and the layout is active, moving, top speed
-
-Elapsed is a caption under the active value, not a fourth peer cell:
+Three cells, with elapsed as a caption under the first rather than a fourth peer:
 
 ```
 38 min          31 min        24.3
@@ -102,112 +154,127 @@ active          moving        mph top
 48 min elapsed
 ```
 
-Three cells keep the existing `ViewThatFits` reflow (`RideSummaryView.swift:266`) working on an
-iPhone SE, and a subordinate caption reads as "secondary" more literally than an equal-weight
-cell would.
+**The caption renders only when its string differs from the active string.**
+*(New in revision 2.)* On an unpaused ride `pausedSeconds == 0`, so active is elapsed and revision
+1's fixed layout printed the same number twice, permanently, on the majority path. Truncation makes
+that wider than "no pause": `RideStatsFormatter.minutes` is `Int(seconds / 60)`
+(`RideStatsFormatter.swift:39`), so any pause that does not cross a minute boundary also collapses
+to identical strings. Comparing the rendered strings, not `pausedSeconds > 0`, is what makes the
+rule cover both.
 
-Keeping moving time is not only a product call. `RideTestID.summaryMoving` is what ROH-103's
-paused golden ride reads to tell a segmented save from a flattened one, since a flattened ride
-reads about 14 minutes against about 4 for a segmented one. Active time is computed from
-timestamps and is identical either way, so deleting that cell would leave the E2E's segmentation
-proof with nothing to read. **The moving cell keeps its identifier, its label, and its exact value
-expression.**
+The moving cell is kept because moving time is a real cycling metric that riders arriving from
+Strava or Garmin expect, and the summary is the surface with room for it. *(Corrected in revision
+2: revision 1 justified this by claiming the paused E2E would otherwise have nothing to read.
+That is false. `assertPausedHeroDistanceInBand` (`RideE2EUITests.swift:309-313`) bands the hero
+distance specifically to exclude a flattened read, and the in-ride probe checks segment count and
+the gain band. The moving cell is one of four discriminators, not the only one.)* Its identifier,
+label and value expression stay unchanged regardless, so `assertMovingTimeIsSegmented` is
+untouched.
 
-### D5 — Unavailable durations are omitted from captions and dashed in stat cells
+An unfinished ride renders `—` in the active cell with no caption. That sits beside a moving cell
+reading a real number, which is a new mixed treatment in one row and is accepted: the duration is
+genuinely not computable while the stats are, and the row already carries the unfinished badge.
 
-A caption is a sentence of terms joined by `·`, so a missing duration drops its term:
-"Explore · ↑ 300 ft". A stat cell is a fixed slot in a grid and cannot be dropped, so it shows
-`—`, which is what those cells already show for a statless ride.
+### D5 — The stat row is a projection of a pure type built from scalars
 
-The existing statless guards run first and are untouched. A ride saved without computed stats
-still renders `—` for its whole stat block on the widget (`LastRideWidget.swift:72`) and its whole
-line on the Home card (`LastRideCard.swift:103`), even though its duration is computable from
-timestamps alone. Showing a lone duration beside dashes for distance and climb would be a new
-treatment, and this issue is not the place to invent one.
+`RideSummaryStats` in `AuraKit/Formatting`, following `ExploreInstrumentState`, resolves the three
+cells to display strings plus the active cell's spoken label.
 
-### D6 — The widget falls back to moving time under its own label
+**It takes scalars, not a `Ride`.** *(New in revision 2.)* `RideSummaryView.swift:52-54` records
+this project's rule about not reading track-derived properties inside `body`, and `ShareCardContent`
+is built in a `.task` precisely because it walks `flattenedPoints`. A type taking a whole `Ride`
+and constructed in `body` invites the next author to add one track-derived field and hand the
+summary an O(n) walk per evaluation.
 
-`WidgetSnapshot.LastRide.activeSeconds` returns nil when `pausedSeconds == nil`. That optional is
-the existing provenance guard: a writer that knew about `endedAt` also wrote `pausedSeconds`, so
-its absence means the payload predates the keys rather than meaning the ride never paused
-(`WidgetSnapshot.swift:151-168`). The guard is reused rather than duplicated, and the shape change
-that ROH-112 was expected to make to that pair, turning `pausedSeconds` into a non-optional
-defaulting to zero, is exactly what the comment there warns kills the guard silently. It stays
-optional.
+The active cell sets an explicit accessibility label rather than relying on `children: .combine`
+to order a value, a label and a caption:
 
-In that window the widget shows the moving number under a `MOVING` label. It never prints a
-moving-time number under an `ACTIVE` label, which would be the same defect this issue exists to
-close. When the app next foregrounds, `WidgetRefresh` rewrites the snapshot and the cell changes
-to `ACTIVE`.
+* with caption: "Active time, 38 min. Elapsed, 48 min."
+* without: "Active time, 38 min."
+* unavailable: "Active time, unavailable."
 
-**No snapshot version bump.** The keys are already optional inside version 1. Bumping would make a
-new widget binary reject every payload an old app wrote, which is the failure the optionals were
-added to prevent.
+### D6 — The Live Activity's running clock is relabeled ACTIVE
 
-### D7 — Views project pure content; captions are assembled in tested code
+*(New in revision 2.)* `RideLiveActivity.swift:107` labels the clock `ELAPSED`, and that clock is
+`RideActiveClock`, which is active time. Shipping D4 without this would leave the word "elapsed"
+pointing at active time on the Lock Screen and at wall clock on the summary the rider lands on
+seconds later, which is a worse version of the inconsistency this issue exists to close.
 
-Two new pure types in `AuraKit/Formatting`, following `ShareCardContent` and
-`ExploreInstrumentState`:
-
-* `RideSummaryStats(ride:units:)` resolves the three summary cells to display strings plus the
-  active cell's spoken label, so the stat row becomes a dumb projection.
-* `RideCaptionText` assembles the History caption and the Home card's stats line through one
-  shared "join the non-empty terms with `·`" helper, so a dropped duration term cannot leave a
-  doubled separator behind on either surface.
-
-`ShareCardContent.movingTime` is **renamed** to `activeTime`, typed `String?`, rather than joined
-by a new sibling property. Leaving the old property in place is how a caller keeps rendering the
-old number. Its `nil` drops the time term from the card's stat run, per D5 above.
-
-Every rendered duration goes through `RideStatsFormatter.minutes`, so active, elapsed, and moving
-share one rounding path and a rider cannot see two of them disagree by a rounding step.
-
-The active cell sets an explicit accessibility label, "Active time, 38 min. Elapsed, 48 min.",
-rather than relying on `children: .combine` to order a value, a label, and a caption.
+One string, at that one site. The Dynamic Island's other clock cells already use the neutral `TIME`
+(`RideLiveActivity.swift:128`) and are left alone.
 
 ## Testing
 
 Package tests, which run on the macOS CI host:
 
-* `RideDurationTests`: the checkpoint fallback, nil when there is no end at all, both clamps, and
-  a pre-pause ride where active equals elapsed.
-* `RideSummaryStats` and `RideCaptionText`: the rendered strings for a paused ride, an unpaused
-  ride, and a ride with no computable duration, including the separator behavior.
-* `ShareCardContent.activeTime`, present and nil.
-* A `WidgetSnapshot.LastRide` decoded from JSON without the ROH-107 keys reports
-  `activeSeconds == nil`; one decoded from a current payload does not.
-* One end-to-end package test through the recorder: record, pause, resume, end, save, read the
-  summary back, and assert the displayed active string is below the displayed elapsed string by
-  the pause. This is where a regression that quietly hands elapsed to both dies.
+* `RideDurationTests`: nil for an unfinished ride (both the checkpoint case and the legacy nil-end
+  case), the elapsed clamp, and a pre-pause ride where active equals elapsed.
+* The cross-implementation test from D1: the same inputs through `refreshElapsed`,
+  `RideActiveClock.make` and `RideDuration` agree.
+* `RideSummaryStats`: a paused ride renders the caption, an unpaused ride does not, a sub-minute
+  pause does not, an unfinished ride renders `—` with no caption, and all three accessibility
+  label forms.
 
-XCUITest, added to ROH-103's existing paused golden ride:
+XCUITest, added to ROH-103's paused golden ride:
 
-* The `summary.active` cell exists and its label carries both terms.
+* `assertActiveIsNotTheMovingNumber`: parse the number from the active cell and from the moving
+  cell on the same summary, and assert they differ.
 
-**What that E2E does not prove.** The paused dwell is wall-clock: the fixture's 600 s stop replays
-in about 30 s at 20x, and the recorder measures the tester's actual dwell, not the fixture's
-stamps. Whole-minute formatting cannot resolve a 30 s gap, so the assertion covers presence and
-wiring only. The subtraction itself is proven by the package test above, and this is stated here
-because ROH-103's review found two assertions whose coverage claims had drifted from what they
-checked.
+**Why that is falsifiable, and what it does not prove.** *(Corrected in revision 2. Revision 1
+proposed asserting the cell "carries both terms", whose substrings are compile-time constants in
+the very format string D5 mandates, so it could only fail if the implementer ignored D5. It also
+argued from arithmetic that was wrong.)* On this fixture the two numbers are structurally
+different quantities: moving time is frozen at 290 s from the GPX stamps
+(`PausedGoldenRideFixture.expectedMovingTimeSeconds`) and reads "4 min", while active time is wall clock over a
+~45 s playback at 20x plus the tester's dwell. A surface still handed `movingTimeSeconds` reads 4
+in both cells and fails. It does not prove the subtraction of paused time, which the package tests
+cover. The assertion holds while playback stretch under CI load stays under about 4x; ROH-103's
+notes on stretch apply.
 
-The moving-time band assertion (`RideE2EUITests.swift:340`) is unchanged and keeps proving
-segmentation.
+Note for anyone reading a harness screenshot: on this fixture moving time **exceeds** active time,
+inverting the production invariant `moving ≤ active ≤ elapsed`, because the two are measured on
+different clocks. That is the harness, not a defect.
+
+Device pass, per `CLAUDE.md`'s rule that UI is verified rather than asserted:
+
+* Summary on an iPhone SE at default and AX5 text sizes. D4 adds a third cell and a caption to a
+  row that already has a `ViewThatFits` fallback, and `HistoryView.swift:190-197` and
+  `LastRideCard.swift:21-24` both carry comments about SE-at-AX5 breakage that only a device found.
+* A paused ride end to end: the Lock Screen reading `ACTIVE`, then the summary's pair.
+* An unpaused ride, confirming no elapsed caption appears.
 
 ## Risks
 
-* Renaming `ShareCardContent.movingTime` is a compile break at every call site, which is the point.
-* Moving three cells behind `RideSummaryStats` touches the cell ROH-103 reads. The moving cell's
-  identifier, label, and value expression are held byte-identical, and the E2E is the check.
-* The widget has three call sites for the same stat (medium, rectangular, and the accessibility
-  label). They resolve one private computed pair so the fallback cannot apply to two of the three.
-* A History row for a ride still recording on another device now shows active time up to its last
-  checkpoint. Correct, and the unfinished badge already says the row is not final.
+* `RideActiveClock.make` and `refreshElapsed` are load-bearing live code being rewritten to route
+  through a new primitive for no behavior change. Existing tests (`RideActiveClockTests`,
+  `RideSessionCoordinatorPauseTests`) are the guard, and the rewrite must not touch the clamping
+  comments at `RideActiveClock.swift:44-52`, which document a Live Activity countdown bug.
+* The summary's stat row is the cell ROH-103's CI gate reads. That gate runs with
+  `-retry-tests-on-failure -test-iterations 2`, so a layout change that makes the cell
+  intermittently unreachable reports as flake rather than as a break.
+
+## Ship precondition
+
+The CloudKit **production** schema promotion covering `CD_pausedSeconds` is still owed (ROH-108).
+Until it lands, a two-device account's synced rows carry no paused time, so a ride paused on one
+phone renders active equal to elapsed on the other. That is silent, and it is the same reading a
+pre-pause ride gives.
 
 ## Out of scope
 
-Weekly aggregates (`RideAggregator.movingTimeSeconds` and the goal ring) stay on moving time; they
-are sums across rides, not one ride's duration. The live HUD, the Live Activity, and the paused
-chip already run on active time. `RideStatsFormatter.minutes` keeps its whole-minute output, so a
-two-hour ride still reads "125 min" on every surface it does today; changing it is a formatter
-change with its own callers and its own review.
+**The other four duration surfaces** (History caption, Home last-ride card, widget last-ride card,
+share card) stay on moving time, per the Problem section, and move when auto-pause ships. Filed as
+a follow-up issue blocked on Slice B.
+
+**HealthKit.** `WorkoutData.init(from:)` writes `start = startedAt`, `end = endedAt` with no
+`HKWorkoutEvent(.pause)`, so a rider with the Health toggle on sees a 68-minute cycling workout in
+Fitness beside a 48-minute active time in Aura. Named here rather than left silent; writing pause
+events is its own issue.
+
+**Weekly aggregates.** `RideAggregator.movingTimeSeconds` is summed but rendered by nothing outside
+tests, so there is no rider-visible inconsistency to fix.
+
+**`RideStatsFormatter.minutes` keeps its truncating whole-minute output.** The HUD's last frame
+reads `59:58` and the summary then reads `59 min`, so the continuity D1 buys at the definition
+layer is still imperfect at the layer the rider perceives. Changing the formatter touches every
+caller and wants its own review.
