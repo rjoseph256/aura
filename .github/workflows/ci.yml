@@ -195,6 +195,8 @@ jobs:
         run: bash scripts/check-terrain-style.sh
       - name: Single active-time definition guard
         run: bash scripts/check-single-active-definition.sh
+      - name: Monotonic instant guard
+        run: bash scripts/check-monotonic-instants.sh
 
   db-tests:
     name: DB tests (pgTAP)

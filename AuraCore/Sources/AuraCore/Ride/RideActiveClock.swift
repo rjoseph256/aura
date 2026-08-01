@@ -1,5 +1,22 @@
 import Foundation
 
+/// The stop currently in progress, as two values stamped together at the pause.
+///
+/// One optional instead of two: `since` and `activeSecondsAtPause` are non-nil under exactly the
+/// same condition, and a half-supplied pair is a state `make` would have to decide about.
+public struct RideOpenStop: Equatable, Sendable {
+    /// When this stop began, on the current system clock — `RideRecorder.anchorPausedSince`.
+    public let since: Date
+    /// The ride's active time frozen at that instant — `RideRecorder.activeSecondsAtPause`, which
+    /// is where the floor-at-zero this type does not enforce actually lives.
+    public let activeSecondsAtPause: TimeInterval
+
+    public init(since: Date, activeSecondsAtPause: TimeInterval) {
+        self.since = since
+        self.activeSecondsAtPause = activeSecondsAtPause
+    }
+}
+
 /// What the Live Activity's clock should display, as a value the widget renders without
 /// arithmetic. Two cases, because a paused clock answers a different question than a running one
 /// (spec D1).
@@ -7,7 +24,9 @@ import Foundation
 /// **Neither case carries a value that moves while the ride is paused**, which is the whole point
 /// of the shape: `RideRecorder.pausedSeconds(asOf:)` grows on every tick of a stop, so a clock
 /// storing it raw would be a distinct value every tick and the controller's dedupe — which exists
-/// precisely for a long stop — could never fire (spec D3).
+/// precisely for a long stop — could never fire (spec D3). The paused case's values are *frozen at
+/// the pause* — the recorder stamps both of them once, at the tap — rather than kept constant by
+/// two growing terms cancelling per tick (ROH-130 D5).
 ///
 /// **Wire-format note.** This type is `Codable` inside `RideActivityAttributes.ContentState`, so
 /// an activity in flight across an app update is decoded by a *new* binary from bytes an *old* one
@@ -27,34 +46,39 @@ public enum RideActiveClock: Codable, Hashable, Sendable {
         return false
     }
 
-    /// Build the clock from the three numbers the recorder holds.
+    /// Build the clock from values that do not move between events.
     ///
-    /// **`pausedSeconds` must be measured as of `now`** — `RideRecorder.pausedSeconds(asOf: now)`,
-    /// which includes the stop currently open. That coupling is what makes the paused case
-    /// constant through a stop: both terms grow in lockstep, so their difference does not.
-    /// A caller that measures the two at different instants reintroduces D3's trap.
+    /// **The paused case's fields are copied, not computed; the running anchor is built from
+    /// stamps.** The controller skips a push when the whole payload is unchanged, which is what
+    /// keeps a forty-minute café stop to one heartbeat push a minute.
     ///
-    /// `pausedSince` is non-nil exactly while a stop is open, so it — not a separate flag —
-    /// selects the case.
+    /// What is banned, and enforced: a value derived from a **wall** elapsed. `now` and a monotonic
+    /// reading cannot be sampled at the same instant, so a payload built that way is distinct every
+    /// tick and pushes every coalescing interval (ROH-130 D5).
+    /// `scripts/check-single-active-definition.sh`'s `betweenStamps` detector is what rejects it.
+    ///
+    /// A recompute that is monotonic on *both* sides would in fact be stable — both terms come from
+    /// one `RideInstant`, so they cancel — and neither a fixture nor the guard script would flag it.
+    /// It is avoided anyway, because it re-couples the payload to the tick rate for no benefit. No
+    /// test pins that distinction and none can: `FakeRideClock` cannot model the two-syscall
+    /// incoherence of a real `RideInstant.now`, so this shape is held by this comment.
+    ///
+    /// A real clock step moves `startedAt` and `openStop.since` through the recorder's
+    /// `wallOffset`, which emits exactly one push and lets the Lock Screen correct itself.
     public static func make(startedAt: Date,
                             pausedSeconds: TimeInterval,
-                            pausedSince: Date?,
+                            openStop: RideOpenStop?,
                             now: Date) -> RideActiveClock {
-        let activeSeconds = RideDuration.activeSeconds(startedAt: startedAt, asOf: now,
-                                                       pausedSeconds: pausedSeconds)
-        if let pausedSince {
-            return .paused(since: pausedSince, activeSeconds: activeSeconds)
+        if let openStop {
+            // Symmetric with the running clamp, and for the same reason: `Text(_, style: .timer)`
+            // counts DOWN from a future instant. `RideRecorder.anchorPausedSince` cannot produce
+            // one, so this only ever catches a `RideInstant.now` whose two clocks were sampled
+            // across a deschedule.
+            return .paused(since: min(now, openStop.since),
+                           activeSeconds: openStop.activeSecondsAtPause)
         }
-        // Anchored at `now` less the active seconds, which is identical to
-        // `startedAt + pausedSeconds` whenever that is in the past, and equal to `now` when it is
-        // not: a backward wall-clock step can push `startedAt + pausedSeconds` past `now`, and
-        // `Text(_, style: .timer)` with a future anchor counts DOWN. The clamp now lives inside
-        // `RideDuration.activeSeconds`, which is why this reads as a subtraction from `now`
-        // rather than an addition to `startedAt`. While it is active the anchor tracks `now` and
-        // the clock reads 0:00, which costs a push per coalescing interval until wall-clock
-        // catches up — bounded by the size of the backward step, and strictly better than a Lock
-        // Screen counting down. The in-app clock clamps for the same reason
-        // (`RideSessionCoordinator.refreshElapsed`); the residual wall-clock weakness is ROH-130.
-        return .running(anchor: now.addingTimeInterval(-activeSeconds))
+        return .running(anchor: RideDuration.runningAnchor(startedAt: startedAt,
+                                                           pausedSeconds: pausedSeconds,
+                                                           now: now))
     }
 }

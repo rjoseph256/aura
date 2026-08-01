@@ -33,7 +33,8 @@ final class RideLiveActivityController {
     /// every tick inside the in-flight window decide against pre-push state and enqueue again
     /// (spec D5).
     private var lastPayload: RideActivityPayload?
-    private var lastPushedAt: Date?
+    /// Monotonic, so a system clock step cannot stall every push gate at once (ROH-130 D6).
+    private var lastPushedMonotonicSeconds: TimeInterval?
     /// Serializes pushes so they land in the order they were decided. Two racing tasks could
     /// otherwise leave the widget holding a running state after a pause was pushed.
     private var pushChain: Task<Void, Never>?
@@ -76,7 +77,7 @@ final class RideLiveActivityController {
         do {
             activity = try Activity.request(attributes: attributes, content: content)
             lastPayload = payload
-            lastPushedAt = startedAt
+            lastPushedMonotonicSeconds = RideInstant.now.monotonicSeconds
         } catch {
             // Still best-effort — the ride is unaffected — but no longer silent. `.targetMaximumExceeded`
             // here is the one case where a ghost this sweep has claimed but not yet ended could
@@ -84,7 +85,7 @@ final class RideLiveActivityController {
             log.error("Live Activity request failed: \(error.localizedDescription, privacy: .public)")
             activity = nil
             lastPayload = nil
-            lastPushedAt = nil
+            lastPushedMonotonicSeconds = nil
         }
     }
 
@@ -97,7 +98,7 @@ final class RideLiveActivityController {
                 activeClock: RideActiveClock) {
         guard let activity else { return }
 
-        let now = Date()
+        let instant = RideInstant.now
         let payload = RideActivityPayload(
             distanceMeters: stats.distanceMeters,
             speedMetersPerSecond: currentSpeedMetersPerSecond,
@@ -109,14 +110,15 @@ final class RideLiveActivityController {
             clock: activeClock
         ).holdingTurn(from: lastPayload)
 
+        let sinceLastPush = lastPushedMonotonicSeconds.map { instant.monotonicSeconds - $0 }
         guard RideActivityPushPolicy.decide(last: lastPayload, next: payload,
-                                            lastPushedAt: lastPushedAt, now: now) == .push else {
+                                            secondsSinceLastPush: sinceLastPush) == .push else {
             return
         }
 
         // Inside the .push branch only: a skip must advance nothing (invariant 3).
         lastPayload = payload
-        lastPushedAt = now
+        lastPushedMonotonicSeconds = instant.monotonicSeconds
         enqueue(payload, on: activity)
     }
 
@@ -146,7 +148,7 @@ final class RideLiveActivityController {
         self.activity = nil
         let final = lastPayload ?? RideActivityPayload(clock: .running(anchor: Date()))
         lastPayload = nil
-        lastPushedAt = nil
+        lastPushedMonotonicSeconds = nil
 
         let id = activity.id
         endingIDs.insert(id)

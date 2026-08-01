@@ -74,9 +74,9 @@ struct RideDurationTests {
     @Test("The shared primitive is what every clock in the app subtracts with")
     func sharedPrimitiveSubtractsPausedTime() {
         let now = start.addingTimeInterval(1000)
-        #expect(RideDuration.activeSeconds(startedAt: start, asOf: now,
+        #expect(RideDuration.activeSeconds(elapsed: .betweenStamps(startedAt: start, endedAt: now),
                                            pausedSeconds: 250) == 750)
-        #expect(RideDuration.activeSeconds(startedAt: start, asOf: now,
+        #expect(RideDuration.activeSeconds(elapsed: .betweenStamps(startedAt: start, endedAt: now),
                                            pausedSeconds: 5000) == 0)
     }
 
@@ -87,5 +87,35 @@ struct RideDurationTests {
                         stats: nil, pausedSeconds: 600, checkpointedAt: nil,
                         routeId: nil, destinationPlaceId: nil)
         #expect(try #require(ride.duration).activeSeconds == 2280)
+    }
+
+    @Test func activeIsMeasuredElapsedLessPaused() {
+        #expect(RideDuration.activeSeconds(elapsed: .measured(100), pausedSeconds: 30) == 70)
+    }
+
+    @Test func activeFloorsAtZeroRatherThanGoingNegative() {
+        #expect(RideDuration.activeSeconds(elapsed: .measured(10), pausedSeconds: 30) == 0)
+    }
+
+    @Test func elapsedBetweenStampsFloorsAtZero() {
+        let a = Date(timeIntervalSinceReferenceDate: 1_000)
+        let b = Date(timeIntervalSinceReferenceDate: 900)
+        #expect(RideElapsed.betweenStamps(startedAt: a, endedAt: b).seconds == 0)
+        #expect(RideElapsed.betweenStamps(startedAt: b, endedAt: a).seconds == 100)
+    }
+
+    /// The Lock Screen's running anchor. `Text(_, style: .timer)` counts DOWN from a future
+    /// anchor, so it is clamped to `now`.
+    @Test func runningAnchorIsTheStartPlusPausedTime() {
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+        let now = Date(timeIntervalSinceReferenceDate: 1_600)
+        #expect(RideDuration.runningAnchor(startedAt: start, pausedSeconds: 120, now: now)
+                == Date(timeIntervalSinceReferenceDate: 1_120))
+    }
+
+    @Test func runningAnchorNeverSitsInTheFuture() {
+        let start = Date(timeIntervalSinceReferenceDate: 1_000)
+        let now = Date(timeIntervalSinceReferenceDate: 1_050)
+        #expect(RideDuration.runningAnchor(startedAt: start, pausedSeconds: 120, now: now) == now)
     }
 }

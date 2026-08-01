@@ -355,8 +355,11 @@ extension RideRecorderPauseTests {
         #expect(r.pausedSeconds(asOf: at(200)) == 80)
     }
 
-    /// Mirrors `pausedSeconds(asOf:)`'s own guard: a backward wall-clock step mid-stop must not
-    /// report a negative duration.
+    /// Belt-and-braces against a *caller*, not against the system clock. Since ROH-130 the stop
+    /// is a difference of monotonic readings, and a real clock step cannot make that go backwards
+    /// — the fixture only reaches the clamp because `.coherent` moves both halves together. What
+    /// it still pins is that a caller handing the recorder an out-of-order instant gets zero
+    /// rather than a negative stop; `RideClockStepTests` is what covers the real step.
     @Test func currentPauseSecondsClampsToZeroOnABackwardClockStep() {
         let r = RideRecorder()
         r.start(at: at(0))

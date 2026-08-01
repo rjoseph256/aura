@@ -17,11 +17,12 @@ struct RideSessionCoordinatorPauseTests {
 
     private func makeCoordinator(screen: SpyScreenWake = SpyScreenWake(),
                                  activity: SpyRideActivity = SpyRideActivity(),
-                                 haptics: HapticSpy = HapticSpy())
+                                 haptics: HapticSpy = HapticSpy(),
+                                 clock: any RideClocking = FakeRideClock())
         -> RideSessionCoordinator {
         RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                screen: screen, activity: activity, haptics: haptics,
-                               nudges: NudgeSpy())
+                               nudges: NudgeSpy(), clock: clock)
     }
 
     /// A ride with two fixes — comfortably past the discard floor, so the pause writes a real
@@ -111,7 +112,10 @@ struct RideSessionCoordinatorPauseTests {
     // MARK: The active clock (spec D5/D6)
 
     @Test func elapsedStopsAdvancingWhilePausedAndResumes() async throws {
-        let c = makeCoordinator()
+        // The one suite member that needs time to pass on its own: it drives the real 0.5 s
+        // ticker and waits on `c.elapsed` moving. A `FakeRideClock` is frozen unless a test
+        // advances it, so both `waitUntil`s would run out the clock and report as timeouts.
+        let c = makeCoordinator(clock: SystemRideClock())
         c.start(location: ManualLocationProvider(), saving: try RideStore.inMemory(),
                 units: .metric, authorization: .authorized)
         #expect(await waitUntil { c.elapsed > 0 })

@@ -24,10 +24,12 @@ struct RideSessionCoordinatorNudgeTests {
                    speedMetersPerSecond: nil)
     }
 
-    private func makeCoordinator(nudges: NudgeSpy) -> RideSessionCoordinator {
+    private func makeCoordinator(nudges: NudgeSpy,
+                                 clock: FakeRideClock = FakeRideClock()) -> RideSessionCoordinator {
         RideSessionCoordinator(kind: .freeRide, destinationName: nil,
                                screen: SpyScreenWake(), activity: SpyRideActivity(),
-                               haptics: HapticSpy(), nudges: nudges)
+                               haptics: HapticSpy(), nudges: nudges,
+                               clock: clock)
     }
 
     /// A started ride carrying enough distance that `RideBackOutGate.canDiscard` is false —
@@ -202,21 +204,30 @@ struct RideSessionCoordinatorNudgeTests {
         c.cancel()
     }
 
-    /// The clamp itself. A backward wall-clock step mid-stop must not make the chip count down
-    /// while the headline active clock jumps forward in the same tick.
+    /// A real system clock step mid-stop must not make the chip count down while the headline
+    /// active clock jumps forward in the same tick.
+    ///
+    /// This used to pin the coordinator's non-decreasing clamp, driven by handing `refreshElapsed`
+    /// an earlier `Date`. That clamp is gone (ROH-130 D6): the step now goes through
+    /// `FakeRideClock.step`, which is what a system clock set actually looks like — the wall half
+    /// moves and the monotonic half does not — and the chip, being a difference of monotonic
+    /// readings, cannot see it at all.
     @Test func theStopClockNeverCountsDownWithinAStop() async throws {
         let nudges = NudgeSpy(), location = ManualLocationProvider()
         let store = try RideStore.inMemory()
-        let c = makeCoordinator(nudges: nudges)
+        let clock = FakeRideClock()
+        let c = makeCoordinator(nudges: nudges, clock: clock)
         await ridePastTheDiscardFloor(c, location, store)
         c.pause()
-        let stop = Date()
-        c.refreshElapsed(now: stop.addingTimeInterval(600))
+        clock.advance(600)
+        c.refreshElapsed(now: clock.now())
         let peak = c.currentPauseSeconds
         #expect(peak >= 599)
 
-        c.refreshElapsed(now: stop.addingTimeInterval(300))
-        #expect(c.currentPauseSeconds == peak, "a backward step holds, it does not rewind")
+        // NTP sets the system clock back five minutes, mid-stop.
+        clock.step = -300
+        c.refreshElapsed(now: clock.now())
+        #expect(c.currentPauseSeconds >= peak, "a backward step holds, it does not rewind")
         c.cancel()
     }
 
@@ -242,9 +253,14 @@ struct RideSessionCoordinatorNudgeTests {
     @Test func theLadderIsAnchoredToTheTap() async throws {
         let nudges = NudgeSpy(), location = ManualLocationProvider()
         let store = try RideStore.inMemory()
-        let c = makeCoordinator(nudges: nudges)
+        let clock = FakeRideClock()
+        let c = makeCoordinator(nudges: nudges, clock: clock)
         await ridePastTheDiscardFloor(c, location, store)
-        let before = Date()
+        // Ten minutes of riding before the tap, so the reference below separates "anchored to the
+        // tap" from "anchored to the start of the ride" — which a bare `Date()` could not, once
+        // the coordinator stopped reading the wall clock directly.
+        clock.advance(600)
+        let before = clock.date
         c.pause()
         let start = try #require(nudges.lastStart)
         #expect(start.timeIntervalSince(before) >= 0)

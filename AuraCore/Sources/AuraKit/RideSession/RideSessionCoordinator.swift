@@ -30,9 +30,11 @@ public final class RideSessionCoordinator {
     /// **Active** time: wall-clock since the start, less everything spent paused (spec D5).
     /// The ticker keeps running while paused; this simply stops advancing.
     public private(set) var elapsed: TimeInterval = 0
-    /// Duration of the stop in progress, zero while recording. Clamped non-decreasing within a
-    /// stop: a backward wall-clock step would otherwise make the chip count down while the
-    /// headline active clock jumps forward in the same tick (ROH-130 owns the headline).
+    /// Duration of the stop in progress, zero while recording.
+    ///
+    /// No longer clamped non-decreasing. It was, against a backward wall-clock step; the input is
+    /// now a difference of monotonic readings, so within one stop it cannot fall, and a clamp that
+    /// cannot fire is a guard nobody can test (ROH-130 D6).
     public private(set) var currentPauseSeconds: TimeInterval = 0
     /// Set by `finish()`; observed by the HUD's `onChange(of:)`, which pushes the summary route
     /// (ROH-85). Not reset here: the HUD is torn down when the path collapses to the summary, so
@@ -66,12 +68,23 @@ public final class RideSessionCoordinator {
     private let nudges: any RideNudgeScheduling
     private let workout: (any WorkoutWriting)?
     @ObservationIgnored private let guidance: (any GuidanceControlling)?
+    /// Where every instant in this type comes from. `start`, `pause`, `resume` and `finish` read
+    /// the clock themselves, so without a seam a test could inject instants into `refreshElapsed`
+    /// and leave the recorder holding two different monotonic origins — which computes stops of
+    /// tens of millions of seconds while `>=` assertions keep passing (ROH-130 D7).
+    ///
+    /// Internal rather than private only so the test target's `Date` overloads can refuse to run
+    /// against a real clock — see `RideClockTestSupport.requireFakeClock`. Nothing in the module
+    /// reads it outside this file.
+    @ObservationIgnored let clock: any RideClocking
 
     // Stashed at start() for the rest of the ride.
     private var location: (any LocationStreaming)?
     private var saving: (any RideSaving)?
-    // public (not private), like pushActivityUpdate is internal, so a test can read the anchor
-    // the activity's clock is built from.
+    // public (not private), like pushActivityUpdate is internal, so a test can anchor its own
+    // injected instants to the ride's actual start stamp. NOT the Live Activity's anchor — that
+    // is `recorder.anchorStartedAt`, which carries the wallOffset correction this stamp does not
+    // (ROH-130 D2/D5).
     public private(set) var startedAt: Date?
     private var saveToHealth = false
     private var groupSink: (any GroupLocationSink)?
@@ -107,7 +120,8 @@ public final class RideSessionCoordinator {
                 workout: (any WorkoutWriting)? = nil,
                 guidance: (any GuidanceControlling)? = nil,
                 haptics: any HapticPlaying,
-                nudges: any RideNudgeScheduling) {
+                nudges: any RideNudgeScheduling,
+                clock: any RideClocking = SystemRideClock()) {
         self.kind = kind
         self.recorder = RideRecorder(kind: kind)
         self.destinationName = destinationName
@@ -117,6 +131,7 @@ public final class RideSessionCoordinator {
         self.guidance = guidance
         self.haptics = haptics
         self.nudges = nudges
+        self.clock = clock
     }
 
     public enum StartOutcome: Sendable { case started, permissionDenied }
@@ -167,14 +182,16 @@ public final class RideSessionCoordinator {
         self.saveToHealth = saveToHealth
         self.groupSink = groupSink
         self.discoverySink = discoverySink
-        let now = Date()
+        let instant = clock.now()
+        let now = instant.date
         startedAt = now
         elapsed = 0
-        // Reset alongside `elapsed`, for the same reason. `refreshElapsed` only ever raises this
-        // one, so a value left over from a previous ride on a reused coordinator would pin the
-        // chip at that ride's last stop and never fall.
+        // Reset alongside `elapsed`. The only *synchronous* zeroing on the reused-coordinator
+        // path: `refreshElapsed` now assigns this from the recorder, but the first tick is half a
+        // second away, and `RideSessionCoordinatorNudgeTests.startingAFreshRideZeroesTheStopClock`
+        // reads the chip before any tick has run.
         currentPauseSeconds = 0
-        recorder.start(at: now)
+        recorder.start(at: instant)
         screen.setKeepAwake(true)
         activity.start(kind: kind, startedAt: now, units: units, destinationName: destinationName)
 
@@ -204,8 +221,11 @@ public final class RideSessionCoordinator {
             // ticker would never come back, and `isRecording` stays true while paused (D6).
             while !Task.isCancelled {
                 guard let self, self.recorder.isRecording else { return }
-                self.refreshElapsed()
-                self.pushActivityUpdate()
+                // One instant for both, and refreshElapsed first: it runs `recorder.align`, whose
+                // `wallOffset` is what `pushActivityUpdate` reads through the anchor properties.
+                let now = self.clock.now()
+                self.refreshElapsed(now: now)
+                self.pushActivityUpdate(now: now)
                 try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
@@ -217,13 +237,16 @@ public final class RideSessionCoordinator {
     /// when the interval eventually closes.
     ///
     /// Internal rather than private, like `pushActivityUpdate`, so a test can drive a specific
-    /// `now` instead of waiting on the 0.5 s ticker — the only way to pin the stop clock's
-    /// non-decreasing clamp against a backward wall-clock step.
-    func refreshElapsed(now: Date = Date()) {
-        guard let startedAt else { return }
-        elapsed = RideDuration.activeSeconds(startedAt: startedAt, asOf: now,
-                                             pausedSeconds: recorder.pausedSeconds(asOf: now))
-        currentPauseSeconds = max(currentPauseSeconds, recorder.currentPauseSeconds(asOf: now))
+    /// `now` instead of waiting on the 0.5 s ticker.
+    func refreshElapsed(now: RideInstant) {
+        guard startedAt != nil else { return }
+        // The one place `align` runs on the ticker. Before the reads below and before
+        // `pushActivityUpdate`, which consumes the anchors it maintains.
+        recorder.align(at: now)
+        elapsed = RideDuration.activeSeconds(
+            elapsed: .measured(recorder.elapsedSeconds(asOf: now)),
+            pausedSeconds: recorder.pausedSeconds(asOf: now))
+        currentPauseSeconds = recorder.currentPauseSeconds(asOf: now)
     }
 
     /// Pause the ride: stop recording, release the wake lock, and flush what has been ridden so
@@ -233,9 +256,9 @@ public final class RideSessionCoordinator {
     /// The flush is the expensive part (a full-track encode and a mirrored write, in this same
     /// turn). One per manual pause is fine; auto-pause, which fires at every red light, will
     /// have to make it incremental or move it off the tap.
-    public func pause() { pause(at: Date()) }
+    public func pause() { pause(at: clock.now()) }
 
-    func pause(at now: Date) {
+    func pause(at now: RideInstant) {
         guard recorder.isRecording, !recorder.isPaused else { return }
         recorder.pause(at: now)
         haptics.play(.pause)
@@ -250,16 +273,9 @@ public final class RideSessionCoordinator {
         // Lock Screen learns about the stop first. Creating a Task does not suspend this
         // function, so the no-yield window above is unaffected.
         pushActivityUpdate(now: now)
-        // Belt-and-braces, and honestly labelled as such: `start()` and `resume()` both zero
-        // this, and `recorder.currentPauseSeconds` returns zero whenever no stop is open, so the
-        // value reaching here is already zero on every path today. Deleting this line breaks no
-        // test — the reset that actually carries the behaviour is `resume()`'s. It stays because
-        // the `max` in `refreshElapsed` makes any future path that *does* arrive here dirty fail
-        // permanently rather than for one tick.
-        currentPauseSeconds = 0
         screen.setKeepAwake(false)
         flushCheckpoint(at: now)
-        scheduleNudges(from: now)
+        scheduleNudges(from: now.date)
     }
 
     /// Schedule the forgotten-pause ladder, if this stop is worth one.
@@ -274,14 +290,13 @@ public final class RideSessionCoordinator {
 
     /// Resume recording: open the next segment and re-acquire the screen. A no-op unless the
     /// ride is paused.
-    public func resume() { resume(at: Date()) }
+    public func resume() { resume(at: clock.now()) }
 
-    func resume(at now: Date) {
+    func resume(at now: RideInstant) {
         guard recorder.isPaused else { return }
         recorder.resume(at: now)
         haptics.play(.resume)
         nudges.cancelForgottenPauseNudges()
-        currentPauseSeconds = 0
         pauseObserver?.rideDidSetPaused(false)
         refreshElapsed(now: now)
         pushActivityUpdate(now: now)
@@ -297,15 +312,17 @@ public final class RideSessionCoordinator {
     /// `saveFailed` (which the summary reads) or interrupt the ride. The row carries the same
     /// id as the finished ride, so End updates it rather than adding a second copy, and
     /// `discard()` removes it if the rider throws the ride away instead.
-    private func flushCheckpoint(at date: Date) {
+    private func flushCheckpoint(at instant: RideInstant) {
         guard let saving else { return }
         // Nothing worth recovering: a ride the app would itself discard silently on a back-out
         // has no business appearing in History if the pause is killed. This also covers a
         // pause taken before the first fix, where there is no track at all.
         guard !RideBackOutGate.canDiscard(distanceMeters: recorder.stats.distanceMeters) else { return }
         do {
-            try saving.save(recorder.checkpoint(at: date, destinationName: destinationName))
-            pendingCheckpoint = PendingCheckpoint(rideID: recorder.rideID, at: date)
+            let row = recorder.checkpoint(at: instant, destinationName: destinationName)
+            try saving.save(row)
+            pendingCheckpoint = PendingCheckpoint(rideID: row.id,
+                                                  at: row.checkpointedAt ?? instant.date)
         } catch {
             // Deliberately NOT cleared: `pendingCheckpoint` tracks whether a row is out there,
             // not whether the last write succeeded. A failed second flush leaves the first one
@@ -318,17 +335,27 @@ public final class RideSessionCoordinator {
     /// directly instead of waiting on the 0.5 s ticker; `now` is injectable for the same reason.
     /// The controller decides whether the push actually goes out.
     ///
-    /// `pausedSeconds(asOf: now)` and `now` must be the same instant — that coupling is what
-    /// keeps the paused clock constant through a stop (`RideActiveClock.make`).
-    func pushActivityUpdate(now: Date = Date()) {
-        guard let startedAt else { return }
+    /// What keeps the paused clock constant through a stop is that both of its fields were frozen
+    /// at the tap — `anchorPausedSince` and `activeSecondsAtPause`, neither of which moves while
+    /// the stop is open. The old coupling between `pausedSeconds(asOf: now)` and `now` went with
+    /// the arithmetic it protected: the paused branch no longer reads `pausedSeconds` at all, and
+    /// that argument now feeds only the running anchor (ROH-130 D5).
+    func pushActivityUpdate(now: RideInstant) {
+        // The recorder's anchor stamps, not the coordinator's `startedAt`: these carry the
+        // wall-offset correction, and `startedAt` deliberately does not (ROH-130 D2/D5).
+        guard let anchorStartedAt = recorder.anchorStartedAt else { return }
+        let openStop = recorder.anchorPausedSince.flatMap { since in
+            recorder.activeSecondsAtPause.map {
+                RideOpenStop(since: since, activeSecondsAtPause: $0)
+            }
+        }
         activity.update(stats: recorder.stats,
                         currentSpeedMetersPerSecond: recorder.currentSpeedMetersPerSecond,
                         maneuver: maneuver,
-                        activeClock: .make(startedAt: startedAt,
+                        activeClock: .make(startedAt: anchorStartedAt,
                                            pausedSeconds: recorder.pausedSeconds(asOf: now),
-                                           pausedSince: recorder.pausedSince,
-                                           now: now))
+                                           openStop: openStop,
+                                           now: now.date))
     }
 
     /// Idempotent on `isRecording`: the End-ride button and a navigate arrival can both
@@ -341,7 +368,7 @@ public final class RideSessionCoordinator {
         stopStreaming()
         screen.setKeepAwake(false)
         activity.end()
-        let ride = recorder.end(at: Date(), destinationName: destinationName)
+        let ride = recorder.end(at: clock.now(), destinationName: destinationName)
         // The ride as the summary should present it. Diverges from `ride` only when the save
         // throws; `ride` is what is handed to `save`, so the divergence can never be persisted.
         var published = ride

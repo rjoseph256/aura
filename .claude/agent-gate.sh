@@ -85,6 +85,9 @@ fi
 if has '\.swift$'; then
   run "single active-time definition" . bash scripts/check-single-active-definition.sh
 fi
+if has '\.swift$'; then
+  run "monotonic instant guard" . bash scripts/check-monotonic-instants.sh
+fi
 
 # --------------------------------------------------------------------- verdict
 [[ ${#failures[@]} -eq 0 ]] && exit 0
