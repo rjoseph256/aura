@@ -354,9 +354,10 @@ final class RideE2EUITests: XCTestCase {
                                                          file: StaticString = #filePath,
                                                          line: UInt = #line) throws {
         // No swipe here: `assertMovingTimeIsSegmented` runs first and may already have scrolled,
-        // and the active cell sits ABOVE the moving cell in both `ViewThatFits` candidates, so a
-        // second swipe would scroll away from it. The ScrollView's VStack is eager, so the
-        // element is in the tree either way.
+        // and the active cell is already in the tree in both `ViewThatFits` candidates — above
+        // the moving cell in the vertical candidate, to its LEFT in the horizontal one — so a
+        // second swipe would scroll away from it rather than toward it. The ScrollView's VStack
+        // is eager, so the element is in the tree either way.
         XCTAssertTrue(summary.activeStat.waitForExistence(timeout: 5), "active cell missing",
                       file: file, line: line)
         let activeLabel = summary.activeStat.label

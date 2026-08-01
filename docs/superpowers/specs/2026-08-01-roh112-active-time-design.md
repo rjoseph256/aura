@@ -176,13 +176,16 @@ Rules, each pinned by a test:
 
 * `nil` when `endedAt` is nil, or when `checkpointedAt >= endedAt`, per D2.
 * `elapsedSeconds = max(0, endedAt - startedAt)`.
-* `pausedSeconds` is clamped into `0...elapsedSeconds` **here**, before the primitive. The two
-  live clocks read `RideRecorder.pausedSeconds(asOf:)`, which is structurally non-negative and
+* `pausedSeconds` is floored at zero **here**, before the primitive: `max(0, pausedSeconds)`. The
+  two live clocks read `RideRecorder.pausedSeconds(asOf:)`, which is structurally non-negative and
   bounded by the session; this reads a persisted, CloudKit-mirrored `Double` column
-  (`RideSchemaV7.swift:42`). Without the clamp a negative stored value renders active *above*
+  (`RideSchemaV7.swift:42`). Without the floor a negative stored value renders active *above*
   elapsed, with the caption present to make it unmissable. *(Revision 3: revision 2 dropped this
-  clamp on the grounds that the shared primitive "removes the question". It relocates it — the
-  arithmetic is shared, the input domain is not.)*
+  floor on the grounds that the shared primitive "removes the question". It relocates it — the
+  arithmetic is shared, the input domain is not.)* An oversized stored value needs no matching
+  upper clamp: the primitive's own `max(0, elapsed - pausedSeconds)` already keeps `activeSeconds`
+  from exceeding `elapsedSeconds` for any non-negative `pausedSeconds`, so a second clamp against
+  `elapsedSeconds` here would be dead code.
 * `activeSeconds` comes from D1's shared primitive with `now: endedAt`.
 * A ride recorded before pause existed has `pausedSeconds == 0`, so active equals elapsed.
 

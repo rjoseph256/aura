@@ -61,7 +61,7 @@ func rideActivityClockLabel(_ clock: RideActiveClock, running: String) -> String
 }
 
 /// The clock cell. Running, it is a self-ticking active-time clock the system renders on-device,
-/// so elapsed stays live without the app pushing every second. Paused, it counts *up* from the
+/// so active stays live without the app pushing every second. Paused, it counts *up* from the
 /// instant of the stop — still OS-rendered, so it keeps moving even when the app is suspended or
 /// dead, and answers the one question a stopped rider has: how long have I been stopped.
 ///

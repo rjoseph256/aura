@@ -8,10 +8,15 @@ import Foundation
 ///
 /// **What this catches and what it does not.** After the rewire both sides of these expectations
 /// call the same function, so this cannot fail for a change to the *definition* of active time —
-/// `RideActiveClockTests` pins that against frozen literals, and
-/// `scripts/check-single-active-definition.sh` is what stops a new derivation appearing. What it
-/// does catch is a future author re-inlining either branch of `make`, which is precisely how
-/// revision 1 of this plan left the rendered anchor behind.
+/// `RideActiveClockTests` pins that against frozen literals. What it does catch is a re-inline of
+/// either branch of `make` that disagrees *numerically* with the primitive — notably one that
+/// drops the primitive's clamp and hands `Text(_, style: .timer)` a future anchor, which makes
+/// the Lock Screen clock count DOWN instead of up. It does NOT catch every re-inline: the
+/// expression revision 1 of this plan left behind,
+/// `min(startedAt.addingTimeInterval(pausedSeconds), now)`, is bit-identical to the primitive for
+/// every input (verified over 7,200 ticks, including the clamped regime), so an algebraically
+/// equivalent re-inline is still GREEN here. `scripts/check-single-active-definition.sh` is what
+/// catches that class — it fails on the re-derivation itself, not on its output.
 ///
 /// The HUD's own clock (`RideSessionCoordinator.refreshElapsed`) is the third caller and is not
 /// tested here: its `startedAt` is private and stamped from `Date()`, so a test cannot supply both

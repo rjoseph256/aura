@@ -30,8 +30,9 @@ public struct RideDuration: Equatable, Sendable {
     ///   beside a real distance and a real top speed, reads as "the app lost my ride".
     ///
     /// So the disqualifier is `checkpointedAt >= endedAt`, which selects the first and spares the
-    /// second. `RideSessionCheckpointFlushTests.swift:238` asserts the second is "still a real
-    /// duration"; this rule is what keeps that true.
+    /// second. `RideDurationTests.saveFailureRideKeepsItsDuration` is what pins that rule;
+    /// `RideSessionCheckpointFlushTests.swift:238` is context for why that second state exists —
+    /// it asserts the underlying ride's `endedAt` is set, not anything about `RideDuration`.
     ///
     /// A nil `endedAt` with no marker is the legacy PR #90 dev-build row, also nil here.
     public init?(startedAt: Date, endedAt: Date?, checkpointedAt: Date?,
@@ -50,14 +51,17 @@ public struct RideDuration: Equatable, Sendable {
         let elapsed = max(0, endedAt.timeIntervalSince(startedAt))
         elapsedSeconds = elapsed
 
-        // The persisted column is sanitized HERE, not inside the shared primitive: the two live
+        // The persisted column is floored HERE, not inside the shared primitive: the two live
         // clocks read `RideRecorder.pausedSeconds(asOf:)`, which is structurally non-negative and
         // bounded by the session, while this reads a CloudKit-mirrored `Double`
-        // (`RideSchemaV7.swift:42`). Without this, a negative value renders active ABOVE elapsed,
-        // with the caption present to make it unmissable.
+        // (`RideSchemaV7.swift:42`). Without this floor, a negative value renders active ABOVE
+        // elapsed, with the caption present to make it unmissable. An oversized stored value
+        // needs no matching upper clamp here: the primitive already floors its own result at
+        // zero, so `max(0, elapsed - pausedSeconds)` cannot exceed `elapsed` for any
+        // non-negative `pausedSeconds` — `RideDurationTests.activeIsBoundedByElapsed` pins this.
         activeSeconds = RideDuration.activeSeconds(
             startedAt: startedAt, asOf: endedAt,
-            pausedSeconds: min(max(0, pausedSeconds), elapsed))
+            pausedSeconds: max(0, pausedSeconds))
     }
 
     /// **The one definition of active time**: wall clock since the start, less time spent paused.
