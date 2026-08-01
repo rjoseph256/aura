@@ -221,7 +221,8 @@ public final class RideSessionCoordinator {
     /// non-decreasing clamp against a backward wall-clock step.
     func refreshElapsed(now: Date = Date()) {
         guard let startedAt else { return }
-        elapsed = max(0, now.timeIntervalSince(startedAt) - recorder.pausedSeconds(asOf: now))
+        elapsed = RideDuration.activeSeconds(startedAt: startedAt, asOf: now,
+                                             pausedSeconds: recorder.pausedSeconds(asOf: now))
         currentPauseSeconds = max(currentPauseSeconds, recorder.currentPauseSeconds(asOf: now))
     }
 

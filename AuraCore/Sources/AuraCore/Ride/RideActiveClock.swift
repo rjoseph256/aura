@@ -40,17 +40,21 @@ public enum RideActiveClock: Codable, Hashable, Sendable {
                             pausedSeconds: TimeInterval,
                             pausedSince: Date?,
                             now: Date) -> RideActiveClock {
-        let activeSeconds = max(0, now.timeIntervalSince(startedAt) - pausedSeconds)
+        let activeSeconds = RideDuration.activeSeconds(startedAt: startedAt, asOf: now,
+                                                       pausedSeconds: pausedSeconds)
         if let pausedSince {
             return .paused(since: pausedSince, activeSeconds: activeSeconds)
         }
-        // Clamped to `now`: a backward wall-clock step can push `startedAt + pausedSeconds` past
-        // it, and `Text(_, style: .timer)` with a future anchor counts DOWN. While the clamp is
-        // active the anchor tracks `now` and the clock reads 0:00, which costs a push per
-        // coalescing interval until wall-clock catches up — bounded by the size of the backward
-        // step, and strictly better than a Lock Screen counting down. The in-app clock clamps for
-        // the same reason (`RideSessionCoordinator.refreshElapsed`); the residual wall-clock
-        // weakness is ROH-130.
-        return .running(anchor: min(startedAt.addingTimeInterval(pausedSeconds), now))
+        // Anchored at `now` less the active seconds, which is identical to
+        // `startedAt + pausedSeconds` whenever that is in the past, and equal to `now` when it is
+        // not: a backward wall-clock step can push `startedAt + pausedSeconds` past `now`, and
+        // `Text(_, style: .timer)` with a future anchor counts DOWN. The clamp now lives inside
+        // `RideDuration.activeSeconds`, which is why this reads as a subtraction from `now`
+        // rather than an addition to `startedAt`. While it is active the anchor tracks `now` and
+        // the clock reads 0:00, which costs a push per coalescing interval until wall-clock
+        // catches up — bounded by the size of the backward step, and strictly better than a Lock
+        // Screen counting down. The in-app clock clamps for the same reason
+        // (`RideSessionCoordinator.refreshElapsed`); the residual wall-clock weakness is ROH-130.
+        return .running(anchor: now.addingTimeInterval(-activeSeconds))
     }
 }

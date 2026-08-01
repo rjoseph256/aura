@@ -1,0 +1,65 @@
+import Testing
+import Foundation
+@testable import AuraCore
+
+/// Both branches of the Live Activity's clock, and the finished ride's, must report the same
+/// active time for the same inputs. Parent spec D5 rests on it: the rider sees the number they
+/// watched when they pressed End.
+///
+/// **What this catches and what it does not.** After the rewire both sides of these expectations
+/// call the same function, so this cannot fail for a change to the *definition* of active time —
+/// `RideActiveClockTests` pins that against frozen literals, and
+/// `scripts/check-single-active-definition.sh` is what stops a new derivation appearing. What it
+/// does catch is a future author re-inlining either branch of `make`, which is precisely how
+/// revision 1 of this plan left the rendered anchor behind.
+///
+/// The HUD's own clock (`RideSessionCoordinator.refreshElapsed`) is the third caller and is not
+/// tested here: its `startedAt` is private and stamped from `Date()`, so a test cannot supply both
+/// sides. The guard script is what holds it, and `RideSessionCoordinatorPauseTests` its behavior.
+@Suite("Active time agreement")
+struct ActiveTimeAgreementTests {
+    let start = Date(timeIntervalSince1970: 1_000_000)
+    let pausedCases: [TimeInterval] = [0, 240, 5000]
+
+    @Test("The paused clock's active reading matches the primitive")
+    func pausedClockMatchesPrimitive() {
+        let now = start.addingTimeInterval(900)
+        for paused in pausedCases {
+            let clock = RideActiveClock.make(startedAt: start, pausedSeconds: paused,
+                                             pausedSince: now, now: now)
+            guard case .paused(_, let activeSeconds) = clock else {
+                Issue.record("expected a paused clock for paused: \(paused)")
+                continue
+            }
+            #expect(activeSeconds == RideDuration.activeSeconds(startedAt: start, asOf: now,
+                                                                pausedSeconds: paused))
+        }
+    }
+
+    @Test("The running anchor is `now` less the active seconds — this is the branch that renders")
+    func runningAnchorMatchesPrimitive() {
+        // `Text(anchor, style: .timer)` counts up from the anchor, so the rendered number is
+        // `now - anchor`. That, not the discarded `activeSeconds` local, is what the rider sees.
+        let now = start.addingTimeInterval(900)
+        for paused in pausedCases {
+            let clock = RideActiveClock.make(startedAt: start, pausedSeconds: paused,
+                                             pausedSince: nil, now: now)
+            guard case .running(let anchor) = clock else {
+                Issue.record("expected a running clock for paused: \(paused)")
+                continue
+            }
+            #expect(now.timeIntervalSince(anchor)
+                    == RideDuration.activeSeconds(startedAt: start, asOf: now,
+                                                  pausedSeconds: paused))
+        }
+    }
+
+    @Test("A finished ride's active time matches the primitive at its end instant")
+    func finishedRideMatchesPrimitive() throws {
+        let end = start.addingTimeInterval(2880)
+        let d = try #require(RideDuration(startedAt: start, endedAt: end,
+                                          checkpointedAt: nil, pausedSeconds: 600))
+        #expect(d.activeSeconds == RideDuration.activeSeconds(startedAt: start, asOf: end,
+                                                              pausedSeconds: 600))
+    }
+}

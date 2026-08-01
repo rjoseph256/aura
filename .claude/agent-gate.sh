@@ -74,13 +74,16 @@ if has '\.swift$'; then
 fi
 
 # ---------------------------------------------------------------------- guards
-# Both are cheap greps over the tree, so they run whenever anything they inspect
+# All three are cheap greps over the tree, so they run whenever anything they inspect
 # could have moved. The terrain guard also owns the bundled style JSON.
 if has '\.swift$'; then
   run "explore rename guard" . bash scripts/check-explore-rename.sh
 fi
 if has '\.swift$|AuraTerrainStyle\.json$'; then
   run "terrain style guard" . bash scripts/check-terrain-style.sh
+fi
+if has '\.swift$'; then
+  run "single active-time definition" . bash scripts/check-single-active-definition.sh
 fi
 
 # --------------------------------------------------------------------- verdict

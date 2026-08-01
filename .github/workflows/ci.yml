@@ -193,6 +193,8 @@ jobs:
         run: bash scripts/check-explore-rename.sh
       - name: Terrain style guard
         run: bash scripts/check-terrain-style.sh
+      - name: Single active-time definition guard
+        run: bash scripts/check-single-active-definition.sh
 
   db-tests:
     name: DB tests (pgTAP)
