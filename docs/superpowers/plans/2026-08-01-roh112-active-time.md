@@ -4,21 +4,24 @@
 
 **Goal:** The ride summary leads with active time (`elapsed - paused`), the number the rider watched on the HUD, with elapsed as a subordinate caption and the existing moving-time cell retained.
 
-**Architecture:** One pure `RideDuration` type in AuraCore owns the finished ride's two durations and hosts the single definition of active time that the two existing live clocks are rewired to call. A pure `RideSummaryStats` in AuraKit resolves the summary's three stat cells to display strings from scalars, and `RideSummaryView` becomes a projection of it. One string changes in the Live Activity so "elapsed" stops naming two different numbers.
+**Architecture:** One pure `RideDuration` type in AuraCore owns the finished ride's two durations and hosts the single definition of active time that both live clocks are rewired to call, with a checked-in guard script keeping it single. A pure `RideSummaryStats` in AuraKit resolves the summary's three stat cells to display strings from scalars, and `RideSummaryView` becomes a projection of it. One string changes in the Dynamic Island so "elapsed" stops naming two different numbers.
 
 **Tech Stack:** Swift 6, SwiftUI, Swift Testing (`@Suite`/`@Test`/`#expect`) for package tests, XCTest/XCUITest for the E2E.
 
-Spec: `docs/superpowers/specs/2026-08-01-roh112-active-time-design.md` (revision 2).
+Spec: `docs/superpowers/specs/2026-08-01-roh112-active-time-design.md` (revision 3).
+
+Status: revision 2, after a two-reviewer gate. Revision 1 disqualified every ride carrying a checkpoint marker, which would have shown `—` to a rider whose ride failed to save; rewired only one of `RideActiveClock`'s two derivations of active time, leaving the rendered one behind; described the Live Activity change on a surface that does not carry the string; and ran the package suite the flaky way. Corrections are inline.
 
 ## Global Constraints
 
-- **The moving cell is untouched.** `RideTestID.summaryMoving`, its label `"moving"`, and its value expression `fmt.minutes(stats.movingTimeSeconds)` must survive byte-identical. `RideE2EUITests.assertMovingTimeIsSegmented` is a CI gate that reads it.
-- **`RideActiveClock.make` and `RideSessionCoordinator.refreshElapsed` change implementation, never behavior.** Their existing tests are the guard. Do not touch the clamping comments at `RideActiveClock.swift:44-52` — they document a Live Activity countdown bug.
-- **Scope is the ride summary plus one Live Activity string.** The History caption, the Home last-ride card, the widget, and the share card stay on moving time (ROH-146). Do not edit `HistoryView.swift`, `LastRideCard.swift`, `LastRideWidget.swift`, `WidgetSnapshot.swift`, `ShareCardContent.swift`, or `ShareCardView.swift`.
-- **Copy is exact:** cell label `active`, caption `"<N> min elapsed"`, Live Activity running label `ACTIVE`.
+- **The moving cell keeps its identifier, its label, and its value.** `RideTestID.summaryMoving` and the label `"moving"` are unchanged, and the value must stay `RideStatsFormatter(units: settings.units).minutes(stats.movingTimeSeconds)` however it is spelled. `RideE2EUITests.assertMovingTimeIsSegmented` is a CI gate that reads it. *(Revision 2: revision 1 said "byte-identical value expression", which Task 4 then violated by routing it through `RideSummaryStats`. The behavior is what matters.)*
+- **`RideActiveClock.make` and `RideSessionCoordinator.refreshElapsed` change implementation, never behavior.** Their existing tests, which pin frozen literals, are the guard.
+- **Scope is the ride summary plus one Dynamic Island string.** The History caption, the Home last-ride card, the widget, and the share card stay on moving time (ROH-146). Do not edit `HistoryView.swift`, `LastRideCard.swift`, `LastRideWidget.swift`, `WidgetSnapshot.swift`, `ShareCardContent.swift`, or `ShareCardView.swift`.
+- **Copy is exact:** cell label `active`, caption `"<N> min elapsed"`, Dynamic Island running label `ACTIVE`.
 - **Package tests must pass on the macOS CI host**, so nothing in AuraCore/AuraKit may import SwiftUI, UIKit, or WidgetKit.
-- Run package tests with `swift test --package-path AuraCore`. Note it prints **two** totals (one per test target); both must be zero-failure.
-- Lint with `swiftlint --strict` run **from the repo root**.
+- **Full package runs use `swift test --no-parallel --package-path AuraCore`.** A bare `swift test` races the SwiftData suites (`.claude/agent-gate.sh:19-20`, `.github/workflows/ci.yml:50`). Filtered runs may omit it.
+- A package run prints **two totals: an XCTest one and a swift-testing one**, not one per target. The XCTest line reading `Executed 0 tests` is normal — every suite here is swift-testing.
+- Lint with `swiftlint --strict` run **from the repo root**, after every task that touches a `.swift` file.
 
 ---
 
@@ -26,11 +29,14 @@ Spec: `docs/superpowers/specs/2026-08-01-roh112-active-time-design.md` (revision
 
 | File | Responsibility |
 | -- | -- |
-| `AuraCore/Sources/AuraCore/Ride/RideDuration.swift` (create) | The finished ride's `elapsedSeconds`/`activeSeconds`, plus `activeSeconds(startedAt:asOf:pausedSeconds:)`, the one definition of active time. Also `Ride.duration` and `RideSummary.duration`. |
+| `AuraCore/Sources/AuraCore/Ride/RideDuration.swift` (create) | The finished ride's `elapsedSeconds`/`activeSeconds`, plus `activeSeconds(startedAt:asOf:pausedSeconds:)`, the one definition of active time. Also `Ride.duration`. |
 | `AuraCore/Tests/AuraCoreTests/RideDurationTests.swift` (create) | Task 1 coverage. |
-| `AuraCore/Sources/AuraCore/Ride/RideActiveClock.swift` (modify) | Route through the shared primitive. |
-| `AuraCore/Sources/AuraKit/RideSession/RideSessionCoordinator.swift` (modify) | Route through the shared primitive. |
-| `AuraCore/Tests/AuraCoreTests/ActiveTimeAgreementTests.swift` (create) | The Live Activity clock and the finished ride's clock agree on the same inputs. |
+| `AuraCore/Sources/AuraCore/Ride/RideActiveClock.swift` (modify) | Both derivations route through the primitive. |
+| `AuraCore/Sources/AuraKit/RideSession/RideSessionCoordinator.swift` (modify) | Route through the primitive. |
+| `AuraCore/Tests/AuraCoreTests/ActiveTimeAgreementTests.swift` (create) | Both clock branches agree with the primitive. |
+| `scripts/check-single-active-definition.sh` (create) | Fails the build if anything re-derives active time. |
+| `.claude/agent-gate.sh` (modify) | Run the guard alongside the two existing ones. |
+| `.github/workflows/ci.yml` (modify) | Same guard in CI. |
 | `AuraCore/Sources/AuraKit/Formatting/RideSummaryStats.swift` (create) | The summary's three cells as display strings, from scalars. |
 | `AuraCore/Tests/AuraKitTests/RideSummaryStatsTests.swift` (create) | Task 3 coverage. |
 | `AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift` (modify) | `RideTestID.summaryActive`. |
@@ -48,12 +54,14 @@ Spec: `docs/superpowers/specs/2026-08-01-roh112-active-time-design.md` (revision
 - Test: `AuraCore/Tests/AuraCoreTests/RideDurationTests.swift`
 
 **Interfaces:**
-- Consumes: `Ride` (`AuraCore/Sources/AuraCore/Models/Ride.swift`), `RideSummary` (`.../RideSummary.swift`). Both already have `startedAt: Date`, `endedAt: Date?`, `checkpointedAt: Date?`, and `pausedSeconds`.
+- Consumes: `Ride` (`AuraCore/Sources/AuraCore/Models/Ride.swift`), which has `startedAt: Date`, `endedAt: Date?`, `checkpointedAt: Date?`, `pausedSeconds: TimeInterval`.
 - Produces:
   - `RideDuration.init?(startedAt: Date, endedAt: Date?, checkpointedAt: Date?, pausedSeconds: TimeInterval)`
   - `RideDuration.elapsedSeconds: TimeInterval`, `RideDuration.activeSeconds: TimeInterval`
   - `RideDuration.activeSeconds(startedAt: Date, asOf: Date, pausedSeconds: TimeInterval) -> TimeInterval` (static)
-  - `Ride.duration: RideDuration?`, `RideSummary.duration: RideDuration?`
+  - `Ride.duration: RideDuration?`
+
+There is deliberately **no `RideSummary.duration`**. Its only consumers, History and the Home last-ride card, are out of scope (ROH-146 adds it when they move). *(Revision 2: revision 1 shipped it with no caller but its own test.)*
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -86,14 +94,30 @@ struct RideDurationTests {
         #expect(d.activeSeconds == d.elapsedSeconds)
     }
 
-    @Test("A checkpointed ride has no duration at all")
-    func checkpointedRideIsDisqualified() {
-        // `RideRecorder.checkpoint(at:)` stamps endedAt at the PAUSE, so the interval it
-        // describes can be a fraction of the ride the rider actually rode. Spec D2 disqualifies
-        // it rather than reporting it under a badge the rider reads as "the last bit is missing".
+    @Test("A checkpoint row — endedAt stamped AT the pause — is disqualified")
+    func checkpointRowIsDisqualified() {
+        // `RideRecorder.checkpoint(at:)` writes endedAt and checkpointedAt to the SAME instant.
+        // The rider may have resumed and ridden for another hour before the kill, so this
+        // interval can be a fraction of the real ride.
         let end = start.addingTimeInterval(1800)
         #expect(RideDuration(startedAt: start, endedAt: end,
                              checkpointedAt: end, pausedSeconds: 0) == nil)
+    }
+
+    @Test("A ride that failed to save still reports its real duration")
+    func saveFailureRideKeepsItsDuration() throws {
+        // `RideSessionCoordinator.finish()`'s catch branch restores the MARKER onto a ride whose
+        // endedAt came from `RideRecorder.end(at:)` — the real End tap, strictly after the
+        // checkpoint. Both durations are exactly known, and the rider is looking at this summary
+        // right now. Disqualifying it would print "—" beside a real distance and a real top speed.
+        // Pinned against `RideSessionCheckpointFlushTests.swift:238`, which asserts this ride is
+        // "still a real duration".
+        let d = try #require(RideDuration(startedAt: start,
+                                          endedAt: start.addingTimeInterval(5400),
+                                          checkpointedAt: start.addingTimeInterval(1800),
+                                          pausedSeconds: 600))
+        #expect(d.elapsedSeconds == 5400)
+        #expect(d.activeSeconds == 4800)
     }
 
     @Test("A ride with no end at all has no duration")
@@ -103,13 +127,18 @@ struct RideDurationTests {
                              checkpointedAt: nil, pausedSeconds: 0) == nil)
     }
 
-    @Test("Paused time exceeding the ride clamps active to zero rather than going negative")
-    func pausedLongerThanTheRideClampsToZero() throws {
-        let d = try #require(RideDuration(startedAt: start,
-                                          endedAt: start.addingTimeInterval(600),
-                                          checkpointedAt: nil, pausedSeconds: 900))
-        #expect(d.activeSeconds == 0)
-        #expect(d.elapsedSeconds == 600)
+    @Test("Active never exceeds elapsed, whatever the stored paused seconds say")
+    func activeIsBoundedByElapsed() throws {
+        // Unlike the live clocks, this reads a persisted, CloudKit-mirrored Double column
+        // (`RideSchemaV7.swift:42`). A negative value would render active ABOVE elapsed with the
+        // caption present to make it unmissable; an oversized one would zero the headline.
+        for paused in [-500.0, 900.0] {
+            let d = try #require(RideDuration(startedAt: start,
+                                              endedAt: start.addingTimeInterval(600),
+                                              checkpointedAt: nil, pausedSeconds: paused))
+            #expect(d.activeSeconds >= 0)
+            #expect(d.activeSeconds <= d.elapsedSeconds)
+        }
     }
 
     @Test("The shared primitive is what every clock in the app subtracts with")
@@ -121,24 +150,16 @@ struct RideDurationTests {
                                            pausedSeconds: 5000) == 0)
     }
 
-    @Test("A Ride and its summary projection report the same duration")
-    func rideAndSummaryAgree() throws {
+    @Test("A Ride projects its own duration")
+    func rideProjectsItsDuration() throws {
         let end = start.addingTimeInterval(2880)
         let ride = Ride(kind: .freeRide, startedAt: start, endedAt: end, track: [],
                         stats: nil, pausedSeconds: 600, checkpointedAt: nil,
                         routeId: nil, destinationPlaceId: nil)
-        let summary = RideSummary(id: ride.id, kind: .freeRide, startedAt: start, endedAt: end,
-                                  hasStats: false, distanceMeters: 0, movingTimeSeconds: 0,
-                                  pausedSeconds: 600, checkpointedAt: nil,
-                                  elevationGainMeters: 0, destinationName: nil,
-                                  thumbnailCoordinates: [])
-        #expect(ride.duration == summary.duration)
         #expect(try #require(ride.duration).activeSeconds == 2280)
     }
 }
 ```
-
-There is deliberately **no test for `endedAt < startedAt`**. That path calls `assertionFailure`, which traps in a debug test build, so a test for it would abort the suite rather than pass.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -164,41 +185,63 @@ public struct RideDuration: Equatable, Sendable {
     /// recorded pauses, which includes every ride recorded before pause existed.
     public let activeSeconds: TimeInterval
 
-    /// Nil for an unfinished ride, which is the only unavailable case.
+    /// Nil when this ride's end instant cannot be trusted as the end of the *riding*.
     ///
-    /// **`checkpointedAt` is read as a disqualifier, never as a clock.**
-    /// `RideRecorder.checkpoint(at:)` stamps `endedAt` at the *pause*, so a rider who paused at
-    /// minute 30, resumed, and was killed at minute 90 has a row whose `endedAt` is minute 30.
-    /// Reporting "30 min" for that ride is confidently wrong in a way the unfinished badge does
-    /// not cover — a rider reads that badge as "the last bit is missing", not "two thirds of this
-    /// ride is missing" (spec D2). The moving cell still reports what was actually recorded.
+    /// **This is deliberately NOT `isUnfinished`, and must not be "corrected" into it.**
+    /// `Ride.isUnfinished` is `checkpointedAt != nil || endedAt == nil`, and two different rides
+    /// satisfy its first clause:
+    ///
+    /// - **A checkpoint row.** `RideRecorder.checkpoint(at:)` writes `endedAt` and
+    ///   `checkpointedAt` to the *same* instant, the pause. The rider may have resumed and ridden
+    ///   for another hour before the kill, so the interval can be a fraction of the real ride.
+    ///   Reporting "30 min" for a 90-minute ride is confidently wrong in a way the unfinished
+    ///   badge does not cover: a rider reads that badge as "the last bit is missing".
+    /// - **A ride that failed to save.** `RideSessionCoordinator.finish()`'s catch branch restores
+    ///   the marker onto a ride whose `endedAt` came from `RideRecorder.end(at:)` — the real End
+    ///   tap, strictly *after* the checkpoint. Both durations are exactly known, and this is the
+    ///   summary the rider is looking at the moment their ride failed to save. Blanking it there,
+    ///   beside a real distance and a real top speed, reads as "the app lost my ride".
+    ///
+    /// So the disqualifier is `checkpointedAt >= endedAt`, which selects the first and spares the
+    /// second. `RideSessionCheckpointFlushTests.swift:238` asserts the second is "still a real
+    /// duration"; this rule is what keeps that true.
     ///
     /// A nil `endedAt` with no marker is the legacy PR #90 dev-build row, also nil here.
     public init?(startedAt: Date, endedAt: Date?, checkpointedAt: Date?,
                  pausedSeconds: TimeInterval) {
-        guard let endedAt, checkpointedAt == nil else { return nil }
-        let elapsed = endedAt.timeIntervalSince(startedAt)
-        if elapsed < 0 {
-            // A degenerate recorder state, not a device clock: `checkpoint(at:)`'s
-            // `startedAt ?? date` collapses to a zero interval when the recorder never started.
-            // Loud in DEBUG and CI, non-fatal in release, exactly as `RideMigrationPlan` treats an
-            // undecodable stats blob. A silent clamp is how a future auto-pause accounting bug
-            // ships as "active time is a bit low" and never gets reported.
-            assertionFailure("RideDuration: endedAt \(endedAt) precedes startedAt \(startedAt)")
-        }
-        elapsedSeconds = max(0, elapsed)
-        activeSeconds = RideDuration.activeSeconds(startedAt: startedAt, asOf: endedAt,
-                                                   pausedSeconds: pausedSeconds)
+        guard let endedAt else { return nil }
+        if let checkpointedAt, checkpointedAt >= endedAt { return nil }
+
+        // Clamped, and NOT asserted. Revision 1 trapped here on the theory that only a degenerate
+        // recorder state produces it; tracing `checkpoint(at:)` and `end(at:)` shows neither can
+        // (both collapse to a zero interval, not a negative one). The real producer is a backward
+        // wall-clock step, which this repo has open as ROH-130 — and unlike
+        // `RideMigrationPlan`'s assertion, which runs once over local data inside a migration,
+        // this runs inside `RideSummaryView.body` over rows CloudKit mirrored from another
+        // device. A trap there fails the summary screen, the UI-test suite, and the device pass
+        // for a clock skew the app already knows it does not handle.
+        let elapsed = max(0, endedAt.timeIntervalSince(startedAt))
+        elapsedSeconds = elapsed
+
+        // The persisted column is sanitized HERE, not inside the shared primitive: the two live
+        // clocks read `RideRecorder.pausedSeconds(asOf:)`, which is structurally non-negative and
+        // bounded by the session, while this reads a CloudKit-mirrored `Double`
+        // (`RideSchemaV7.swift:42`). Without this, a negative value renders active ABOVE elapsed,
+        // with the caption present to make it unmissable.
+        activeSeconds = RideDuration.activeSeconds(
+            startedAt: startedAt, asOf: endedAt,
+            pausedSeconds: min(max(0, pausedSeconds), elapsed))
     }
 
     /// **The one definition of active time**: wall clock since the start, less time spent paused.
     ///
-    /// Three clocks call this and nothing re-derives it — the HUD's live number
-    /// (`RideSessionCoordinator.refreshElapsed`), the Live Activity's (`RideActiveClock.make`),
-    /// and the finished ride's (`init` above). Parent spec D5 makes their agreement a product
-    /// requirement: the rider must see the same clock after the ride that they watched during it.
-    /// One function is what makes that an invariant instead of three subtractions that happen to
-    /// match today.
+    /// Every clock calls this and nothing re-derives it — the HUD's live number
+    /// (`RideSessionCoordinator.refreshElapsed`), both branches of the Live Activity's
+    /// (`RideActiveClock.make`), and the finished ride's (`init` above). Parent spec D5 makes
+    /// their agreement a product requirement: the rider must see the same clock after the ride
+    /// that they watched during it. `scripts/check-single-active-definition.sh` is what keeps
+    /// that true, because a doc comment asking future authors not to re-derive it is exactly the
+    /// kind of request this repo has watched get ignored.
     ///
     /// For a running ride `pausedSeconds` must be measured as of `now`, including a stop still
     /// open; see `RideActiveClock.make`.
@@ -209,15 +252,8 @@ public struct RideDuration: Equatable, Sendable {
 }
 
 extension Ride {
-    /// This ride's durations, or nil when it is unfinished. See `RideDuration.init`.
-    public var duration: RideDuration? {
-        RideDuration(startedAt: startedAt, endedAt: endedAt,
-                     checkpointedAt: checkpointedAt, pausedSeconds: pausedSeconds)
-    }
-}
-
-extension RideSummary {
-    /// This row's durations, or nil when the ride is unfinished. See `RideDuration.init`.
+    /// This ride's durations, or nil when its end instant cannot be trusted. See
+    /// `RideDuration.init`, which explains why this is not `isUnfinished`.
     public var duration: RideDuration? {
         RideDuration(startedAt: startedAt, endedAt: endedAt,
                      checkpointedAt: checkpointedAt, pausedSeconds: pausedSeconds)
@@ -228,7 +264,7 @@ extension RideSummary {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `swift test --package-path AuraCore --filter RideDurationTests`
-Expected: PASS, 7 tests.
+Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Lint and commit**
 
@@ -240,22 +276,23 @@ git commit -m "feat(roh-112): add RideDuration, the one definition of active tim
 
 ---
 
-### Task 2: Route the two live clocks through the shared primitive
+### Task 2: Route every clock through the primitive, and keep it that way
 
 **Files:**
-- Modify: `AuraCore/Sources/AuraCore/Ride/RideActiveClock.swift:43`
+- Modify: `AuraCore/Sources/AuraCore/Ride/RideActiveClock.swift:43` and `:54`
 - Modify: `AuraCore/Sources/AuraKit/RideSession/RideSessionCoordinator.swift:224`
+- Create: `scripts/check-single-active-definition.sh`
+- Modify: `.claude/agent-gate.sh` (beside the two existing guards at `:80` and `:83`)
+- Modify: `.github/workflows/ci.yml`
 - Test: `AuraCore/Tests/AuraCoreTests/ActiveTimeAgreementTests.swift` (create)
 
 **Interfaces:**
 - Consumes: `RideDuration.activeSeconds(startedAt:asOf:pausedSeconds:)` from Task 1.
 - Produces: no new API. Behavior is unchanged by construction.
 
-This task is a refactor with two guards that make the refactor's *point* enforceable: a test for the Live Activity clock, and a grep for single-definition. `RideActiveClock.make` and `refreshElapsed` today both compute `max(0, now - startedAt - pausedSeconds)` in longhand. After this task there is one copy of that expression in the codebase.
+`RideActiveClock.make` has **two** derivations of active time, not one, and revision 1 rewired only the first. `:43` computes `activeSeconds`, which is *discarded* on the running branch; `:54` separately derives the anchor the Lock Screen and Dynamic Island actually render. The rendered one is the one that mattered.
 
-`refreshElapsed` gets no direct test here. Its `startedAt` is private and set from `Date()` inside `start()`, so a test cannot supply the inputs needed to compare it against the primitive without reaching through the coordinator's whole lifecycle; its behavior is already pinned by `RideSessionCoordinatorPauseTests`. Step 5's grep is what keeps it on the shared definition. Do not claim more than that in a comment.
-
-- [ ] **Step 1: Write the test**
+- [ ] **Step 1: Write the agreement test**
 
 Create `AuraCore/Tests/AuraCoreTests/ActiveTimeAgreementTests.swift`:
 
@@ -264,33 +301,55 @@ import Testing
 import Foundation
 @testable import AuraCore
 
-/// The Live Activity's clock and the finished ride's clock must report the same active time for
-/// the same inputs. Parent spec D5 rests on it: the rider sees the number they watched when they
-/// pressed End. Separately-written subtractions would agree today and drift on the first change
-/// to either, so this pins the agreement rather than trusting a doc comment.
+/// Both branches of the Live Activity's clock, and the finished ride's, must report the same
+/// active time for the same inputs. Parent spec D5 rests on it: the rider sees the number they
+/// watched when they pressed End.
+///
+/// **What this catches and what it does not.** After the rewire both sides of these expectations
+/// call the same function, so this cannot fail for a change to the *definition* of active time —
+/// `RideActiveClockTests` pins that against frozen literals, and
+/// `scripts/check-single-active-definition.sh` is what stops a new derivation appearing. What it
+/// does catch is a future author re-inlining either branch of `make`, which is precisely how
+/// revision 1 of this plan left the rendered anchor behind.
 ///
 /// The HUD's own clock (`RideSessionCoordinator.refreshElapsed`) is the third caller and is not
-/// tested here — its `startedAt` is private and stamped from `Date()`, so the inputs cannot be
-/// supplied. It is held to the shared definition by review and by the single-definition grep in
-/// the ROH-112 plan, and its behavior by `RideSessionCoordinatorPauseTests`.
+/// tested here: its `startedAt` is private and stamped from `Date()`, so a test cannot supply both
+/// sides. The guard script is what holds it, and `RideSessionCoordinatorPauseTests` its behavior.
 @Suite("Active time agreement")
 struct ActiveTimeAgreementTests {
     let start = Date(timeIntervalSince1970: 1_000_000)
+    let pausedCases: [TimeInterval] = [0, 240, 5000]
 
-    @Test("The Live Activity clock's active reading matches the shared primitive")
-    func liveActivityClockMatchesPrimitive() {
-        for (paused, offset) in [(0.0, 600.0), (240.0, 900.0), (5000.0, 600.0)] {
-            let now = start.addingTimeInterval(offset)
-            let expected = RideDuration.activeSeconds(startedAt: start, asOf: now,
-                                                      pausedSeconds: paused)
-            // A stop is open, so the clock carries its active reading explicitly.
+    @Test("The paused clock's active reading matches the primitive")
+    func pausedClockMatchesPrimitive() {
+        let now = start.addingTimeInterval(900)
+        for paused in pausedCases {
             let clock = RideActiveClock.make(startedAt: start, pausedSeconds: paused,
                                              pausedSince: now, now: now)
             guard case .paused(_, let activeSeconds) = clock else {
                 Issue.record("expected a paused clock for paused: \(paused)")
                 continue
             }
-            #expect(activeSeconds == expected)
+            #expect(activeSeconds == RideDuration.activeSeconds(startedAt: start, asOf: now,
+                                                                pausedSeconds: paused))
+        }
+    }
+
+    @Test("The running anchor is `now` less the active seconds — this is the branch that renders")
+    func runningAnchorMatchesPrimitive() {
+        // `Text(anchor, style: .timer)` counts up from the anchor, so the rendered number is
+        // `now - anchor`. That, not the discarded `activeSeconds` local, is what the rider sees.
+        let now = start.addingTimeInterval(900)
+        for paused in pausedCases {
+            let clock = RideActiveClock.make(startedAt: start, pausedSeconds: paused,
+                                             pausedSince: nil, now: now)
+            guard case .running(let anchor) = clock else {
+                Issue.record("expected a running clock for paused: \(paused)")
+                continue
+            }
+            #expect(now.timeIntervalSince(anchor)
+                    == RideDuration.activeSeconds(startedAt: start, asOf: now,
+                                                  pausedSeconds: paused))
         }
     }
 
@@ -305,19 +364,16 @@ struct ActiveTimeAgreementTests {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it passes already, then confirm it is load-bearing**
+- [ ] **Step 2: Run it and confirm it passes against the current code**
 
 Run: `swift test --package-path AuraCore --filter ActiveTimeAgreementTests`
-Expected: PASS. The two implementations already agree; the test exists to keep them agreeing.
+Expected: PASS. The existing derivations already agree; the test exists to keep them agreeing.
 
-Now confirm the test can fail. Temporarily change `RideActiveClock.swift:43` to
-`let activeSeconds = max(0, now.timeIntervalSince(startedAt) - pausedSeconds / 2)`, re-run, and
-confirm `liveActivityClockMatchesPrimitive` FAILS. **Revert the edit before continuing.** Record
-the observed failure in the commit message body.
+If `runningAnchorMatchesPrimitive` fails here, stop and report — that would mean the two current derivations already disagree, which is a bug this task did not expect to find.
 
-- [ ] **Step 3: Rewire `RideActiveClock.make`**
+- [ ] **Step 3: Rewire `RideActiveClock.make`, both branches**
 
-In `AuraCore/Sources/AuraCore/Ride/RideActiveClock.swift`, replace line 43 only:
+In `AuraCore/Sources/AuraCore/Ride/RideActiveClock.swift`, replace line 43:
 
 ```swift
         let activeSeconds = max(0, now.timeIntervalSince(startedAt) - pausedSeconds)
@@ -330,7 +386,22 @@ with:
                                                        pausedSeconds: pausedSeconds)
 ```
 
-Leave every comment in that function unchanged, including the clamping note at lines 44-52.
+Then replace the running return at line 54 and amend the comment block above it (`:47-53`) so it
+describes the form that is actually there. Replace lines 47-54 in full with:
+
+```swift
+        // Anchored at `now` less the active seconds, which is identical to
+        // `startedAt + pausedSeconds` whenever that is in the past, and equal to `now` when it is
+        // not: a backward wall-clock step can push `startedAt + pausedSeconds` past `now`, and
+        // `Text(_, style: .timer)` with a future anchor counts DOWN. The clamp now lives inside
+        // `RideDuration.activeSeconds`, which is why this reads as a subtraction from `now`
+        // rather than an addition to `startedAt`. While it is active the anchor tracks `now` and
+        // the clock reads 0:00, which costs a push per coalescing interval until wall-clock
+        // catches up — bounded by the size of the backward step, and strictly better than a Lock
+        // Screen counting down. The in-app clock clamps for the same reason
+        // (`RideSessionCoordinator.refreshElapsed`); the residual wall-clock weakness is ROH-130.
+        return .running(anchor: now.addingTimeInterval(-activeSeconds))
+```
 
 - [ ] **Step 4: Rewire `refreshElapsed`**
 
@@ -349,31 +420,77 @@ with:
 
 Leave the `currentPauseSeconds` line and every comment unchanged.
 
-- [ ] **Step 5: Verify there is exactly one definition left**
+- [ ] **Step 5: Write the guard script**
 
-Run:
+Create `scripts/check-single-active-definition.sh`, matching the shape of the two guards already
+in `scripts/`:
 
 ```bash
-grep -rn "timeIntervalSince(startedAt) -" --include="*.swift" AuraCore/Sources Aura/Sources Aura/Widgets
+#!/usr/bin/env bash
+# Active time has exactly one definition: `RideDuration.activeSeconds`.
+#
+# Three clocks compute it — the HUD's, both branches of the Live Activity's, and the finished
+# ride's — and parent spec D5 requires that they agree, because the rider must see the same clock
+# after the ride that they watched during it. Two of them were separately-written subtractions
+# until ROH-112, and the rendered one was nearly missed. A comment asking future authors not to
+# re-derive it is the kind of request this repo has watched get ignored, so this is a build gate.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+offenders=$(grep -rnE \
+  '(-[[:space:]]*[A-Za-z_.]*[Pp]ausedSeconds)|(addingTimeInterval\([A-Za-z_.]*[Pp]ausedSeconds)' \
+  --include='*.swift' AuraCore/Sources Aura/Sources Aura/Widgets \
+  | grep -vE ':[[:space:]]*//' \
+  | grep -v 'AuraCore/Sources/AuraCore/Ride/RideDuration.swift' || true)
+
+if [ -n "$offenders" ]; then
+  echo "Active time must come from RideDuration.activeSeconds. Re-derived at:"
+  echo "$offenders"
+  exit 1
+fi
 ```
 
-Expected: exactly one hit, inside `RideDuration.activeSeconds`. Any other hit is a clock that
-re-derives active time instead of calling the shared definition, which is the drift this task
-exists to prevent.
+Then `chmod +x scripts/check-single-active-definition.sh`.
 
-- [ ] **Step 6: Run the full package suite**
+- [ ] **Step 6: Run the guard**
 
-Run: `swift test --package-path AuraCore`
-Expected: PASS. `RideActiveClockTests` and `RideSessionCoordinatorPauseTests` are the guard that behavior did not move. Remember the run prints two totals; both must be zero-failure.
+Run: `bash scripts/check-single-active-definition.sh; echo "exit: $?"`
+Expected: no output, exit 0. Before Steps 3-4 it reported three offenders
+(`RideSessionCoordinator.swift:224`, `RideActiveClock.swift:43`, `:54`); all three are now calls
+rather than derivations.
 
-- [ ] **Step 7: Lint and commit**
+- [ ] **Step 7: Wire the guard into the gate and CI**
+
+In `.claude/agent-gate.sh`, beside the existing guards (`:80`, `:83`), add:
+
+```bash
+  run "single active-time definition" . bash scripts/check-single-active-definition.sh
+```
+
+In `.github/workflows/ci.yml`, add a step in the same job as the other guard scripts:
+
+```yaml
+      - name: Single active-time definition guard
+        run: bash scripts/check-single-active-definition.sh
+```
+
+Match the surrounding steps' indentation and naming style exactly; read the neighbours first.
+
+- [ ] **Step 8: Run the full package suite**
+
+Run: `swift test --no-parallel --package-path AuraCore`
+Expected: PASS. `RideActiveClockTests` (frozen literals, including the `.running` anchor) and
+`RideSessionCoordinatorPauseTests` are the guard that behavior did not move.
+
+- [ ] **Step 9: Lint and commit**
 
 ```bash
 swiftlint --strict
 git add AuraCore/Sources/AuraCore/Ride/RideActiveClock.swift \
         AuraCore/Sources/AuraKit/RideSession/RideSessionCoordinator.swift \
-        AuraCore/Tests/AuraCoreTests/ActiveTimeAgreementTests.swift
-git commit -m "refactor(roh-112): route both live clocks through RideDuration.activeSeconds"
+        AuraCore/Tests/AuraCoreTests/ActiveTimeAgreementTests.swift \
+        scripts/check-single-active-definition.sh .claude/agent-gate.sh .github/workflows/ci.yml
+git commit -m "refactor(roh-112): one definition of active time, enforced by a build gate"
 ```
 
 ---
@@ -385,7 +502,7 @@ git commit -m "refactor(roh-112): route both live clocks through RideDuration.ac
 - Test: `AuraCore/Tests/AuraKitTests/RideSummaryStatsTests.swift`
 
 **Interfaces:**
-- Consumes: `RideDuration` (Task 1), `RideStatsFormatter` (`AuraKit/Formatting/RideStatsFormatter.swift`), `DistanceUnits`.
+- Consumes: `RideDuration` (Task 1), `RideStatsFormatter` (`AuraKit/Formatting/RideStatsFormatter.swift`), `DistanceUnits` (`AuraKit/Settings/SettingsStore.swift`).
 - Produces: `RideSummaryStats(duration:movingTimeSeconds:maxSpeedMetersPerSecond:units:)` with `activeValue: String`, `elapsedCaption: String?`, `activeAccessibilityLabel: String`, `movingValue: String`, `topSpeedValue: String`, `topSpeedLabel: String`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -439,8 +556,8 @@ struct RideSummaryStatsTests {
         #expect(s.elapsedCaption == nil)
     }
 
-    @Test("An unfinished ride shows a dash and no caption")
-    func unfinishedRideIsDashed() {
+    @Test("A ride with no trustworthy end shows a dash and no caption")
+    func unavailableDurationIsDashed() {
         let s = stats(nil)
         #expect(s.activeValue == "—")
         #expect(s.elapsedCaption == nil)
@@ -453,7 +570,8 @@ struct RideSummaryStatsTests {
         #expect(s.movingValue == "31 min")
         #expect(s.topSpeedValue == "24.3")
         #expect(s.topSpeedLabel == "mph top")
-        #expect(stats(duration(elapsed: 2880, paused: 600), units: .metric).topSpeedLabel == "km/h top")
+        #expect(stats(duration(elapsed: 2880, paused: 600), units: .metric).topSpeedLabel
+                == "km/h top")
     }
 }
 ```
@@ -472,16 +590,16 @@ import Foundation
 import AuraCore
 
 /// The ride summary's supporting stat row, resolved to display-ready strings in the pure layer so
-/// the branching is unit tested without the app target. `RideSummaryView`'s row is a dumb
-/// projection of this.
+/// the branching is unit tested without the app target. `RideSummaryView`'s row is a projection
+/// of this.
 ///
-/// **Takes scalars, never a `Ride`.** The view builds this inside `body`, and this project's rule
+/// **Takes scalars, never a `Ride`.** The view builds this during `body`, and this project's rule
 /// (see `RideSummaryView.swift:52`) is that nothing track-derived is read there. A type holding a
 /// whole ride invites the next author to add one `flattenedPoints`-derived field and hand the
 /// summary an O(n) walk on every body evaluation — which is exactly why `ShareCardContent`, the
 /// other type of this shape, is built in a `.task` instead.
 public struct RideSummaryStats: Equatable, Sendable {
-    /// "38 min", or "—" when the ride is unfinished and has no computable duration.
+    /// "38 min", or "—" when the ride's end instant cannot be trusted (see `RideDuration.init`).
     public let activeValue: String
     /// "48 min elapsed", or nil when it would merely repeat `activeValue`.
     public let elapsedCaption: String?
@@ -497,7 +615,9 @@ public struct RideSummaryStats: Equatable, Sendable {
         let fmt = RideStatsFormatter(units: units)
         movingValue = fmt.minutes(movingTimeSeconds)
         topSpeedValue = fmt.speedValue(maxSpeedMetersPerSecond, decimals: 1)
-        topSpeedLabel = units == .metric ? "km/h top" : "mph top"
+        // Composed from the formatter's own unit rather than a second `units == .metric` ternary,
+        // so "km/h" has one source.
+        topSpeedLabel = "\(fmt.speedUnit) top"
 
         guard let duration else {
             activeValue = "—"
@@ -513,6 +633,11 @@ public struct RideSummaryStats: Equatable, Sendable {
         // pause that does not cross a minute boundary also renders the same number twice. On an
         // unpaused ride — the majority path, and every ride recorded before pause existed — the
         // two are equal by definition, and stacking a number under itself tells the rider nothing.
+        //
+        // The caption's absence is therefore ambiguous in a third way worth knowing about: until
+        // ROH-108 promotes the CloudKit PRODUCTION schema, `CD_pausedSeconds` does not mirror, so
+        // a ride paused on one phone shows the pair on that phone and a lone active reading on a
+        // second one. There is no in-app signal for that; the release gate is the fix.
         elapsedCaption = (elapsed == active) ? nil : "\(elapsed) elapsed"
         activeAccessibilityLabel = elapsedCaption == nil
             ? "Active time, \(active)."
@@ -539,8 +664,8 @@ git commit -m "feat(roh-112): add RideSummaryStats, the summary stat row as stri
 ### Task 4: Project the stats into `RideSummaryView`
 
 **Files:**
-- Modify: `AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift:33` (add an identifier beside `summaryMoving`)
-- Modify: `Aura/Sources/Ride/RideSummaryView.swift:45` (remove `metric`), `:277-282` (the cells)
+- Modify: `AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift` (add an identifier above `summaryMoving`, currently `:33`)
+- Modify: `Aura/Sources/Ride/RideSummaryView.swift:45` (remove `metric`), `:278-282` (the cells)
 
 **Interfaces:**
 - Consumes: `RideSummaryStats` (Task 3), `Ride.duration` (Task 1).
@@ -549,11 +674,11 @@ git commit -m "feat(roh-112): add RideSummaryStats, the summary stat row as stri
 - [ ] **Step 1: Add the test identifier**
 
 In `AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift`, directly above the existing
-`summaryMoving` declaration, add:
+`summaryMoving` declaration and its doc comment, add:
 
 ```swift
-    /// The summary's active-time cell. Its accessibility label carries both numbers —
-    /// "Active time, 38 min. Elapsed, 48 min." — because the cell is one combined element.
+    /// The summary's active-time cell. It is one combined element with an explicit label, so the
+    /// label carries both numbers when the ride was paused: "Active time, 38 min. Elapsed, 48 min."
     public static let summaryActive = "summary.active"
 ```
 
@@ -572,8 +697,10 @@ In `Aura/Sources/Ride/RideSummaryView.swift`, replace `supportingCells`:
 with:
 
 ```swift
+    /// Pure string formatting only — `ViewThatFits` measures its candidates, so this is built more
+    /// than once per body pass and must stay cheap. That is why `RideSummaryStats` takes scalars
+    /// and never touches the track.
     @ViewBuilder private var supportingCells: some View {
-        // Bound once rather than recomputed per cell: this is built during `body`.
         let summary = RideSummaryStats(duration: ride.duration,
                                        movingTimeSeconds: stats.movingTimeSeconds,
                                        maxSpeedMetersPerSecond: stats.maxSpeedMetersPerSecond,
@@ -584,13 +711,15 @@ with:
     }
 
     /// Active time, with elapsed as a subordinate caption rather than a fourth peer cell — the
-    /// rider watched active on the HUD, and elapsed only explains the gap when there is one.
-    /// The caption is absent on an unpaused ride, where it would repeat the value above it.
+    /// rider watched active on the HUD, and elapsed only explains the gap when there is one. The
+    /// caption is absent on an unpaused ride, where it would repeat the value above it.
     private func activeCell(_ summary: RideSummaryStats) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: AuraTheme.Spacing.xs) {
             StatPair(value: summary.activeValue, label: "active",
                      context: .brand, alignment: .leading)
             if let caption = summary.elapsedCaption {
+                // Contrast-aware, unlike `StatPair`'s own label: this line is the smallest text
+                // in the cell, so it is the first thing Increase Contrast needs to help with.
                 Text(caption)
                     .font(.caption2)
                     .foregroundStyle(AuraTheme.secondaryText(contrast))
@@ -602,6 +731,10 @@ with:
     }
 ```
 
+The caption's leading spacing is `AuraTheme.Spacing.xs`, matching `StatPair`'s own value-to-label
+gap (`StatPair.swift:23`). A tighter gap would bind the caption to the label more strongly than
+the label binds to the number it describes.
+
 - [ ] **Step 3: Remove the now-unused `metric`**
 
 `metric` (line 45) had exactly one reader, the top-speed label that moved into `RideSummaryStats`.
@@ -612,7 +745,7 @@ Delete the line:
 ```
 
 Verify with `grep -n "metric\b" Aura/Sources/Ride/RideSummaryView.swift` that the only remaining
-hits are `metricBrand` and the words "metric" inside comments. `fmt` stays: `heroDistance` uses it.
+hits are `metricBrand` and the word "metric" inside comments. `fmt` stays: `heroDistance` uses it.
 
 - [ ] **Step 4: Build the app target**
 
@@ -630,16 +763,21 @@ git commit -m "feat(roh-112): lead the ride summary with active time"
 
 ---
 
-### Task 5: The Live Activity's running clock says ACTIVE
+### Task 5: The Dynamic Island's running clock says ACTIVE
 
 **Files:**
 - Modify: `Aura/Widgets/RideLiveActivity.swift:107`
 
 **Interfaces:** none consumed or produced.
 
-The clock at that site is a `RideActiveClock`, which is active time, and it is labeled `ELAPSED`.
-Shipping Task 4 without this leaves "elapsed" naming active time on the Lock Screen and wall clock
-on the summary the rider lands on seconds later.
+`RideLiveActivity.swift:107` sits inside `expandedTrailing(_:nav:imminent:clock:)`, a
+`DynamicIslandExpandedRegion(.trailing)`, on the non-navigate branch. So the string appears in the
+**expanded Dynamic Island of a running free ride** and nowhere else. The clock it labels is a
+`RideActiveClock`, which is active time.
+
+*(Revision 2: revision 1 called this the Lock Screen. It is not. `RideLockScreenView.swift:49`
+and `:93` label their clock `TIME` and always have. A paused clock renders `PAUSED` via
+`rideActivityClockLabel`, so the running label never appears on a paused ride either.)*
 
 - [ ] **Step 1: Change the string**
 
@@ -655,8 +793,8 @@ becomes:
                 Text(rideActivityClockLabel(clock, running: "ACTIVE"))
 ```
 
-Do not touch the `TIME` labels at `:128` and in `RideActivityComponents.swift` — those are already
-neutral and correct.
+Do not touch the `TIME` labels at `:128`, in `RideLockScreenView.swift`, or in
+`RideActivityComponents.swift` — those are already neutral and correct.
 
 - [ ] **Step 2: Confirm nothing asserted the old string**
 
@@ -669,11 +807,12 @@ Delegate to the `apple-platform-build-tools:builder` subagent: build the `Aura` 
 builds `AuraWidgets`) for an iPhone simulator.
 Expected: build succeeds.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Lint and commit**
 
 ```bash
+swiftlint --strict
 git add Aura/Widgets/RideLiveActivity.swift
-git commit -m "fix(roh-112): the Live Activity clock is active time, so label it ACTIVE"
+git commit -m "fix(roh-112): the Dynamic Island clock is active time, so label it ACTIVE"
 ```
 
 ---
@@ -681,11 +820,12 @@ git commit -m "fix(roh-112): the Live Activity clock is active time, so label it
 ### Task 6: E2E — the active cell is not the moving number
 
 **Files:**
-- Modify: `Aura/UITests/Screens/Screens.swift:123` (add an accessor beside `movingStat`)
-- Modify: `Aura/UITests/RideE2EUITests.swift:275-276` and `:309-310` (call sites), plus a new helper beside `assertMovingTimeIsSegmented` at `:340`
+- Modify: `Aura/UITests/Screens/Screens.swift` (add an accessor beside `movingStat`, currently `:123`)
+- Modify: `Aura/UITests/RideE2EUITests.swift` — call sites at `:276` and `:310`, new helper beside `assertMovingTimeIsSegmented` at `:340`
+- Modify (temporarily, Step 4 only): `Aura/Sources/Ride/RideSummaryView.swift`
 
 **Interfaces:**
-- Consumes: `RideTestID.summaryActive` (Task 4), the existing `leadingNumber(in:)` helper at `RideE2EUITests.swift:413`.
+- Consumes: `RideTestID.summaryActive` (Task 4), the `activeCell(_:)` helper and `supportingCells` binding from Task 4, and the existing `leadingNumber(in:)` helper at `RideE2EUITests.swift:413`.
 
 - [ ] **Step 1: Add the screen accessor**
 
@@ -697,23 +837,24 @@ In `Aura/UITests/Screens/Screens.swift`, inside `SummaryScreen`, directly above 
     }
 ```
 
-- [ ] **Step 2: Write the failing assertion**
+- [ ] **Step 2: Write the assertion**
 
 In `Aura/UITests/RideE2EUITests.swift`, directly above `assertMovingTimeIsSegmented`, add:
 
 ```swift
     /// The summary's active cell is fed the ride's own timestamps, not `movingTimeSeconds`.
     ///
-    /// Falsifiable on this fixture precisely because the two numbers are measured on different
-    /// clocks: moving time is frozen at `PausedGoldenRideFixture.expectedMovingTimeSeconds`
-    /// (290 s, from the GPX stamps) and renders "4 min", while active time is wall clock over a
-    /// ~45 s playback at 20x plus the tester's dwell at the three pauses. A surface still handed
-    /// `movingTimeSeconds` reads 4 in both cells and fails here.
+    /// **Falsifiable because the two are measured on different clocks here.** Moving time is
+    /// frozen at `PausedGoldenRideFixture.expectedMovingTimeSeconds` (290 s, from the GPX stamps)
+    /// and renders "4 min". Active time is real wall clock — only the *location* stream replays
+    /// at 20x — so the ~890 s fixture plays in ~45 s, minus the three pause dwells, and the cell
+    /// renders "0 min" or "1 min". A cell still wired to `movingTimeSeconds` reads 4 in both and
+    /// fails.
     ///
-    /// What it does NOT prove: that paused time was subtracted. The gap between active and
-    /// elapsed here is the tester's real dwell, a handful of seconds, which whole-minute
-    /// formatting usually cannot resolve. `RideDurationTests` and `RideSummaryStatsTests` cover
-    /// the subtraction.
+    /// **What it does NOT prove.** It cannot tell active from elapsed. Their difference here is
+    /// the tester's dwell, a handful of seconds, and whole-minute truncation renders both as
+    /// "0 min" — which is also why the elapsed caption is absent on this run and cannot be
+    /// asserted. `RideDurationTests` and `RideSummaryStatsTests` cover the subtraction.
     ///
     /// Note for anyone reading a screenshot of this run: moving time EXCEEDS active time on this
     /// fixture, inverting the production invariant `moving ≤ active ≤ elapsed`, for the same
@@ -722,7 +863,10 @@ In `Aura/UITests/RideE2EUITests.swift`, directly above `assertMovingTimeIsSegmen
     private static func assertActiveIsNotTheMovingNumber(_ summary: SummaryScreen,
                                                          file: StaticString = #filePath,
                                                          line: UInt = #line) throws {
-        if !summary.activeStat.waitForExistence(timeout: 5) { summary.app.swipeUp() }
+        // No swipe here: `assertMovingTimeIsSegmented` runs first and may already have scrolled,
+        // and the active cell sits ABOVE the moving cell in both `ViewThatFits` candidates, so a
+        // second swipe would scroll away from it. The ScrollView's VStack is eager, so the
+        // element is in the tree either way.
         XCTAssertTrue(summary.activeStat.waitForExistence(timeout: 5), "active cell missing",
                       file: file, line: line)
         let activeLabel = summary.activeStat.label
@@ -734,14 +878,17 @@ In `Aura/UITests/RideE2EUITests.swift`, directly above `assertMovingTimeIsSegmen
                                    "no number in moving label: \(movingLabel)",
                                    file: file, line: line)
         XCTAssertNotEqual(active, moving,
-                          "active reads \(activeLabel) and moving reads \(movingLabel) — the "
-                          + "active cell is being handed movingTimeSeconds",
+                          "active reads \(activeLabel), moving reads \(movingLabel). Either the "
+                          + "active cell is being handed movingTimeSeconds, or playback stretched "
+                          + "~5x under CI load and active genuinely reached \(moving) min — "
+                          + "check the run duration before assuming the former.",
                           file: file, line: line)
     }
 ```
 
 Then add the call at both existing summary-read sites, immediately after each
-`try Self.assertMovingTimeIsSegmented(summary)` (currently lines 276 and 310):
+`try Self.assertMovingTimeIsSegmented(summary)` (currently lines 276 and 310 — the ride-end summary
+and the History-detail re-read):
 
 ```swift
         try Self.assertActiveIsNotTheMovingNumber(summary)
@@ -756,23 +903,22 @@ Expected: PASS.
 - [ ] **Step 4: Prove the assertion is load-bearing (negative control)**
 
 Temporarily hand the active cell a duration whose active seconds equal moving time, which is what
-a surface still wired to `movingTimeSeconds` would render. In `supportingCells`, replace the
-`activeCell(summary)` call with:
+a cell still wired to `movingTimeSeconds` renders. In `Aura/Sources/Ride/RideSummaryView.swift`,
+replace the `activeCell(summary)` call in `supportingCells` with:
 
 ```swift
-        let neutered = RideSummaryStats(
+        activeCell(RideSummaryStats(
             duration: RideDuration(startedAt: ride.startedAt,
                                    endedAt: ride.startedAt.addingTimeInterval(stats.movingTimeSeconds),
                                    checkpointedAt: nil, pausedSeconds: 0),
             movingTimeSeconds: stats.movingTimeSeconds,
             maxSpeedMetersPerSecond: stats.maxSpeedMetersPerSecond,
-            units: settings.units)
-        activeCell(neutered)
+            units: settings.units))
 ```
 
 Re-run the paused golden ride and confirm `assertActiveIsNotTheMovingNumber` FAILS with the
 "being handed movingTimeSeconds" message. **Revert the edit**, re-run, confirm PASS. Record both
-observations in the commit message body.
+observations in the commit message body, and confirm `git status` is clean before committing.
 
 - [ ] **Step 5: Commit**
 
@@ -785,10 +931,18 @@ git commit -m "test(roh-112): assert the summary's active cell is not moving tim
 
 ## Verification before handoff
 
-- [ ] `swift test --package-path AuraCore` — both target totals zero-failure.
+- [ ] `swift test --no-parallel --package-path AuraCore` — the swift-testing total is zero-failure. (The XCTest total reading `Executed 0 tests` is expected.)
+- [ ] `bash scripts/check-single-active-definition.sh` — exit 0, no output.
 - [ ] `swiftlint --strict` from the repo root — clean.
 - [ ] App and widget build for an iPhone simulator (delegate to the builder subagent).
 - [ ] `AuraUITests` paused golden ride passes, with the negative control observed and recorded.
+- [ ] `git status` clean — no leftover negative-control edits.
 - [ ] Whole-branch review on the most capable model, findings fixed.
-- [ ] Note in the PR body that ROH-108 (the CloudKit **production** schema promotion covering `CD_pausedSeconds`) is still owed. Until it lands, a ride paused on one phone renders active equal to elapsed on a second synced device, silently.
-- [ ] **Stop.** The device pass is Rohun's: summary on an iPhone SE at default and AX5 text sizes, a paused ride showing `ACTIVE` on the Lock Screen and the pair on the summary, and an unpaused ride showing no elapsed caption.
+- [ ] PR body names ROH-108 (the CloudKit **production** promotion of `CD_pausedSeconds`) as still owed: until it lands, a ride paused on one phone shows a lone active reading on a second synced device, with no in-app signal.
+
+**Then stop.** The device pass is Rohun's:
+
+1. **A paused ride on an iPhone SE**, at default, at one intermediate Dynamic Type size, and at AX5. The caption widens the first cell's ideal width, so a paused ride flips `ViewThatFits` to its vertical fallback at a *smaller* text size than an unpaused one — the intermediate size is where that flip lands, and it pushes the moving cell (a CI gate reads it) further down the scroll.
+2. **The same ride unpaused**, confirming no elapsed caption appears and the row stays horizontal longer.
+3. **The expanded Dynamic Island of a running free ride**, reading `ACTIVE`. Not the Lock Screen, which says `TIME`, and not while paused, which says `PAUSED`.
+4. **A ride paused, then ended, with the Health toggle on**, if convenient: Fitness will report the wall-clock duration while Aura reports active. That mismatch is known and out of scope, but it is worth seeing once.
