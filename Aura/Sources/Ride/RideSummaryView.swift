@@ -145,10 +145,30 @@ struct RideSummaryView: View {
             guard shareImage != nil else { return }
             guard let request = ShareMapRequest(rideID: ride.id, segments: content.routeSegments,
                                                 style: settings.mapStyle) else { return }
-            // Both presentation paths wait out the entrance window before requesting.
-            // Ride-end: the HUD prefetch fired at +0.7 s is already in flight and this
-            // request dedups onto it. History: this is the entrance-animation courtesy delay.
+            // Three jobs. The third is the one that makes this delay load-bearing, and it
+            // was written down nowhere until ROH-155 went looking for a reason to delete it.
+            //
+            // 1. Ride-end: the HUD prefetch fired at +0.7 s and this request dedups onto it.
+            // 2. History: keeps a warm hit's upgrade render — a 1080×1350 main-actor
+            //    ImageRenderer pass — out of the entrance animation. Ride-end can't warm-hit:
+            //    `cacheKey` carries the rideID and the ride has never been rendered.
+            // 3. It debounces committing the process-wide pipeline slot. `slot.run` has NO
+            //    cancellation point — both its awaits go through `withCheckedContinuation`
+            //    and the pipeline task is unstructured — so a cancelled caller neither
+            //    returns nor frees the slot. This sleep plus the guard below is the only
+            //    thing stopping a sub-second History glance from committing the single slot
+            //    to a ride nobody is looking at; the ride the rider IS looking at then
+            //    queues behind it. Reproduced at three glances: the on-screen ride resolved
+            //    at 2.18 s instead of 1.36 s, because the post-release wake-up is a
+            //    thundering herd rather than a queue.
+            //
+            // So ride-end and History want opposite policies here — asking early is pure
+            // insurance for one ride, and a ghost queue for unbounded glances. Any change
+            // that treats the two paths alike is wrong in one of them. ROH-155 was closed
+            // after three design revisions failed on exactly that; the analysis is in
+            // docs/superpowers/specs/2026-07-31-share-prefetch-ownership-design.md.
             try? await Task.sleep(for: .seconds(0.8))
+            // Load-bearing with job 3: this is what turns a glance into no pipeline at all.
             guard !Task.isCancelled else { return }
             isUpgrading = true
             // Hint show-delay, counted from the isUpgrading transition. A plain Task (NOT
