@@ -1,150 +1,158 @@
-# ROH-155 — cancellation follows interest, and the route is derived once
+# ROH-155 — delete the ride-end share-map prefetch
 
 Date: 2026-07-31. Branch `claude/post-ride-shareable-redesign-54df82`, follow-up to ROH-126.
-Both reviewers of the blocker-2 fix (`4cd429e`) reached these independently; that commit
-recorded them rather than fixing them.
 
-## Problem 1 — the party with no stake holds the kill switch
+**Revision note.** The first version of this spec proposed an interest refcount in
+`SharePipelineSlot` so cancellation followed interest rather than arrival order. Three
+adversarial reviewers — skeptic, architecture, product — independently rejected it, and they
+were right. That design is recorded at the end under "What was rejected and why," because the
+reasoning is worth more than the proposal was.
 
-`SharePipelineSlot` lets the caller that created a pipeline cancel it, and nobody else. At
-ride end that is structurally the wrong caller.
+## The problem, restated with the numbers checked
 
-`ShareMapProviderBox.prefetchShareMap` fires from both HUDs when a ride finishes, sleeps
-0.7 s inside a detached task, calls `raster(for:)`, and discards the result —
-`_ = await provider.raster(for: request)`. `RideSummaryView`'s `.task` renders the fallback
-card, sleeps 0.8 s, and calls `raster(for:)` at roughly +0.9 s. The ordering is fixed by
-construction, not by luck: the prefetch always owns the slot, and the summary — the only
-caller a rider can see — is always a waiter.
+`ShareMapProviderBox.prefetchShareMap` fires from both HUDs when a ride finishes, sleeps 0.7 s
+in a detached `.utility` task, calls `raster(for:)`, and discards the result.
+`RideSummaryView`'s `.task` requests the same key roughly 0.2–0.7 s later. So at ride end the
+prefetch creates the pipeline and the summary — the only caller a rider can see — joins it.
 
-So the prefetch's 20 s ceiling, armed 0.9 s earlier, cancels the pipeline the summary is
-waiting on. Nothing in the type expresses which caller wants the result; a waiter cannot
-signal that it is still interested; and "owner" means only "arrived first," which is a
-timing accident.
+Three consequences, in descending order of what they actually cost:
 
-Two mitigations already in place keep this from being urgent. The owner's ceiling fires
-about 0.1 s before the waiter's, so the summary was nearly out of time anyway, and since
-`4cd429e` a cancelled pipeline that has an accepted raster still composites and caches it.
-Neither addresses the inversion; they cap its cost.
+**The pipeline runs at the wrong priority for its whole life.** The pipeline `Task` is created
+inside `SharePipelineSlot.run`, so it inherits the priority of whichever caller reached the
+creation site. At ride end that is the prefetch's detached `.utility` task, and a foreground
+summary then blocks on background-priority work. On the History path, where no prefetch exists,
+the same pipeline runs at `.userInitiated` — so the two paths differ in a way nobody chose.
 
-## Problem 2 — the route derivation can drift, and drift inverts the prefetch
+**The route derivation is written twice on the share path.** `ShareCardContent:51` and
+`ShareMapRasterProviding:51` both compute
+`ride.segments.map { $0.points.map(\.coordinate) }.filter { $0.count > 1 }`, and both feed
+`ShareMapRequest.cacheKey`. A comment asks them to stay in lockstep; nothing enforces it. On
+divergence the prefetch occupies the single slot under a *different* key, so the summary
+becomes a different-key waiter — and if that pipeline outlives the ceiling the summary gets
+`nil` and never starts its own, because its `.task` gets exactly one attempt.
 
-`ride.segments.map { $0.points.map(\.coordinate) }.filter { $0.count > 1 }` appears three
-times: `RideSummaryView:39`, `ShareMapRasterProviding:51`, `ShareCardContent:51`. A comment
-asks them to stay in lockstep. Nothing enforces it.
+The ROH-126 review counted three copies. `RideSummaryView:39` is the third and it is
+display-only — it feeds `StaticRouteMap`, never a cache key. And `ShareRouteGeometry.prepare`
+re-applies `.filter { $0.count > 1 }` itself, so the caller-side filter contributes nothing to
+`contentHash`; real key drift needs flattening or regrouping, not dropping a short run.
 
-They feed `ShareMapRequest.cacheKey`. The ROH-126 review recorded the failure as "the
-prefetch is wasted," which is too kind. There is one pipeline slot. On divergence the
-prefetch occupies it under a *different* key, so the summary is no longer a joiner — it is
-a different-key waiter, and it must wait out a full pipeline it cannot use before starting
-its own. The optimization inverts into roughly double the latency, silently, with both
-paths individually correct.
+**Cancel authority sits with the caller that discards the result.** The prefetch owns the slot,
+so its ceiling cancels the pipeline the summary is waiting on. This is the item the ROH-126
+review recorded, and it is listed last deliberately: it is the smallest of the three. Each
+caller arms its own ceiling from its own join (`SharePipelineSlot.race`), so the summary stops
+waiting 20 s after *it* joined either way. The inversion costs the arrival skew — roughly
+200 ms — not the summary's map.
 
-## Design
+## The design
 
-### Interest replaces ownership
+**Delete `prefetchShareMap` and both call sites.**
 
-`Slot` gains `var interested: Int` — the number of callers waiting on *this* pipeline for
-*its* key. The creator starts it at 1. A same-key joiner increments on join. Both paths then
-converge on one function, so there is exactly one place a withdrawal can be missed:
+- Remove `ShareMapProviderBox.prefetchShareMap` entirely.
+- Remove `shareMapBox.prefetchShareMap(...)` from `RideHUDView:232` and `NavigateHUDView:263`,
+  and the then-unused `@Environment(ShareMapProviderBox.self)` in each.
+- `ShareMapProviderBox` stays: `RideSummaryView` reads `shareMap.provider` and `AuraApp` injects
+  it.
+- `ShareMapRasterProviding`'s `Sendable` refinement is justified in its doc comment by "the
+  HUDs' detached prefetch tasks capture the existential." That justification dies with the
+  prefetch. Try removing the refinement; if something still needs it, keep it and correct the
+  comment. A conformance kept for a reason that no longer holds is the failure mode this branch
+  has spent three commits removing.
 
-```swift
-private func waitOnPipeline(task: Task<Value?, Never>, id: UUID, key: String) async -> Value? {
-    let outcome = await race(task)
-    let remaining = withdrawInterest(from: id)
-    switch outcome {
-    case .finished(let value):
-        return value
-    case .ceiling:
-        if remaining == 0 { task.cancel() }
-        onCeiling?(key, remaining == 0)
-        return nil
-    }
-}
-```
+That is the whole change. It does not manage the three problems — it removes the conditions for
+all three:
 
-Withdrawal happens before the decision, because "am I the last" is a question about the
-state *after* this caller leaves.
+| | before | after |
+|---|---|---|
+| pipeline priority at ride end | `.utility`, inherited from a discarded background task | `.userInitiated`, matching History |
+| derivations feeding `cacheKey` | 2, kept in step by comment | 1 |
+| cancel authority | held by the caller that discards the result | one caller; nothing to contest |
+| Mapbox renders per ride end | up to 2 on a key miss | 1 |
 
-`withdrawInterest(from:)` is identity-guarded and returns 0 when the slot has already turned
-over. Cancelling in that case is safe: turnover only happens after the departing pipeline's
-`defer`, which runs when its task completes, so the `cancel()` lands on a finished task and
-is a no-op.
+**Cost: the map arrives 0.2–0.7 s later at ride end**, 3–7% of a 6–12 s pipeline. The History
+path is untouched, because it never had a prefetch.
 
-**Different-key waiters neither register nor cancel.** This is the substantive line in the
-design. They are not waiting for the result — they are waiting for the *slot*. Counting them
-would keep alive a pipeline whose value nobody wants, and letting them cancel is the bug
-being fixed, one step removed.
+### The 0.8 s sleep does not change here
 
-`onCeiling`'s second parameter changes from `isOwner` to `isLast`. Ownership stops being
-observable because it stops meaning anything; what a log reader needs to know is whether
-this ceiling ended the pipeline.
+`RideSummaryView:140` sleeps 0.8 s before requesting, and its comment attributes the ride-end
+half to the prefetch already being in flight. That sentence becomes false and must be corrected.
 
-At ride end the sequence becomes: prefetch creates (1), summary joins (2), prefetch ceilings
-at 20.7 s and drops to 1 without cancelling, summary ceilings at 20.8 s and drops to 0 and
-cancels. A prefetch with no summary behind it still cancels itself.
+The value stays at 0.8 s. Shortening it would recover the latency this deletion costs, and it is
+tempting — but the sleep also keeps the upgrade render, a main-actor `ImageRenderer` pass at
+1080×1350, out of the entrance animation on a warm cache hit, where `raster(for:)` returns
+immediately. Which effect dominates is a question about frame timing on real hardware, and this
+repo's rule is that UI is verified on a device rather than asserted. Tuning it belongs on the
+device pass this branch already owes.
 
-### One derivation
+### One derivation, for a smaller reason than before
 
-`ShareRouteSegments.from(_:)` in AuraKit, taking `[RideSegment]` rather than `Ride` so the
-prefetch keeps both its deferred whole-track walk and its `Sendable` capture. A
-`ShareMapRequest(rideID:rideSegments:style:)` convenience initializer applies it, so a call
-site can build a request for a ride without writing the expression at all.
+With the prefetch gone no second caller builds a `ShareMapRequest`, so cache-key drift becomes
+structurally impossible and the reason ROH-155 was filed stops existing.
 
-`ShareCardContent.init` and `RideSummaryView.routeSegments` route through the same function.
-The summary keeps building its request from `content.routeSegments` — that is literally the
-route the card draws, and matching what is drawn is the point — and because content now
-derives through the shared function, the two agree by construction.
+`ShareRouteSegments.from(_ segments: [RideSegment]) -> [[Coordinate]]` in AuraKit is still worth
+landing, for a smaller reason that should be stated as the smaller reason it is:
+`ShareCardContent` (what the card draws) and `RideSummaryView.routeSegments` (what the on-screen
+map draws) should not be able to disagree about which route this ride is. Consistency between
+two views of one ride, not cache-key protection.
+
+No test will assert `ShareCardContent.routeSegments == ShareRouteSegments.from(ride.segments)`.
+Once `ShareCardContent` calls `from`, that is `f(x) == f(x)`; it cannot fail. The first version
+of this spec proposed exactly that test three paragraphs below the sentence "a test that passes
+against both behaviours is not testing this change." Existing `ShareCardContent` coverage
+exercises the behaviour and the shared function inherits it.
 
 ## Testing
 
-Slot behaviour, in `SharePipelineSlotTests`:
+This is a deletion, so verification is mostly negative and mostly not unit tests.
 
-- A same-key waiter keeps the pipeline alive when the first caller's ceiling fires: the work
-  body observes no cancellation, and the slot stays occupied.
-- The last withdrawal cancels: with both callers ceilinged, the work body observes
-  cancellation.
-- A different-key waiter neither counts nor keeps a pipeline alive, and its ceiling cancels
-  nothing.
-- `onCeiling` reports `isLast` correctly for each of the above.
+- Package suite and app build stay green. `SharePipelineSlotTests` is untouched; the slot does
+  not change.
+- `ShareCardContent` coverage of `routeSegments` continues to pass through the shared function —
+  grouping preserved, runs under two points dropped — on both the plain and paused golden
+  fixtures.
+- **Device pass, ride end.** End a real ride, confirm the map still upgrades in place, and time
+  it. This is the only way to know what the deletion actually cost; the 0.2–0.7 s above is read
+  off the code, not measured.
+- **Device pass, History warm open.** Confirm no change, since this path never had a prefetch.
+- While on device: whether the 0.8 s sleep can shrink without hitching the entrance animation.
 
-Each is verified the way `4cd429e`'s were: revert to first-caller-cancels and confirm the
-new tests fail. A test that passes against both behaviours is not testing this change.
+## What was rejected and why
 
-Derivation, in the package:
+The first version added `var interested: Int` to `Slot` so a ceiling cancelled only when the
+last same-key caller withdrew. Recorded because the reasons it fails are properties of the
+subsystem rather than of the proposal, and the next person to have this idea should find them
+here.
 
-- `ShareCardContent(ride:units:).routeSegments` equals `ShareRouteSegments.from(ride.segments)`
-  on the golden fixture, including the paused fixture, so segment splitting is covered.
-- A request built via the convenience initializer has the same `cacheKey` as one built from
-  `content.routeSegments`. This is the invariant that actually matters — equal segments are
-  the mechanism, an equal key is the requirement.
+- **The benefit is ~200 ms.** `race()` arms a fresh ceiling per caller from its own join, so the
+  summary times out 20 s after it joined regardless of who owns the slot. Refcounting moves the
+  pipeline's death from `prefetch + 20 s` to `summary + 20 s`; the summary gets `nil` in both.
+- **Pipeline lifetime becomes unbounded.** With a per-caller ceiling gated on a count, the
+  pipeline dies 20 s after the *last* join and each new join buys another 20 s, with no cap. A
+  reviewer transcribed the design and drove it: ten ceilings, `cancel()` never delivered once.
+- **The wedge would be self-sustaining and slot-wide.** The trickle of same-key callers keeping
+  a stuck pipeline alive is riders retrying *because it looks broken*, and the slot is exclusive,
+  so one immortal pipeline takes down every other ride's map for the session. `task.cancel()` is
+  the subsystem's only recovery lever, and refcounting withholds it exactly when it is needed.
+- **The count would measure the wrong thing.** `run` has no cancellation point, and History
+  presents the summary as a swipe-dismissible sheet, so a dismissed view stays counted for a full
+  ceiling. The counter would count callers whose timer has not expired, not callers who still
+  want the result — which was the justification the whole design rested on.
+- **It would blind its own telemetry.** `onCeiling` logs only a cancel that, in the wedge case,
+  never happens, so the signal added to make wedges visible goes quiet exactly then.
+- **It contradicted itself on priority.** "Refcounting makes ownership stop mattering" cannot
+  coexist with "the pipeline inherits `.utility` from the prefetch." Creator identity fixes
+  priority for the pipeline's whole life, and refcounting would have *lengthened* the window in
+  which a foreground caller blocks on `.utility` work.
 
-## What this costs
+Deleting the prefetch resolves all six by removing the second caller.
 
-**Wedge exposure widens.** A stuck pipeline now survives until every same-key caller times
-out, rather than until the first does. With a steady trickle of same-key callers it could
-stay alive indefinitely. This is judged correct — those callers do still want the result, and
-cancelling out from under them is the defect — but it is a trade, and `onCeiling` logging is
-what makes it visible.
+## Still out of scope
 
-**A joiner arriving during an unwind still resurrects interest in a doomed pipeline.**
-A same-key caller that arrives after the count hit zero but before the cancelled pipeline has
-unwound increments to 1 and inherits its nil. Behaviour is unchanged from today and already
-pinned by `testSameKeyRetryDuringUnwindJoinsTheDyingPipeline`; refcounting neither fixes nor
-worsens it.
+The ride-end path renders the card twice and writes two multi-megabyte PNGs, and
+`ShareCardFileStore.sweepOtherRides` cannot collect the current ride's accumulation.
 
-**Ride-end ownership is deliberately unchanged.** The prefetch still creates the pipeline.
-Making the summary the owner would mean fighting the timings, and ownership is the wrong
-lever precisely because it is decided by arrival order. Refcounting makes ownership stop
-mattering, which survives a future third caller in a way that a correctly-assigned owner
-would not.
-
-## Out of scope
-
-The ride-end path still renders the card twice and writes two multi-megabyte PNGs, and
-`ShareCardFileStore.sweepOtherRides` cannot collect the current ride's accumulation. Both are
-in the ROH-126 review's smaller-items list and neither is touched here.
-
-Priority is also untouched: the pipeline task inherits `.utility` from the prefetch's detached
-task, and the three `Task.detached(priority: .utility)` stages inside `runPipeline` do not
-escalate when a foreground caller joins. An architecture reviewer raised this as unverified.
-It is a real question and a separate one — it wants measurement before a change, not a guess.
+Larger, and raised by the product reviewer as worth more than anything in this spec: the 20 s
+ceiling is a resource watchdog doing double duty as the rider's timeout. The summary gets one
+upgrade attempt, no terminal state and no retry, so the two commonest causes of a missing map —
+being offline at ride end, and pocketing the phone during the window — both end in a spinner
+that vanishes with nothing else changed on screen. That wants its own issue and probably
+outranks this one.
