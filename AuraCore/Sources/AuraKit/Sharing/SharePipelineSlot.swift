@@ -1,5 +1,27 @@
 import Foundation
 
+/// What a caller learned from one trip through the slot.
+///
+/// The distinction is the point. The slot was rewritten (ROH-126) so a ceiling stops the
+/// *caller* waiting without stopping the *pipeline*; `run` used to return nil for both,
+/// which told a caller that wanted to offer a retry nothing about whether a retry would be
+/// a second attempt or a re-join of a pipeline still running.
+public enum SlotOutcome<Value: Sendable>: Sendable {
+    /// The pipeline ran to completion. `nil` means it produced nothing.
+    ///
+    /// Not quite "it exhausted itself": a same-key waiter returns whatever the OWNER
+    /// produced, and an owner whose ceiling fired returns nil through
+    /// `cancelledBeforeStarting`. A retry is still a real second attempt in both cases,
+    /// which is all `Retryability.freshAttempt` promises.
+    case finished(Value?)
+    /// A ceiling fired. The pipeline may still be alive and holding the slot.
+    case stoppedWaiting
+}
+
+/// Conditional because an unconditional conformance would constrain `Value` for no reason.
+/// NOT because `UIImage` isn't `Equatable` — it is, via `NSObject`.
+extension SlotOutcome: Equatable where Value: Equatable {}
+
 /// The share-map pipeline slot: at most one pipeline alive at a time, single-flight per
 /// cache key, with a watchdog ceiling that stops a caller waiting without ever letting a
 /// second pipeline start beside a first that is still running.
@@ -85,15 +107,22 @@ public final class SharePipelineSlot<Value: Sendable> {
     public var isRunning: Bool { inFlight != nil }
 
     /// Runs `work` under the slot, joining an in-flight pipeline for the same key instead
-    /// of starting a second one. Returns `work`'s result, or nil if the ceiling ran out.
-    public func run(key: String, work: @escaping @MainActor () async -> Value?) async -> Value? {
+    /// of starting a second one.
+    ///
+    /// The return says which of two things happened, because they are not the same thing to
+    /// a caller deciding whether to offer a retry. `.finished(value)` means a pipeline ran
+    /// to completion and this is what it produced — nil included, which is a pipeline that
+    /// produced nothing rather than one that is still going. `.stoppedWaiting` means a
+    /// ceiling fired: this caller is unblocked, but the pipeline may still be alive and
+    /// still holding the slot, so a retry is not necessarily a second attempt.
+    public func run(key: String, work: @escaping @MainActor () async -> Value?) async -> SlotOutcome<Value> {
         while let current = inFlight {
             switch await race(current.task) {
             case .finished(let value):
                 // Same key: the owner's result is ours too. Different key: the owner's
                 // `defer` has already cleared the slot, so the loop either exits or finds
                 // whoever claimed it in the meantime.
-                if current.key == key { return value }
+                if current.key == key { return .finished(value) }
             case .ceiling:
                 // A waiter's ceiling unblocks THIS caller and nothing else. It must not
                 // cancel a pipeline it does not own, and it must not clear the slot,
@@ -108,7 +137,7 @@ public final class SharePipelineSlot<Value: Sendable> {
                 // regression bites only when the pipeline ahead is pathological, which is
                 // the case where a second one alongside it was the wrong answer anyway.
                 onCeiling?(key, false)
-                return nil
+                return .stoppedWaiting
             }
         }
         // No await between the loop exit and the assignment: claiming the slot has to be
@@ -125,13 +154,13 @@ public final class SharePipelineSlot<Value: Sendable> {
         inFlight = Slot(key: key, id: id, task: task)
         switch await race(task) {
         case .finished(let value):
-            return value
+            return .finished(value)
         case .ceiling:
             // Ask the pipeline to stop, and hand this caller nil. Deliberately does NOT
             // touch the slot: that is the defect this type was rewritten to close.
             task.cancel()
             onCeiling?(key, true)
-            return nil
+            return .stoppedWaiting
         }
     }
 
