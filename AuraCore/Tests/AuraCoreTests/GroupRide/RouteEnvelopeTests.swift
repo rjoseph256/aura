@@ -33,9 +33,13 @@ struct RouteEnvelopeTests {
         #expect(data != nil)
     }
 
-    /// The only assertion here that can catch a lossy mirror. Nil-folding still passes if
-    /// `.integer` and `.double` are collapsed, or if a nested object is flattened; a real `Route`
-    /// through the whole path — encode, decode into `RouteJSON`, fold, decode back — does not.
+    /// Catches **structural** loss: flatten the object or array case and a real `Route` no longer
+    /// survives encode → decode into `RouteJSON` → fold → decode back. Nil-folding alone passes
+    /// through that damage, which is why this exists.
+    ///
+    /// It does **not** catch the `.integer`/`.double` collapse — every number in a `Route` is
+    /// already a `Double`, so this passes either way. `aWideIntegerKeepsEveryBit` holds that half.
+    /// Two tests, two distinct failure modes, neither redundant.
     @Test func aRealRouteSurvivesTheRoundTrip() throws {
         let original = route()
         let value = try JSONDecoder().decode(RouteJSON.self, from: JSONEncoder().encode(original))
