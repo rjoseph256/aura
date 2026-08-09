@@ -166,19 +166,31 @@ private nonisolated struct GroupRideRow: Decodable {
     }
     /// nil for a destination-free ride (ROH-114), and **`.null` folds to nil too**.
     ///
-    /// This is the layer the first ROH-114 spec revision missed, and it was ship-dead.
-    /// `AnyJSON` has a `.null` case, so a SQL-NULL `route` column does not fail to decode and
-    /// does not arrive absent — a non-optional property would receive `.null` and encode back
-    /// to the four bytes `null`. `GroupRideSession.join` would then see non-nil bytes, fail the
-    /// `Route` decode, land in `.routeUnavailable`, and call `leaveRide` — showing every guest
-    /// of an open ride an error and removing them from the ride server-side.
-    ///
-    /// Making the property optional handles the usual decode path (`decodeIfPresent` returns
-    /// nil for a JSON null); the explicit `.null` fold covers a decoder that hands back the
-    /// case instead. Both roads lead to nil, which is the only value that means "open ride".
+    /// The rule itself lives in `AuraCore.RouteEnvelope`, which carries the full account of why
+    /// `.null` has to fold. It was moved there because this type is `private` in a target whose
+    /// only test bundle is `AuraUITests`, so the layer that the first spec revision got wrong —
+    /// the one that showed every guest of an open ride an error and then removed them from the
+    /// ride — was the one layer no test could reach. What is left here is the wire mapping.
     func routeData() throws -> Data? {
-        guard let route, route != .null else { return nil }
-        return try JSONEncoder().encode(route)
+        try RouteEnvelope.routeData(route.map(Self.routeJSON))
+    }
+
+    /// `AnyJSON`'s seven cases into AuraCore's mirror of them, one for one.
+    ///
+    /// The package cannot see `AnyJSON` — it is an SDK type of this target — so the translation
+    /// has to happen here, and it has to be complete: `.object` and `.array` recurse, and
+    /// `.integer` stays an integer rather than being widened into `.double`, which would quietly
+    /// round any value past 2^53 inside a payload this path promises to carry unchanged.
+    private static func routeJSON(_ json: AnyJSON) -> RouteJSON {
+        switch json {
+        case .null: .null
+        case .bool(let value): .bool(value)
+        case .integer(let value): .integer(value)
+        case .double(let value): .double(value)
+        case .string(let value): .string(value)
+        case .object(let value): .object(value.mapValues(Self.routeJSON))
+        case .array(let value): .array(value.map(Self.routeJSON))
+        }
     }
 }
 
