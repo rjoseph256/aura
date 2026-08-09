@@ -8,7 +8,7 @@ Spun out: [ROH-177](https://linear.app/rohun/issue/ROH-177/a-failed-fallback-car
 Related: ROH-126 (`2026-07-29-roh126-share-card-redesign-design.md`,
 `2026-07-30-roh126-slot-watchdog-cancellation.md`) · ROH-155
 (`2026-07-31-share-prefetch-ownership-design.md`)
-Status: **revision 3**, after three adversarial review rounds. Scope is smaller than every prior
+Status: **revision 4**, after three adversarial rounds plus a focused re-check. Scope is smaller than every prior
 revision.
 
 > Process note: CLAUDE.md requires prose deliverables to go through `humanizer`. Not installed on
@@ -156,6 +156,15 @@ should not round its own away.
 **Clock choice, not hedged:** measure the deadline against `ContinuousClock`, matching the ceiling
 (`SharePipelineSlot.swift:79`). A locked phone should not hold the line off — see D6.
 
+**The deadline bounds the reject path only, and the render leg is unbounded.** Once a raster is in
+hand the deadline stops applying (D8), and the leg it hands to — `RideCardRenderer.make` — is a
+synchronous 1080×1350 main-actor `ImageRenderer` pass plus an *awaited* detached PNG encode and
+atomic write (`RideCardRenderer.swift:22-53`). No belt, no ceiling, and awaiting a non-throwing
+detached `.value` is not a cancellation point. On a slow disk a raster arriving at 6.9 s can leave the
+rider past 7 s with the deadline deliberately ignored. Accepted for phase 1 — the spinner is still up
+and truthful, and a card is genuinely coming — but "~7.8 s" is a bound on *being told there is no
+map*, not on the screen settling.
+
 ## D4 — The deadline must not cancel `raster(for:)`
 
 Two reasons, in order, and the first is corrected from revision 2.
@@ -190,12 +199,23 @@ The belts are `DispatchQueue.main.asyncAfter` (`ShareMapSnapshotter.swift:268,35
 advance while the machine sleeps. The ceiling is `Task.sleep(for:)` on `ContinuousClock`
 (`SharePipelineSlot.swift:79`), so it does. So after a long screen-lock, on resume:
 
-1. The ceiling has already expired. Its arm resolves, `task.cancel()` fires (`:132`).
+1. A ceiling has already expired. **Which one depends on the path, and revision 3 named the wrong
+   one for the commoner case.** At ride end the prefetch owns the slot from +0.7 s
+   (`ShareMapRasterProviding.swift:44-56`) and the summary's request joins the same key as a
+   *waiter*; a waiter's ceiling returns nil **without** cancelling anything (`:98-111`), so the
+   pipeline dies from the *owner's* ceiling at `:132`. On a History open with no prefetch, the
+   summary is the owner and cancels its own pipeline. Both expire together after a long lock, so the
+   outcome is the same — but the arm is different, and the ride-end case is the one the device test
+   exercises.
 2. That cancellation reaches the render's `onCancel`, which cancels the snapshotter and resolves its
    latch nil (`ShareMapSnapshotter.swift:359-370`).
-3. The provider returns nil. Nothing is cached.
+3. The provider returns nil, and **usually** nothing is cached. Not unconditionally: cancellation past
+   the render is a deliberate no-op (`:161-178`, `:249-251`), so a lock landing while the pipeline is
+   in its tail — acceptance, composite, persist — can have the raster written to disk while the
+   caller still gets nil. That is exactly the ceiling-nil-with-a-cached-raster case phase 1 scopes out
+   to ROH-176, and D7 of revision 2 was cut partly because it could not reach it either.
 
-**The render is killed by the ceiling's cancellation, not by an overdue belt.** And the deadline,
+**The render is killed by a ceiling's cancellation, not by an overdue belt.** And the deadline,
 also on `ContinuousClock`, has expired too — so the line is on screen at the first frame after unlock,
 which is the correct outcome and the reason D3 pins the clock.
 
@@ -205,60 +225,100 @@ honest.
 So the pocketed-phone rider gets a truthful line and no map. Better than a vanishing spinner, and
 worse than revision 1 promised. Phase 1 does not fix it; ROH-176 can.
 
-## D7 — The reducer is total, and that is the design
+## D7 — The reducer is total, and here is the whole table
 
-The whole of phase 1's correctness rests on one property: **every input is legal in every phase, and
-a late or duplicate input is a no-op by construction.**
+Phase 1's correctness rests on one property: **every input is legal in every phase, and a late or
+duplicate input is a no-op by construction.**
 
-That is what takes task lifetime off the correctness path. Revision 2 staked the deadline task's
-behaviour on being `@State`-held and cancelled in `.onDisappear` — but `RideHUDView.swift:346`
-records that `onDisappear` "can fire without the rider asking for anything," so a design that needs
-it to be precise is a design built on a signal this repo has already written off. With a total
-reducer, a deadline that fires after the view settled is simply an input the reducer ignores, and the
-task's shape becomes a performance question.
+That takes task lifetime off the correctness path. Revision 2 staked the deadline task's behaviour on
+being `@State`-held and cancelled in `.onDisappear`, and `RideHUDView.swift:346` records that
+`onDisappear` "can fire without the rider asking for anything." With a total reducer a deadline firing
+after the view settled is an input the reducer ignores, and the task's shape becomes a performance
+question.
 
-**Inputs:** deadline reached · provider produced a raster · provider produced nothing · upgrade render
-produced a card · upgrade render produced nothing · the card was applied · the card was deferred.
+**Phases.** `upgrading` · `successPending` (a raster is in hand, its card is not on screen) ·
+`upgraded` (a generation-1 card is on screen) · `settledOnFallback` (the line is showing).
 
-**Phases:** `upgrading` · `successPending` (a raster is in hand, its card is not) · `upgraded` (a card
-is on screen) · `settledOnFallback` (the line is showing).
+`absent` is not a phase — no route, no stats and no fallback are preconditions resolved before the
+machine exists (`:145-147`).
 
-`absent` is not a phase. No route, no stats and no fallback are preconditions resolved before the
-machine exists (`:145-147`), and revision 2 was wrong to list it alongside transitions.
+**Inputs.** Six, not seven. Revision 3 listed "render produced a card" as its own input, which left it
+with no rule in any phase. It does not need one: a rendered card goes straight to
+`applyOrDeferUpgrade`, which decides, so the reducer only ever hears the *outcome* — `applied` or
+`deferred`.
 
-## D8 — Terminal is input-scoped, not phase-scoped
+*(Revision 3 said the table was total and did not print it. It defined 16 of 28 cells, and two of the
+gaps produced wrong states under the obvious rule. Printing it is the fix.)*
 
-Revision 2 said the terminal phase is "enterable only from the upgrading phase." That contradicted its
-own D11, which requires a failed upgrade render to settle on the fallback — a transition out of
-`successPending`, exactly what the rule forbade. Both appeared in the same test list.
+| input | `upgrading` | `successPending` | `upgraded` | `settledOnFallback` |
+| --- | --- | --- | --- | --- |
+| deadline reached | **settled** | no-op | no-op | no-op |
+| provider raster | **successPending** | no-op | no-op | **no-op** |
+| provider nothing | **settled** | no-op | no-op | no-op |
+| render nothing | no-op | **settled** | no-op | no-op |
+| applied | **upgraded** | **upgraded** | no-op | **upgraded** |
+| deferred | **successPending** | no-op | no-op | no-op |
 
-The rule that works names the input:
+Three cells are worth their own sentence.
 
-- **The deadline input** enters `settledOnFallback` only from `upgrading`. Once a raster is in hand,
-  the deadline is a no-op — this is what stops a success at 6.9 s from flashing a line while its card
-  renders.
-- **The render-failure input** enters `settledOnFallback` from `successPending`. A raster that renders
-  no card leaves the fallback on screen, so that is what the phase must say.
-- **A provider-nothing input** enters `settledOnFallback` from `upgrading`, at the moment it arrives —
-  a reject at 2 s shows the line at 2 s, not at 7 s.
-- **From `settledOnFallback`**, a later provider or render success still moves forward (that is
-  auto-apply). A later *nothing* is a no-op.
+**`(settledOnFallback, provider raster)` is a no-op, and revision 3 had it move forward.** That was a
+reachable bad state: line shows at 7 s, rider taps Share at 8 s, raster lands at 9 s and *clears the
+line before any card exists*, then the render defers behind the sheet — leaving a fallback card with
+no line and nothing in flight. The line now stays up until a card is genuinely applied, which is what
+"the line stays" in the Scope means.
 
-## D9 — `upgraded` means applied, so the defer latch is an input
+**`(*, applied)` reaches `upgraded` from anywhere, and that is safe because of D9** — `applied` is
+emitted only where `shareImage` is actually written.
 
-The gate's sharpest finding, and it would have rebuilt ROH-161's defect inside the fix.
+**`(upgraded, provider raster)` is a no-op**, so a second raster cannot put the spinner back over a
+finished card.
 
-`applyOrDeferUpgrade` (`:376-382`) writes `deferredUpgrade` instead of `shareImage` when a share sheet
-is up. A machine keyed on the *render* outcome would call that `upgraded` and clear the line — while
-the card on screen is still generation 0. Silent no-map with nothing saying so.
+## D8 — Why terminal is input-scoped
 
-So the reducer takes **applied** and **deferred** as distinct inputs. Deferred holds `successPending`;
-the release at `:407-411` supplies **applied**, which is what reaches `upgraded`.
+Revision 2 said terminal was "enterable only from the upgrading phase," which contradicted its own
+requirement that a failed upgrade render settle on the fallback. The table above resolves it by naming
+inputs rather than phases: the **deadline** reaches `settled` only from `upgrading`, while **render
+nothing** reaches it only from `successPending`. That kills the 6.9 s flash (a raster in hand makes the
+deadline a no-op) without forbidding the render-failure transition.
 
-This also makes phase 1 degrade honestly under ROH-178. If `shareSheetUp` is stuck true for the
-History sheet's whole lifetime, the machine stays at `successPending` — spinner up, no false claim —
-rather than announcing a map the rider does not have. Wrong, but wrong in the direction that does not
-lie.
+## D9 — `upgraded` means *applied*, and the input must come from the same expression
+
+`applyOrDeferUpgrade` (`:376-382`) writes `deferredUpgrade` instead of `shareImage` when a sheet is up.
+A machine keyed on the render outcome would call that `upgraded` and clear the line while the card on
+screen is generation 0 — silent no-map, ROH-161's defect inside its own fix.
+
+So `applied` and `deferred` are distinct inputs, and the release at `:407-411` supplies `applied`.
+
+**And the input has to be produced by the same expression that writes `shareImage`.** The phase is a
+second copy of a fact whose ground truth is `shareImage`, which has three writers (`:141`, `:380`,
+`:409`); no `AuraKitTests` test can observe a divergence between them. So `applyOrDeferUpgrade`
+*returns* the input it caused rather than the call site feeding one alongside it. Divergence becomes
+unrepresentable instead of a convention someone has to remember.
+
+## D9a — What the rider sees is derived, and the imperative clears go away
+
+The re-check found the hole this closes: revision 3 derived `isUpgrading` from the phase, forbade the
+reducer from writing `showHint`, and left `showHint = false` at `:194-195` firing the moment
+`applyOrDeferUpgrade` returns — **including the deferred branch**. On the History path with ROH-178's
+stuck latch that meant no spinner, no line, fallback card, forever.
+
+Both display facts are derived from the phase, and `:194-195`'s imperative clears are deleted:
+
+- **spinner** = phase is `upgrading` or `successPending`, **and** the show-delay has elapsed
+- **line** = phase is `settledOnFallback`
+
+`hintDelayElapsed` is the one view-local boolean that remains, set by the existing 0.3 s task and never
+written by the reducer. It cannot be derived: the phase does not change at t+0.3 s, so deriving it
+needs a second time input, a second timer and a second late-fire hazard — and dropping the delay
+reintroduces the warm-cache flash `:174-179` exists to prevent, on the History path where warm hits
+actually happen.
+
+One rule fixes both failures the re-check found. A deferred card holds `successPending`, so the
+spinner stays up and nothing false is claimed. `settledOnFallback` wants no spinner, so the line never
+appears beside one — which is what D6's device criterion requires.
+
+This is also what makes phase 1 degrade honestly under ROH-178: a stuck latch leaves a spinner that
+does not resolve. Wrong, and wrong in the direction that does not lie.
 
 ## D10 — The copy names no reason
 
@@ -288,15 +348,10 @@ this exact subsystem: the slot "used to live inline here, where the app target's
 unit-test target put it out of reach of a test — which is where the review found the ceiling arm
 clearing the slot out from under a live pipeline."
 
-Small: four phases, seven inputs, one transition function.
+Small: four phases, six inputs, one transition function, and the table in D7 is the whole of it.
 
-**`isUpgrading` is derived** from the phase (`upgrading` or `successPending`). It is read once, at
-`:182`.
-
-**`showHint` stays as state.** Revision 2 said to derive it; that is not implementable. The phase does
-not change at t+0.3 s, so deriving the show-delay needs a second time input, a second timer, and a
-second late-fire hazard — and dropping the delay reintroduces the warm-cache flash `:174-179` exists
-to prevent, on the History path where warm hits actually happen. The reducer must never write it.
+Display derivation and the removal of the imperative clears are D9a. `hintDelayElapsed` is the only
+view-local boolean left in this region, replacing both `isUpgrading` and `showHint`.
 
 **Also staying in the view, untested:** the deadline task's shape, the sheet latch, and the `@State`.
 One note for the plan: the existing `hint` Task (`:180-184`) is a trap, not a precedent. A `Task {}`
@@ -329,16 +384,28 @@ already-shared-file residue, which ROH-126 accepted.
 
 ## Testing
 
-The reducer, in `AuraKitTests`. The first test is the one that matters:
+The reducer, in `AuraKitTests`.
 
-- **Totality:** every input in every phase yields a defined phase and never traps.
-- Deadline in `upgrading` → `settledOnFallback`. Deadline in `successPending` → no-op (D8's flash
-  race). Deadline in `upgraded` or `settledOnFallback` → no-op (the late-fire case).
-- Provider raster → `successPending`, from `upgrading` **and** from `settledOnFallback` (auto-apply).
-- Provider nothing in `upgrading` → `settledOnFallback` immediately. In any other phase → no-op.
-- Render card + **applied** → `upgraded`. Render card + **deferred** → stays `successPending` (D9).
+**The table in D7 is the test.** All 24 cells, asserted cell by cell against that table rather than
+described in prose — revision 3's "every input in every phase yields a defined phase" is satisfied by
+any total function, including two that were wrong. A table-driven test over
+`(phase, input) → expected` is the only version that can fail for the right reason.
+
+Then the cells worth naming, because each one is a bug the gates found:
+
+- Deadline in `successPending` → no-op (the 6.9 s flash).
+- Deadline in `upgraded` or `settledOnFallback` → no-op (the late fire, which is what lets the task's
+  lifetime stop mattering).
+- Provider raster in `settledOnFallback` → **no-op**, not forward (the line must outlive the raster and
+  die only to an applied card).
+- Provider raster in `upgraded` → no-op (no spinner back over a finished card).
+- `deferred` → holds `successPending`, so the spinner stays up (D9a).
+- `applied` from `settledOnFallback` → `upgraded` (auto-apply).
 - Render nothing in `successPending` → `settledOnFallback` (D8).
-- Duplicate inputs: applied twice, deadline twice, nothing-then-raster → no wrong phase.
+- Idempotence: `applied` twice, `deadline` twice, `provider nothing` then `provider raster`.
+
+Plus one derivation test, since D9a is where the last hole was: for every phase, the derived spinner
+and line flags — never both, and never neither while work is outstanding.
 
 *(Dropped from revision 2: "no cancellation" and "no stacking" — a pure reducer can observe neither,
 and non-stacking is `SharePipelineSlot`'s property, already covered by its own tests.)*
