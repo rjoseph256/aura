@@ -145,10 +145,23 @@ public enum SlotOutcome<Value: Sendable>: Sendable {
 }
 ```
 
-`run` returns `SlotOutcome<Value>`. **No behavior changes** — the three existing `return nil` sites
-map to `.stoppedWaiting`, `.stoppedWaiting`, and `.finished(nil)` respectively, and every existing
-policy (who cancels, who frees the slot, what the ceiling does) is untouched. This is additive
-information, which is what makes it safe to do to a type this load-bearing.
+`run` returns `SlotOutcome<Value>`. **No behavior changes** — every existing policy (who cancels,
+who frees the slot, what the ceiling does) is untouched. This is additive information, which is
+what makes it safe to do to a type this load-bearing.
+
+The mapping, corrected: `run` has **two** literal `return nil` sites, the waiter ceiling and the
+owner ceiling, and **both** become `.stoppedWaiting`. The other two returns hand back a `Value?`
+that may itself be nil, and both become `.finished(value)`. **No `return nil` site produces
+`.finished(nil)`** — that outcome arises when a same-key waiter returns an owner's task result
+that was nil, which is the path §The finding's second erratum is about. Revisions 2–4 said "the
+three existing `return nil` sites map to `.stoppedWaiting`, `.stoppedWaiting`, and
+`.finished(nil)`", which sends a reader looking for `.finished(nil)` in the wrong place —
+precisely the confusion that erratum exists to clear up.
+
+Verified at implementation: a reviewer extracted the pre-change implementation and ran a
+seven-scenario differential against the new one — return values, the full `onCeiling` sequence,
+`isRunning` at every checkpoint, and the work log — and got identical traces on all seven. The
+"no behaviour changes" claim is tested, not asserted.
 
 `ShareMapRasterProviding` follows:
 

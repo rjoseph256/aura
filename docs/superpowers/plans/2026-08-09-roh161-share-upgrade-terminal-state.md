@@ -21,6 +21,9 @@ timers so they are unit-tested in CI. `RideSummaryView` renders the phase and su
 **Commands.** Package tests: `swift test --package-path AuraCore --no-parallel`. The app build
 goes to the `apple-platform-build-tools` builder subagent — never run `xcodebuild` inline.
 
+**`swift test` rewrites `AuraCore/Package.resolved`** (strips ~137 lines) on every run. Restore it
+and keep it out of every commit in this plan unless a task says otherwise. Found in Task 1.
+
 ---
 
 ## The code in Tasks 1–2 is verified, not sketched
@@ -97,7 +100,25 @@ keeps its `log.started == 1` assertion untouched; its `XCTAssertNil(retry)` beco
 pipeline's outcome" — a reviewer instrumented it and the retry trips its own waiter ceiling
 without ever observing that pipeline. The spec carries this as an erratum.
 
-- [ ] **Step 3: Add exactly two new tests**
+- [ ] **Step 3: Add one new test — and NOT the two below**
+
+> **Corrected after Task 1's review.** The two tests specified below are **exact duplicates** of
+> `testSlotIsReleasedWhenWorkReturnsNil` (`:295-306`) — same slot construction, same call, same
+> assertion, one differing only in a string literal. Their marginal mutation coverage is zero.
+> This section cut two of revision 1's four tests *for duplicating that very test*, then specified
+> two more that duplicate it. They were written, reviewed out, and deleted.
+>
+> **What was actually missing** is the one path the entire `.freshAttempt` gate rests on: a
+> same-key waiter reading the owner's cancelled nil as `.finished(nil)`. The spec's second erratum
+> is about it, `SlotOutcome.finished`'s doc comment leads with it, and nothing tested it. Add
+> `testSameKeyRetryInheritsTheDyingPipelinesNil` plus a `Ceiling.firesOnlyForTheFirstArm()`
+> factory (the inverse of the existing `firesForEveryArmAfterTheFirst`), and rename
+> `testSameKeyRetryDuringUnwindJoinsTheDyingPipeline` to
+> `testSameKeyRetryDuringUnwindStartsNoSecondPipeline` — instrumentation shows that retry trips
+> its **own** waiter ceiling and never observes the dying pipeline, so the old name has now
+> produced the same wrong citation three times across spec revisions 2–4.
+
+<details><summary>The superseded text (kept so the correction is legible)</summary>
 
 Only two, and **inside the class body** — `blockingWork`, `begin` and `settle` are private
 *instance methods* of the test case (`:118`, `:132`, `:142`), so appending at file scope puts
@@ -113,7 +134,12 @@ func testAPipelineThatProducesNothingReportsFinishedNil() async {
 
 func testASuccessfulPipelineReportsFinishedValue() async {
     let slot = SharePipelineSlot<String>(ceilingTimer: Ceiling.neverFires())
-    XCTAssertEqual(await slot.run(key: "a", work: { "map" }), .finished("map"))
+    // Hoisted, NOT `XCTAssertEqual(await slot.run(...), .finished("map"))`. That form is what
+    // this plan shipped first, and it does not compile: XCTAssertEqual's arguments are
+    // non-async autoclosures — "'async' call in an autoclosure that does not support
+    // concurrency". Found during Task 1 by applying the text verbatim and building it.
+    let outcome = await slot.run(key: "a", work: { "map" })
+    XCTAssertEqual(outcome, .finished("map"))
 }
 ```
 
@@ -122,6 +148,8 @@ Revision 1 proposed four. Two of them duplicated `testWaiterCeilingLeavesTheOwne
 the ceiling and nil cases. One of those duplicates also used `async let`, which does not compile:
 the test case is `@MainActor` and an `async let` child would send `self` across isolation —
 `:137-138` documents exactly this and is why `begin` exists.
+
+</details>
 
 - [ ] **Step 4: Run the package suite**
 
