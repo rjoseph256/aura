@@ -3,9 +3,17 @@
 Date: 2026-08-06. Branch `adaws96/roh-161-share-map-upgrade-fails-silently-one-attempt-no-terminal`.
 Issue: https://linear.app/rohun/issue/ROH-161
 
-**Revision 2.** Revision 1 went through the three-reviewer adversarial gate and did not survive it.
-The record of what was wrong is at the end, under §What revision 1 got wrong, because most of it
-was wrong in ways the next person to touch this surface would repeat.
+**Revision 3.** Revision 1 went through the three-reviewer adversarial gate and did not survive it;
+the record of what was wrong is at the end, under §What revision 1 got wrong, because most of it was
+wrong in ways the next person to touch this surface would repeat. Revision 2 rebuilt it around
+outcome-typed results. Revision 3 replaced the terminal state's error framing with an offer, after
+an earlier ungated ROH-161 draft was found on branch
+`adaws96/roh-161-share-map-upgrade-silent-failure` that had reached that conclusion independently
+of the product reviewer — see §Copy.
+
+That draft is a second, superseded spec for this issue. It should be deleted, or its branch closed,
+before this one merges; two specs for one issue is how a decision gets re-litigated by whoever finds
+the wrong one first.
 
 > `humanizer` is mandated by `CLAUDE.md` for prose deliverables. It is **not installed on this
 > machine**, so this document did not go through it. Recorded here rather than skipped silently.
@@ -156,8 +164,8 @@ public enum Retryability: Equatable, Sendable {
 | `upgrading` | attempt starts (first attempt only) | nothing | no |
 | `upgradingVisible` | first attempt +300 ms; **immediately** on a retry | spinner + "Adding your map…" | no |
 | `slow` | +6 s, request still outstanding | spinner + "Still adding your map…" | no |
-| `unavailable(.freshAttempt)` | `.rejected` | "Couldn't add the map to your card" | **yes** |
-| `unavailable(.mayRejoin)` | `.stoppedWaiting` | "Couldn't add the map to your card" | **yes** |
+| `unavailable(.freshAttempt)` | `.rejected` | "Add the map" (button only) | **yes** |
+| `unavailable(.mayRejoin)` | `.stoppedWaiting` | "Add the map" (button only) | **yes** |
 | `upgraded(confirming: true)` | map applied after an explicit retry | "Map added" for ~2 s, then nothing | no |
 | `upgraded(confirming: false)` | map applied on the first attempt | nothing | no |
 
@@ -328,17 +336,36 @@ and never `slow` or `idle`. One per presentation.
 |---|---|
 | `upgradingVisible` | "Adding your map…" (unchanged) |
 | `slow` | "Still adding your map…" |
-| `unavailable` (both) | "Couldn't add the map to your card" + "Try again" |
+| `unavailable` (both) | **"Add the map"** — a button, and no sentence |
 | `upgraded(confirming: true)` | "Map added" (~2 s) |
 
-"…to your card" rather than revision 1's bare "Couldn't add the map", because **there is a real map
-at the top of this screen** — `StaticRouteMap` at `RideSummaryView.swift:57`. A caption saying the
-map couldn't be added, on a screen displaying a map, reads as a problem with the route the rider is
-looking at. Offline, that map is also rendering degraded tiles, which makes the misreading worse.
+**The terminal state is an offer, not an apology.** No failure sentence, no destructive colour, no
+warning glyph, no "couldn't". Nothing is broken: the card is finished and Share is enabled. The map
+is an upgrade that did not land, and the rider is offered another go.
 
-Not alarming: the card works and Share stays enabled. "Map added" exists so an explicit tap has a
-visible result — otherwise a successful retry ends in the indicator vanishing, which is the exact
-symptom this issue is about, delivered in response to a deliberate action.
+Revision 2 originally said "Couldn't add the map to your card". Two independent sources rejected
+that framing, and they are right:
+
+- The product reviewer at the spec gate: this is a celebration screen, the rider never knew a map
+  was coming, and telling them one failed manufactures a problem they did not have.
+- An earlier, ungated ROH-161 draft on branch `adaws96/roh-161-share-map-upgrade-silent-failure`
+  (§D2) reached the same conclusion independently: "Nothing is broken, so nothing apologises… The
+  card is finished; the map is an upgrade that did not land."
+
+Leading with the affordance also disposes of an ambiguity no wording fixed: **there is a real map at
+the top of this screen** (`StaticRouteMap`, `RideSummaryView.swift:57`), and offline it is itself
+rendering degraded tiles. Any sentence about a map failing, on a screen showing a degraded map,
+reads as a diagnosis of the route the rider is looking at. A button that says "Add the map" cannot
+be misread that way.
+
+The reason is never named. Nine reject categories, and the rider's action is identical for all of
+them; "the style source failed to load" is not a sentence for someone standing over a bike. The
+reasons keep going to the log, which is where `ShareMapSnapshotter.swift:116-120` says they were
+deliberately put.
+
+"Map added" exists so an explicit tap has a visible result — otherwise a successful retry ends in
+the indicator vanishing, which is this issue's exact symptom delivered in response to a deliberate
+action.
 
 ### Layout: the row is reserved
 
@@ -361,8 +388,9 @@ they never wanted.
 - Announce the transition into `unavailable` only — not `slow`, and **not** a second `unavailable`
   reached by a failed auto-retry, which would interrupt a VoiceOver rider unprompted seconds after
   they unlock the phone.
-- "Try again" gets a label naming what it retries ("Try again, add the map to your card"); a bare
-  "Try again" has no antecedent for anyone navigating by element.
+- The button's label names what it acts on ("Add the map to your share card"), since "Add the map"
+  alone has an ambiguous antecedent for anyone navigating by element on a screen that also shows a
+  route map.
 
 ## Files
 
