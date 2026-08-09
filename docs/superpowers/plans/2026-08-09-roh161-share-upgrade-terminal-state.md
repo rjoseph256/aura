@@ -4,313 +4,490 @@
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give the post-ride share-map upgrade a presentation deadline, a terminal state that
-offers another attempt, and a retry — so a rider who loses the map is told, and can ask again.
+**Revision 2**, after a three-reviewer plan gate against revision 1. See §What revision 1 got
+wrong — it is kept because the failures are properties of this work, not of one draft.
 
-**Architecture:** Three layers, bottom-up. `SharePipelineSlot.run` stops collapsing "the pipeline
-produced nothing" and "a ceiling fired while you waited" into one `nil` and returns a
-`SlotOutcome` instead; `ShareMapRasterProviding` carries that distinction up as a
-`ShareMapOutcome`; a new `ShareUpgradePresenter` in AuraKit owns every timing rule (show-delay,
-6 s deadline, 1 s minimum dwell, one-shot automatic retry) behind injected timers so it is
-unit-tested in CI. `RideSummaryView` renders the presenter's phase and supplies the effects.
+**Goal:** Give the post-ride share-map upgrade a deadline, a terminal state that offers another
+attempt, and a retry — so a rider who loses the map is told, and can ask again.
 
-**Tech stack:** Swift 6 strict concurrency, SwiftUI, `@Observable`, XCTest. Package code in
-`AuraCore/Sources/AuraKit`, app code in `Aura/Sources`.
+**Architecture:** `SharePipelineSlot.run` stops collapsing "the pipeline produced nothing" and "a
+ceiling fired while you waited" into one `nil`; `ShareMapRasterProviding` carries that up as a
+`ShareMapOutcome`; a `ShareUpgradePresenter` in AuraKit owns every timing rule behind injected
+timers so they are unit-tested in CI. `RideSummaryView` renders the phase and supplies effects.
 
 **Spec:** `docs/superpowers/specs/2026-08-06-roh161-share-upgrade-terminal-state-design.md`
-(revision 4). Read it before starting. Where this plan and the spec disagree, the spec wins on
-intent and this plan wins on file paths — see *Corrections to the spec* below.
+(**revision 5** — read it first; revisions 2–4 differ materially).
+
+**Commands.** Package tests: `swift test --package-path AuraCore --no-parallel`. The app build
+goes to the `apple-platform-build-tools` builder subagent — never run `xcodebuild` inline.
 
 ---
 
-## Corrections to the spec
+## The code in Tasks 1–2 is verified, not sketched
 
-Verified against the tree at `775ac72`. Fix these as you go; do not propagate them.
+Revision 1's pasted Swift did not compile: an undeclared property, an initializer that disagreed
+with its own tests, and an `async let` that violated Swift 6 isolation in the very file that
+documents that trap. Two reviewers demonstrated it by building it.
 
-1. **The ride-end call site is `Aura/Sources/AuraApp.swift:131`, not the HUD views.** The spec's
-   Files table names `RideHUDView.swift` and `NavigateHUDView.swift`. Neither constructs a
-   `RideSummaryView`. There are exactly two call sites: `AuraApp.swift:131` (ride-end) and
-   `Aura/Sources/History/HistoryView.swift:53` (History).
-2. **`SharePipelineSlot.run` has two literal `return nil` sites, not three** — `:111` (waiter
-   ceiling) and `:134` (owner ceiling). The other two returns are `:96` and `:128`, which return
-   a `Value?` that may itself be nil. The mapping the spec intends is still exactly right: both
-   ceilings become `.stoppedWaiting`, both completions become `.finished(value)`.
+Everything in Task 2 below was compiled and run in a scratch SwiftPM package under Swift 6.3
+language mode before being written here: **16 tests, 0 failures.** Two defects were found that
+way and are already fixed in the text you are about to paste — a test-harness race that *hung*
+two tests rather than failing them, and a missing absorbing rule that let a newer attempt's
+reject retract a map the rider already had.
 
-## Assumption carried forward
+Task 1's slot change was likewise built and run green by a reviewer.
 
-The spec marks its ride-end-only scope "**Assumption, overturnable** — recommended and not
-explicitly ratified." This plan builds it as specified: the terminal state and retry appear at
-ride end only, History keeps today's silent behaviour. If that is reversed, the change is the
-default on the `presentation:` parameter in Task 9 plus one line in Task 11; no other task moves.
+## Corrections carried into spec revision 5
 
-## File structure
-
-| File | Responsibility | Task |
-|---|---|---|
-| `AuraCore/Sources/AuraKit/Sharing/SharePipelineSlot.swift` | modify — `run` returns `SlotOutcome<Value>`; no policy change | 1 |
-| `AuraCore/Tests/AuraKitTests/SharePipelineSlotTests.swift` | modify — mechanical update, plus one new test per outcome case | 1 |
-| `AuraCore/Sources/AuraKit/Sharing/ShareUpgradePhase.swift` | create — `ShareUpgradePhase`, `Retryability`, `ShareUpgradeResult`. Types only | 2 |
-| `AuraCore/Sources/AuraKit/Sharing/ShareUpgradePresenter.swift` | create — every timing rule, behind three injected timers | 2–6 |
-| `AuraCore/Tests/AuraKitTests/ShareUpgradePresenterTests.swift` | create — the whole presenter contract | 2–6 |
-| `Aura/Sources/Ride/ShareCard/ShareMapRasterProviding.swift` | modify — `ShareMapOutcome`; protocol return type | 7 |
-| `Aura/Sources/Ride/ShareCard/ShareMapSnapshotter.swift` | modify — map `SlotOutcome` onto `ShareMapOutcome` | 7 |
-| `Aura/Sources/Ride/ShareCard/ShareCardFileStore.swift` | modify — generation is per-attempt | 8 |
-| `Aura/Sources/AuraApp.swift`, `Aura/Sources/History/HistoryView.swift` | modify — pass `presentation:` | 9 |
-| `Aura/Sources/Ride/RideSummaryView.swift` | modify — parameter, extracted `runUpgrade`, reserved phase row, Try again, background-return handler, announcements | 9–12 |
-
-**Commands.** Package tests: `swift test --package-path AuraCore --no-parallel`. Add
-`--filter <TestClass>/<testName>` to run one. The app build goes to the
-`apple-platform-build-tools` builder subagent (CLAUDE.md) — never run `xcodebuild` inline, it
-takes ~13 minutes and floods the session.
+Recorded here because the plan gate found them and they are now fixed in the spec: the ride-end
+call site is `AuraApp.swift:131` (not the HUD views); `run` has two literal `return nil` sites
+(not three); `SlotOutcome`'s conditional `Equatable` is right but **not** because `UIImage` isn't
+`Equatable` — it is, via `NSObject`.
 
 ---
 
 ### Task 1: `SlotOutcome` — stop collapsing "rejected" into "stopped waiting"
 
-This is the spec's central finding made real. `SharePipelineSlot` already knows which case it is
-in and throws the distinction away at the return.
-
 **Files:**
 - Modify: `AuraCore/Sources/AuraKit/Sharing/SharePipelineSlot.swift:89-136`
 - Test: `AuraCore/Tests/AuraKitTests/SharePipelineSlotTests.swift`
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Add the type and change the return**
 
-Append to `SharePipelineSlotTests.swift`. These use the file's existing private helpers —
-`Gate`, `WorkLog`, `Ceiling`, `blockingWork`, `settle` — which are already in the file; do not
-redefine them.
-
-```swift
-func testOwnerCeilingReportsStoppedWaitingRatherThanAFinishedNil() async {
-    let slot = SharePipelineSlot<String>(ceilingTimer: Ceiling.firesAtOnce())
-    let gate = Gate(), log = WorkLog()
-
-    let outcome = await slot.run(key: "a", work: blockingWork(key: "a", gate: gate, log: log, value: "a"))
-
-    XCTAssertEqual(outcome, .stoppedWaiting,
-                   "the owner's ceiling cancelled the pipeline but it is still alive and holds the slot")
-    gate.open()
-    await settle()
-}
-
-func testWaiterCeilingReportsStoppedWaiting() async {
-    let slot = SharePipelineSlot<String>(ceilingTimer: Ceiling.firesForEveryArmAfterTheFirst())
-    let gate = Gate(), log = WorkLog()
-
-    async let owner = slot.run(key: "a", work: blockingWork(key: "a", gate: gate, log: log, value: "a"))
-    await settle()
-    let waiter = await slot.run(key: "b", work: blockingWork(key: "b", gate: .opened(), log: log, value: "b"))
-
-    XCTAssertEqual(waiter, .stoppedWaiting, "a waiter's ceiling says nothing about the pipeline")
-    gate.open()
-    _ = await owner
-    await settle()
-}
-
-func testAPipelineThatProducesNothingReportsFinishedNil() async {
-    let slot = SharePipelineSlot<String>(ceilingTimer: Ceiling.neverFires())
-
-    let outcome = await slot.run(key: "a", work: { nil })
-
-    XCTAssertEqual(outcome, .finished(nil),
-                   "the pipeline ran to completion and produced nothing — a retry is a real second attempt")
-}
-
-func testASuccessfulPipelineReportsFinishedValue() async {
-    let slot = SharePipelineSlot<String>(ceilingTimer: Ceiling.neverFires())
-
-    let outcome = await slot.run(key: "a", work: { "map" })
-
-    XCTAssertEqual(outcome, .finished("map"))
-}
-```
-
-`SlotOutcome` must be `Equatable` where `Value: Equatable` for these assertions. Declare it
-`Equatable` conditionally, not unconditionally — `Value` is `UIImage` in production and
-`Equatable` on it would be a lie.
-
-- [ ] **Step 2: Run them and watch them fail**
-
-```bash
-swift test --package-path AuraCore --no-parallel --filter SharePipelineSlotTests
-```
-
-Expected: compile failure — `cannot find type 'SlotOutcome' in scope`.
-
-- [ ] **Step 3: Add the type and change the return**
-
-In `SharePipelineSlot.swift`, above the class:
+Above the class:
 
 ```swift
 /// What a caller learned from one trip through the slot.
 ///
-/// The distinction is the point. `SharePipelineSlot` was rewritten (ROH-126) so that a
-/// ceiling stops the *caller* waiting without stopping the *pipeline* — `run` used to
-/// return nil for both, which told a caller that wanted to offer a retry nothing about
-/// whether a retry would be a second attempt or a re-join of the pipeline still running.
-/// `SharePipelineSlotTests.testSameKeyRetryDuringUnwindJoinsTheDyingPipeline` is the
-/// checked-in proof that they are different.
+/// The distinction is the point. The slot was rewritten (ROH-126) so a ceiling stops the
+/// *caller* waiting without stopping the *pipeline*; `run` used to return nil for both,
+/// which told a caller that wanted to offer a retry nothing about whether a retry would be
+/// a second attempt or a re-join of a pipeline still running.
 public enum SlotOutcome<Value: Sendable>: Sendable {
-    /// The pipeline ran to completion. `nil` means it produced nothing — there is no
-    /// negative cache, so a later request re-runs it in full.
+    /// The pipeline ran to completion. `nil` means it produced nothing.
+    ///
+    /// Not quite "it exhausted itself": a same-key waiter at `:96` returns whatever the
+    /// OWNER produced, and an owner whose ceiling fired returns nil through
+    /// `cancelledBeforeStarting`. A retry is still a real second attempt in both cases,
+    /// which is all `Retryability.freshAttempt` promises. Spec revision 5, §The finding.
     case finished(Value?)
-    /// A ceiling fired. The pipeline may still be alive and holding the slot; this says
-    /// nothing about whether a map is obtainable.
+    /// A ceiling fired. The pipeline may still be alive and holding the slot.
     case stoppedWaiting
 }
 
+/// Conditional because an unconditional conformance would constrain `Value` for no reason.
+/// NOT because `UIImage` isn't `Equatable` — it is, via `NSObject`. Revision 1 said otherwise.
 extension SlotOutcome: Equatable where Value: Equatable {}
 ```
 
-Then change `run`'s signature to `-> SlotOutcome<Value>` and its four returns:
+Then `run` returns `SlotOutcome<Value>`, with `:96` and `:128` → `.finished(value)` and `:111`
+and `:134` → `.stoppedWaiting`. **Change nothing else** — not the ceiling policy, not who
+cancels, not who frees the slot, not `onCeiling`.
 
-| Line (before) | Was | Becomes |
-|---|---|---|
-| `:96` | `return value` | `return .finished(value)` |
-| `:111` | `return nil` | `return .stoppedWaiting` |
-| `:128` | `return value` | `return .finished(value)` |
-| `:134` | `return nil` | `return .stoppedWaiting` |
+- [ ] **Step 2: Update the existing tests — and the `begin` harness**
 
-**Change nothing else.** Not the ceiling policy, not who cancels, not who frees the slot, not
-`onCeiling`. This task is additive information and must be provably behaviour-free.
+Revision 1 called this "mechanical, assertions only." It is not: `begin` at
+`SharePipelineSlotTests.swift:142` returns `Task<String?, Never>` and must become
+`Task<SlotOutcome<String>, Never>`, and `:303` has a generic-parameter conflict. Both are
+compile errors, not assertion updates.
 
-Update the doc comment on `run` to say what the return now carries.
+**Preserve each test's meaning.** `testSameKeyRetryDuringUnwindJoinsTheDyingPipeline` (`:261`)
+keeps its `log.started == 1` assertion untouched; its `XCTAssertNil(retry)` becomes
+`XCTAssertEqual(retry, .stoppedWaiting)`. Do **not** relabel it "the retry inherits the dying
+pipeline's outcome" — a reviewer instrumented it and the retry trips its own waiter ceiling
+without ever observing that pipeline. The spec carries this as an erratum.
 
-- [ ] **Step 4: Update the existing tests mechanically**
+- [ ] **Step 3: Add exactly two new tests**
 
-Every existing `SharePipelineSlotTests` assertion on `run`'s result needs rewriting against the
-new type. **Preserve each test's meaning exactly** — in particular
-`testSameKeyRetryDuringUnwindJoinsTheDyingPipeline` (`:261`) still asserts the retry does not
-start a second pipeline; its `XCTAssertNil(retry, ...)` becomes
-`XCTAssertEqual(retry, .stoppedWaiting, "the retry inherits the cancelled pipeline's outcome")`
-and the `log.started == 1` assertion is untouched. If a rewrite makes a test weaker, stop and
-say so rather than landing it.
+Only two, and **inside the class body** — `blockingWork`, `begin` and `settle` are private
+*instance methods* of the test case (`:118`, `:132`, `:142`), so appending at file scope puts
+them out of reach. Revision 1 said "append to the file", which does not work.
 
-- [ ] **Step 5: Run the whole package suite**
+```swift
+func testAPipelineThatProducesNothingReportsFinishedNil() async {
+    let slot = SharePipelineSlot<String>(ceilingTimer: Ceiling.neverFires())
+    let outcome = await slot.run(key: "a", work: { nil })
+    XCTAssertEqual(outcome, .finished(nil),
+                   "ran to completion and produced nothing — a retry is a real second attempt")
+}
+
+func testASuccessfulPipelineReportsFinishedValue() async {
+    let slot = SharePipelineSlot<String>(ceilingTimer: Ceiling.neverFires())
+    XCTAssertEqual(await slot.run(key: "a", work: { "map" }), .finished("map"))
+}
+```
+
+Revision 1 proposed four. Two of them duplicated `testWaiterCeilingLeavesTheOwnersPipelineAlone`
+(`:237`) and `testSlotIsReleasedWhenWorkReturnsNil` (`:294`), which after Step 2 already assert
+the ceiling and nil cases. One of those duplicates also used `async let`, which does not compile:
+the test case is `@MainActor` and an `async let` child would send `self` across isolation —
+`:137-138` documents exactly this and is why `begin` exists.
+
+- [ ] **Step 4: Run the package suite**
 
 ```bash
 swift test --package-path AuraCore --no-parallel
 ```
 
-Expected: PASS, with no test deleted and none made weaker.
+Expected: green, no test deleted, none weakened.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add AuraCore/Sources/AuraKit/Sharing/SharePipelineSlot.swift AuraCore/Tests/AuraKitTests/SharePipelineSlotTests.swift
-git commit -m "feat(roh-161): SharePipelineSlot.run reports whether the pipeline finished
-
-A ceiling stopping a caller and a pipeline producing nothing were both nil.
-A design that offers a retry has to tell them apart: only one of them means
-the retry is a second attempt. No policy changes."
+git commit -m "feat(roh-161): SharePipelineSlot.run reports whether the pipeline finished"
 ```
 
 ---
 
-### Task 2: The phase types and the show-delay
+### Task 2: `ShareUpgradePresenter` — every timing rule, in a target that has tests
+
+`Aura/project.yml` declares `Aura`, `AuraWidgets` and `AuraUITests` and no unit-test target, so
+anything load-bearing in the app target is untestable. That is the documented reason the ROH-126
+ceiling defect survived to a whole-branch review.
+
+Revision 1 spread this over five tasks whose intermediate states did not compile and whose test
+list was half comment-only stubs — two of which it labelled "THE" regression test. It is one task
+because the verified artifact is one artifact.
 
 **Files:**
 - Create: `AuraCore/Sources/AuraKit/Sharing/ShareUpgradePhase.swift`
 - Create: `AuraCore/Sources/AuraKit/Sharing/ShareUpgradePresenter.swift`
 - Create: `AuraCore/Tests/AuraKitTests/ShareUpgradePresenterTests.swift`
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Write the tests first and watch them fail to compile**
+
+The full file, verified. Expected first run: `cannot find 'ShareUpgradePresenter' in scope`.
 
 ```swift
 import XCTest
 import os
 @testable import AuraKit
 
-/// A hand-fired timer: `fire()` releases whoever is sleeping on it. One per hop, because a
-/// single shared closure can only be told apart by matching on its `Duration` — which means
-/// hardcoding production constants into the test — or by call order.
+/// Hand-fired and **re-armable**: each `fire()` releases everyone waiting at that moment, and a
+/// later arm suspends again. A one-shot gate cannot express a test that arms the same hop twice.
 private final class ManualTimer: Sendable {
-    private let gate = TimerGate()
-    var closure: @Sendable (Duration) async -> Void { { [gate] _ in await gate.wait() } }
-    func fire() { gate.open() }
+    private struct State {
+        var credits = 0
+        var waiters: [CheckedContinuation<Void, Never>] = []
+    }
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    var closure: @Sendable (Duration) async -> Void {
+        { [state] _ in
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let alreadyFired = state.withLock { s -> Bool in
+                    guard s.credits > 0 else { s.waiters.append(continuation); return false }
+                    s.credits -= 1
+                    return true
+                }
+                if alreadyFired { continuation.resume() }
+            }
+        }
+    }
+
+    /// Releases everyone waiting now, and BANKS A CREDIT for an arm that has not registered yet.
+    /// Without the credit this is a race: a hop armed synchronously inside `attempt` may not have
+    /// reached its `await` when the test fires, and then waits forever. Two tests hung on exactly
+    /// that before the credit existed, and a hung test is far worse than a failing one — it burns
+    /// the agent gate's whole timeout and reads as a slow machine.
+    func fire() {
+        let pending = state.withLock { s -> [CheckedContinuation<Void, Never>] in
+            guard s.waiters.isEmpty else { defer { s.waiters = [] }; return s.waiters }
+            s.credits += 1
+            return []
+        }
+        for waiter in pending { waiter.resume() }
+    }
+}
+
+/// For hops a test never intends to fire. A long cancellable sleep rather than a continuation
+/// nobody resumes, so nothing is left suspended at teardown.
+private func neverFires() -> @Sendable (Duration) async -> Void {
+    { _ in try? await Task.sleep(for: .seconds(3600)) }
+}
+
+/// Holds `work` open until the test resolves it.
+private final class WorkGate: Sendable {
+    private let state = OSAllocatedUnfairLock(initialState: [CheckedContinuation<ShareUpgradeResult, Never>]())
+    func result() async -> ShareUpgradeResult {
+        await withCheckedContinuation { (continuation: CheckedContinuation<ShareUpgradeResult, Never>) in
+            state.withLock { $0.append(continuation) }
+        }
+    }
+    func resolve(_ value: ShareUpgradeResult) {
+        let pending = state.withLock { s -> [CheckedContinuation<ShareUpgradeResult, Never>] in
+            defer { s = [] }
+            return s
+        }
+        for p in pending { p.resume(returning: value) }
+    }
+}
+
+private func settle() async {
+    for _ in 0..<12 { await Task.yield() }
 }
 
 @MainActor
 final class ShareUpgradePresenterTests: XCTestCase {
 
+    private func makePresenter(showDelay: ManualTimer? = nil,
+                               deadline: ManualTimer? = nil,
+                               dwell: ManualTimer? = nil) -> ShareUpgradePresenter {
+        ShareUpgradePresenter(showDelayTimer: showDelay?.closure ?? neverFires(),
+                              deadlineTimer: deadline?.closure ?? neverFires(),
+                              dwellTimer: dwell?.closure ?? neverFires())
+    }
+
+    // MARK: show-delay
+
     func testTheIndicatorIsHiddenUntilTheShowDelayFires() async {
-        let showDelay = ManualTimer()
-        let presenter = ShareUpgradePresenter(showDelayTimer: showDelay.closure,
-                                              deadlineTimer: ManualTimer().closure,
-                                              dwellTimer: ManualTimer().closure)
+        let showDelay = ManualTimer(), dwell = ManualTimer()
+        let presenter = makePresenter(showDelay: showDelay, dwell: dwell)
         let work = WorkGate()
 
-        let running = Task { await presenter.attempt(isRetry: false) { await work.result() } }
+        let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
         await settle()
-        XCTAssertEqual(presenter.phase, .upgrading, "in flight, but nothing on screen yet")
+        XCTAssertEqual(presenter.phase, .upgrading, "in flight, nothing on screen yet")
 
-        showDelay.fire()
-        await settle()
+        showDelay.fire(); await settle()
         XCTAssertEqual(presenter.phase, .upgradingVisible)
 
-        work.resolve(.gotMap)
-        await running.value
+        work.resolve(.gotMap); dwell.fire(); await running.value
     }
 
     func testAResultBeforeTheShowDelayNeverShowsTheIndicator() async {
-        let showDelay = ManualTimer()
-        let presenter = ShareUpgradePresenter(showDelayTimer: showDelay.closure,
-                                              deadlineTimer: ManualTimer().closure,
-                                              dwellTimer: ManualTimer().closure)
-
-        await presenter.attempt(isRetry: false) { .gotMap }
-
+        let presenter = makePresenter()
+        await presenter.attempt(origin: .first) { .gotMap }
         XCTAssertEqual(presenter.phase, .upgraded(confirming: false),
-                       "a warm hit must not flash the hint — ROH-126 §Share flow step 4")
+                       "a warm hit must not flash the hint, and must not claim a confirmation")
     }
 
-    func testARetryShowsItsIndicatorImmediately() async {
-        let showDelay = ManualTimer()   // never fired
-        let presenter = ShareUpgradePresenter(showDelayTimer: showDelay.closure,
-                                              deadlineTimer: ManualTimer().closure,
-                                              dwellTimer: ManualTimer().closure)
+    func testARiderTapShowsItsIndicatorImmediately() async {
+        let dwell = ManualTimer()
+        let presenter = makePresenter(dwell: dwell)
         let work = WorkGate()
 
-        let running = Task { await presenter.attempt(isRetry: true) { await work.result() } }
+        let running = Task { await presenter.attempt(origin: .riderTap) { await work.result() } }
+        await settle()
+        XCTAssertEqual(presenter.phase, .upgradingVisible, "the rider pressed a button")
+
+        work.resolve(.gotMap); dwell.fire(); await running.value
+    }
+
+    // MARK: deadline
+
+    func testTheDeadlineOffersTheMapWhileTheAttemptIsStillOutstanding() async {
+        let showDelay = ManualTimer(), deadline = ManualTimer(), dwell = ManualTimer()
+        let presenter = makePresenter(showDelay: showDelay, deadline: deadline, dwell: dwell)
+        let work = WorkGate()
+
+        let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
+        await settle(); showDelay.fire(); await settle()
+        deadline.fire(); await settle()
+
+        XCTAssertEqual(presenter.phase, .unavailable(.mayRejoin),
+                       "the pipeline may still be running — that is exactly what mayRejoin says")
+
+        work.resolve(.gotMap); dwell.fire(); await running.value
+    }
+
+    func testTheDeadlineIsInertOnceTheAttemptHasResolved() async {
+        let deadline = ManualTimer()
+        let presenter = makePresenter(deadline: deadline)
+
+        await presenter.attempt(origin: .first) { .gotMap }
+        deadline.fire(); await settle()
+
+        XCTAssertEqual(presenter.phase, .upgraded(confirming: false),
+                       "a fired deadline must never resurrect an offer over a finished attempt")
+    }
+
+    func testAnAttemptThatSucceedsAfterTheDeadlineEndsUpgraded() async {
+        let showDelay = ManualTimer(), deadline = ManualTimer(), dwell = ManualTimer()
+        let presenter = makePresenter(showDelay: showDelay, deadline: deadline, dwell: dwell)
+        let work = WorkGate()
+
+        let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
+        await settle(); showDelay.fire(); await settle(); deadline.fire(); await settle()
+
+        work.resolve(.gotMap); dwell.fire(); await running.value
+
+        XCTAssertEqual(presenter.phase, .upgraded(confirming: true),
+                       "an indicator was on screen and no automatic retry was behind it")
+    }
+
+    // MARK: dwell
+
+    func testAnIndicatorHoldsForTheDwellBeforeATerminalPhaseIsApplied() async {
+        let showDelay = ManualTimer(), dwell = ManualTimer()
+        let presenter = makePresenter(showDelay: showDelay, dwell: dwell)
+        let work = WorkGate()
+
+        let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
+        await settle(); showDelay.fire(); await settle()
+
+        work.resolve(.rejected); await settle()
+        XCTAssertEqual(presenter.phase, .upgradingVisible, "still held by the dwell")
+
+        dwell.fire(); await running.value
+        XCTAssertEqual(presenter.phase, .unavailable(.freshAttempt))
+    }
+
+    func testAWarmRiderTapStillShowsItsIndicatorForTheDwell() async {
+        let dwell = ManualTimer()
+        let presenter = makePresenter(dwell: dwell)
+
+        let running = Task { await presenter.attempt(origin: .riderTap) { .gotMap } }
+        await settle()
+        XCTAssertEqual(presenter.phase, .upgradingVisible,
+                       "without the dwell a warm tap changes nothing the rider can see")
+
+        dwell.fire(); await running.value
+        XCTAssertEqual(presenter.phase, .upgraded(confirming: true))
+    }
+
+    // MARK: terminal outcomes and staleness
+
+    func testRejectedAndStoppedWaitingReachDifferentRetryabilities() async {
+        let rejected = makePresenter()
+        await rejected.attempt(origin: .first) { .rejected }
+        XCTAssertEqual(rejected.phase, .unavailable(.freshAttempt))
+
+        let stopped = makePresenter()
+        await stopped.attempt(origin: .first) { .stoppedWaiting }
+        XCTAssertEqual(stopped.phase, .unavailable(.mayRejoin))
+    }
+
+    func testAStaleAttemptsRejectDoesNotOverwriteALiveIndicator() async {
+        let dwell = ManualTimer()
+        let presenter = makePresenter(dwell: dwell)
+        let first = WorkGate(), second = WorkGate()
+
+        let older = Task { await presenter.attempt(origin: .first) { await first.result() } }
+        await settle()
+        let newer = Task { await presenter.attempt(origin: .riderTap) { await second.result() } }
+        await settle()
+        XCTAssertEqual(presenter.phase, .upgradingVisible)
+
+        first.resolve(.rejected); await settle()
+        XCTAssertEqual(presenter.phase, .upgradingVisible,
+                       "the older attempt's reject must not overwrite the newer attempt's indicator")
+
+        second.resolve(.rejected); dwell.fire()
+        _ = await older.value; _ = await newer.value
+        XCTAssertEqual(presenter.phase, .unavailable(.freshAttempt))
+    }
+
+    func testAStaleAttemptsMapIsStillApplied() async {
+        let dwell = ManualTimer()
+        let presenter = makePresenter(dwell: dwell)
+        let first = WorkGate(), second = WorkGate()
+
+        let older = Task { await presenter.attempt(origin: .first) { await first.result() } }
+        await settle()
+        let newer = Task { await presenter.attempt(origin: .riderTap) { await second.result() } }
         await settle()
 
-        XCTAssertEqual(presenter.phase, .upgradingVisible,
-                       "the rider just pressed a button and needs to see it registered")
-        work.resolve(.gotMap)
-        await running.value
+        first.resolve(.gotMap); dwell.fire(); await settle()
+        XCTAssertEqual(presenter.phase, .upgraded(confirming: true), "a map is a map")
+
+        second.resolve(.rejected)
+        _ = await older.value; _ = await newer.value
+    }
+
+    func testNoUpgradePossibleParksInIdle() async {
+        let presenter = makePresenter()
+        presenter.noUpgradePossible()
+        XCTAssertEqual(presenter.phase, .idle)
+    }
+
+    // MARK: automatic retry
+
+    func testArmingDuringAnInFlightAttemptFiresWhenItLaterRejects() async {
+        let showDelay = ManualTimer(), deadline = ManualTimer(), dwell = ManualTimer()
+        let presenter = makePresenter(showDelay: showDelay, deadline: deadline, dwell: dwell)
+        let work = WorkGate()
+        let fired = OSAllocatedUnfairLock(initialState: 0)
+        let flagWhenFired = OSAllocatedUnfairLock(initialState: true)
+        presenter.onAutomaticRetry = {
+            fired.withLock { $0 += 1 }
+            // Read on the MainActor, outside the lock's Sendable closure.
+            let inFlight = presenter.isAttempting
+            flagWhenFired.withLock { $0 = inFlight }
+        }
+
+        let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
+        await settle(); showDelay.fire(); await settle(); deadline.fire(); await settle()
+
+        // The pocketed phone: the scene edge arrives while the parked pipeline is still
+        // unwinding, so evaluating the phase here would find mayRejoin and do nothing.
+        presenter.armAutomaticRetry()
+        await settle()
+        XCTAssertEqual(fired.withLock { $0 }, 0, "nothing to retry yet")
+
+        work.resolve(.rejected); dwell.fire(); await running.value
+        await settle()
+
+        XCTAssertEqual(fired.withLock { $0 }, 1, "consumed when the phase became freshAttempt")
+        XCTAssertFalse(flagWhenFired.withLock { $0 },
+                       "must fire with no attempt in flight, or the retry it triggers is swallowed")
+    }
+
+    func testArmingNeverFiresOnMayRejoin() async {
+        let presenter = makePresenter()
+        let fired = OSAllocatedUnfairLock(initialState: 0)
+        presenter.onAutomaticRetry = { fired.withLock { $0 += 1 } }
+
+        await presenter.attempt(origin: .first) { .stoppedWaiting }
+        presenter.armAutomaticRetry()
+        await settle()
+
+        XCTAssertEqual(presenter.phase, .unavailable(.mayRejoin))
+        XCTAssertEqual(fired.withLock { $0 }, 0,
+                       "re-joining a live pipeline on the rider's behalf is what mayRejoin forbids")
+    }
+
+    func testOnlyOneAutomaticRetryPerPresentation() async {
+        // The dwell timer is firable because the SECOND attempt has origin .automatic, which
+        // shows its indicator immediately and therefore waits on the dwell. A test that leaves
+        // it unfirable does not fail — it hangs, and `swift test --no-parallel` wedges until the
+        // agent gate's 900 s timeout reports it as a slow machine.
+        let dwell = ManualTimer()
+        let presenter = makePresenter(dwell: dwell)
+        let fired = OSAllocatedUnfairLock(initialState: 0)
+        presenter.onAutomaticRetry = { fired.withLock { $0 += 1 } }
+
+        await presenter.attempt(origin: .first) { .rejected }
+        presenter.armAutomaticRetry(); await settle()
+        XCTAssertEqual(fired.withLock { $0 }, 1)
+
+        let second = Task { await presenter.attempt(origin: .automatic) { .rejected } }
+        await settle(); dwell.fire(); await second.value
+        presenter.armAutomaticRetry(); await settle()
+        XCTAssertEqual(fired.withLock { $0 }, 1, "one per presentation, however many background cycles")
+    }
+
+    func testTheAutomaticRetryNeverShowsAConfirmation() async {
+        let dwell = ManualTimer()
+        let presenter = makePresenter(dwell: dwell)
+
+        let running = Task { await presenter.attempt(origin: .automatic) { .gotMap } }
+        await settle(); dwell.fire(); await running.value
+
+        XCTAssertEqual(presenter.phase, .upgraded(confirming: false),
+                       "the rider did not ask; the map simply appears")
     }
 }
 ```
 
-Write `TimerGate`, `WorkGate` (a one-shot gate returning a `ShareUpgradeResult`) and `settle()`
-as private helpers in this file, modelled on `SharePipelineSlotTests`' `Gate` and `settle`. Keep
-them top-level-private in the file so SwiftLint's nesting rule stays happy — the slot tests
-document that constraint at their own `Gate`.
-
-- [ ] **Step 2: Run and watch it fail**
-
-```bash
-swift test --package-path AuraCore --no-parallel --filter ShareUpgradePresenterTests
-```
-
-Expected: compile failure — no `ShareUpgradePresenter`.
-
-- [ ] **Step 3: Create the types**
-
-`ShareUpgradePhase.swift` — types only, no behaviour:
+- [ ] **Step 2: Create `ShareUpgradePhase.swift`**
 
 ```swift
 import Foundation
 
-/// Whether a retry from this terminal state is a real second attempt.
 public enum Retryability: Equatable, Sendable {
-    /// The pipeline ran and produced nothing. There is no negative cache, so a retry
-    /// re-runs it in full — this is the offline-at-the-trailhead case that ROH-161 exists
-    /// for, and the only case the automatic retry is allowed to fire on.
     case freshAttempt
-    /// A ceiling fired. A retry may warm-hit a cache the pipeline filled after we stopped
-    /// waiting, or re-join the pipeline still running. Still worth offering to a rider who
-    /// asks — but never done on their behalf.
     case mayRejoin
 }
 
@@ -318,376 +495,251 @@ public enum ShareUpgradePhase: Equatable, Sendable {
     case idle
     case upgrading
     case upgradingVisible
-    case slow
     case unavailable(Retryability)
     case upgraded(confirming: Bool)
 }
 
-/// What one attempt produced, with no `UIImage` in it — the presenter stays in AuraKit and
-/// the app keeps the image.
-public enum ShareUpgradeResult: Sendable {
+public enum AttemptOrigin: Equatable, Sendable {
+    case first
+    case riderTap
+    case automatic
+}
+
+public enum ShareUpgradeResult: Equatable, Sendable {
     case gotMap
     case rejected
     case stoppedWaiting
 }
 ```
 
-- [ ] **Step 4: Create the presenter with the show-delay only**
+Doc-comment each case from spec revision 5 §Phases when you paste it — the types above are the
+verified shape, not the finished file. `slow` is **gone** (revision 5); `AttemptOrigin` replaces
+revision 1's `isRetry`, which conflated "the rider asked" with "skip the show-delay" and so would
+have given the pocketed-phone rider an unprompted spinner and an unprompted "Map added".
+
+- [ ] **Step 3: Create `ShareUpgradePresenter.swift`**
 
 ```swift
 import Foundation
 import Observation
 
+/// Opened once; waiters arriving after it is open return immediately.
+@MainActor
+private final class DwellGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    func open() {
+        guard !isOpen else { return }
+        isOpen = true
+        let resuming = waiters
+        waiters = []
+        for waiter in resuming { waiter.resume() }
+    }
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+}
+
 @Observable @MainActor
 public final class ShareUpgradePresenter {
     public private(set) var phase: ShareUpgradePhase = .idle
 
-    @ObservationIgnored private let showDelay: @Sendable (Duration) async -> Void
-    @ObservationIgnored private var isAttempting = false
-    @ObservationIgnored private var showDelayHop: Task<Void, Never>?
+    @ObservationIgnored public var onAutomaticRetry: (@MainActor () -> Void)?
 
-    /// Timers are `nil`-defaulted and the real closures are built HERE, in the defining
-    /// module. ROH-110: an async closure *default argument* is duplicated into every module
-    /// that references the declaration and the copies can disagree about frame size, which
-    /// aborts the process. `SharePipelineSlot.swift:59-67` carries the same note.
-    public init(showDelay showDelayDuration: Duration = .milliseconds(300),
-                showDelayTimer: (@Sendable (Duration) async -> Void)? = nil) {
-        self.showDelayDuration = showDelayDuration
-        self.showDelay = showDelayTimer ?? { try? await Task.sleep(for: $0) }
+    @ObservationIgnored private let showDelayDuration: Duration
+    @ObservationIgnored private let deadlineDuration: Duration
+    @ObservationIgnored private let dwellDuration: Duration
+    @ObservationIgnored private let showDelayTimer: @Sendable (Duration) async -> Void
+    @ObservationIgnored private let deadlineTimer: @Sendable (Duration) async -> Void
+    @ObservationIgnored private let dwellTimer: @Sendable (Duration) async -> Void
+
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var attemptsInFlight = 0
+    @ObservationIgnored private var indicatorShown = false
+    @ObservationIgnored private var dwellGate: DwellGate?
+    @ObservationIgnored private var hops: [Task<Void, Never>] = []
+    @ObservationIgnored private var armedAutomaticRetry = false
+    @ObservationIgnored private var hasAutomaticallyRetried = false
+
+    public init(showDelay: Duration = .milliseconds(300),
+                deadline: Duration = .seconds(6),
+                minimumDwell: Duration = .seconds(1),
+                showDelayTimer: (@Sendable (Duration) async -> Void)? = nil,
+                deadlineTimer: (@Sendable (Duration) async -> Void)? = nil,
+                dwellTimer: (@Sendable (Duration) async -> Void)? = nil) {
+        self.showDelayDuration = showDelay
+        self.deadlineDuration = deadline
+        self.dwellDuration = minimumDwell
+        self.showDelayTimer = showDelayTimer ?? { try? await Task.sleep(for: $0) }
+        self.deadlineTimer = deadlineTimer ?? { try? await Task.sleep(for: $0) }
+        self.dwellTimer = dwellTimer ?? { try? await Task.sleep(for: $0) }
     }
 
-    /// Runs one attempt end to end. There is no `begin`/`finish` pair to leave unpaired —
-    /// which matters because an unpaired `finish` is a permanent spinner, this issue's own
-    /// bug reintroduced.
-    public func attempt(isRetry: Bool, _ work: () async -> ShareUpgradeResult) async {
-        guard !isAttempting else { return }
-        isAttempting = true
-        defer { isAttempting = false }
+    public var isAttempting: Bool { attemptsInFlight > 0 }
 
-        if isRetry {
-            phase = .upgradingVisible
-        } else {
+    public func noUpgradePossible() {
+        cancelHops()
+        generation += 1
+        phase = .idle
+    }
+
+    public func attempt(origin: AttemptOrigin, _ work: () async -> ShareUpgradeResult) async {
+        generation += 1
+        let mine = generation
+        attemptsInFlight += 1
+        cancelHops()
+
+        if origin == .first {
+            indicatorShown = false
             phase = .upgrading
-            showDelayHop = Task { [weak self] in
-                await self?.showDelay(self?.showDelayDuration ?? .milliseconds(300))
-                guard !Task.isCancelled, let self, self.phase == .upgrading else { return }
-                self.phase = .upgradingVisible
+            arm { [weak self] in
+                guard let self else { return }
+                await self.showDelayTimer(self.showDelayDuration)
+                guard !Task.isCancelled, mine == self.generation, self.phase == .upgrading else { return }
+                self.enterIndicator()
             }
+        } else {
+            enterIndicator()
+        }
+
+        arm { [weak self] in
+            guard let self else { return }
+            await self.deadlineTimer(self.deadlineDuration)
+            guard !Task.isCancelled, mine == self.generation,
+                  self.phase == .upgrading || self.phase == .upgradingVisible else { return }
+            self.phase = .unavailable(.mayRejoin)
         }
 
         let result = await work()
-        showDelayHop?.cancel()
-        phase = terminalPhase(for: result, isRetry: isRetry)
+        attemptsInFlight -= 1
+
+        // Only the newest attempt's terminal outcome may set the phase. An older attempt's
+        // MAP is still applied — a map is a map.
+        guard mine == generation || result == .gotMap else { return }
+        if mine == generation { cancelHops() }
+
+        if indicatorShown, let gate = dwellGate { await gate.wait() }
+        guard mine == generation || result == .gotMap else { return }
+        // `.upgraded` absorbs. A newer attempt's reject must never retract a map the rider
+        // already has — reachable whenever an older attempt's map lands while a newer one is
+        // still outstanding, which is exactly what the "a map is a map" rule creates.
+        if case .upgraded = phase { return }
+
+        phase = terminal(for: result, origin: origin)
+        consumeAutomaticRetryIfDue()
+    }
+
+    /// A real background→foreground return happened. Arms one automatic retry, consumed when the
+    /// phase next becomes `.unavailable(.freshAttempt)` — or now, if it already is and nothing is
+    /// in flight. Never evaluated at the scene edge: on resume the parked belts are many
+    /// main-actor hops behind, so reading the phase there would always be too early.
+    public func armAutomaticRetry() {
+        guard !hasAutomaticallyRetried else { return }
+        armedAutomaticRetry = true
+        consumeAutomaticRetryIfDue()
+    }
+
+    private func consumeAutomaticRetryIfDue() {
+        guard armedAutomaticRetry, !hasAutomaticallyRetried, attemptsInFlight == 0,
+              phase == .unavailable(.freshAttempt) else { return }
+        armedAutomaticRetry = false
+        hasAutomaticallyRetried = true
+        let callback = onAutomaticRetry
+        // NEVER invoked synchronously from inside `attempt`: the callback re-enters this type,
+        // and a hop keeps that re-entry out of the current attempt's unwind.
+        Task { @MainActor in callback?() }
+    }
+
+    private func enterIndicator() {
+        indicatorShown = true
+        phase = .upgradingVisible
+        let gate = DwellGate()
+        dwellGate = gate
+        arm { [weak self] in
+            guard let self else { return }
+            await self.dwellTimer(self.dwellDuration)
+            gate.open()
+        }
+    }
+
+    private func terminal(for result: ShareUpgradeResult, origin: AttemptOrigin) -> ShareUpgradePhase {
+        switch result {
+        case .gotMap:        return .upgraded(confirming: origin != .automatic && indicatorShown)
+        case .rejected:      return .unavailable(.freshAttempt)
+        case .stoppedWaiting: return .unavailable(.mayRejoin)
+        }
+    }
+
+    private func arm(_ body: @escaping @MainActor () async -> Void) {
+        hops.append(Task { await body() })
+    }
+
+    private func cancelHops() {
+        for hop in hops { hop.cancel() }
+        hops = []
     }
 }
 ```
 
-(Tasks 3–6 grow this; `terminalPhase(for:isRetry:)` arrives properly in Task 5. For now give it
-the minimal body that satisfies these three tests: `.gotMap → .upgraded(confirming: isRetry)`,
-everything else `→ .unavailable(.freshAttempt)`.)
+Five things in there are load-bearing and are the plan gate's findings made structural. Do not
+"simplify" any of them without re-reading §What revision 1 got wrong:
 
-- [ ] **Step 5: Run the tests**
+1. **`generation` is checked inside every hop**, not just `Task.isCancelled`. A hop armed under
+   attempt *n* can still be suspended when attempt *n+1* starts, and `withCheckedContinuation` is
+   not a cancellation point, so cancellation alone does not stop it. A reviewer reproduced a stale
+   hop re-applying attempt *n*'s terminal phase over attempt *n+1*'s live indicator — in the
+   pocketed-phone case specifically, ending with an "Add map to card" button that did nothing.
+2. **`attempt` awaits the dwell gate; there is no `defer` that applies a terminal phase.**
+   Revision 1 had both a park-and-return hop *and* a defer, and the defer ran a second before the
+   hop and won every time, making the dwell a no-op on the happy path. Its own dwell test went red
+   three tasks later. There is also no cancellation defer at all, because spec revision 5 records
+   that `attempt` never returns on cancellation in production: `slot.run` has no cancellation
+   point, so `work()` never returns.
+3. **`consumeAutomaticRetryIfDue` hops via `Task { }`.** Revision 1 instead instructed "clear the
+   flag, apply the terminal phase, then consume the arming", which is unsatisfiable — `defer`s run
+   in reverse declaration order, so no point in `attempt` has the flag clear and the phase applied.
+   The hop makes the ordering true by construction instead of by paragraph, and
+   `testArmingDuringAnInFlightAttemptFiresWhenItLaterRejects` asserts `isAttempting == false` at
+   callback time so the invariant is enforced by a line.
+4. **`if case .upgraded = phase { return }` — `.upgraded` absorbs.** Found by running the tests:
+   without it, an older attempt's map lands, then the newer attempt's reject retracts it.
+5. **`onAutomaticRetry` is `@ObservationIgnored`.** It is set from the view; without this,
+   assigning it is a tracked mutation and can invalidate during view update.
+
+- [ ] **Step 4: Run**
 
 ```bash
 swift test --package-path AuraCore --no-parallel --filter ShareUpgradePresenterTests
 ```
 
-Expected: PASS (3 tests).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add AuraCore/Sources/AuraKit/Sharing/ShareUpgradePhase.swift AuraCore/Sources/AuraKit/Sharing/ShareUpgradePresenter.swift AuraCore/Tests/AuraKitTests/ShareUpgradePresenterTests.swift
-git commit -m "feat(roh-161): ShareUpgradePresenter with the show-delay
-
-One wrapping attempt() rather than begin/finish, so there is no way to start
-an attempt without ending it. A retry skips the show-delay: the rider just
-pressed a button."
-```
-
----
-
-### Task 3: The 6 s presentation deadline
-
-**Files:**
-- Modify: `AuraCore/Sources/AuraKit/Sharing/ShareUpgradePresenter.swift`
-- Test: `AuraCore/Tests/AuraKitTests/ShareUpgradePresenterTests.swift`
-
-- [ ] **Step 1: Write the failing tests**
-
-```swift
-func testTheDeadlineMovesAVisibleUpgradeToSlow() async {
-    let showDelay = ManualTimer(), deadline = ManualTimer()
-    let presenter = ShareUpgradePresenter(showDelayTimer: showDelay.closure,
-                                          deadlineTimer: deadline.closure,
-                                          dwellTimer: ManualTimer().closure)
-    let work = WorkGate()
-    let running = Task { await presenter.attempt(isRetry: false) { await work.result() } }
-    await settle()
-    showDelay.fire(); await settle()
-
-    deadline.fire(); await settle()
-
-    XCTAssertEqual(presenter.phase, .slow)
-    work.resolve(.gotMap)
-    await running.value
-}
-
-func testTheDeadlineDoesNothingOnceTheAttemptHasResolved() async {
-    let deadline = ManualTimer()
-    let presenter = ShareUpgradePresenter(showDelayTimer: ManualTimer().closure,
-                                          deadlineTimer: deadline.closure,
-                                          dwellTimer: ManualTimer().closure)
-
-    await presenter.attempt(isRetry: false) { .gotMap }
-    deadline.fire(); await settle()
-
-    XCTAssertEqual(presenter.phase, .upgraded(confirming: false),
-                   "a fired deadline must never resurrect a spinner over a finished attempt")
-}
-
-func testASlowAttemptThatSucceedsEndsUpgradedAndNeverClaimsFailure() async {
-    let showDelay = ManualTimer(), deadline = ManualTimer(), dwell = ManualTimer()
-    let presenter = ShareUpgradePresenter(showDelayTimer: showDelay.closure,
-                                          deadlineTimer: deadline.closure,
-                                          dwellTimer: dwell.closure)
-    let work = WorkGate()
-    let running = Task { await presenter.attempt(isRetry: false) { await work.result() } }
-    await settle(); showDelay.fire(); await settle(); deadline.fire(); await settle()
-
-    work.resolve(.gotMap)
-    dwell.fire()
-    await running.value
-
-    XCTAssertEqual(presenter.phase, .upgraded(confirming: false))
-}
-```
-
-- [ ] **Step 2: Run and watch it fail**
-
-Expected: compile failure on the `deadlineTimer:` argument.
-
-- [ ] **Step 3: Add the deadline hop**
-
-A second injected timer and a second hop, armed alongside the show-delay hop and cancelled at
-the same place. The hop's guard is `phase == .upgradingVisible || phase == .upgrading` —
-the deadline can fire before the show-delay on a device where the attempt is slow and the two
-hops raced, and `slow` is the honest phase either way.
-
-**The deadline must not cancel `work`.** It changes what is on screen and nothing else. The
-pipeline's own comments argue this at length (`ShareMapSnapshotter.swift:161-178`): a late
-cancel throws away a style load and an SDK render and, with no negative cache, makes the next
-request pay for all of it again.
-
-- [ ] **Step 4: Run the tests** — expect PASS (6 total).
+Expected: **16 tests, 0 failures.** If any test *hangs* rather than fails, you have changed
+`ManualTimer` — its banked credit is what stops a hop that arms after `fire()` from waiting
+forever. A hung test burns the agent gate's full 900 s and reads as a slow machine.
 
 - [ ] **Step 5: Commit**
 
-```bash
-git commit -am "feat(roh-161): the 6 s presentation deadline
-
-A fourth timeout, and deliberately none of the three that exist — the ceiling
-protects the singleton, the belts bound SDK calls, and none of them serve the
-rider. It stops the spinner, never the work."
-```
-
 ---
 
-### Task 4: Minimum dwell, so nothing flashes
+### Task 3: `ShareMapOutcome` — the seam AND its consumer, in one commit
 
-The rule that replaces tuning a constant: **any indicator the presenter shows stays for at least
-1 s.** `upgradingVisible` and `slow` each get their own dwell.
+Revision 1 split these across Tasks 7 and 10, which left the tree **not compiling** for three
+tasks that each claimed "compiles clean" — `RideSummaryView.swift:187` does `if let raster` on
+what would now be a non-optional enum. At ~13 minutes per build through the builder subagent,
+that is a real cost. They land together.
 
-Implement it clock-free, so it is testable with a hand-fired timer: entering an indicator phase
-sets `dwellSatisfied = false` and arms the dwell hop; a terminal phase arriving while
-`dwellSatisfied` is false is parked in `pendingTerminal` and applied by the hop when it fires.
-A terminal phase arriving from `.upgrading` (no indicator was ever shown) applies immediately.
-
-**Files:**
-- Modify: `AuraCore/Sources/AuraKit/Sharing/ShareUpgradePresenter.swift`
-- Test: `AuraCore/Tests/AuraKitTests/ShareUpgradePresenterTests.swift`
-
-- [ ] **Step 1: Write the failing tests**
-
-```swift
-func testAnIndicatorHoldsForTheDwellBeforeATerminalPhaseIsApplied() async {
-    let showDelay = ManualTimer(), dwell = ManualTimer()
-    let presenter = ShareUpgradePresenter(showDelayTimer: showDelay.closure,
-                                          deadlineTimer: ManualTimer().closure,
-                                          dwellTimer: dwell.closure)
-    let work = WorkGate()
-    let running = Task { await presenter.attempt(isRetry: false) { await work.result() } }
-    await settle(); showDelay.fire(); await settle()
-
-    work.resolve(.rejected)
-    await settle()
-    XCTAssertEqual(presenter.phase, .upgradingVisible, "still held by the dwell")
-
-    dwell.fire()
-    await running.value
-    XCTAssertEqual(presenter.phase, .unavailable(.freshAttempt))
-}
-
-func testAWarmRetryStillShowsItsIndicatorForTheDwell() async {
-    let dwell = ManualTimer()
-    let presenter = ShareUpgradePresenter(showDelayTimer: ManualTimer().closure,
-                                          deadlineTimer: ManualTimer().closure,
-                                          dwellTimer: dwell.closure)
-
-    let running = Task { await presenter.attempt(isRetry: true) { .gotMap } }
-    await settle()
-    XCTAssertEqual(presenter.phase, .upgradingVisible,
-                   "without the dwell a warm retry is unavailable → upgrading → upgraded with nothing visible")
-
-    dwell.fire()
-    await running.value
-    XCTAssertEqual(presenter.phase, .upgraded(confirming: true))
-}
-
-func testEnteringSlowRestartsTheDwell() async {
-    // upgradingVisible's dwell has already been satisfied; slow gets its own.
-}
-```
-
-Fill in the third test body following the same shape.
-
-- [ ] **Step 2: Run and watch it fail.**
-- [ ] **Step 3: Implement `dwellSatisfied` / `pendingTerminal` as described above.**
-- [ ] **Step 4: Run the tests** — expect PASS (9 total).
-- [ ] **Step 5: Commit.**
-
----
-
-### Task 5: Terminal phases, re-entrancy, and cancellation
-
-**Files:**
-- Modify: `AuraCore/Sources/AuraKit/Sharing/ShareUpgradePresenter.swift`
-- Test: `AuraCore/Tests/AuraKitTests/ShareUpgradePresenterTests.swift`
-
-- [ ] **Step 1: Write the failing tests**
-
-```swift
-func testRejectedAndStoppedWaitingReachDifferentRetryabilities() async {
-    // .rejected → .unavailable(.freshAttempt)
-    // .stoppedWaiting → .unavailable(.mayRejoin)
-}
-
-func testASecondAttemptWhileOneIsInFlightIsANoOp() async {
-    // and arms no second deadline hop — assert the phase does not jump and the
-    // in-flight attempt still completes normally
-}
-
-func testACancelledAttemptStillLandsInATerminalPhase() async {
-    // cancel the Task running attempt(); assert the phase is terminal, never an
-    // absorbing spinner. This is THE regression test for this issue's own bug.
-}
-
-func testNoUpgradePossibleParksInIdleAndFiresNoHop() async {
-}
-```
-
-- [ ] **Step 2: Run and watch it fail.**
-
-- [ ] **Step 3: Implement**
-
-`terminalPhase(for:isRetry:)`:
-
-| Result | Phase |
-|---|---|
-| `.gotMap` | `.upgraded(confirming: isRetry)` |
-| `.rejected` | `.unavailable(.freshAttempt)` |
-| `.stoppedWaiting` | `.unavailable(.mayRejoin)` |
-
-**The cancellation path needs care and is the one place `defer` is not enough.** A Swift `defer`
-block cannot `await`, so it cannot wait out the dwell. Structure it as: the normal path awaits
-the dwell remainder and then applies the terminal phase; a `defer` applies the terminal phase
-*synchronously, skipping the dwell*, if and only if it has not already been applied. A cancelled
-attempt means the view is going away and a minimum visible duration is pointless. Track
-"already applied" with a local flag, not by inspecting `phase` — the phase could legitimately
-have been moved by a hop.
-
-`noUpgradePossible()` sets `.idle` and cancels every hop.
-
-- [ ] **Step 4: Run the tests** — expect PASS (13 total).
-- [ ] **Step 5: Commit.**
-
----
-
-### Task 6: The one-shot automatic retry
-
-Two things the spec is emphatic about, both of which killed revision 1:
-
-- **Trigger on a return from a real background**, tracked with a `wasBackgrounded` flag set on
-  `scenePhase == .background` — not on `.active` from anything. `AuraApp.swift:262-268` already
-  documents why: "a transient `.inactive` — Control Center, a notification banner, a permission
-  alert" is not a background cycle. The flag lives in the **view** (Task 12); the presenter only
-  receives "a real foreground return happened."
-- **Never evaluate the phase at the scene edge.** On resume the parked belts are five-plus
-  main-actor hops behind, so the `scenePhase` update wins that race and would read `slow`.
-  Arming is consumed when the phase *next becomes* `.unavailable(.freshAttempt)` — or
-  immediately, if it already is.
-
-**Files:**
-- Modify: `AuraCore/Sources/AuraKit/Sharing/ShareUpgradePresenter.swift`
-- Test: `AuraCore/Tests/AuraKitTests/ShareUpgradePresenterTests.swift`
-
-- [ ] **Step 1: Write the failing tests**
-
-```swift
-func testArmingDuringAnInFlightAttemptFiresWhenItLaterRejects() async {
-    // THE pocketed-phone test. Arm while .slow; the attempt then rejects;
-    // onAutomaticRetry fires exactly once, after the terminal phase is applied.
-}
-
-func testArmingWhenAlreadyUnavailableFreshFiresImmediately() async {}
-
-func testArmingNeverFiresOnMayRejoin() async {
-    // re-joining a live pipeline on the rider's behalf is exactly what the
-    // Retryability distinction exists to forbid
-}
-
-func testOnlyOneAutomaticRetryPerPresentation() async {
-    // arm, consume, arm again → the second never fires
-}
-
-func testArmingNeverFiresFromIdle() async {}
-```
-
-- [ ] **Step 2: Run and watch it fail.**
-
-- [ ] **Step 3: Implement**
-
-```swift
-/// Invoked at most once per presenter, when an armed automatic retry is consumed. The view
-/// supplies it; the presenter cannot start work itself.
-public var onAutomaticRetry: (@MainActor () -> Void)?
-
-/// A real background→foreground return happened. Arms one automatic retry, consumed when
-/// the phase next becomes `.unavailable(.freshAttempt)` — or now, if it already is.
-public func armAutomaticRetry()
-```
-
-**Ordering trap, state it in a comment:** the callback re-enters `attempt`, and `attempt` is a
-no-op while `isAttempting` is true. So the callback must fire *after* `isAttempting` has been
-cleared, or the automatic retry silently does nothing. Clear the flag, apply the terminal phase,
-*then* consume the arming.
-
-- [ ] **Step 4: Run the whole package suite** — expect PASS.
-- [ ] **Step 5: Commit.**
-
----
-
-### Task 7: `ShareMapOutcome` — carry the distinction across the app seam
+Revision 1 also said to "update any test double conforming to `ShareMapRasterProviding`" and gave
+a grep. **There is no test double** — `ShareMapSnapshotter` is the only conformer — so the grep
+returns nothing and an implementer would conclude they were done, having missed the one call site
+that actually breaks.
 
 **Files:**
 - Modify: `Aura/Sources/Ride/ShareCard/ShareMapRasterProviding.swift:15-20`
 - Modify: `Aura/Sources/Ride/ShareCard/ShareMapSnapshotter.swift:143-158`
+- Modify: `Aura/Sources/Ride/RideSummaryView.swift:185-193` (the consumer, minimally — full
+  rewiring is Task 6)
 
-No unit test: this is app-target code and `Aura/project.yml` declares no unit-test target for
-it. The mapping is exercised by Task 13's build and the device pass. Keep it trivial enough that
-this is honest — all the judgement lives in the tested presenter.
-
-- [ ] **Step 1: Add the outcome type and change the protocol**
+- [ ] **Step 1:**
 
 ```swift
 enum ShareMapOutcome: Sendable {
@@ -704,119 +756,87 @@ protocol ShareMapRasterProviding: Sendable {
 }
 ```
 
-- [ ] **Step 2: Map the outcomes in `ShareMapSnapshotter.raster(for:)`**
+- [ ] **Step 2: Map in `raster(for:)`**
 
 | Source | Result |
 |---|---|
-| Disk-cache fast path hits (`:150`) | `.map(image)` |
-| `slot.run` → `.finished(image)` | `.map(image)` |
-| `slot.run` → `.finished(nil)` | `.rejected` |
-| `slot.run` → `.stoppedWaiting` | `.stoppedWaiting` |
+| Disk-cache fast path (`:150`) | `.map(image)` |
+| `.finished(image)` | `.map(image)` |
+| `.finished(nil)` | `.rejected` |
+| `.stoppedWaiting` | `.stoppedWaiting` |
 | `self` deallocated (`:155-157`) | `.rejected` |
 
-- [ ] **Step 3: Update the prefetch call site**
+`prefetchShareMap` already discards its result and needs no change beyond compiling.
 
-`ShareMapProviderBox.prefetchShareMap:54` already discards its result (`_ = await ...`) and needs
-no change beyond compiling.
-
-- [ ] **Step 4: Update any test double** conforming to `ShareMapRasterProviding`.
-
-```bash
-grep -rn "ShareMapRasterProviding" Aura AuraCore
-```
-
-- [ ] **Step 5: Delegate a build** to the `apple-platform-build-tools` builder subagent. Expected:
-      compiles clean. Fix and re-delegate until it does.
-- [ ] **Step 6: Commit.**
+- [ ] **Step 3: Switch at the consumer**, preserving today's `!Task.isCancelled` guard — Task 6
+      decides its fate deliberately, this task must not drop it silently.
+- [ ] **Step 4: Delegate a build.** Expected: compiles clean. This is the first step in the plan
+      where that claim is actually true.
+- [ ] **Step 5: Commit.**
 
 ---
 
-### Task 8: Per-attempt generations in `ShareCardFileStore`
+### Task 4: Per-attempt generations in `ShareCardFileStore`
 
-Today generation is documented as "0 = fallback card, 1 = map". With retry, more than one
-upgrade render can succeed in a presentation, and reusing generation 1 would overwrite a file a
-still-live share-sheet consumer may read lazily — the exact hazard the per-presentation UUID
-exists to prevent.
+**Files:** `Aura/Sources/Ride/ShareCard/ShareCardFileStore.swift:10, 26-31`
 
-**Files:**
-- Modify: `Aura/Sources/Ride/ShareCard/ShareCardFileStore.swift:10, 26-31`
-
-- [ ] **Step 1:** Change the doc comment: generation 0 is the fallback, and each upgrade attempt
-      that produces a card writes the next generation. `url(generation:)` itself already takes an
-      `Int` and needs no signature change — the counter lives in the view (Task 10).
-- [ ] **Step 2:** Record the accepted cost in the comment: files accumulate per attempt under the
-      presentation's UUID directory, bounded by rider taps, in `tmp`, and `sweepOtherRides()`
-      structurally cannot collect the current ride's subtree.
+- [ ] **Step 1:** Update the doc comment — generation 0 is the fallback and each upgrade attempt
+      that produces a card writes the next generation. `url(generation:)` needs no signature
+      change; the counter lives in the view.
+- [ ] **Step 2:** Record the accepted cost: files accumulate per attempt under the presentation's
+      UUID directory, bounded by rider taps, in `tmp`, and `sweepOtherRides()` structurally cannot
+      collect the current ride's subtree.
 - [ ] **Step 3: Commit.**
 
 ---
 
-### Task 9: The `presentation:` parameter and both call sites
+### Task 5: Close the share-sheet hazard (spec revision 5 moved this in scope)
 
-**Files:**
-- Modify: `Aura/Sources/Ride/RideSummaryView.swift:6-14`
-- Modify: `Aura/Sources/AuraApp.swift:131`
-- Modify: `Aura/Sources/History/HistoryView.swift:53`
+`beginShareSheetWatch` polls for the sheet 20 × 100 ms and gives up (`RideSummaryView.swift:398`).
+On a cold first share `UIActivityViewController` can take longer, so `shareSheetUp` goes false
+under a live sheet and a late upgrade assigns `shareImage` beneath it — which the 2026-07-31
+device pass watched dismiss a presented sheet. Retry is what makes late landings routine, so this
+change is what makes the hazard reachable.
 
-- [ ] **Step 1: Add the parameter**
-
-```swift
-/// Which presentation this is. The terminal state and the retry are ride-end only:
-/// there is no negative cache, so every History open re-runs the pipeline, and offline a
-/// rider paging through old rides would collect an offer on every one of them — for a
-/// share card they did not ask for and cannot see on that screen. ROH-126 designated the
-/// History reopen as the *recovery* path; making it the complaint path inverts that.
-enum SummaryPresentation { case rideEnd, history }
-
-let presentation: SummaryPresentation
-```
-
-**Explicitly not** derived from `onDone == nil` (`:13-14`). That correlates today but it is a
-callback, not a policy flag.
-
-- [ ] **Step 2:** `AuraApp.swift:131` passes `presentation: .rideEnd`; `HistoryView.swift:53`
-      passes `presentation: .history`.
-- [ ] **Step 3: Delegate a build.** Expected: compiles clean.
-- [ ] **Step 4: Commit.**
+- [ ] **Step 1:** `applyOrDeferUpgrade` (`:376-382`) re-checks `SharePresentation.isPresenting` at
+      assignment time rather than trusting the latch alone, and defers if any modal is up.
+- [ ] **Step 2:** Note in the comment that `isPresenting` is true for *any* modal, so an unrelated
+      system alert also defers. That is the safe direction.
+- [ ] **Step 3: Delegate a build. Commit.**
 
 ---
 
-### Task 10: Wire the presenter into `RideSummaryView`
+### Task 6: Wire the presenter into `RideSummaryView`
 
-**Files:**
-- Modify: `Aura/Sources/Ride/RideSummaryView.swift:26-37` (state), `:132-196` (the `.task`)
+**Files:** `Aura/Sources/Ride/RideSummaryView.swift:26-37`, `:132-196`
 
-- [ ] **Step 1: Replace the ad-hoc flags with the presenter**
+- [ ] **Step 1:** `isUpgrading` and `showHint` go; add
+      `@State private var upgrade = ShareUpgradePresenter()` and `@State private var generation = 0`.
+      Keep `shareImage`, `shareSheetUp`, `deferredUpgrade` as they are.
 
-`isUpgrading` and `showHint` go. `@State private var upgrade = ShareUpgradePresenter()`. Keep
-`shareImage`, `shareSheetUp`, `deferredUpgrade` exactly as they are.
+- [ ] **Step 2: Extract `runUpgrade(glanceDebounce:origin:)`**
 
-Add `@State private var generation = 0` for Task 8's counter.
-
-- [ ] **Step 2: Extract `runUpgrade(glanceDebounce:isRetry:)`**
-
-**The 0.8 s sleep stays OUTSIDE `presenter.attempt`, and this is load-bearing.** Putting
-`attempt` at the top of the extracted function puts the 300 ms show-delay hop inside the 0.8 s
-sleep, so "Adding your map…" appears at t+0.3 s — mid-entrance on every ride end, as a hard
-insert. That is verbatim the rev-3 rejection in the ROH-155 record: *"the one drawing operation
-the rider actually sees during the entrance, and it was the one left ungated."*
-
-Shape:
+**The 0.8 s sleep stays OUTSIDE `presenter.attempt`.** Putting `attempt` first would arm the
+300 ms show-delay inside the sleep, so "Adding your map…" appears at t+0.3 s — mid-entrance on
+every ride end, as a hard insert. That is verbatim the rev-3 rejection in the ROH-155 record:
+"the one drawing operation the rider actually sees during the entrance, and it was the one left
+ungated."
 
 ```
-func runUpgrade(glanceDebounce: Bool, isRetry: Bool) async {
+func runUpgrade(glanceDebounce: Bool, origin: AttemptOrigin) async {
     if glanceDebounce {
-        try? await Task.sleep(for: .seconds(0.8))    // keep the three-job comment verbatim
+        try? await Task.sleep(for: .seconds(0.8))   // keep the three-job comment verbatim
         guard !Task.isCancelled else { return }
     }
-    await upgrade.attempt(isRetry: isRetry) {
+    await upgrade.attempt(origin: origin) {
         switch await shareMap.provider.raster(for: request) {
         case .map(let raster):
-            generation += 1
-            guard let upgraded = await RideCardRenderer.make(content, mapImage: raster,
-                                                             title: title,
-                                                             writeTo: fileStore.url(generation: generation))
-            else { return .rejected }      // fallback kept, Share stays enabled
+            let next = generation + 1          // NOT `generation += 1` then read back:
+            generation = next                  // @State read-after-write outside `body` is
+            guard let upgraded = await RideCardRenderer.make(   // not a documented guarantee,
+                    content, mapImage: raster, title: title,    // and a stale read would
+                    writeTo: fileStore.url(generation: next))   // overwrite generation 0.
+            else { return .stoppedWaiting }    // see below
             applyOrDeferUpgrade(upgraded)
             return .gotMap
         case .rejected:       return .rejected
@@ -826,190 +846,200 @@ func runUpgrade(glanceDebounce: Bool, isRetry: Bool) async {
 }
 ```
 
-Retry passes `glanceDebounce: false` — the debounce exists to stop a *sub-second glance*
-committing the slot, and an explicit tap is the case it was never meant to catch.
+**A render failure returns `.stoppedWaiting`, not `.rejected`.** Spec revision 5 §Error handling:
+the raster is now cached, so an automatic retry would warm-hit and fail at the same renderer,
+deterministically — spending the one-shot budget on something that cannot succeed. `.mayRejoin`
+still offers the rider the button; it just refuses to press it for them.
 
-- [ ] **Step 3: The `.task` calls it**
+- [ ] **Step 3:** `.task` keeps its guards and its fallback render, and calls
+      `runUpgrade(glanceDebounce: true, origin: .first)`. Where it currently returns because
+      `ShareMapRequest.init` gave nil (`:146-147`) or the fallback render failed (`:145`), call
+      `upgrade.noUpgradePossible()` first — those are the two paths that must never show an offer.
 
-`.task` keeps its `guard ride.stats != nil, shareImage == nil`, its fallback render, and its
-`guard shareImage != nil`. Where it currently gives up because `ShareMapRequest.init` returned
-nil (`:146-147`), call `upgrade.noUpgradePossible()` first — that is the no-route path and it
-must never show an offer. Same for the failed-fallback path at `:145`.
+- [ ] **Step 4:** Hold `content`, `fileStore`, `title`, `request` in `@State`. `ShareCardFileStore`
+      mints its `presentationID` in `init`, so build it **once** and never rebuild it in the retry
+      path. Add `.id(ride.id)` where `HistoryView` presents the sheet, so a reused content view
+      cannot carry another ride's file store.
 
-Store `content`, `fileStore`, `title` and `request` in `@State` so the retry has them.
-`ShareCardFileStore` mints a `presentationID` in its initializer, so it must be created **once**
-and held — never rebuilt in the retry path, or a retry writes into a different directory.
+- [ ] **Step 5:** Decide the `!Task.isCancelled` guard **explicitly**. It exists today at `:187`
+      and stops a 1080×1350 main-actor `ImageRenderer` pass running for a view being torn down.
+      Keep it for the `.first` path; for `.riderTap`/`.automatic` the enclosing task is not
+      `.task`'s, so state what you chose in a comment. Revision 1 dropped it silently.
 
-- [ ] **Step 4: Delegate a build.**
-- [ ] **Step 5: Commit.**
+- [ ] **Step 6: Delegate a build. Commit.**
 
 ---
 
-### Task 11: The reserved phase row and Try again
+### Task 7: The reserved row and the offer
 
-**Files:**
-- Modify: `Aura/Sources/Ride/RideSummaryView.swift:107-114` (the current bare hint)
+**Files:** `Aura/Sources/Ride/RideSummaryView.swift:107-114`
 
-- [ ] **Step 1: Build the row**
+- [ ] **Step 1: The row**
 
 | Phase | Content |
 |---|---|
-| `.upgrading`, `.idle`, `.upgraded(confirming: false)` | empty (reserved height only) |
+| `.idle`, `.upgrading`, `.upgraded(confirming: false)` | empty |
 | `.upgradingVisible` | `ProgressView` + "Adding your map…" |
-| `.slow` | `ProgressView` + "Still adding your map…" |
-| `.unavailable` (either) | **"Add the map"** — a button, no sentence |
-| `.upgraded(confirming: true)` | "Map added", ~2 s, then empty |
+| `.unavailable` (either) | **"Add map to card"** — a button, no sentence |
+| `.upgraded(confirming: true)` | "Map added" — persists, does not self-clear |
 
-**The terminal state is an offer, not an apology.** No failure sentence, no destructive colour,
-no warning glyph, no "couldn't". Nothing is broken — the card is finished and Share is enabled.
-Note this overrides the amber `GroupLobbyView.startRetryRow` treatment: that row reports a
-failure, this one makes an offer.
+**An offer, not an apology.** No failure sentence, no destructive colour, no warning glyph, no
+"couldn't", and explicitly **not** `GroupLobbyView.startRetryRow`'s amber treatment — that row
+reports a failure, this one makes an offer. Nothing is broken: the card is finished and Share
+works. The label names its destination because there is a real `StaticRouteMap` at the top of this
+screen (`:57`) and the share card is never rendered on it.
 
-There is also a real `StaticRouteMap` at the top of this screen (`:57`), itself rendering
-degraded tiles when offline. Any sentence about a map failing, on a screen showing a degraded
-map, reads as a diagnosis of the route the rider is looking at. A button cannot be misread that
-way.
+Specify the treatment rather than leaving it to inherit the current `.font(.caption)` +
+`secondaryText` chain, which would render the button as small grey text that looks disabled:
+accent-coloured, `minHeight: 44`, `.contentShape(Rectangle())` — the hit-target lesson from
+`GroupLobbyView.swift:225-234`, which is worth keeping even though its colour is not. **No SF
+Symbol**: `arrow.clockwise` would reintroduce the retry-after-failure reading the copy avoids.
 
-- [ ] **Step 2: Reserve the height — the requirement, not a nicety**
+- [ ] **Step 2: Reserve the height — as a `ZStack`, not a fixed frame**
 
-**The slot reserves its height for the whole presentation whenever an upgrade is possible, so
-Done never moves** — not on a phase change, and not when the map lands and the row empties.
-Size to the tallest state at the current Dynamic Type size.
+Render every phase's content in a `ZStack`, only the active one visible, the rest
+`.accessibilityHidden(true)`. That sizes to the tallest state at **any** Dynamic Type size by
+construction. A fixed `.frame(height: 44)` breaks at AX3+, where the button label wraps to two
+lines and Done moves — for the rider least able to recover from it.
 
-Without this: Done sits below the fold on most devices (under map + title + hero + elevation
-band + stats + Share), so a rider scrolling to it reaches as the row grows, and lands on **Add
-the map** — starting a pipeline they never wanted. The ROH-155 record already names the
-mechanism: the hint today "is a hard insert that shoves the Done button down."
+Gate the whole row on `request != nil`, **not** on `phase != .idle`: `.idle` is both "no upgrade
+possible" and "none attempted yet", and at ride end the presenter sits in `.idle` for the first
+~0.8 s because the debounce is outside `attempt`. Gating on the phase either puts dead space on a
+no-route ride or pops the row in mid-entrance.
 
-- [ ] **Step 3: Gate on presentation**
+Done must not move: it is the only exit (`AuraApp.swift:124-135` hides the nav bar, the back
+button and swipe-back) and sits below the fold, so a rider scrolling to it as the row grows lands
+on the offer and starts a pipeline they never wanted.
 
-`presentation == .history` shows the `upgradingVisible` hint exactly as today and never `slow`,
-`unavailable` or `upgraded(confirming:)`. **If the ride-end-only scope is reversed, this step is
-the one line that changes.**
-
-- [ ] **Step 4: Wire the button**
-
-```swift
-Button("Add the map") { Task { await runUpgrade(glanceDebounce: false, isRetry: true) } }
-```
-
-`attempt`'s in-flight guard already makes a double-tap a no-op, so no separate debounce.
-
-- [ ] **Step 5: Delegate a build.**
-- [ ] **Step 6: Commit.**
+- [ ] **Step 3:** Both presentations. Spec revision 5 reversed the ride-end-only scope, so there is
+      no `presentation:` parameter and no call-site change.
+- [ ] **Step 4:** `Button("Add map to card") { Task { await runUpgrade(glanceDebounce: false, origin: .riderTap) } }`
+- [ ] **Step 5:** Give the row a `reduceMotion`-aware cross-fade. With the height reserved it is
+      free, and unspecified means a hard pop.
+- [ ] **Step 6: Delegate a build. Commit.**
 
 ---
 
-### Task 12: Background return and accessibility
+### Task 8: Background return and accessibility
 
-**Files:**
-- Modify: `Aura/Sources/Ride/RideSummaryView.swift`
-
-- [ ] **Step 1: The background-return handler**
-
-```swift
-@Environment(\.scenePhase) private var scenePhase
-@State private var wasBackgrounded = false
-```
+- [ ] **Step 1: The edge**
 
 ```swift
 .onChange(of: scenePhase) { _, phase in
-    // A REAL background cycle, not `.active` from anything. AuraApp.swift:262-268 carries
-    // the same warning: a transient `.inactive` — Control Center, a notification banner, a
-    // permission alert — is not a background cycle, and gating on `.active` would spend the
-    // one-shot budget on a notification banner.
+    // A REAL background cycle. AuraApp.swift:262-268 carries the same warning: a transient
+    // `.inactive` — Control Center, a notification banner, a permission alert — is not one,
+    // and gating on `.active` would spend the one-shot budget on a notification banner.
     if phase == .background { wasBackgrounded = true }
     if phase == .active, wasBackgrounded {
         wasBackgrounded = false
-        guard presentation == .rideEnd else { return }
         upgrade.armAutomaticRetry()
     }
 }
 ```
 
-Set `upgrade.onAutomaticRetry` in the same place the presenter is first used, to
-`{ Task { await runUpgrade(glanceDebounce: false, isRetry: true) } }`.
+Set `upgrade.onAutomaticRetry` in `.task`, before the first `attempt` — **not** in `body` — to
+`{ Task { await runUpgrade(glanceDebounce: false, origin: .automatic) } }`.
 
-- [ ] **Step 2: The announcements**
+Note the edge is wider than "the rider pocketed the phone": sharing to another app, saving to
+Files, taking a call and following a link all produce a real `.background`. That is why the
+arming is gated on `.freshAttempt` and bounded to one, and why device-pass item 7 exists.
 
-Posted by the **view** — AuraKit imports no UIKit and cannot post one.
-
-- Announce the transition **into `unavailable`** only.
-- **Not** `slow`.
-- **Not** a second `unavailable` reached by a failed automatic retry — that would interrupt a
-  VoiceOver rider unprompted, seconds after they unlocked the phone.
-- The button's accessibility label names what it acts on: "Add the map to your share card".
-  "Add the map" alone has an ambiguous antecedent on a screen that also shows a route map.
-
-- [ ] **Step 3: Delegate a build.**
-- [ ] **Step 4: Commit.**
+- [ ] **Step 2: Announcements** — posted by the view; AuraKit imports no UIKit.
+  - Announce entry into `unavailable` **once**.
+  - **Not** a second `unavailable` from a failed automatic retry. `AttemptOrigin` is what makes
+    this expressible — the phase carries no provenance, so revision 1 asked the view to suppress
+    something it had no way to detect.
+  - Button accessibility label: "Add the map to your share card".
+- [ ] **Step 3: Delegate a build. Commit.**
 
 ---
 
-### Task 13: Full verification
+### Task 9: Instrument the measurement the device pass depends on
 
-- [ ] **Step 1: Package suite**
+The 6 s constant rests on device-pass item 1, and nothing in revision 1 made it measurable — the
+tester's only tool was eyeballing Console timestamps across nine reject strings, one of which
+covers four code paths.
 
-```bash
-swift test --package-path AuraCore --no-parallel
-```
-
-- [ ] **Step 2: App build** via the `apple-platform-build-tools` builder subagent.
-
-- [ ] **Step 3: The device pass — a real device, per CLAUDE.md**
-
-A clean build proves nothing here. Work through the spec's §Testing device list in order:
-
-1. **Measure the real distribution** of upgrade durations and reject timings at ride end, on
-   wifi and on cellular. Revision 1 asserted a success envelope that was two timeout caps added
-   together. Check 6 s against reality.
-2. Airplane mode at ride end → fast `unavailable(.freshAttempt)` + the offer.
-3. Re-enable wifi, tap it → map lands, "Map added" shows.
-4. Tap it *while still offline* → indicator held ≥1 s, back to the offer, no flicker.
-5. Pocket the phone during the window, unlock later on wifi → map present without interaction.
-6. Pull down Control Center during `unavailable`, dismiss → **the automatic retry must not fire.**
-7. Reach for Done as the phase changes → **Done must not move.** Repeat at an accessibility text
-   size.
-8. Retry while the share sheet is open → sheet stays up, card swaps on dismissal.
-9. VoiceOver: `unavailable` announced once; a failed automatic retry does not announce again.
-10. Reduce Motion on → identical deadline behaviour.
-
-Items 7 and 8 overlap **ROH-140** (the ROH-126 device-verification tail) on this same surface —
-worth closing what you can of it in the same session on the same phone.
-
-- [ ] **Step 4: Answer the spec's three open questions**, which the device pass exists to answer
-      rather than confirm:
-      1. Is 6 s right, or does the offer appear too eagerly ahead of a pipeline about to land?
-      2. Does the auto-applied swap read as delightful or as a glitch?
-      3. **Does the offer change sharing behaviour** — do riders wait for a map they would not
-         otherwise have waited for? This is the one risk that argues for the feature's absence.
-
-- [ ] **Step 5: Whole-branch review** on the most capable model (CLAUDE.md pipeline step 6),
-      then open the PR and move ROH-161 to **In Review**.
+- [ ] **Step 1:** Log attempt duration and outcome once per attempt, at `.notice`, in the existing
+      `app.aura.ios` / `ShareCard` category, so a sysdiagnose answers "how long do upgrades
+      actually take at ride end, on wifi and on cellular" without inference.
+- [ ] **Step 2: Commit.**
 
 ---
 
-## Known risks carried from the spec
+### Task 10: Verification
 
-Not solved here. Each is stated so nobody discovers them as surprises.
+- [ ] **Step 1:** `swift test --package-path AuraCore --no-parallel`
+- [ ] **Step 2:** App build via the `apple-platform-build-tools` builder subagent.
+- [ ] **Step 3: Device pass — a real device.** A clean build proves nothing here.
 
-- **The share-sheet latch has a 2 s appearance bound** (`RideSummaryView.swift:398`). If
-  `UIActivityViewController` takes longer than 2 s to present, `shareSheetUp` goes false while a
-  sheet is up and a late upgrade assigns `shareImage` underneath it — which the 2026-07-31 device
-  pass watched dismiss a presented sheet. Today it is nearly unreachable because upgrades resolve
-  at ~1.5 s; **retry makes late landings routine and therefore makes this reachable.** Device-pass
-  item 8 covers the happy path only. Probably a separate issue — raise it rather than widening
-  this one.
-- **A committed retry cannot be retracted.** `slot.run` has no cancellation point, so a rider who
-  taps and immediately leaves has left a pipeline running for a ride nobody is looking at. Bounded
-  by taps on a screen the rider is looking at; not solvable at this layer.
-- **`SharePresentation.isPresenting` is true for any modal** (`:437-444`), so an unrelated system
-  alert during a retry pins `shareSheetUp`.
-- **`@State` copies of `content`/`title` freeze the units** at first render, so a retry after a
-  remote units change re-renders with stale units. Present today; retry makes it visible.
-- **The `saveFailed` + no-checkpoint case** is where the share card is the only artifact of the
-  ride that will ever exist, and Done destroys the retry. Treated identically here; whether it
-  deserves special handling is a real product question, deferred.
+1. **Measure** (Task 9's log): upgrade durations and reject timings at ride end, wifi and
+   cellular. Check 6 s against reality rather than against arithmetic.
+2. Airplane mode at ride end → offer appears; confirm it reads as an offer, not a failure.
+3. Re-enable wifi, tap it → map lands, "Map added" shows and stays.
+4. Tap it while still offline → indicator held ≥1 s, back to the offer, no flicker. **This is a
+   button that visibly does nothing, repeatable forever — judge whether that is acceptable or
+   whether the second consecutive failure needs to name connectivity.** Recorded as an open
+   question, not a pass/fail.
+5. Pocket the phone **during the attempt** → map present on unlock, no interaction. (Auto-apply,
+   not the auto-retry — the spec calls this the primary mechanism.)
+6. Pocket the phone **after the offer appears** → exactly one automatic retry on unlock.
+7. Control Center during `unavailable`, dismiss → **no automatic retry.** Then: share to Messages,
+   come back → confirm the card does not swap under you.
+8. Reach for Done as the phase changes → **Done must not move.** Repeat at AX3 and confirm the
+   button is still one line and still 44 pt.
+9. Tap Share **during a retry, on a cold first share** → the sheet must survive (Task 5).
+10. VoiceOver: `unavailable` announced once; a failed automatic retry silent; **and check where
+    focus goes when the row changes from a `Text` to a `Button`** — that identity change drops
+    focus, and no earlier revision tested it.
+11. Tap the offer, then immediately tap Done → clean dismissal, no state write on a torn-down view.
+
+Revision 1's "Reduce Motion → identical deadline behaviour" is **cut**: the deadline has no Reduce
+Motion coupling by construction, so it confirmed that 6 s equals 6 s. What needs looking at under
+Reduce Motion is Task 7's cross-fade.
+
+Items 8 and 9 overlap **ROH-140** on this surface — worth closing what you can in the same session.
+
+- [ ] **Step 4: Answer the spec's open questions**, which the pass exists to answer, not confirm.
+      Question 3 — does the offer make riders wait to share who otherwise would not have — is a
+      field question that one tester cannot settle. Record it as unmeasured rather than hand-waved.
+- [ ] **Step 5:** Whole-branch review on the most capable model, then PR, then ROH-161 → In Review.
+
+---
+
+## What revision 1 got wrong
+
+Kept because the failures are properties of this work, not of one draft. Three reviewers, two of
+whom built reproduction packages.
+
+1. **Four of five pasted Swift blocks did not compile** — an undeclared `showDelayDuration`, an
+   initializer taking two parameters its own tests called with three (twice), and an `async let`
+   sending `@MainActor` self in the one file that documents that exact trap.
+2. **Tasks 2, 3 and 4 could not each end on a green suite**, which was the plan's own per-task
+   contract and what `.claude/agent-gate.sh` enforces. Two of them committed a non-compiling test
+   module, which fails every test in the package.
+3. **Task 4 made three earlier tests hang rather than fail**, on anonymous timers nothing held a
+   reference to — 15 minutes of gate timeout that reads as a slow machine.
+4. **The dwell was a no-op in every path.** Task 5's `defer` beat Task 4's hop by a second, so
+   Task 4's own flagship test went red three tasks after it was written.
+5. **A stale dwell hop could re-apply a previous attempt's terminal phase over a live retry**, in
+   the pocketed-phone case, ending with a dead button and a forbidden second announcement.
+6. **Task 6's ordering instruction was unsatisfiable** against Task 2's `defer`, and its own tests
+   could not detect the violation — the invariant was a paragraph, not a line.
+7. **The tree did not compile between Tasks 7 and 10**, while three tasks claimed clean builds.
+8. **Nine of eighteen presenter tests were comment-only stubs**, including both labelled "THE"
+   regression test. An empty XCTest method passes, so two load-bearing green gates were satisfied
+   by nothing.
+9. **"Map added, ~2 s, then empty" had no owner** — no timer, no test, no phase to return to.
+10. **It dropped the `!Task.isCancelled` guard** at `:187` silently.
+11. **It said to grep for a test double that does not exist**, so the grep returns nothing and the
+    one call site that breaks goes unnoticed.
+12. **`isRetry` conflated "the rider asked" with "skip the show-delay"**, so the automatic retry
+    would have announced itself to a rider who had just unlocked their phone — and a slow *first*
+    attempt that succeeded showed no confirmation at all, which is this issue's own symptom.
+
+What held up: every file:line anchor and both quotations were verified correct by the skeptic, and
+both corrections revision 1 made to the spec's file table were right.
 
 > `humanizer` is mandated by CLAUDE.md for prose deliverables and is **not installed on this
 > machine**, so this plan did not go through it.
