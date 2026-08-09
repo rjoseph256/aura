@@ -30,7 +30,9 @@ So revision 3 changes the rules rather than making a third attempt at the same t
 
 ## Preconditions
 
-- [ ] **Docker + Supabase CLI.** `which supabase` and `docker info`. **Neither is available on the machine this plan was written on.** The documented fallback (`2026-06-29-group-rides-sp1-backend-identity.md:21`) is MCP `execute_sql` against a dev branch — but see Task 1 Step 5, which cannot run under that fallback as a simple substitution. Record any substitution in the commit message. Do not silently skip Task 1; that is how `794d748` got here unverified.
+- [ ] **Where the pgTAP actually runs.** `which supabase` and `docker info` both fail on the machine this plan was written on, so there is no local stack. The fallback the older plans name (`2026-06-29-group-rides-sp1-backend-identity.md:21`) — MCP `execute_sql` against a dev branch — **is also unavailable**: `supabase/config.toml`'s `project_id = "aura"` is the local CLI name, not a hosted ref, and no Aura project is reachable through the Supabase connector on this machine.
+
+  **The real path is CI.** `.github/workflows/ci.yml:201-212` runs a `db-tests` job on ubuntu that does `supabase start` then `supabase test db`, so pushing the branch executes the suite. Task 1 is therefore written locally and **verified by the CI run on the PR**, not by a local invocation. That is weaker in one specific way — the edit/observe loop is minutes per iteration instead of seconds — and Task 1 Step 4's discrimination check needs its own throwaway commit. Both are stated where they bite. What is *not* acceptable is marking Task 1 done without a green `db-tests` run; that is how `794d748` got here unverified.
 - [ ] **Mapbox token**, or Task 2 fails on SPM rather than on code (`docs/COLLABORATOR-SETUP.md:82-93`).
 
 ## Read this before Task 1
@@ -103,13 +105,13 @@ alter table public.rides
 
   Set `plan(n)` to the assertion count you actually write.
 
-- [ ] **Step 3: Run.** `supabase db reset && supabase test db`, or the fallback. Expected: all pass. A failure is a **real defect in `794d748` or 0022** — *unless* it is one of the four known test-shaped hazards: RLS visibility, `created_at` ties, `throws_ok` arity, or a grant assumption. Diagnose which before touching a migration. Revision 2 pre-committed the implementer to "it's a migration defect" and would have sent them hunting two bugs that do not exist.
+- [ ] **Step 3: Run it on CI.** Push the branch and read the `db-tests` job. Expected: all pass. A failure is a **real defect in `794d748` or 0022** — *unless* it is one of the four known test-shaped hazards: RLS visibility, `created_at` ties, `throws_ok` arity, or a grant assumption. Diagnose which before touching a migration. Revision 2 pre-committed the implementer to "it's a migration defect" and would have sent them hunting two bugs that do not exist.
 
-- [ ] **Step 4: Prove the join gate discriminates.** Comment out `if v_ride.kind = 'open' and not p_supports_open …` (`0021:74`), re-run, confirm assertion 4 fails, restore, re-run.
+  Budget for this honestly: each iteration is a push and a CI wait. Read the whole TAP output before changing anything, rather than fixing one assertion per run.
 
-- [ ] **Step 5: If running under the MCP fallback, adapt Step 4 explicitly.** There is no "re-run the migration file" against a live branch: 0021 does `drop function` + `create` + `revoke`/`grant`, so mutating it means hand-issuing that sequence twice. Confirm `pgtap` is installed on the branch first, and decide how you will read TAP output from `plan()`/`finish()` through `execute_sql`. If any of that is not workable, **say so in the commit message rather than marking the task done**.
+- [ ] **Step 4: Prove the join gate discriminates.** Comment out `if v_ride.kind = 'open' and not p_supports_open …` (`0021:74`), push as a throwaway commit, confirm the CI `db-tests` job fails on that one assertion, then revert the commit and confirm green again. A test that passes against both the working and the broken gate is testing nothing — and the RLS defect in revision 1 was exactly a test that passed for the wrong reason.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 5: Commit.**
 
 ```bash
 git add supabase/migrations/0022_open_ride_invariant.sql supabase/tests/0021_open_rides_test.sql
