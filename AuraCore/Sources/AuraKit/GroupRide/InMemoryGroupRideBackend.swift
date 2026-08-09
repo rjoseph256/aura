@@ -13,6 +13,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var forceRenameError: GroupRideError?    // test spy
         var forceDeleteError: GroupRideError?    // test spy
         var forceStartError: GroupRideError?     // test spy
+        var forceRosterError: GroupRideError?    // test spy
         var forceEndError: GroupRideError?       // test spy, one-shot: cleared on throw so a retry succeeds
         var hangEndLeave = false                          // test spy: park endRide/leaveRide until cancelled
         var onEndLeaveEntered: (@Sendable () -> Void)?    // test spy: fired when end/leave is entered
@@ -73,7 +74,8 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         return JoinedRide(ride: ride, route: store.routes[rideID] ?? Data())
     }
     public func roster(rideID: UUID) async throws -> [RosterMember] {
-        (store.members[rideID] ?? []).map {
+        if let forced = store.forceRosterError { throw forced }
+        return (store.members[rideID] ?? []).map {
             RosterMember(userID: $0, displayName: store.names[$0] ?? "Rider",
                          role: $0 == store.rides[rideID]?.hostID ? .host : .member)
         }
