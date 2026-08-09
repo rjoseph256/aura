@@ -76,7 +76,8 @@ begin
   if v_ride.id is null then raise exception 'join failed'; end if;
 
   -- Same generic oracle as every other rejection: an old client learns nothing about why.
-  if v_ride.kind = 'open' and not p_supports_open then raise exception 'join failed'; end if;
+  -- MUTATION (temporary, reverted in the next commit): gate disabled to prove the test catches it.
+  -- if v_ride.kind = 'open' and not p_supports_open then raise exception 'join failed'; end if;
 
   if exists (select 1 from public.ride_members
              where ride_id = v_ride.id and user_id = v_uid) then
