@@ -2,44 +2,50 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A host starts a crew ride with no destination from Home, a guest joins by code, and both land in a lobby that says which kind of ride it is — with the SQL half actually tested.
+**Goal:** A host starts a crew ride with no destination, a guest joins by code, both tap through to a recording ride on the Explore cockpit, and the SQL underneath is actually tested.
 
-**Architecture:** Most of the wire already exists in `794d748`, written before this plan and never verified. So this plan opens by *proving or breaking* that commit rather than adding to it: pgTAP against migration 0021, then an app-target build. Only then does it close the `kind` seam the commit left half-built, and wire the two entry points. Nothing on the Explore cockpit is touched here — that is Plan 2.
+**Architecture:** Most of the wire already exists in `794d748`, written before this plan and never verified. So this plan opens by *proving or breaking* that commit rather than building on it. It then closes the `kind` seam, carries the ride kind and destination name to the lobby, wires both entry points, and forks the riding container so an open ride reaches the Explore HUD instead of an error screen. Peer rendering — dots, roster, colours — is Plan 2.
 
 **Tech Stack:** Swift 6 / SwiftUI, `AuraCore` + `AuraKit` packages, Supabase Postgres with pgTAP, PostgREST RPC.
 
-**Spec:** [`docs/superpowers/specs/2026-08-02-roh114-group-explore-design.md`](../specs/2026-08-02-roh114-group-explore-design.md) revision 5. This plan covers **D1**, **D2** and **D5.4**.
+**Spec:** [`2026-08-02-roh114-group-explore-design.md`](../specs/2026-08-02-roh114-group-explore-design.md) revision 5. Covers **D1**, **D2**, **D4.1**, **D4.5**, **D5.4**.
+
+**Revision 2 (2026-08-09), after a three-reviewer adversarial gate.** Revision 1 was scoped to stop before D4.1, which put a working dead end in front of every user of the feature; all three reviewers found it independently. It also carried a pgTAP suite that could not run, a test for a class with no test bundle, three snippets that would not compile, and no step that applied the migration to the project the device test targets. Details in "What the gate caught" at the end. **Weight accordingly:** revision 1 read as careful and was wrong in six places that would have cost cycles.
 
 ---
 
+## Preconditions — check these before Task 1, not during it
+
+- [ ] **Docker + the Supabase CLI.** `which supabase` and `docker info` must both succeed. **Neither is available on the machine this plan was written on.** The documented fallback (`2026-06-29-group-rides-sp1-backend-identity.md:21`) is to run the same SQL against a Supabase dev branch through the Supabase MCP `execute_sql`, **and to record that substitution in the task's commit message**. Do not silently skip Task 1 because the stack will not start — that is how `794d748` reached this branch unverified in the first place.
+- [ ] **The Mapbox token**, or Task 2 fails on SPM rather than on code. See `docs/COLLABORATOR-SETUP.md:82-93`.
+
 ## Read this before Task 1
 
-`794d748` is already on this branch. It implements D1.1, D1.2, D1.4 and D1.5, with `GroupRideOpenRideTests` and 880 green package tests. Its own commit message ends `NOT YET VERIFIED`, and that is accurate:
+`794d748` is already on this branch: D1.1, D1.2, D1.4 and D1.5, with `GroupRideOpenRideTests` and 880 green package tests (re-run and confirmed by a reviewer). Its own commit message ends `NOT YET VERIFIED`, and that is accurate — the app target has never compiled with it, and migration `0021_open_rides.sql` has never been applied or tested anywhere.
 
-- the app target has never compiled with it;
-- migration `0021_open_rides.sql` has never been applied or tested.
+The SQL half is the dangerous one. D1.5 drops and recreates `join_ride`, and the spec says getting it wrong "takes down joining for **every** client including route rides."
 
-The second is the dangerous one. D1.5 drops and recreates `join_ride`, and the spec says in terms that getting it wrong "takes down joining for **every** client including route rides." There is currently no evidence it is right.
-
-**It is also incomplete against its own spec section.** D1.3 lists five Swift seams. `GroupRide.kind` (item 3) and `GroupRideSession.rideKind` (item 4) were never added — `GroupRide.swift` is not in the commit — so `kind` reaches SQL and stops. That is exactly the dead-seam failure D1.3 was written to prevent. Tasks 3 and 4 close it, and Task 4 gives it a consumer in the same plan so it cannot sit dead.
+**What it left unfinished**, against D1.3's own seam list: `GroupRide.kind` (item 3) and `rideKind` (the second half of item 4) were never added, so `kind` reaches SQL and stops. *`GroupRideSession.create(route: Route?)` — the first half of item 4 — was done; revision 1 of this plan said otherwise and was wrong.*
 
 ## File structure
 
 | File | Responsibility | Status |
 | --- | --- | --- |
-| `supabase/migrations/0021_open_rides.sql` | nullable route, `rides.kind`, `join_ride` gate | exists, untested |
-| `supabase/tests/0021_open_rides_test.sql` | pgTAP for the above | **create** |
-| `AuraCore/Sources/AuraCore/GroupRide/GroupRide.swift` | `GroupRide.kind` | **modify** |
-| `Aura/Sources/Sync/SupabaseGroupRideBackend.swift` | `GroupRideRow.kind` → domain | modify (route half done) |
-| `AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift` | `rideKind` for the lobby | modify (route half done) |
-| `AuraCore/Sources/AuraKit/GroupRide/InMemoryGroupRideBackend.swift` | fake must carry `kind` too | **modify** |
-| `Aura/Sources/GroupRide/GroupLobbyView.swift` | D5.4 kind line | **modify** |
-| `AuraCore/Sources/AuraCore/Navigation/AppRoute.swift` | `GroupRideEntry.create(Route?)` | **modify** |
-| `Aura/Sources/GroupRide/GroupRideFlowView.swift` | `invokeEntry` optional route | **modify** |
-| `Aura/Sources/Home/HomeLaunchBand.swift` | "Join a ride" → "Crew" | **modify** |
-| `Aura/Sources/GroupRide/GroupRideJoinView.swift` | two actions, no keyboard trap | **modify** |
-
-Commands used throughout:
+| `supabase/migrations/0021_open_rides.sql` | nullable route, `kind`, join gate, **+ the kind/route CHECK** | exists, amend |
+| `supabase/tests/0021_open_rides_test.sql` | pgTAP | **create** |
+| `AuraCore/Sources/AuraCore/GroupRide/GroupRide.swift` | `GroupRide.Kind` | **modify** |
+| `AuraCore/Sources/AuraCore/GroupRide/RouteEnvelope.swift` | testable route-bytes folding | **create** |
+| `Aura/Sources/Sync/SupabaseGroupRideBackend.swift` | row → domain, calls the above | modify |
+| `AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift` | `rideKind` | modify |
+| `AuraCore/Sources/AuraKit/GroupRide/InMemoryGroupRideBackend.swift` | fake must not lose `kind` | **modify** |
+| `AuraCore/Sources/AuraCore/GroupRide/GroupRideSubtitle.swift` | D5.4 copy | **create** |
+| `AuraCore/Sources/AuraCore/Navigation/AppRoute.swift` | `create(Route?, Place?)` | **modify** |
+| `Aura/Sources/Plan/RoutePreviewView.swift` | stop dropping the destination name | **modify** |
+| `Aura/Sources/GroupRide/GroupLobbyView.swift` | D5.4 line | **modify** |
+| `Aura/Sources/GroupRide/GroupRideFlowView.swift` | D4.1 fork | **modify** |
+| `Aura/Sources/Ride/RideHUDView.swift` | D4.5 `groupSink` at `.task` | **modify** |
+| `Aura/Sources/Home/HomeLaunchBand.swift` | chip label | **modify** |
+| `Aura/Sources/GroupRide/GroupRideJoinView.swift` + `AuraApp.swift` | two actions | **modify** |
 
 ```bash
 cd AuraCore && swift test --no-parallel
@@ -49,475 +55,340 @@ cd AuraCore && swift test --no-parallel
 supabase db reset && supabase test db
 ```
 
-The app build is **delegated to the `apple-platform-build-tools:builder` subagent**, never run inline — it takes ~13 minutes and floods a session with xcodebuild output.
+The app build is **delegated to the `apple-platform-build-tools:builder` subagent** — ~13 minutes, and its output would swamp a session.
 
 ---
 
-### Task 1: pgTAP for migration 0021 — the verification `794d748` skipped
+### Task 1: pgTAP for 0021 — the verification `794d748` skipped
 
-**Files:**
-- Create: `supabase/tests/0021_open_rides_test.sql`
-- Reference: `supabase/migrations/0021_open_rides.sql`, `supabase/tests/0014_join_cap_lock_test.sql` (nearest seeding precedent)
+**Files:** Create `supabase/tests/0021_open_rides_test.sql`; amend `supabase/migrations/0021_open_rides.sql`.
 
-Seeding convention is load-bearing and documented at `docs/superpowers/plans/2026-06-29-group-rides-sp1-backend-identity.md:22`: never insert into `public.profiles` (the `handle_new_user` trigger does it), seed `auth.users` with `(instance_id, id, aud, role, email)` as superuser **before** any role switch, then switch identity with `set local request.jwt.claims`.
+**Precedent is `0003_join_ride_test.sql` and `0014_join_cap_lock_test.sql`, and the pattern matters.** Both drive multi-identity flows through a `pg_temp` SECURITY DEFINER helper with `set_config(..., true)`, and **never** `set local role authenticated`. `0003:1-5` says why. Revision 1 of this plan cited 0014 and then wrote the role-switching pattern, which cannot work here: `rides_select` is members-only (`0002_membership_rls.sql:63-64`), so a guest reading `join_code` out of `public.rides` gets NULL, and `join_ride(NULL, …)` dies at the ride-not-found guard without ever reaching the kind gate.
 
-- [ ] **Step 1: Write the pgTAP test**
+- [ ] **Step 1: Add the missing invariant to the migration**
 
-Covers the four claims in the spec's Verification block, plus the discrimination check.
+`kind` is derived in `create_ride`'s body and nowhere enforced, so any service-role write or backfill can produce `kind='route'` with a null route — which lands a rider on the D4.1 error path — or `kind='open'` with a route, which draws a course under a "no destination" label. The column pair has one legal shape:
+
+```sql
+alter table public.rides
+  add constraint rides_kind_matches_route check ((kind = 'open') = (route is null));
+```
+
+- [ ] **Step 2: Write the test through a SECURITY DEFINER helper**
 
 ```sql
 begin;
-select plan(7);
+select plan(8);
 
--- Two users, seeded before any role switch.
-insert into auth.users (instance_id, id, aud, role, email) values
-  ('00000000-0000-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
-   'authenticated', 'authenticated', 'host@example.com'),
-  ('00000000-0000-0000-0000-000000000000', '22222222-2222-2222-2222-222222222222',
-   'authenticated', 'authenticated', 'guest@example.com');
+insert into auth.users (instance_id, id, aud, role, email)
+select '00000000-0000-0000-0000-000000000000',
+       ('bbbbbbbb-0000-0000-0000-00000000000'||g)::uuid,
+       'authenticated','authenticated','o'||g||'@test.dev'
+from generate_series(1,2) g;
 
-set local role authenticated;
-set local request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111"}';
+-- A pre-0021 row, to prove the backfill default. Inserted before any identity switch.
+insert into public.rides (host_id, join_code, route, expires_at)
+values ('bbbbbbbb-0000-0000-0000-000000000001', 'LEGACY01', '{}'::jsonb, now() + interval '1 day');
 
--- 1. An open ride is created through the RPC with p_route OMITTED, not passed as null.
---    Omission is the whole point: a jsonb 'null' scalar would satisfy `is not null`.
-select lives_ok($$ select public.create_ride() $$, 'create_ride with no p_route succeeds');
+create function pg_temp.open_ride_flow(
+  out open_kind text, out open_route_null boolean, out route_kind text,
+  out old_client_rejected boolean, out new_client_joined boolean)
+language plpgsql security definer set search_path = '' as $$
+declare v_open public.rides; v_route public.rides;
+begin
+  perform set_config('request.jwt.claims','{"sub":"bbbbbbbb-0000-0000-0000-000000000001"}', true);
 
-select is(
-  (select kind from public.rides order by created_at desc limit 1),
-  'open',
-  'a route-less create is stored as kind = open');
+  -- p_route OMITTED, not passed as null: a jsonb 'null' scalar would satisfy `is not null`.
+  select * into v_open from public.create_ride();
+  open_kind := v_open.kind;
+  open_route_null := v_open.route is null;
 
-select ok(
-  (select route is null from public.rides order by created_at desc limit 1),
-  'route is SQL NULL, not a jsonb null scalar');
+  select * into v_route from public.create_ride('{"distanceMeters": 8000}'::jsonb);
+  route_kind := v_route.kind;   -- by returned row, NOT by created_at: now() is constant in a txn
 
--- 2. A route create still derives kind = 'route'.
-select public.create_ride('{"distanceMeters": 8000}'::jsonb);
-select is(
-  (select kind from public.rides order by created_at desc limit 1),
-  'route',
-  'a create WITH a route derives kind = route');
+  perform set_config('request.jwt.claims','{"sub":"bbbbbbbb-0000-0000-0000-000000000002"}', true);
+  begin
+    perform public.join_ride(v_open.join_code, false);
+    old_client_rejected := false;
+  exception when others then old_client_rejected := true; end;
 
--- 3. join_ride refuses an open ride when the caller has not declared support...
-set local request.jwt.claims = '{"sub":"22222222-2222-2222-2222-222222222222"}';
+  begin
+    perform public.join_ride(v_open.join_code, true);
+    new_client_joined := true;
+  exception when others then new_client_joined := false; end;
+end; $$;
+
+select is(open_kind, 'open', 'a route-less create is stored as kind = open') from pg_temp.open_ride_flow();
+select ok(open_route_null, 'route is SQL NULL, not a jsonb null scalar') from pg_temp.open_ride_flow();
+select is(route_kind, 'route', 'a create WITH a route derives kind = route') from pg_temp.open_ride_flow();
+select ok(old_client_rejected, 'an old client is refused an open ride') from pg_temp.open_ride_flow();
+select ok(new_client_joined, 'a supporting client joins an open ride') from pg_temp.open_ride_flow();
+
+select is((select kind from public.rides where join_code = 'LEGACY01'), 'route',
+          'a pre-0021 row backfills to kind = route');
+
+-- The CHECK from Step 1 actually bites.
 select throws_ok(
-  format($$ select public.join_ride(%L, false) $$,
-         (select join_code from public.rides where kind = 'open' order by created_at desc limit 1)),
-  'join failed',
-  'an old client is refused an open ride, with the generic oracle');
+  $$ update public.rides set route = null where join_code = 'LEGACY01' $$,
+  '23514', 'a route ride cannot lose its route without changing kind');
 
--- 4. ...and accepts it when it has.
-select lives_ok(
-  format($$ select public.join_ride(%L, true) $$,
-         (select join_code from public.rides where kind = 'open' order by created_at desc limit 1)),
-  'a supporting client joins an open ride');
-
--- 5. The drop-and-recreate left the grant intact. See the note below before trusting this.
-select ok(
-  has_function_privilege('authenticated', 'public.join_ride(text, boolean)', 'execute'),
-  'join_ride is still executable by authenticated after the drop/recreate');
+-- The DISCRIMINATING grant assertion. `has_function_privilege('authenticated', ...)` is true
+-- the moment the function exists, because Postgres grants EXECUTE to PUBLIC by default and
+-- authenticated inherits it — so the positive assertion the spec suggests cannot fail. The
+-- negative one fails if 0021's `revoke ... from public` line is dropped.
+select ok(not has_function_privilege('anon', 'public.join_ride(text, boolean)', 'execute'),
+          'anon cannot execute join_ride after the drop/recreate');
 
 select * from finish();
 rollback;
 ```
 
-- [ ] **Step 2: Run it**
+- [ ] **Step 3: Run it**
 
-Run: `supabase db reset && supabase test db`
-Expected: **7/7 PASS.** This is verification of code already written, so a pass is the expected outcome — and a *failure here is a real defect in `794d748`*, not a test bug. Do not edit the test to make it pass. Fix the migration, or stop and report.
+Run: `supabase db reset && supabase test db` (or the MCP fallback from Preconditions).
+Expected: **8/8 PASS.** This verifies code already written, so a pass is expected — and a failure is a **real defect in `794d748`** unless it is one of the two known test-shaped hazards above (RLS visibility, `created_at` ties). Diagnose which before touching the migration.
 
-- [ ] **Step 3: Prove the join gate test discriminates**
+- [ ] **Step 4: Prove the join gate assertion discriminates**
 
-A test that passes against both the fixed and the broken code tests nothing. This is the same reasoning the ROH-167 guard used to reject asserting `isLive` directly.
-
-Temporarily comment out this line in `supabase/migrations/0021_open_rides.sql`:
-
-```sql
-  if v_ride.kind = 'open' and not p_supports_open then raise exception 'join failed'; end if;
-```
-
-Run: `supabase db reset && supabase test db`
-Expected: **the `throws_ok` assertion FAILS.** If it still passes, the test is not reaching the gate — fix the test before restoring.
-
-Then restore the line and re-run: back to 7/7.
-
-- [ ] **Step 4: Record what the grant assertion is worth**
-
-Add this comment above assertion 7, and do not skip it — the spec calls this one out specifically:
-
-```sql
--- NOTE: this assertion may be theatre. 0020_revoke_maintenance_rpc_from_api_roles.sql:4-10
--- documents that hosted Supabase materialises explicit grants at function-create time via
--- ALTER DEFAULT PRIVILEGES, and the local CLI stack replicates it — so this would pass whether
--- or not the migration re-grants. Keep it as a tripwire; do not read a pass as proof.
-```
+Comment out `if v_ride.kind = 'open' and not p_supports_open then raise exception 'join failed'; end if;` in the migration, re-run, and confirm **`old_client_rejected` fails**. If it still passes, the test is not reaching the gate — fix the test, not the migration. Restore, re-run, back to 8/8.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add supabase/tests/0021_open_rides_test.sql supabase/migrations/0021_open_rides.sql
-git commit -m "test(roh-114): pgTAP the open-ride migration that shipped unverified"
+git commit -m "test(roh-114): pgTAP the open-ride migration, and constrain kind to match route"
 ```
 
 ---
 
-### Task 2: Prove the app target still compiles
+### Task 2: Prove the app target compiles
 
-**Files:** none changed — this is a gate, not an edit.
+**Files:** none — a gate.
 
-`794d748` changed a protocol signature (`createRide(route: Data?)`) that the app target conforms to. The package suite cannot see that.
+`794d748` changed a protocol the app target conforms to. The package suite cannot see that.
 
-- [ ] **Step 1: Delegate the build**
-
-Dispatch the `apple-platform-build-tools:builder` subagent with: *"Build the Aura app target for an iOS simulator. Report success, or the first compiler error with its file and line. Do not attempt fixes."*
-
-Expected: success.
-
-If it fails on a **missing Mapbox token** rather than a compiler error, that is an environment problem, not a code problem — see `docs/COLLABORATOR-SETUP.md:82-93` for the `~/.netrc` entry SPM needs. Fix the environment and re-dispatch. Do not proceed past this task on an unbuilt app target; the whole reason this plan exists is that someone did.
-
-- [ ] **Step 2: If it fails on a real compiler error, fix and re-dispatch**
-
-Likely sites are the `GroupRideBackend` conformance in `Aura/Sources/Sync/SupabaseGroupRideBackend.swift` and any call to `session.create(route:)`. Commit any fix as `fix(roh-114): <what>` before continuing.
+- [ ] **Step 1:** Dispatch `apple-platform-build-tools:builder`: *"Build the Aura app target for an iOS simulator. Report success, or the first compiler error with file and line. Do not attempt fixes."*
+- [ ] **Step 2:** Fix any real compiler error and re-dispatch; commit as `fix(roh-114): …`. A missing Mapbox token is an environment failure, not a code one — see Preconditions.
 
 ---
 
-### Task 3: `kind` reaches the client
+### Task 3: The decoder test the spec singles out, made possible
 
-**Files:**
-- Modify: `AuraCore/Sources/AuraCore/GroupRide/GroupRide.swift`
-- Modify: `Aura/Sources/Sync/SupabaseGroupRideBackend.swift` (`GroupRideRow`, `toDomain()`)
-- Modify: `AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift` (expose `rideKind`)
-- Modify: `AuraCore/Sources/AuraKit/GroupRide/InMemoryGroupRideBackend.swift`
-- Test: `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideOpenRideTests.swift` (extend)
+**Files:** Create `AuraCore/Sources/AuraCore/GroupRide/RouteEnvelope.swift`; modify `SupabaseGroupRideBackend.swift`; test in `AuraCore/Tests/AuraCoreTests/GroupRide/`.
 
-`join_ride` and `create_ride` both `returns public.rides`, so `kind` is already on the wire the moment the column exists — only the Swift decode is missing.
+The spec's Verification block calls this **"the test R1 lacked"**: `"route": null` through the real row decoder, asserting nil, and it "cannot run against the in-memory fake." It also cannot run where the code currently lives — `GroupRideRow` is `private` (`SupabaseGroupRideBackend.swift:141`) in a target whose only test bundle is `Aura/UITests`. Writing a mirror struct in AuraCore would be the same evasion the spec rejects.
 
-Per D1.3, the client reads the **stored** column rather than re-deriving from a nil route, so there is one authority for the read side.
+So move the logic, not the test: the `.null`-folding rule becomes a pure function in AuraCore, and `GroupRideRow.routeData()` calls it. The bug then lives somewhere a test can see.
 
 - [ ] **Step 1: Write the failing test**
+
+```swift
+@Test func aJSONNullRouteFoldsToNil() throws {
+    #expect(try RouteEnvelope.bytes(from: AnyJSONLike.null) == nil)
+}
+@Test func anAbsentRouteIsNil() throws {
+    #expect(try RouteEnvelope.bytes(from: nil) == nil)
+}
+@Test func aPresentRouteSurvives() throws {
+    #expect(try RouteEnvelope.bytes(from: .object(["distanceMeters": .number(8000)])) != nil)
+}
+```
+
+`AnyJSON` belongs to the Supabase SDK and is not visible in AuraCore. Define the minimal `AnyJSONLike` enum this function needs in `RouteEnvelope.swift`, and have `GroupRideRow` map its `AnyJSON` into it at the boundary — a two-line mapping in the app target, with the *rule* in the package.
+
+- [ ] **Step 2:** Run `cd AuraCore && swift test --no-parallel --filter RouteEnvelope` → FAIL (no such type).
+- [ ] **Step 3:** Implement `RouteEnvelope.bytes(from:)`, then rewrite `routeData()` to delegate. Behaviour must not change.
+- [ ] **Step 4:** Run `cd AuraCore && swift test --no-parallel` → PASS. Then **re-dispatch the builder** — this touches the app target.
+- [ ] **Step 5:** Commit as `refactor(roh-114): make the null-route fold testable where the bug was`.
+
+---
+
+### Task 4: `kind` reaches the client, without the fake lying about it
+
+**Files:** `GroupRide.swift`, `SupabaseGroupRideBackend.swift`, `GroupRideSession.swift`, `InMemoryGroupRideBackend.swift`; extend `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideOpenRideTests.swift`.
+
+**Two traps the gate found.**
+
+*Decode side.* `let kind: String` as a **required** key means a build reaching a device before 0021 is applied fails to decode every ride — and `joinRide`'s blanket `catch` (`SupabaseGroupRideBackend.swift:56`) reports "double-check the code with your host" for route rides too. Use `let kind: String?` with `?? "route"`, which survives both rollout directions.
+
+*Fake side.* `InMemoryGroupRideBackend.startRide` (`:92`) and `endRide` (`:109`) **rebuild** `GroupRide` positionally. A trailing defaulted `kind:` would silently reset an open ride to `.route` at every lifecycle write, so Plans 2 and 3 would build crew behaviour on a fake that misreports the seam. Both sites must pass `kind: ride.kind` explicitly.
+
+- [ ] **Step 1: Write the failing tests** — use the file's existing `host()` / `guest(sharing:)` / `route()` helpers (`GroupRideOpenRideTests.swift:32-34`), which sign in and supply `transport:`. Do not hand-roll a session; revision 1's snippets omitted `transport:` (no default) and the sign-in, and used a `Route.fixture()` that does not exist.
 
 ```swift
 @Test func aCreatedOpenRideReportsItsKind() async {
-    let backend = InMemoryGroupRideBackend()
-    let session = GroupRideSession(backend: backend, displayNameProvider: { "Alice" })
-    await session.create(route: nil)
+    let session = host(); await session.create(route: nil)
     #expect(session.rideKind == .open)
 }
-
-@Test func aJoinedRouteRideReportsItsKind() async {
+@Test func anOpenRideStaysOpenAcrossAStart() async {
     let backend = InMemoryGroupRideBackend()
-    let host = GroupRideSession(backend: backend, displayNameProvider: { "Alice" })
-    await host.create(route: .fixture())
-    let guest = GroupRideSession(backend: backend, displayNameProvider: { "Bob" })
-    await guest.join(code: host.joinCode!)
-    #expect(guest.rideKind == .route)
+    let h = host(on: backend); await h.create(route: nil); await h.startRiding()
+    let g = guest(sharing: backend); await g.join(code: h.joinCode!)
+    #expect(g.rideKind == .open)   // the defaulted-parameter trap, caught
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `cd AuraCore && swift test --no-parallel --filter GroupRideOpenRideTests`
-Expected: FAIL — `rideKind` does not exist.
-
-- [ ] **Step 3: Add the field through every layer**
-
-`GroupRide.swift` — the enum is defined here beside `Status`, which it parallels:
-
-```swift
-public enum Kind: String, Codable, Sendable { case route, open }
-public let kind: Kind
-```
-
-Add `kind: Kind = .route` to `init` **at the end of the parameter list with a default**, so the many existing construction sites in tests keep compiling and mean what they meant before.
-
-`GroupRideRow` in `SupabaseGroupRideBackend.swift` — add `let kind: String`, add `case kind` to `CodingKeys`, and in `toDomain()` map it with a fallback rather than a force:
-
-```swift
-kind: GroupRide.Kind(rawValue: kind) ?? .route
-```
-
-An unknown future kind degrades to a route ride rather than throwing a guest out mid-join.
-
-`GroupRideSession` — expose it for D5.4:
-
-```swift
-/// The ride's kind as the server stored it (D1.3): the read side has one authority, so this
-/// is never re-derived from `route == nil`.
-public private(set) var rideKind: GroupRide.Kind = .route
-```
-
-Assign it in **both** `create` and `join`, beside the existing `rideID` assignments.
-
-`InMemoryGroupRideBackend` — its `createRide` must set `kind` from whether `route` was nil, mirroring the SQL derivation, or every fake-backed test lies about the seam.
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `cd AuraCore && swift test --no-parallel`
-Expected: PASS, whole suite green.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add AuraCore Aura/Sources/Sync/SupabaseGroupRideBackend.swift
-git commit -m "feat(roh-114): carry the ride kind from the column to the client"
-```
+- [ ] **Step 2:** Run `--filter GroupRideOpenRideTests` → FAIL.
+- [ ] **Step 3:** Implement. `GroupRide.Kind` beside `Status`; `kind: Kind = .route` as a trailing init parameter **and** an explicit `kind: ride.kind` at both `InMemoryGroupRideBackend` rebuild sites; `GroupRideRow.kind: String?`; `rideKind` on the session assigned in both `create` and `join`.
+- [ ] **Step 4:** `swift test --no-parallel` → PASS, then re-dispatch the builder.
+- [ ] **Step 5:** Commit as `feat(roh-114): carry the ride kind from the column to the client`.
 
 ---
 
-### Task 4: The lobby names the ride kind (D5.4)
+### Task 5: Stop throwing away the destination name (D1.3 item 5, and D5.4's real copy)
 
-**Files:**
-- Modify: `Aura/Sources/GroupRide/GroupLobbyView.swift` (header, ~`:84-94`)
+**Files:** `AppRoute.swift:47-76` (both `==` **and** `hash(into:)` — they are at `:52-63` and `:65-76`), `RoutePreviewView.swift:250`, `GroupRideFlowView.swift:149-156`.
 
-Without this, Task 3 is dead code, which is the failure this plan exists to stop repeating. D1.6 keeps `GroupLobbyView` structurally unchanged; this is the one copy addition it allows.
+D5.4 promises "Heading to Blue Bottle · 8 km". Revision 1 concluded the name was unavailable and substituted "Heading somewhere". That was wrong: `RoutePreviewView` holds `destination: Place` (`:19`), already renders `destination.name` (`:80`), and already pairs route-with-Place for the solo path (`:241`). Only `.create(selected)` (`:250`) drops it — and this task is editing that payload anyway.
 
-**A spec gap to settle first.** D5.4 gives the route-ride example as `"Heading to Blue Bottle · 8 km"`. **`Route` carries no destination name** — `Route.swift:3-18` has `origin`, `destination` and `waypoints` as bare `Coordinate`s. There is no "Blue Bottle" anywhere on the guest's side, and inventing a reverse-geocode here is out of scope. Ship the distance, which is real:
-
-- open: `"Open ride — no destination"`
-- route: `"Heading somewhere · 8.0 mi"` — distance from `session.route?.distanceMeters`, formatted through the existing units setting.
-
-Flag this to the spec author rather than silently downgrading the copy.
-
-- [ ] **Step 1: Write the failing test**
-
-There is no view-test harness for the lobby, so test the string, not the view. Put the formatter in AuraCore where it can be seen:
+- [ ] **Step 1: Write the failing test** in `AuraCore/Tests/AuraCoreTests/AppRouteTests.swift` (the real home for `GroupRideEntry` equality; `Tests/AuraCoreTests/Navigation/` does not exist).
 
 ```swift
-@Test func openRideSubtitleNamesTheKind() {
-    #expect(GroupRideSubtitle.text(kind: .open, distanceMeters: nil, isImperial: true)
-            == "Open ride — no destination")
-}
-
-@Test func routeRideSubtitleCarriesTheDistance() {
-    #expect(GroupRideSubtitle.text(kind: .route, distanceMeters: 12_875, isImperial: true)
-            == "Heading somewhere · 8.0 mi")
-}
-
-@Test func aRouteRideWithNoDistanceStillSaysSomething() {
-    #expect(GroupRideSubtitle.text(kind: .route, distanceMeters: nil, isImperial: true)
-            == "Heading somewhere")
+@Test func openCreateEntriesAreEqualAndHashAlike() {
+    let a = GroupRideEntry.create(nil, nil), b = GroupRideEntry.create(nil, nil)
+    #expect(a == b); #expect(Set([a, b]).count == 1)
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `cd AuraCore && swift test --no-parallel --filter GroupRideSubtitle`
-Expected: FAIL — no such type.
-
-- [ ] **Step 3: Implement**
-
-Create `AuraCore/Sources/AuraCore/GroupRide/GroupRideSubtitle.swift`, a pure function over `(kind, distanceMeters, isImperial)`. Reuse the existing distance formatter rather than writing a second one — grep for how `GroupRosterViewData` formats distance and match it.
-
-Then render it in `GroupLobbyView`'s header, under `Text("Ride together")`, as a third line in that `VStack`, styled like the existing subtitle (`.font(.subheadline)`, `AuraTheme.textSecondary`).
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `cd AuraCore && swift test --no-parallel`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add AuraCore Aura/Sources/GroupRide/GroupLobbyView.swift
-git commit -m "feat(roh-114): the lobby says which kind of ride a guest just joined"
-```
+- [ ] **Step 2:** Run `--filter AppRouteTests` → FAIL.
+- [ ] **Step 3:** `case create(Route?, Place?)`; `==` compares `a?.id == b?.id` and the place; `hash(into:)` combines `route?.id`. `Optional`'s conformances give this free — no invented discriminator, as the spec says. Update `:250` to pass `destination`, and `invokeEntry` to ignore the place (the lobby reads it in Task 6).
+- [ ] **Step 4:** `swift test --no-parallel` → PASS; re-dispatch the builder.
+- [ ] **Step 5:** Commit as `feat(roh-114): a create entry carries an optional route and its place`.
 
 ---
 
-### Task 5: `GroupRideEntry.create` takes an optional route (D1.3 item 5)
+### Task 6: The lobby names the ride kind (D5.4)
 
-**Files:**
-- Modify: `AuraCore/Sources/AuraCore/Navigation/AppRoute.swift:47-60`
-- Modify: `Aura/Sources/GroupRide/GroupRideFlowView.swift:149-156` (`invokeEntry`)
-- Test: `AuraCore/Tests/AuraCoreTests/Navigation/` (nearest existing `GroupRideEntry` test)
+**Files:** Create `GroupRideSubtitle.swift`; modify `GroupLobbyView.swift:84-94`.
 
-The spec settles the `Equatable`/`Hashable` question: `Route?` gives `a?.id == b?.id` and `hasher.combine(route?.id)` free from `Optional`'s conformances. The naive edit compiles and is correct — no invented discriminator.
+Without this, Task 4 is dead code — the failure this plan exists to stop repeating.
+
+**Do not add `@Environment(SettingsStore.self)` to `GroupLobbyView`.** It is injected only at the app root (`AuraApp.swift:13,40`), so the two lobby previews (`GroupLobbyView.swift:313-323`) would trap at runtime. Pass `isImperial` down from `GroupRideFlowView`. **Do not reuse `PeerDistance`** — it takes a `RidePeer` and returns "0.4 mi ahead", not "8.0 mi", and the repo has two mile divisors (`PeerDistance.swift:15` uses 1609.34, `UnitConverter.swift:3` uses 1609.344). Use `UnitConverter`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```swift
-@Test func twoOpenCreateEntriesAreEqualAndHashAlike() {
-    let a = GroupRideEntry.create(nil)
-    let b = GroupRideEntry.create(nil)
-    #expect(a == b)
-    #expect(Set([a, b]).count == 1)
-}
-
-@Test func anOpenCreateDiffersFromARouteCreate() {
-    #expect(GroupRideEntry.create(nil) != GroupRideEntry.create(.fixture()))
-}
+#expect(GroupRideSubtitle.text(kind: .open, placeName: nil, distanceMeters: nil, isImperial: true)
+        == "Open ride — no destination")
+#expect(GroupRideSubtitle.text(kind: .route, placeName: "Blue Bottle", distanceMeters: 12_875, isImperial: true)
+        == "Heading to Blue Bottle · 8.0 mi")
+#expect(GroupRideSubtitle.text(kind: .route, placeName: nil, distanceMeters: 12_875, isImperial: true)
+        == "8.0 mi route")
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+The no-name fallback leads with the fact rather than apologising for the gap — a guest who joined by code has no Place, and "Heading somewhere" tells them nothing.
 
-Run: `cd AuraCore && swift test --no-parallel --filter GroupRideEntry`
-Expected: FAIL — `create` does not accept nil.
-
-- [ ] **Step 3: Implement**
-
-`case create(Route?)`; in `==`, `case let (.create(a), .create(b)): return a?.id == b?.id`; in `hash(into:)`, `hasher.combine(route?.id)`. In `invokeEntry`, `case let .create(route): await session.create(route: route)` — which now type-checks unchanged, since `create` already takes `Route?`.
-
-- [ ] **Step 4: Run to verify it passes**
-
-Run: `cd AuraCore && swift test --no-parallel`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add AuraCore Aura/Sources/GroupRide/GroupRideFlowView.swift
-git commit -m "feat(roh-114): a create entry can carry no route"
-```
+- [ ] **Step 2:** Run → FAIL. **Step 3:** Implement and render as a third line in the header `VStack`, `.font(.subheadline)`, `AuraTheme.textSecondary`. **Step 4:** `swift test` → PASS; re-dispatch the builder.
+- [ ] **Step 5:** Commit as `feat(roh-114): the lobby says which kind of ride a guest just joined`.
 
 ---
 
-### Task 6: Home's chip becomes "Crew" (D2)
+### Task 7: The riding container stops treating "no route" as a failure (D4.1)
 
-**Files:**
-- Modify: `Aura/Sources/Home/HomeLaunchBand.swift:33`
+**Files:** `GroupRideFlowView.swift:117-132`, `GroupNavigateContainer.swift:13-14`.
 
-One string. The width argument behind it is in D2: chips are natural-width in an `HStack(spacing: 8)` inside `.padding(.horizontal, 24)`, so on an iPhone SE that row has 327 pt of usable width and "Ride with friends" overflows it. "Crew" fits.
+**This is the task revision 1 deferred, and deferring it is what made revision 1 unshippable.** Today an open ride that starts lands on "Couldn't load this ride's route." — the host taps the lobby's unconditional **Start riding** (`GroupLobbyView.swift:198`), `phase` goes `.riding`, and the fork at `:118` reads `route != nil` as "something went wrong". A guest joining an already-started open ride skips the lobby entirely (`GroupRideSession.swift:198-201` reconciles to `.riding`) and lands there directly. The only control is Back → `router.pop()`, which drops the session without leaving the ride, so the code stays poisoned until the ride expires.
 
-Leave `.accessibilityIdentifier("home.join")` **unchanged** — UI tests key off it, and renaming the identifier alongside the label turns a copy change into a test-suite change for no gain.
-
-- [ ] **Step 1: Change the title**
+- [ ] **Step 1: Fork on kind, not on route**
 
 ```swift
-HomeChip(title: "Crew", systemImage: "person.2.badge.plus", action: onJoin)
-```
-
-- [ ] **Step 2: Check no test asserts the old string**
-
-Run: `grep -rn "Join a ride" --include="*.swift" .`
-Expected: hits only in `GroupRideJoinView.swift` (Task 7 rewrites that one). Any UI-test hit must be updated in this same commit.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add Aura/Sources/Home/HomeLaunchBand.swift
-git commit -m "feat(roh-114): Home's crew chip stops saying 'join'"
-```
-
----
-
-### Task 7: The crew screen hosts two actions (D2.1)
-
-**Files:**
-- Modify: `Aura/Sources/GroupRide/GroupRideJoinView.swift:55-57` (the gestures and `.task`), `:68-70` (the header)
-
-Three defects, all in the spec and all confirmed in the file:
-
-1. `.task { isFocused = true }` throws the keyboard up on the first frame, so a host who came to *start* a ride meets a keyboard, eight code boxes and a disabled Join.
-2. The keyboard cannot be dismissed — `.contentShape(Rectangle()).onTapGesture { isFocused = true }` re-focuses on every background tap, and there is no scroll view for `scrollDismissesKeyboard`.
-3. The header says "Join a ride".
-
-- [ ] **Step 1: Remove the autofocus and the re-focusing background tap**
-
-Delete `.task { isFocused = true }`. Change the background gesture to dismiss rather than focus:
-
-```swift
-.contentShape(Rectangle())
-.onTapGesture { isFocused = false }
-```
-
-The code field keeps its own tap-to-focus; a tap on the *background* should mean "put that keyboard away", which is the one thing the screen cannot currently do.
-
-- [ ] **Step 2: Rewrite the header for two actions**
-
-```swift
-Text("Crew")
-Text("Start a ride together, or enter a code to join one")
-```
-
-- [ ] **Step 3: Add the "start a ride" action**
-
-A button above the code field, calling back to the host screen's handler. Wire the handler in Task 8 — leave it as a passed-in closure here so this task stays reviewable on its own.
-
-- [ ] **Step 4: Verify on the simulator**
-
-This is a keyboard-behaviour change and cannot be asserted from a unit test. Launch the app, open Crew from Home, and confirm: no keyboard on arrival; tapping the code field raises it; tapping the background dismisses it.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add Aura/Sources/GroupRide/GroupRideJoinView.swift
-git commit -m "feat(roh-114): the crew screen greets a host, not a keyboard"
-```
-
----
-
-### Task 8: Start an open ride through `replaceTopWithGroupRide` (D2.2)
-
-**Files:**
-- Modify: `Aura/Sources/GroupRide/GroupRideJoinView.swift` (the handler from Task 7)
-- Reference: `Aura/Sources/App/AppRouter.swift:73-93`
-
-**Use `replaceTopWithGroupRide`, not `startGroupRide`.** The spec's reasoning holds against the current file: `startGroupRide` *pushes*, leaving the code screen underneath, so Back from the lobby lands the host on a code form with the keyboard up; and signed out it stashes the intent without popping, so `resumePendingGroupRide()` pushes on top of the stale screen. `replaceTopWithGroupRide` exists for exactly this case — its doc comment names the manual-join dead-end observed on device on 2026-07-19 — and it applies the same sign-in gate.
-
-- [ ] **Step 1: Write the failing test**
-
-`AppRouter` is testable directly:
-
-```swift
-@Test func startingAnOpenRideReplacesTheEntryScreen() {
-    let router = AppRouter(isSignedIn: { true })
-    router.push(.joinRide)
-    router.replaceTopWithGroupRide(.create(nil))
-    #expect(router.path == [.groupRide(.create(nil))])
+@ViewBuilder private var ridingContainer: some View {
+    if session.rideKind == .open {
+        RideHUDView(groupSession: session)          // Task 8 wires the sink
+            .task { didEnterRiding = true; await session.beginLiveSession() }
+    } else if session.route != nil {
+        GroupNavigateContainer(session: session)
+            .task { didEnterRiding = true; await session.beginLiveSession() }
+    } else {
+        dismissMessage(title: "Couldn't load this ride's route.", …)   // now genuinely corrupt-only
+    }
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+The third branch keeps its meaning for the case it was written for — a route ride whose route did not arrive. **Rewrite the stale comment at `:125-127`** ("unreachable in practice") and the one at `GroupNavigateContainer.swift:13`; ROH-105's documented lesson was a stale doc comment on exactly this kind of type.
 
-Run: `cd AuraCore && swift test --no-parallel --filter AppRouter`
-Expected: FAIL if `AppRoute`/`GroupRideEntry` equality does not yet accept nil — otherwise this passes off Task 5's work, which is fine; the point is the call site.
+This is the third production call site of `beginLiveSession()`. The entry latch is what makes that safe — see the spec's D4.1, and do not move it.
 
-- [ ] **Step 3: Wire the handler**
-
-```swift
-onStartOpenRide: { router.replaceTopWithGroupRide(.create(nil)) }
-```
-
-- [ ] **Step 4: Verify the whole path on the simulator**
-
-Home → Crew → Start a ride → lobby shows a join code and the line "Open ride — no destination". Back from the lobby goes **Home**, not to the code screen.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add Aura/Sources/GroupRide/GroupRideJoinView.swift
-git commit -m "feat(roh-114): a host starts a destination-free ride from the crew screen"
-```
+- [ ] **Step 2:** Re-dispatch the builder. There is no unit test for a `@ViewBuilder` fork; the evidence is Task 10.
+- [ ] **Step 3:** Commit as `feat(roh-114): an open ride rides the Explore cockpit, not an error screen`.
 
 ---
 
-### Task 9: Two-phone check on what this plan actually shipped
+### Task 8: `groupSink` attaches at `.task` (D4.5)
+
+**Files:** `RideHUDView.swift:216-219`.
+
+The spec is emphatic and the code confirms it. `RideHUDView`'s `.task` passes `discoverySink:` and no `groupSink:`; navigate passes `groupSink: groupSession?.locationSink` (`NavigateHUDView.swift:234-237`). **Both parameters default to nil on the same call**, so omitting one compiles clean and ships dead — and `start` early-returns on `guard !recorder.isRecording` (`RideSessionCoordinator.swift:149`), so a sink not supplied at the first `start` can **never** attach. The rider then publishes nothing while seeing everyone else: invisible to their whole crew.
+
+Wiring it into the `State(initialValue:)` coordinator in `init` fails the same way. It goes in `.task`, beside `discoverySink:`.
+
+- [ ] **Step 1:** Add `var groupSession: GroupRideSession? = nil` to `RideHUDView`. Safe: `@State` identity is positional and the solo call site (`AuraApp.swift:108`) stays `RideHUDView()`.
+- [ ] **Step 2:** Pass `groupSink: groupSession?.locationSink` in the existing `coordinator.start(...)` call.
+- [ ] **Step 3:** Re-dispatch the builder. Commit as `feat(roh-114): an open-ride rider actually publishes their position`.
+
+---
+
+### Task 9: Home's chip, and a crew screen that hosts two actions (D2, D2.1, D2.2)
+
+**Files:** `HomeLaunchBand.swift:5,33`, `GroupRideJoinView.swift:5,53-57,70,163`, `AuraApp.swift:118`.
+
+Revision 1 split this across two tasks with a closure passed between them. That was wrong twice: `GroupRideJoinView()` takes no arguments at `AuraApp.swift:118` and in three `#Preview`s, so the closure either breaks four call sites or ships a dead button — and the view already holds `@Environment(AppRouter.self)` (`:12`) and calls `router.replaceTopWithGroupRide` directly at `:163`. No seam needed.
+
+- [ ] **Step 1: Rename the chip.** `HomeChip(title: "Crew", …)`. Keep `.accessibilityIdentifier("home.join")` — `Screens.swift:7` keys off it. Update the file's own stale doc comment at `:5`.
+
+  `grep -rn "Join a ride" --include="*.swift" .` also hits `JoinRideUITests.swift:13,14`, `HomeUITests.swift:7` and both files' comments. Those are comments and an assertion *message* — **do not** edit them into this commit.
+
+- [ ] **Step 2: Fix the keyboard trap without shrinking the target.** Delete `.task { isFocused = true }`. **Do not** invert the background gesture to `isFocused = false`: the real `TextField` is `.opacity(0.02)` with no height behind boxes that are `.allowsHitTesting(false)` (`:85-108`), so the entry target is a ~22 pt strip and a near-miss would actively dismiss. Take D2.1's other branch — **focus when the host chooses "Enter a code"** — leaving the background gesture alone.
+- [ ] **Step 3:** Header → "Crew" / "Start a ride together, or enter a code to join one". Toolbar "Cancel" reads wrong on a screen that now creates; make it "Close". Update the view's stale doc comment at `:5`.
+- [ ] **Step 4:** Add the start action calling `router.replaceTopWithGroupRide(.create(nil, nil))` inline. **Not `startGroupRide`** — that pushes, leaving the code screen underneath, so Back from the lobby lands on a code form; signed out it stashes without popping and resumes onto a stale screen (`AppRouter.swift:61-93`).
+- [ ] **Step 5:** Re-dispatch the builder, then verify on the simulator: no keyboard on arrival; "Enter a code" raises it; the start action reaches a lobby; Back from the lobby goes Home.
+- [ ] **Step 6:** Commit as `feat(roh-114): the crew screen greets a host, not a keyboard`.
+
+---
+
+### Task 10: Two phones, past the button revision 1 stopped before
 
 **Files:** none.
 
-Plan 1 ships a real, user-visible slice, and the repo's rule is that UI is verified on a device rather than asserted. Explore's crew layer does not exist yet, so the check stops at the lobby.
+- [ ] **Apply 0021 to the project the phones talk to.** `supabase db push`, or MCP `apply_migration`. **No revision-1 step did this**, and with `kind` on the decode path a build meeting a project without 0021 fails every join — route rides included. 0021 lands **before** the build, and cannot be reverted after one ships.
+- [ ] Host: Home → Crew → Start a ride → lobby, code visible, "Open ride — no destination".
+- [ ] Guest: Home → Crew → code → lobby, **not** the route error.
+- [ ] **Host taps Start riding.** Both phones reach the Explore cockpit and record. This is the tap revision 1's device pass stopped short of, and all three reviewers found the dead end behind it.
+- [ ] **A guest joining after the start** goes straight to `.riding` — confirm they land on the cockpit, not the error screen.
+- [ ] Both riders' positions publish (D4.5's failure is silent on the publishing phone — check the *other* phone's roster in Plan 2, or the `ride_track_points` rows now).
+- [ ] A route ride still works end to end: preview → Ride together → lobby subtitle names the place → navigate cockpit.
+- [ ] Signed out, tapping Start a ride: the sign-in sheet appears with no explanation of why. **Known gap, pre-existing on the join path** — record what it looks like; fixing it is not in this plan.
+- [ ] iPhone SE, largest type size, saved place present: the chip row does not truncate, **and the lobby's new third line does not push Start riding off a screen with no ScrollView** (`GroupLobbyView.swift:42-70`).
 
-- [ ] Host on phone A: Home → Crew → Start a ride → lobby, code visible, subtitle reads "Open ride — no destination".
-- [ ] Guest on phone B: Home → Crew → enter the code → **lobby, not the "Couldn't load this ride's route" screen.** This is the D1.1 bug; if it appears, the wire fix is not working end to end against real Supabase, which no unit test can tell you.
-- [ ] A normal route ride still works: route preview → "Ride together" → lobby, subtitle carries the distance.
-- [ ] iPhone SE, largest supported type size, with a saved place present: the Home chip row does not truncate (D2).
-
-- [ ] **Commit the device notes**
-
-```bash
-git commit --allow-empty -m "chore(roh-114): record the plan-1 two-phone pass"
-```
+- [ ] **Commit the notes:** `git commit --allow-empty -m "chore(roh-114): record the plan-1 two-phone pass"`
 
 ---
 
-## What this plan deliberately leaves out
+## What the gate caught
 
-**Plan 2 — the crew layer on Explore** (D3, D4). Peer dots, the roster, `coordinator.currentCoordinate`, the `CrewChrome` extraction, and the colour authority. Two things to settle before it starts:
+Three reviewers, independent, distinct lenses. All three found the same critical defect by different routes, which is the argument for running more than one.
 
-- **`RiderColorLatch` does not exist.** D3.3 says it "becomes the only authority" and the Verification block lists tests for it, both phrased as though the type were already in the tree. It is not — `PeerPalette.assign` is the only colour code today, and it has no `reserved:` parameter. Plan 2 creates it.
-- **D4.3 promotes ROH-115 to a prerequisite.** `ribbonPieces` must be memoised *before* the `TimelineView` goes in, or `RideMapView.body` re-evaluates ~30×/s while copying every point of a growing recorded track. A five-minute device pass cannot see this; hour two can.
+- **Critical, all three:** revision 1 shipped a complete, tested path to "Couldn't load this ride's route." Fixed by pulling D4.1 and D4.5 in (Tasks 7–8) and extending the device pass (Task 10).
+- **Critical, architecture:** nothing enforced `kind = 'open' ⟺ route is null`. Now a table CHECK.
+- **High, skeptic + architecture:** the pgTAP could not run — RLS hides the ride from the guest role. Rewritten on the repo's actual precedent.
+- **High, architecture:** a trailing defaulted `kind:` would have made the in-memory fake silently reset open rides to `.route` at every lifecycle write, poisoning Plans 2 and 3.
+- **High, skeptic:** no step applied 0021 to the project the device test targets, while `kind` was a required decode key. Now a rollout order plus an optional key.
+- **High, skeptic:** the spec's headline decoder test was omitted, and cannot be written where `GroupRideRow` lives. Task 3 moves the rule into AuraCore.
+- **High, product:** the destination name was one identifier away and revision 1 wrote copy apologising for its absence.
+- **Medium:** the keyboard fix would have shrunk the code-entry target to ~22 pt; the closure seam had no caller; four app-target commits ran with no build between them; `SettingsStore` in the lobby would trap both previews.
+- **Wrong facts in revision 1:** `Route.fixture()` and an `AppRouter(isSignedIn:)` initialiser (neither exists), `AppRouter` as package-testable (it is app-target-only, so the filter would have run zero tests and exited 0), a non-existent test directory, a wrong line range, a wrong grep expectation, and the claim that `create(route: Route?)` was unfinished (it was done).
 
-**Plan 3 — behaviour and copy** (D5 except D5.4, D6, D7). The exit rules, the waited-on leave, the late-join notice, the join-link toast, roster copy, and navigate's two declared changes.
+## Carried back to the spec, not fixed here
 
-**Out of scope entirely** (D9): mid-ride join, the crew compass (ROH-168), group-aware Live Activity (ROH-15), the lifecycle defects (ROH-174).
+- **D1.5's rate-limit reasoning appears false.** It argues each rejected retry burns a `join_attempts` row toward the 10/minute cap. `join_ride` has no exception block, so the insert rolls back with the statement whenever a later `raise` fires — failed joins never count. Pre-existing since 0003.
+- **D2's "verified on device" is contradicted** by the spec's own Verification block, which still lists the SE chip check as pending. Task 10 treats it as unverified.
+- **An old client is told to check a correct code.** D1.5's generic oracle is the right security call, but nothing anywhere says "update the app", and the host gets no warning at creation that older builds cannot join.
+- **"Open ride" beside a large JOIN CODE reads as a privacy claim** — open to *anyone* — when it means "no route".
+
+## Deferred
+
+**Plan 2 — the crew layer** (D3, D4.2–D4.6): peer dots, roster, `coordinator.currentCoordinate`, `CrewChrome`. Two prerequisites: **`RiderColorLatch` does not exist** despite D3.3 and the Verification block both referencing it as though it does, and **D4.3 promotes ROH-115** (memoise `ribbonPieces` before the `TimelineView`, or `RideMapView.body` copies a growing track ~30×/s).
+
+**Plan 3 — behaviour and copy** (D5 except D5.4, D6, D7).
+
+**Out of scope** (D9): mid-ride join, crew compass (ROH-168), group-aware Live Activity (ROH-15), lifecycle defects (ROH-174).
