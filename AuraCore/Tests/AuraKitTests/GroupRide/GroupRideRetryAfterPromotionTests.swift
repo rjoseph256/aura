@@ -22,10 +22,16 @@ struct GroupRideRetryAfterPromotionTests {
               profile: .fastest, distanceMeters: 100, estimatedDurationSeconds: 60, elevationGainMeters: 0)
     }
 
-    /// Host creates and starts a ride; a guest joins it. Returns the guest's session, the
-    /// guest's backend, and the ride id.
-    private func ridingGuest(ctrl: SleepControl)
-        async throws -> (GroupRideSession, InMemoryGroupRideBackend, UUID) {
+    /// The three handles a test needs on a guest who has joined a started ride. A named type
+    /// rather than a tuple so the arity can grow without tripping `large_tuple`.
+    private struct RidingGuest {
+        let session: GroupRideSession
+        let backend: InMemoryGroupRideBackend
+        let rideID: UUID
+    }
+
+    /// Host creates and starts a ride; a guest joins it.
+    private func ridingGuest(ctrl: SleepControl) async throws -> RidingGuest {
         let hostBackend = InMemoryGroupRideBackend()
         try await hostBackend.signIn(idToken: "t", nonce: "n", displayName: "Mike")
         let host = GroupRideSession(backend: hostBackend, transport: InMemoryRideSessionTransport(),
@@ -43,12 +49,15 @@ struct GroupRideRetryAfterPromotionTests {
         await guest.join(code: code)
         #expect(guest.phase == .riding)
         #expect(guest.isHost == false)
-        return (guest, guestBackend, rideID)
+        return RidingGuest(session: guest, backend: guestBackend, rideID: rideID)
     }
 
     @Test func aRetryAfterBeingPromotedStillLeavesRatherThanEndingForEveryone() async throws {
         let ctrl = SleepControl(fireImmediately: true)
-        let (guest, backend, rideID) = try await ridingGuest(ctrl: ctrl)
+        let joined = try await ridingGuest(ctrl: ctrl)
+        let guest = joined.session
+        let backend = joined.backend
+        let rideID = joined.rideID
         let guestID = try #require(guest.selfUserID)
 
         // The member taps "End ride" and the call hangs past the timeout.
