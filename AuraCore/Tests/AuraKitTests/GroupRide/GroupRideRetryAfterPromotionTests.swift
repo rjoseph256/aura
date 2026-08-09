@@ -67,9 +67,7 @@ struct GroupRideRetryAfterPromotionTests {
 
         // Meanwhile the host leaves and the server promotes this rider (0018's rule).
         let ride = try #require(backend.store.rides[rideID])
-        backend.store.rides[rideID] = GroupRide(id: ride.id, hostID: guestID, joinCode: ride.joinCode,
-                                                status: ride.status, createdAt: ride.createdAt,
-                                                startedAt: ride.startedAt, endedAt: ride.endedAt)
+        backend.store.rides[rideID] = ride.replacing(hostID: guestID)
         await guest.reconcileFromStatus()
         #expect(guest.isHost == true, "the promotion has landed on this session")
 

@@ -69,6 +69,49 @@ struct GroupRideOpenRideTests {
                 "an open ride must not bounce the guest back out")
     }
 
+    @Test func aCreatedOpenRideReportsItsKind() async throws {
+        let (session, _) = try await host()
+
+        await session.create(route: nil)
+
+        #expect(session.rideKind == .open)
+    }
+
+    @Test func aCreatedRouteRideReportsItsKind() async throws {
+        let (session, _) = try await host()
+
+        await session.create(route: route())
+
+        #expect(session.rideKind == .route)
+    }
+
+    /// The one that catches the fake lying about the seam.
+    ///
+    /// A guest joining a *started* ride reads kind off a `GroupRide` that has been through the
+    /// backend's start rebuild, so this covers both halves of the trap at once: the origin, where
+    /// `createRide` has to derive kind from the absence of route bytes rather than stamping a
+    /// fixed value, and the rebuild, which has to carry that value across instead of dropping it.
+    /// Get either wrong and this ride reports `.route` with no route to show — which is the exact
+    /// state that puts the rider on the "couldn't load this ride's route" screen.
+    ///
+    /// The host must finish acting **before** the guest exists: `Store.currentUserID` is one
+    /// shared field, so `guest(sharing:)`'s sign-in overwrites the host's identity and a later
+    /// `startRiding()` would fail its host check.
+    @Test func aGuestJoiningAfterTheStartStillReportsAnOpenRide() async throws {
+        let (hostSession, hostBackend) = try await host()
+        await hostSession.create(route: nil)
+        await hostSession.startRiding()
+        #expect(hostSession.phase == .riding)
+        let code = try #require(hostSession.joinCode)
+
+        let (guestSession, _) = try await guest(sharing: hostBackend, name: "Priya")
+        await guestSession.join(code: code)
+
+        #expect(guestSession.phase == .riding)
+        #expect(guestSession.rideKind == .open, "the ride's stored kind survives the start rebuild")
+        #expect(guestSession.route == nil)
+    }
+
     @Test func joiningARideWhoseRouteWillNotDecodeStillFailsAndLeaves() async throws {
         let (hostSession, hostBackend) = try await host()
         await hostSession.create(route: route())

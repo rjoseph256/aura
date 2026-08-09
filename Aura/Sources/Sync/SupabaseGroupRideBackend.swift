@@ -146,10 +146,13 @@ private nonisolated struct GroupRideRow: Decodable {
     let createdAt: Date
     /// Optional, and `routeData()` also folds `.null` away — see there. ROH-114.
     let route: AnyJSON?
+    /// Optional, and decoded as a `String` rather than a `GroupRide.Kind` — both deliberate, and
+    /// `resolvedKind` is where the two decisions are argued. ROH-114.
+    let kind: String?
     let startedAt: Date?
     let endedAt: Date?
     enum CodingKeys: String, CodingKey {
-        case id, status, route
+        case id, status, route, kind
         case hostID = "host_id"
         case joinCode = "join_code"
         case createdAt = "created_at"
@@ -161,8 +164,45 @@ private nonisolated struct GroupRideRow: Decodable {
               let rideStatus = GroupRide.Status(rawValue: status) else {
             throw GroupRideError.joinFailed
         }
-        return GroupRide(id: id, hostID: hostID, joinCode: code, status: rideStatus, createdAt: createdAt,
-                         startedAt: startedAt, endedAt: endedAt)
+        return GroupRide(id: id, hostID: hostID, joinCode: code, kind: resolvedKind, status: rideStatus,
+                         createdAt: createdAt, startedAt: startedAt, endedAt: endedAt)
+    }
+
+    /// The ride's kind, resolved so that **no shape of this column can fail a join** (ROH-114).
+    ///
+    /// Both fallbacks below exist because the only caller that can observe them is `joinRide`, whose
+    /// blanket `catch` turns anything thrown here into "double-check the code with your host" — a
+    /// message that is wrong about a correct code and says nothing about what to actually do.
+    ///
+    /// **Absent** — a project that has not had migration 0021 applied returns no `kind` at all. A
+    /// required key would then fail to decode *every* ride, route rides included. Absent falls back
+    /// by looking at the route, and it falls **toward `.open`** when the route is absent too:
+    /// migration 0022 constrains `(kind = 'open') = (route is null or route = 'null'::jsonb)`, so
+    /// kind-absent with route-absent is unambiguous, and guessing `.route` there would fork the
+    /// rider (D4.1) into a navigate container with no route — the "Couldn't load this ride's route."
+    /// dead end. Guessing wrong toward the error screen is the one wrong guess with a cost.
+    ///
+    /// **Unknown** — a newer server sending a third kind this build has never heard of. That maps to
+    /// `.route` rather than throwing: a guest should not be ejected from a ride they just joined
+    /// because of a value they could safely have ignored, and `.route` is the conservative reading
+    /// of a ride that *has* a route (the absent-route case cannot reach here — 0022 forbids a
+    /// non-`open` kind without one).
+    ///
+    /// None of this is rollout safety in both directions, and it should not be sold as such: against
+    /// a pre-0021 project `joinRide` sends `p_supports_open`, which PostgREST cannot even resolve to
+    /// a function. Applying the migrations before the build ships is what protects the rollout.
+    private var resolvedKind: GroupRide.Kind {
+        guard let kind else { return routeIsAbsent ? .open : .route }
+        return GroupRide.Kind(rawValue: kind) ?? .route
+    }
+
+    /// Whether this row carries no route, folding the jsonb `'null'` scalar in with a real absence
+    /// exactly as `routeData()` does — the same rule migration 0022's CHECK is written against.
+    private var routeIsAbsent: Bool {
+        switch route {
+        case .none, .some(.null): true
+        default: false
+        }
     }
     /// nil for a destination-free ride (ROH-114), and **`.null` folds to nil too**.
     ///

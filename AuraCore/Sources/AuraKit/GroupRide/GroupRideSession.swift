@@ -30,6 +30,15 @@ public final class GroupRideSession {
     public private(set) var selfUserID: UUID?
     public private(set) var joinCode: JoinCode?
     public private(set) var route: Route?
+    /// What sort of ride this is (ROH-114) — `nil` until a ride has been created or joined.
+    ///
+    /// Always the value the server **stored**, taken off the `GroupRide` that `create`/`join`
+    /// returned. It is deliberately not re-derived from `route == nil` on this side: the server
+    /// derives kind once, at create, and migration 0022 constrains the column to agree with the
+    /// route, so a second derivation here would be a second authority that can disagree with the
+    /// first (spec D1.3). The lobby names the kind from this (D5.4) and the riding container forks
+    /// on it (D4.1).
+    public private(set) var rideKind: GroupRide.Kind?
     public private(set) var peers: [RidePeer] = []
     public private(set) var isLive: Bool = false
     /// userID -> display name, populated from `backend.roster(rideID:)`.
@@ -145,6 +154,7 @@ public final class GroupRideSession {
             rideID = ride.id
             joinCode = ride.joinCode
             route = inputRoute
+            rideKind = ride.kind
             hostID = ride.hostID
             selfUserID = resolvedSelfUserID
             isHost = (ride.hostID == resolvedSelfUserID)
@@ -188,6 +198,7 @@ public final class GroupRideSession {
         rideID = joined.ride.id
         joinCode = joined.ride.joinCode
         route = decodedRoute
+        rideKind = joined.ride.kind
         hostID = joined.ride.hostID
         selfUserID = resolvedSelfUserID
         isHost = (joined.ride.hostID == resolvedSelfUserID)
