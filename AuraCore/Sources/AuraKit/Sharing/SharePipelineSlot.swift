@@ -9,17 +9,21 @@ import Foundation
 public enum SlotOutcome<Value: Sendable>: Sendable {
     /// The pipeline ran to completion. `nil` means it produced nothing.
     ///
-    /// Not quite "it exhausted itself": a same-key waiter returns whatever the OWNER
-    /// produced, and an owner whose ceiling fired returns nil through
-    /// `cancelledBeforeStarting`. A retry is still a real second attempt in both cases,
-    /// which is all `Retryability.freshAttempt` promises.
+    /// A same-key waiter reports whatever the OWNER'S TASK produced, which is not always
+    /// what the owner itself was told. If the owner's ceiling fired, `task.cancel()` ran and
+    /// that task went on to produce nil, so the waiter reads `.finished(nil)` while the
+    /// owner got `.stoppedWaiting`. Both are honest: by the time the waiter is answered that
+    /// pipeline is genuinely over, which is the thing a caller weighing a retry needs.
     case finished(Value?)
     /// A ceiling fired. The pipeline may still be alive and holding the slot.
     case stoppedWaiting
 }
 
-/// Conditional because an unconditional conformance would constrain `Value` for no reason.
-/// NOT because `UIImage` isn't `Equatable` — it is, via `NSObject`.
+/// Conditional because it can only be conditional — the compiler cannot synthesize
+/// `Equatable` for an arbitrary `Value`, so there was never an unconditional conformance to
+/// prefer over this one. Worth saying because the constraint reads like a restriction on
+/// callers and is not one: `SlotOutcome<UIImage>` is `Equatable`, since `UIImage` is, via
+/// `NSObject`.
 extension SlotOutcome: Equatable where Value: Equatable {}
 
 /// The share-map pipeline slot: at most one pipeline alive at a time, single-flight per
@@ -38,8 +42,8 @@ extension SlotOutcome: Equatable where Value: Equatable {}
 ///
 /// The ceiling's job is to stop making a caller wait on any ONE pipeline. Freeing the slot
 /// is a different job and belongs to whoever can establish the pipeline is dead — which
-/// only the pipeline can. So the owner's ceiling cancels its pipeline and returns nil, and
-/// the slot clears when that pipeline actually unwinds.
+/// only the pipeline can. So the owner's ceiling cancels its pipeline and returns
+/// `.stoppedWaiting`, and the slot clears when that pipeline actually unwinds.
 ///
 /// Two limits worth knowing before relying on this:
 ///
@@ -49,7 +53,8 @@ extension SlotOutcome: Equatable where Value: Equatable {}
 ///   here, and unchanged by it.
 /// - **Cancellation has to be real, and nothing here can enforce that.** A pipeline that
 ///   ignores it holds the slot for the life of the owner, and every later caller then pays
-///   a full ceiling to be told nil. That is the deliberate trade against the defect above —
+///   a full ceiling to be told `.stoppedWaiting`. That is the deliberate trade against the
+///   defect above —
 ///   the old behaviour recovered from this, but only by breaking the invariant — and it is
 ///   why `onCeiling` exists.
 ///
@@ -132,7 +137,7 @@ public final class SharePipelineSlot<Value: Sendable> {
                 // watchdog cleared the slot here, so the `while let` then failed and this
                 // waiter went on to run its own pipeline and return a map — which is the
                 // second-pipeline defect, but it did serve the caller. Now the caller gets
-                // nil. It only reaches this arm after waiting a full ceiling on somebody
+                // `.stoppedWaiting`. It only reaches this arm after waiting a full ceiling on somebody
                 // else's key, so a healthy pipeline still serves it via `.finished`; the
                 // regression bites only when the pipeline ahead is pathological, which is
                 // the case where a second one alongside it was the wrong answer anyway.
@@ -156,7 +161,7 @@ public final class SharePipelineSlot<Value: Sendable> {
         case .finished(let value):
             return .finished(value)
         case .ceiling:
-            // Ask the pipeline to stop, and hand this caller nil. Deliberately does NOT
+            // Ask the pipeline to stop, and hand this caller `.stoppedWaiting`. Deliberately does NOT
             // touch the slot: that is the defect this type was rewritten to close.
             task.cancel()
             onCeiling?(key, true)
