@@ -1,15 +1,15 @@
 # Group ride without a destination (ROH-114) — design
 
-Date: 2026-08-02 (revision 4: 2026-08-05)
+Date: 2026-08-02 (revision 5: 2026-08-09)
 Issue: [ROH-114](https://linear.app/rohun/issue/ROH-114/group-ride-without-a-destination-group-explore-surface)
-Status: revision 4, after three three-reviewer adversarial gates.
+Status: revision 5, after three three-reviewer adversarial gates.
 
-**Depends on** [ROH-167](https://linear.app/rohun/issue/ROH-167/beginlivesession-latches-before-its-first-await-one-failed-roster)
-(the live layer must actually start) and
-[ROH-174](https://linear.app/rohun/issue/ROH-174/group-ride-lifecycle-silent-host-promotion-stale-ishost-on-retry-async)
-(group-ride lifecycle defects).
+**Depends on** [ROH-174](https://linear.app/rohun/issue/ROH-174/group-ride-lifecycle-silent-host-promotion-stale-ishost-on-retry-async)
+(group-ride lifecycle defects). That is the only one.
 **Split out:** [ROH-168](https://linear.app/rohun/issue/ROH-168/crew-compass-a-wheel-of-colour-coded-arrows-showing-where-every-rider) (crew compass).
-Related: ROH-105, ROH-72, ROH-115 (D4.3 promotes it), ROH-15 (out of scope).
+Related: ROH-105, ROH-72, ROH-115 (D4.3 promotes it),
+[ROH-167](https://linear.app/rohun/issue/ROH-167/beginlivesession-latches-before-its-first-await-one-failed-roster)
+(carried as a dependency through revision 4; disproven — D4.1), ROH-15 (out of scope).
 
 ## Revision history, and what it says about this spec
 
@@ -29,8 +29,16 @@ Revision 4 is deliberately not a fourth attempt at inventing behaviour. It **del
 the lifecycle defects to ROH-174, and **cuts** the most speculative remaining item. No new
 mechanism is designed here.
 
+Revision 5 is narrower still, and subtracts rather than adds. Through revision 4 this spec opened
+by declaring itself blocked on ROH-167 — a defect *this spec's own gate* raised — and repeated the
+claim in D4.1. ROH-167 was closed as not a bug on 2026-08-07, when someone finally wrote it as a
+test and it passed on the first run. Both places are corrected below; the design is otherwise
+untouched.
+
 **Weight this spec's clean bill accordingly.** Three times running, the gate caught something
-ship-dead written with confident citations. The two-phone device pass is the real check.
+ship-dead written with confident citations. It also produced one blocker that did not exist, and
+that one sat in the header for four days while the spec claimed to be gated on it. A gate finding
+is a lead, not a verdict. The two-phone device pass is the real check.
 
 ## Problem
 
@@ -282,8 +290,23 @@ Verified across three gates: `route` is `private(set)` with two writers
 (`GroupRideSession.swift:145,178`), both before `phase` leaves `.idle`, so the condition cannot flip
 mid-ride and the `_ConditionalContent` branch is stable across `.riding → .ended`.
 
-**Depends on ROH-167** — `beginLiveSession` latches before its first await, so a failed roster fetch
-permanently disables the live layer. This adds a second call site to that function.
+**Not blocked on ROH-167.** *Revisions 1 through 4 said it was.* That issue came out of this spec's
+own gate: `beginLiveSession` sets `didBeginLive` before its first await, so a failed roster fetch was
+said to leave the latch set with the live layer never started. Written as a test, it passed on the
+first run. `refreshRoster()` is non-throwing and swallows the backend error with `try?`
+(`GroupRideSession.swift:320-329`), so a failing fetch returns `[]` and execution continues to
+`startManaged`, the owned event loop and `startTicker()`. There is no early exit between the latch
+and the end of the function. A failed roster costs display names, not the live layer. Closed as not
+a bug on 2026-08-07 with a regression guard
+([PR #128](https://github.com/rjoseph256/aura/pull/128)).
+
+What the fork does add is a **third production call** to `beginLiveSession()`, beside
+`GroupLobbyView`'s `.task` (`:78`) and this same view's navigate branch (`GroupRideFlowView:122`).
+`GroupNavigateContainer:91` is inside a `#Preview` and does not count. **The entry latch is what
+makes that safe** — and ROH-167's proposed remedy, latching on success rather than on entry, would
+have broken it: the lobby's call and the riding container's call can be in flight together, and both
+would then get through and open a second subscription. The correct reading is the inverse of the one
+this spec carried for four revisions. Nothing here moves that latch.
 
 ### D4.2 — *(deleted)*
 
