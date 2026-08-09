@@ -1,398 +1,360 @@
-# Share-map upgrade: a rider's deadline, a terminal state, and a card that catches up (ROH-161) — design
+# Share-map upgrade: a rider's deadline and a terminal state (ROH-161) — design
 
 Date: 2026-08-05
-Issue: [ROH-161 — Share-map upgrade fails silently: one attempt, no terminal state, no retry](https://linear.app/rohun/issue/ROH-161/share-map-upgrade-fails-silently-one-attempt-no-terminal-state-no)
-Related: [ROH-126](https://linear.app/rohun/issue/ROH-126/redesign-shareable-post-ride-card-real-map-background-distance-off-the)
-(`2026-07-29-roh126-share-card-redesign-design.md`, and the watchdog follow-up
-`2026-07-30-roh126-slot-watchdog-cancellation.md`) ·
-[ROH-155](https://linear.app/rohun/issue/ROH-155/share-map-prefetch-cancel-authority-follows-arrival-order-and-the)
+Issue: [ROH-161](https://linear.app/rohun/issue/ROH-161/share-map-upgrade-fails-silently-one-attempt-no-terminal-state-no)
+Phase 2: [ROH-176 — typed provider outcome, then retry](https://linear.app/rohun/issue/ROH-176/give-the-share-map-provider-a-typed-outcome-then-build-retry-on-it) ·
+Spun out: [ROH-177](https://linear.app/rohun/issue/ROH-177/a-failed-fallback-card-render-leaves-share-dead-with-no-explanation) ·
+[ROH-178](https://linear.app/rohun/issue/ROH-178/share-sheet-detection-asks-is-any-modal-up-so-the-history-path-may)
+Related: ROH-126 (`2026-07-29-roh126-share-card-redesign-design.md`,
+`2026-07-30-roh126-slot-watchdog-cancellation.md`) · ROH-155
 (`2026-07-31-share-prefetch-ownership-design.md`)
-Status: **revision 2**, following a two-lens adversarial gate (`review-skeptic`,
-`review-architecture`) on 2026-08-05. Revision 1's retry design does not work; the scope is now
-narrower and the retry is a separate issue.
+Status: **revision 3**, after three adversarial review rounds. Scope is smaller than every prior
+revision.
 
-> Process note: CLAUDE.md requires prose deliverables to go through `humanizer`. It is not
-> installed on this machine, so this spec has not had that pass. Recorded rather than skipped.
+> Process note: CLAUDE.md requires prose deliverables to go through `humanizer`. Not installed on
+> this machine, so this has not had that pass.
 
-## What the gate changed
+## Scope
 
-Revision 1 proposed a deadline, a terminal *offer*, unbounded retry, and auto-apply. Both reviewers
-refuted the retry independently, and one found a checked-in test that says the opposite of what the
-spec claimed. Every finding below was re-verified against the code before being accepted.
+Replace a vanishing spinner with a line that stays, and let a late success land on its own.
 
-**The retry does not work, and `SharePipelineSlotTests.swift:256-275` already documents why.** The
-test is named `testSameKeyRetryDuringUnwindJoinsTheDyingPipeline`; its own doc comment says an
-architecture reviewer reproduced it, and it asserts `"the retry inherits the cancelled pipeline's
-nil"` and `"does not run a second pipeline for a live key"`. So a tap while the original pipeline is
-alive joins it and inherits its nil — and returns fast enough that the 300 ms show-delay never fires,
-so the rider sees no change at all. Revision 1 also contradicted itself here: D5 said the tap "joins
-the pipeline still running, **or starts a fresh one**," D7 said "every retry is a **genuine fresh
-attempt**." Both cannot be true, and the test settles which is false.
+- A **presentation deadline** that bounds the rider's wait, and does not cancel the pipeline.
+- An **informational terminal line** when the wait ends without a map.
+- **Auto-apply** when a success arrives late.
 
-**The suspension argument was backwards, and it was the justification for auto-apply.** The render
-belts are `DispatchQueue.main.asyncAfter` (`ShareMapSnapshotter.swift:268,352`), i.e. `DispatchTime`,
-which does *not* advance while the machine sleeps. The slot ceiling is `Task.sleep(for:)`
-(`SharePipelineSlot.swift:79`), i.e. `ContinuousClock`, which does. This repo documents that exact
-distinction in that exact scenario at `RideInstant.swift:31-35` — "a phone in a jersey pocket with
-the screen locked is exactly where a suspending clock under-counts." So on resume the render belt
-fires *overdue*, rejecting a render that never had CPU, and there is no negative cache: the rider
-gets a rejection and a cold cache. Revision 1 claimed they would "unlock to a finished map card."
+Not here: retry (ROH-176), and — new in revision 3 — **no disk-cache re-probe**. See "What the third
+gate cut."
 
-**`nil` from the provider is four different facts**, and `UIImage?` cannot tell them apart:
-rejected permanently, rejected transiently, *you* stopped waiting while the pipeline lives on and may
-still cache a map, and you joined a dying pipeline. D8 below turns on this.
+## What the three gates changed
 
-**Provider success is not an upgraded card.** `RideCardRenderer.make` returns nil on three paths —
-renderer produced nothing, PNG encode failed, atomic write failed (`RideCardRenderer.swift:30,37,46`)
-— so revision 1's phase machine would have reported `upgraded` with the fallback still on screen,
-reproducing ROH-161's own defect inside the fix.
+Recorded because two of the three rounds killed a mechanism rather than a sentence, and because the
+same drafting error recurred across rounds.
 
-**"Strictly downstream of ROH-155" was false**, because `RideSummaryView` is also the History sheet
-(`HistoryView.swift:53`) and a retry button there is a new uncapped, undebounced, uncancellable
-request path into the exclusive slot — verbatim the failure ROH-155 was closed over.
+**Round 1 and 2 killed the retry.** `SharePipelineSlotTests.swift:256-275`
+(`testSameKeyRetryDuringUnwindJoinsTheDyingPipeline`) already documents that a same-key retry against
+a *cancelled* pipeline joins it and inherits its nil. That, plus the fact that `nil` from the provider
+means four different things, moved retry to ROH-176. *(Narrowed in round 3: the test covers a
+cancelled pipeline, so it does not by itself prove a retry against a live pipeline fails. The
+four-meanings argument is the one that holds, and ROH-176 carries it.)*
 
-Also corrected: D0's citation was wrong and its claim overstated (see D0); the ceiling's job was
-misattributed in D3's table; D3's cancellation argument was borrowed from a comment about a different
-question (see D4); the 7 s justification was a non-sequitur (4 + 6 = 10 > 7); and two listed unit
-tests asserted properties a pure function structurally cannot exhibit.
+**Round 2 killed the suspension argument.** Revision 1 claimed the belts and the deadline park
+together so a pocketed phone unlocks to a finished card. See D6 for what actually happens.
 
-## The split
+**Round 3 killed the disk-cache re-probe**, which revision 2 introduced as retry's replacement.
 
-**This issue (phase 1):** the presentation deadline, a terminal state, auto-apply, and a **disk-cache
-re-probe on foreground**. No retry button. Nothing touches the provider API, the slot, or when a
-request is made.
+**A recurring drafting failure, stated so it stops.** Three rounds each caught a claim that failed on
+arithmetic or on a timeline I had not walked: revision 1's "4 s + 6 s usually lands before 7 s"
+(10 > 7); revision 2's "~1.5 s on wifi" quoted from a sentence that also says "~8 s as a *cold
+simulator* number" (`2026-07-31-share-prefetch-ownership-design.md:67-68`, and 8 > 7); and revision
+2's re-probe, justified by a case that occurs 13 s after its own trigger has passed. Every number in
+this revision is checked against its source in context, and D3 now states both numbers.
 
-**A new issue (phase 2):** give `ShareMapRasterProviding` a typed outcome instead of `UIImage?`, and
-build retry on top of that. Every confirmed defect in revision 1 lives in the retry path, and all of
-them are downstream of one overloaded `nil`. Fix the vocabulary first and retry becomes small; build
-it on `UIImage?` and it is a button that lies.
+## What the third gate cut, and why
 
-**Stated cost of the split:** the terminal state becomes *informational* rather than an offer. An
-offer implies an action, and the action cannot be made honest in phase 1. This is a real reduction
-from what was approved on 2026-08-05, and it is the part of this revision most worth arguing with.
+Revision 2's D7 re-read the composited disk cache — on entering the terminal state and on foreground
+— to recover the case where a slot ceiling hands *this caller* nil while the pipeline runs on and
+caches an accepted raster (`ShareMapSnapshotter.swift:249-251` keeps that write deliberately
+un-gated).
+
+Two independent findings killed it.
+
+**It has no legal implementation inside this issue's scope.** `ShareMapRasterProviding` has exactly
+one method (`ShareMapRasterProviding.swift:19`), and the cache is `private let` with its directory
+literal in one place (`ShareMapSnapshotter.swift:137-139`). So the options are: add a seam method,
+which is a provider-API change and therefore ROH-176; call `raster(for:)`, which commits the
+exclusive slot on a miss and re-opens the ROH-155 question; or duplicate the directory literal in the
+view, with no test binding the two copies. Revision 2 cited `:150` as proof the read was safe — but
+`:150` and `:155` are in the same function, so the view cannot reach the fast path without also
+reaching the slot.
+
+**It does not fix the case it was justified by.** The ceiling is 20 s
+(`SharePipelineSlot.swift:74`); the deadline is 7 s. In the ceiling scenario the nil arrives ~13 s
+after the line appeared and the raster is cached a second or so later — by which time the terminal-entry
+probe has long since missed, and the only remaining trigger is the rider happening to background and
+return.
+
+**Where it belongs instead: ROH-176.** "You stopped waiting; work continues" is one of the four facts
+that issue's typed outcome introduces. Once the provider can *say* that, it can also hand back a
+completion to await — which is a real fix rather than a poll that misses. Recorded there.
+
+So phase 1 leaves that case unfixed, and says so rather than shipping a mechanism that appears to
+address it.
 
 ## Problem
 
-The summary renders a polyline fallback card, then tries to upgrade it with a real map raster. While
-that runs, a quiet "Adding your map…" hint appears (`RideSummaryView.swift:107-114`). On a reject the
-hint disappears and nothing else on screen changes.
+The summary renders a polyline fallback card, then upgrades it with a map raster. While that runs a
+quiet "Adding your map…" hint shows (`RideSummaryView.swift:107-114`). On a reject the hint
+disappears and nothing else changes.
 
-**One attempt per presentation.** The `.task` is guarded by
-`guard ride.stats != nil, shareImage == nil` (`:133`) and `shareImage` is non-nil the moment the
-fallback renders. There is no `scenePhase` handler.
+**One attempt per presentation.** `.task` is guarded by `guard ride.stats != nil, shareImage == nil`
+(`:133`), and `shareImage` is non-nil once the fallback renders. No `scenePhase` handler.
 
-**No terminal state.** `ShareMapSnapshotter` emits nine distinct `share-map reject:` lines
-(`:176,208,218,224,232,245,285,288,295`), plus the slot's ceiling log — all to Console, for a
-developer. Note one of those nine is not itself distinct: `:224` covers four causes in one string
-("render failed, timed out, mid-render error, or no captured route"), so revision 1's "every reject
-path logs a distinct reason" was slightly generous.
+**No terminal state.** `ShareMapSnapshotter` emits nine `share-map reject:` lines
+(`:176,208,218,224,232,245,285,288,295`) — one of which, `:224`, covers four causes in a single string
+— plus the slot's ceiling log. All to Console, for a developer.
 
-**No bound on the rider's wait.** The slot ceiling is 20 s (`SharePipelineSlot.swift:74`) and a
-waiter that watches other keys finish arms a fresh ceiling per loop iteration
-(`SharePipelineSlot.swift:144-148`), so the wait is not even bounded at 20 s in the multi-key case.
+**No rider-facing bound.** The ceiling is 20 s (`SharePipelineSlot.swift:74`), and a waiter watching
+other keys finish arms a fresh ceiling each time round its loop (documented at `:24-27`), so the wait
+is not bounded at 20 s in the multi-key case.
 
-The two commonest ways a rider loses the map: offline or weak signal at ride end, and the phone
-pocketed during the window.
+## D0 — What is lost, and what is not
 
-## D0 — What is lost, corrected
+When the fallback renders, the rider holds a complete shareable card, and a failed upgrade never takes
+it away. That is what makes the terminal line an observation rather than an error.
 
-Revision 1 said "Share is enabled from the first frame (`RideSummaryView.swift:139-145`)." Both
-halves were wrong.
-
-- The citation is wrong. `:139-145` is the fallback render; Share's enablement is `:89-105`, where
-  `shareImage == nil` renders `Button("Share") {}.disabled(true)` (`:101`).
-- "From the first frame" is false: `shareImage` is assigned inside `.task` at `:141`, after
-  `await Task.yield()` (`:134`) and an awaited render. Share is disabled for the first several frames.
-- **There is a path where Share stays disabled forever**, and the comment two lines below the range
-  revision 1 quoted says so (`:143-144`): "No fallback, no upgrade: Share stays disabled."
-
-So the corrected claim is narrower: **when the fallback renders, the rider has a complete shareable
-card, and a failed upgrade never takes it away.** That is what makes the terminal state an
-observation rather than an error.
-
-The fallback-render failure is a genuinely silent failure — a dead grey Share button with no
-explanation. Revision 1 filed it under "unchanged from today," which is a contradiction in a spec
-whose thesis is that silent failure is the bug. It is out of scope here (it is a different failure,
-with a different remedy) and it gets its own issue rather than a shrug.
+Two corrections from round 2, kept because revision 1 got both wrong. Share is **not** enabled from
+the first frame — `shareImage` is assigned inside `.task` at `:141`, after `Task.yield()` and an
+awaited render, and enablement is at `:89-105` where `shareImage == nil` renders
+`Button("Share") {}.disabled(true)` (`:101`). And there **is** a path where Share stays disabled
+forever, which the code states at `:143-144`: "No fallback, no upgrade: Share stays disabled." That is
+a genuinely silent failure, it is not this issue's, and it is ROH-177 rather than a shrug.
 
 ## D1 — This reverses a recorded decision
 
-ROH-126 §Share flow item 5 (`2026-07-29-roh126-share-card-redesign-design.md:265-268`) accepted this
-cost in writing: "the residue is accepted rather than blocking Share or adding retry UI. Weak
-coverage → fallback every time — accepted; a later History open upgrades."
+ROH-126 §Share flow item 5 (`2026-07-29-roh126-share-card-redesign-design.md:265-268`) accepted the
+cost in writing: "the residue is accepted rather than blocking Share or adding retry UI. Weak coverage
+→ fallback every time — accepted; a later History open upgrades."
 
-ROH-161 revisits it because two reviewers independently ranked it above ROH-155's work, and ROH-155
-was then closed won't-do with this named as what to build instead. What changed is not the cost but
-the confidence that "a later History open upgrades" is a mitigation — it only mitigates for a rider
-who knows to go looking, and nothing tells them.
+Phase 1 still adds no retry UI, so it keeps most of that call. What it stops doing is staying silent —
+because "a later History open upgrades" only mitigates for a rider who knows to go looking, and
+nothing tells them.
 
-Phase 1 partially *keeps* ROH-126's call: still no retry UI. What it stops doing is staying silent.
+## D2 — Framing: an observation
 
-## D2 — Framing: an observation, not an error and not an offer
+The line says what the rider has, plainly. No destructive colour, no warning glyph, no "failed" —
+nothing is broken. And no promise: revision 1's offer framing implied a tap, and phase 1 has no
+honest tap.
 
-The terminal line says what the rider has, in plain language, with no destructive colour, no warning
-glyph, and no "failed". Nothing is broken: the card is finished and shareable.
+## D3 — The deadline, with both numbers
 
-It also does not promise anything. Revision 1's offer framing ("try for the detailed one") implied a
-tap; phase 1 has no honest tap. Copy that promises an action the build cannot deliver is worse than
-copy that states a fact.
-
-Rejected, unchanged from revision 1: an error framing tells the rider they have a problem they mostly
-do not have, on the screen whose job is "nice ride," and it reads dishonestly at the deadline, where
-nothing has failed yet.
-
-## D3 — The presentation deadline is a fourth bound, and it is the rider's
-
-A new constant, order of **7 s**, whose only job is to bound how long the rider waits.
+A new constant, order of **7 s**, bounding how long the rider waits.
 
 | Bound | Value | Whose job |
 | --- | --- | --- |
-| Slot ceiling | 20 s (`SharePipelineSlot.swift:74`) | Stop making **one caller** wait on one pipeline |
+| Slot ceiling | 20 s (`SharePipelineSlot.swift:74`) | Stop **one caller** waiting on one pipeline |
 | Style belt | 4 s (`ShareMapSnapshotter.swift:268`) | Bound one SDK style load |
 | Render belt | 6 s (`ShareMapSnapshotter.swift:352`) | Bound one SDK render |
 | **Presentation deadline** | **~7 s, new** | **Stop the rider waiting** |
 
-*(Corrected: revision 1's table said the ceiling protects a singleton from a wedged pipeline, which
-contradicted the quote revision 1 used five lines later and is refuted by the source.
-`SharePipelineSlot.swift:17-20` says "the ceiling's job is to stop making a caller wait on any ONE
-pipeline," and `:28-32` says explicitly that it does **not** recover from a wedge: "a pipeline that
-ignores it holds the slot for the life of the owner, and every later caller then pays a full ceiling
-to be told nil.")*
+The ceiling and the deadline share a purpose and differ in scope — `SharePipelineSlot.swift:17-20`
+says "the ceiling's job is to stop making a caller wait on any ONE pipeline," and `:28-32` says it
+does *not* recover from a wedge. The deadline stops *the rider* waiting on *the screen*.
 
-So the ceiling and the deadline share a purpose and differ in scope: the ceiling stops *a caller*
-waiting on *a pipeline*; the deadline stops *the rider* waiting on *the screen*. That is a weaker
-distinction than revision 1 drew, and it is the true one.
+**Both timing numbers, in context.** `2026-07-31-share-prefetch-ownership-design.md:67-68` records
+"~8 s as a *cold simulator* number and ~1.5 s on device," and `RideSummaryView.swift:374-375` puts the
+device case at "~1.5 s after the summary appears" on wifi. Under contention ROH-155 measured 2.18 s
+(`RideSummaryView.swift:161-163`). So 7 s is roughly four times the healthy device case, above the
+contended case, and **below the cold-simulator figure** — meaning on a cold simulator the line will
+often appear before a success that was coming. That is a known and accepted simulator artefact, not a
+device claim.
 
-**On 7 s.** Revision 1 argued it was "long enough that a healthy pipeline (4 s style belt plus 6 s
-render belt in the worst case) usually lands first," which is self-refuting: 4 + 6 = 10 > 7, and
-`ShareMapSnapshotter.swift:105` calls it "the ≤10 s pipeline" with acceptance, composite, encode and
-prune unbounded past that. The honest justification is empirical, not structural: ROH-155 records the
-upgrade resolving in about 1.5 s on wifi, and `RideSummaryView.swift:374-375` puts it at "~1.5 s after
-the summary appears." 7 s is several multiples of the healthy case and well under the ceiling. It is a
-guess bounded by one measurement, it is injectable, and the device pass is what settles it.
+**What the rider actually waits.** The deadline starts when `isUpgrading` flips (`:173`), after the
+0.8 s sleep, which itself follows `Task.yield()` and an awaited fallback render (`:134-142`). So the
+rider-visible bound is ~7.8 s plus that render, not 7 s. Stated because a section about honest bounds
+should not round its own away.
 
-## D4 — The deadline must not cancel `raster(for:)`, and here is the actual reason
+**Clock choice, not hedged:** measure the deadline against `ContinuousClock`, matching the ceiling
+(`SharePipelineSlot.swift:79`). A locked phone should not hold the line off — see D6.
 
-Revision 1 imported `cancelledBeforeStarting`'s doc comment (`ShareMapSnapshotter.swift:161-178`) as
-its authority. That comment argues about *where inside the pipeline to place cancellation checks* —
-it is not an argument that a caller must refrain from cancelling, and the slot's own ceiling does
-cancel (`SharePipelineSlot.swift:132`). Borrowing it was a category error.
+## D4 — The deadline must not cancel `raster(for:)`
 
-The real reason is in the file revision 1 cited elsewhere, at `RideSummaryView.swift:155-158`:
+Two reasons, in order, and the first is corrected from revision 2.
 
-> `slot.run` has NO cancellation point — both its awaits go through `withCheckedContinuation` and the
-> pipeline task is unstructured — so a cancelled caller neither returns nor frees the slot.
+**It would buy nothing.** Revision 2 claimed a cancelling deadline yields a caller that never
+returns. It does return — at the ceiling, via `:129-134` (owner) or `:110-111` (waiter). The accurate
+claim is that cancelling gains no time at all: the caller still returns no sooner than 20 s, so the
+hint would stay up for 20 s and the deadline would be decorative. The `ceilingArm` is an unstructured
+`Task {}` (`:148`), so caller cancellation does not reach it either.
 
-Confirmed: `SharePipelineSlot.race` awaits a `withCheckedContinuation` and a non-throwing
-`Task.value`, neither a cancellation point (its own doc says so at `:140-143`), and the pipeline is an
-unstructured `Task {` at `:117`.
+**It would destroy work worth keeping.** Cancellation only ever stops a stage from *starting*
+(`ShareMapSnapshotter.swift:160-178`), so a late cancel throws away a style load, a render and the
+cache write, and there is no negative cache (`:100-105`) to soften the next request.
 
-**So a cancelling deadline would produce a caller that never returns** — the `.task` never reaches
-`isUpgrading = false` (`:194`), and the hint never clears. A permanent spinner: exactly the defect
-this issue exists to remove. The secondary argument from revision 1 still holds and is worth keeping
-(a late cancel would throw away a style load, a render and the cache write, with no negative cache to
-soften it), but it is the secondary one.
+## D5 — Auto-apply
 
-The deadline changes what is on screen and nothing else.
-
-## D5 — Auto-apply, on honest grounds
-
-When a success arrives after the deadline, the card upgrades itself and the terminal line disappears.
-
-Revision 1 justified this with the suspension claim, which was backwards. The justification that
-survives is smaller and still sufficient: **a success that lands while the rider is still on this
-screen should not require a tap**, and there is no tap in phase 1 to require. The healthy case
-resolves in ~1.5 s, so this mostly matters for the slow-but-successful middle: a pipeline that lands
-at 9 s on a weak connection.
+When a success arrives after the deadline, the card upgrades and the line clears. The healthy case
+resolves in ~1.5 s, so this matters for the slow-but-successful middle — a pipeline landing at 9 s on
+a weak connection.
 
 The swap goes through the existing `applyOrDeferUpgrade` (`:376-382`), which holds an upgrade back
-rather than swapping the item under a presented share sheet — behaviour the 2026-07-31 device pass
-established the hard way (`:370-375`).
+rather than swapping under a presented share sheet — behaviour the 2026-07-31 device pass established
+the hard way (`:370-375`). D9 is what stops that deferral from becoming a lie.
 
 ## D6 — What suspension actually does
 
-Recorded because revision 1 got it backwards and the corrected version is a limitation, not a
-feature.
+Revision 1 claimed suspension helped. Revision 2 corrected the outcome but named the wrong cause
+("the render belt fires overdue"), which contradicted its own statement that `DispatchTime` does not
+advance while asleep. Both are now replaced by the mechanism.
 
-The belts are `DispatchTime`-based and do not advance while the machine sleeps. The ceiling — and the
-deadline, if built on `Task.sleep` — is `ContinuousClock` and does. Consequences on resume from a
-long screen-lock:
+The belts are `DispatchQueue.main.asyncAfter` (`ShareMapSnapshotter.swift:268,352`), so they do not
+advance while the machine sleeps. The ceiling is `Task.sleep(for:)` on `ContinuousClock`
+(`SharePipelineSlot.swift:79`), so it does. So after a long screen-lock, on resume:
 
-- The deadline has **already expired** in continuous time, so the terminal line is on screen at the
-  first frame after unlock.
-- The render belt fires **overdue**, rejecting a render that never had CPU.
-- With no negative cache, nothing is cached.
+1. The ceiling has already expired. Its arm resolves, `task.cancel()` fires (`:132`).
+2. That cancellation reaches the render's `onCancel`, which cancels the snapshotter and resolves its
+   latch nil (`ShareMapSnapshotter.swift:359-370`).
+3. The provider returns nil. Nothing is cached.
 
-So the pocketed-phone rider gets a truthful line and no map. That is better than today's vanishing
-spinner and worse than revision 1 promised. D7 is what recovers the recoverable part of it.
+**The render is killed by the ceiling's cancellation, not by an overdue belt.** And the deadline,
+also on `ContinuousClock`, has expired too — so the line is on screen at the first frame after unlock,
+which is the correct outcome and the reason D3 pins the clock.
 
-## D7 — A disk-cache re-probe on foreground
+A *short* lock changes nothing: no bound has expired, and the spinner resumes mid-flight. That is
+honest.
 
-Phase 1's one new mechanism, and the piece revision 1 was missing while its own Problem section
-complained that no `scenePhase` handler exists.
+So the pocketed-phone rider gets a truthful line and no map. Better than a vanishing spinner, and
+worse than revision 1 promised. Phase 1 does not fix it; ROH-176 can.
 
-On returning to the foreground, and once on entering the terminal state, re-read the disk cache for
-this request's key. If an image is there, apply it and clear the line.
+## D7 — The reducer is total, and that is the design
 
-Why this earns its place:
+The whole of phase 1's correctness rests on one property: **every input is legal in every phase, and
+a late or duplicate input is a no-op by construction.**
 
-- **It fixes the case both reviewers hit hardest.** A ceiling hands *this caller* nil while the
-  pipeline runs on and caches the result — `ShareMapSnapshotter.swift:249-251` records that the cache
-  write is deliberately not cancellation-gated, because "an accepted raster is worth keeping." So a
-  perfectly good map can land in `Caches/ShareCardSnapshots` moments after the rider was told nil,
-  and nothing re-reads it. Auto-apply cannot fire: that caller's await already returned.
-- **It is structurally safe.** A small file read, the same one `raster(for:)` already does as its
-  fast path (`ShareMapSnapshotter.swift:150`). It starts no pipeline, commits no slot, and creates no
-  new request path — which is what keeps D10's ROH-155 claim true.
-- **It covers the pocketed phone as far as it can be covered.** If the pipeline cached before
-  suspension, the rider unlocks to a finished card.
+That is what takes task lifetime off the correctness path. Revision 2 staked the deadline task's
+behaviour on being `@State`-held and cancelled in `.onDisappear` — but `RideHUDView.swift:346`
+records that `onDisappear` "can fire without the rider asking for anything," so a design that needs
+it to be precise is a design built on a signal this repo has already written off. With a total
+reducer, a deadline that fires after the view settled is simply an input the reducer ignores, and the
+task's shape becomes a performance question.
 
-It cannot help when the pipeline genuinely rejected. Nothing in phase 1 can.
+**Inputs:** deadline reached · provider produced a raster · provider produced nothing · upgrade render
+produced a card · upgrade render produced nothing · the card was applied · the card was deferred.
 
-## D8 — Terminal state is entered by the deadline or a non-image outcome, whichever is first — after a re-probe
+**Phases:** `upgrading` · `successPending` (a raster is in hand, its card is not) · `upgraded` (a card
+is on screen) · `settledOnFallback` (the line is showing).
 
-A reject at 2 s shows the line at 2 s, not at 7 s. If the deadline fires first, the line appears then.
-Either way the cache is re-probed immediately before the line appears, for the reason in D7: `nil`
-means "this caller stopped waiting," not "no map exists."
+`absent` is not a phase. No route, no stats and no fallback are preconditions resolved before the
+machine exists (`:145-147`), and revision 2 was wrong to list it alongside transitions.
 
-Once terminal, a later nil is a no-op.
+## D8 — Terminal is input-scoped, not phase-scoped
 
-**One race the phase machine must handle explicitly.** `RideCardRenderer.make` is a 1080×1350
-main-actor render plus an awaited off-main encode. A success at 6.9 s yields at that await, the 7 s
-deadline wakes and writes the terminal phase, and then the render lands and writes `upgraded` — a
-visible flash of a line over a success that had already arrived. So the terminal phase is enterable
-**only from the upgrading phase**, and observing a success moves out of upgrading immediately, before
-the render is awaited. That needs a distinct "success observed, swap pending" state; four phases
-cannot represent it.
+Revision 2 said the terminal phase is "enterable only from the upgrading phase." That contradicted its
+own D11, which requires a failed upgrade render to settle on the fallback — a transition out of
+`successPending`, exactly what the rule forbade. Both appeared in the same test list.
 
-## D9 — The copy names no reason
+The rule that works names the input:
 
-Nine log lines, and the rider can act on none of them — there is no action in phase 1 at all. Naming
-a reason would cost nine strings and buy nothing, and "the style source failed to load" is not a
-sentence for someone standing over a bike. The reasons keep going to the log, which is where
-`ShareMapSnapshotter.swift:116-120` says they were put deliberately.
+- **The deadline input** enters `settledOnFallback` only from `upgrading`. Once a raster is in hand,
+  the deadline is a no-op — this is what stops a success at 6.9 s from flashing a line while its card
+  renders.
+- **The render-failure input** enters `settledOnFallback` from `successPending`. A raster that renders
+  no card leaves the fallback on screen, so that is what the phase must say.
+- **A provider-nothing input** enters `settledOnFallback` from `upgrading`, at the moment it arrives —
+  a reject at 2 s shows the line at 2 s, not at 7 s.
+- **From `settledOnFallback`**, a later provider or render success still moves forward (that is
+  auto-apply). A later *nothing* is a no-op.
 
-That comment's premise — "a nil from this pipeline is invisible in the UI **by design**" — is what
-this feature deletes. It needs updating as part of the work, which revision 1 did not notice while
-citing it as authority.
+## D9 — `upgraded` means applied, so the defer latch is an input
 
-## D10 — Nothing here re-opens ROH-155, and the split is why
+The gate's sharpest finding, and it would have rebuilt ROH-161's defect inside the fix.
 
-ROH-155 concluded that ride end and History want opposite policies on when to request a raster, that
-nothing distinguishes them, and that "any change that treats them alike is wrong in one of them."
+`applyOrDeferUpgrade` (`:376-382`) writes `deferredUpgrade` instead of `shareImage` when a share sheet
+is up. A machine keyed on the *render* outcome would call that `upgraded` and clear the line — while
+the card on screen is still generation 0. Silent no-map with nothing saying so.
+
+So the reducer takes **applied** and **deferred** as distinct inputs. Deferred holds `successPending`;
+the release at `:407-411` supplies **applied**, which is what reaches `upgraded`.
+
+This also makes phase 1 degrade honestly under ROH-178. If `shareSheetUp` is stuck true for the
+History sheet's whole lifetime, the machine stays at `successPending` — spinner up, no false claim —
+rather than announcing a map the rider does not have. Wrong, but wrong in the direction that does not
+lie.
+
+## D10 — The copy names no reason
+
+Nine log lines, and no action to take in phase 1. Naming a reason costs nine strings and buys nothing,
+and "the style source failed to load" is not a sentence for someone standing over a bike.
+
+`ShareMapSnapshotter.swift:116-120` still says "a nil from this pipeline is invisible in the UI by
+design." That premise is what this issue deletes, and the comment is part of the work.
+`RideSummaryView.swift:139`'s "Share is enabled from the first frame" is wrong (D0) and gets fixed in
+the same pass.
+
+## D11 — Nothing re-opens ROH-155
 
 Phase 1 makes no request. The deadline starts after the 0.8 s sleep and its cancellation guard
-(`:170-173`); the re-probe is a cache read. So the sleep keeps all three documented jobs and a
-History glance still commits no pipeline.
+(`:170-173`), and with the re-probe cut there is no other entry point. So the sleep keeps all three
+documented jobs and a History glance still commits no pipeline.
 
-This claim was **false in revision 1** and is true here only because the retry left. Phase 2 has to
-answer ROH-155's question rather than inherit this paragraph — and the likeliest answer is that retry
-is offered on the ride-end path only, since History already re-attempts on every open.
+This was false in revision 1 (retry) and shaky in revision 2 (the re-probe could reach the slot). It
+is true here because both are gone.
 
-## D11 — Success from the provider is not an upgraded card
+## D12 — Where it lives, and what stays in the view
 
-The phase machine's inputs must include the **upgrade render's** outcome, not just the provider's.
-`RideCardRenderer.make` fails on three paths (`RideCardRenderer.swift:30,37,46`), each logging and
-none surfacing, and `:187`'s `!Task.isCancelled` is a fourth way the upgrade is dropped after a
-successful raster.
+The reducer goes to **AuraKit** (`Sources/AuraKit/Sharing/`, beside `ShareCardContent` and
+`ShareRasterAcceptance`). The app target has no unit test target — `Aura/project.yml` declares only
+`Aura`, `AuraWidgets`, `AuraUITests` — and `ShareMapSnapshotter.swift:122-128` records what that cost
+this exact subsystem: the slot "used to live inline here, where the app target's lack of any
+unit-test target put it out of reach of a test — which is where the review found the ceiling arm
+clearing the slot out from under a live pipeline."
 
-A raster that renders no card leaves the fallback on screen, so it is terminal, not `upgraded`.
+Small: four phases, seven inputs, one transition function.
 
-## D12 — The phase machine, and what it can honestly own
+**`isUpgrading` is derived** from the phase (`upgrading` or `successPending`). It is read once, at
+`:182`.
 
-The decision table moves to **AuraKit** (`Sources/AuraKit/Sharing/`, beside `ShareCardContent` and
-`ShareRasterAcceptance`) as a pure type. The app target has no unit test target — `Aura/project.yml`
-declares only `Aura`, `AuraWidgets` and `AuraUITests` — and `ShareMapSnapshotter.swift:122-128`
-records what that cost this exact subsystem: the slot "used to live inline here, where the app
-target's lack of any unit-test target put it out of reach of a test — which is where the review found
-the ceiling arm clearing the slot out from under a live pipeline."
+**`showHint` stays as state.** Revision 2 said to derive it; that is not implementable. The phase does
+not change at t+0.3 s, so deriving the show-delay needs a second time input, a second timer, and a
+second late-fire hazard — and dropping the delay reintroduces the warm-cache flash `:174-179` exists
+to prevent, on the History path where warm hits actually happen. The reducer must never write it.
 
-Inputs: elapsed-versus-deadline, provider outcome, **upgrade-render outcome** (D11), and a cache-hit
-signal (D7). Phases: `upgrading`, `successPending`, `upgraded`, `settledOnFallback`, and a
-non-transitioning `absent` for the no-route / no-stats / no-fallback preconditions, which are
-determined before the machine exists.
-
-**No attempt epoch is needed, and that is a benefit of the split.** With no retry there is exactly
-one logical attempt per presentation, so there is no superseded attempt whose stale outcome could
-demote an upgraded card. Phase 2 will need an epoch; phase 1 does not, and the spec says so rather
-than discovering it later.
-
-**What stays in the view, and stays untested:** the deadline task's lifetime, the sheet latch, and the
-`@State`. Two notes for the plan, both from the gate. The existing `hint` Task (`:180-184`) is a trap
-rather than a precedent: a `Task {}` created inside `.task` is unstructured, so view cancellation does
-not reach it, and its only cancellation is `hint.cancel()` at `:186` — unreachable until the
-uncancellable provider await returns. A deadline task copying that shape fires ~7 s after a
-dismissal. It needs to be `@State`-held and cancelled in an `.onDisappear`, which this view does not
-currently have. And the structured alternatives do not work: `async let` and task-group children are
-nonisolated and cannot touch `@State` (the comment at `:174-176` is right about that), and a group
-cannot exit early while the raster child's cancellation is a no-op.
-
-`isUpgrading` and `showHint` should be *derived from* the phase rather than living beside it. Five
-pieces of state already write to this region — `shareImage`, `isUpgrading`, `showHint`,
-`shareSheetUp`, `deferredUpgrade` — and adding a sixth that can disagree with two of them is how the
-hint ends up flashing over an upgraded card.
+**Also staying in the view, untested:** the deadline task's shape, the sheet latch, and the `@State`.
+One note for the plan: the existing `hint` Task (`:180-184`) is a trap, not a precedent. A `Task {}`
+inside `.task` is unstructured, so view cancellation does not reach it; its `try?` swallows
+`CancellationError`, which is why `:182` re-checks `Task.isCancelled`. A deadline task needs the same
+guard after every await. Structured alternatives do not help: a task group awaits its children at
+scope exit and the raster child's cancellation is a no-op, so the group would sit until the pipeline
+ends.
 
 ## Risks
 
-**The line makes riders wait to share who otherwise would not have.** Even as an observation rather
-than an offer, "simple map" implies something better exists. Untestable off-device.
+**The line makes riders wait to share who otherwise would not have.** Untestable off-device.
 
-**Layout shift at a rider-independent moment.** The line goes where the hint is (`:107-114`), directly
-above `Button("Done")` (`:117`). It appears at 7 s and auto-apply removes it later, moving Done twice
-while a thumb may be travelling toward it.
+**Layout shift under a travelling thumb.** The line goes where the hint is (`:107-114`), directly
+above `Button("Done")` (`:117`), and auto-apply removes it later — moving Done twice.
 
-**`shareSheetUp` may be wrong on the History path, and auto-apply leans on it harder.**
-`SharePresentation.isPresenting` (`:435-445`) asks whether the key window's root view controller has
-*any* presented view controller. The History path presents this very view as a sheet
-(`HistoryView.swift:53`), so the predicate may be true for the summary's entire lifetime — in which
-case every upgrade after one Share tap is deferred and applied only into a dying view. Pre-existing,
-promoted by auto-apply from rare to routine, and it needs its own issue rather than a line in this
-one. The presentation poll is also one-shot and bounded at 2 s (`:398-401`).
+**ROH-178 degrades this feature.** D9 makes the degradation honest rather than a lie, but on the
+History path a stuck `shareSheetUp` means a spinner that never resolves. Worth sequencing ROH-178
+first if it verifies.
 
-**7 s is a guess bounded by one measurement.** D3.
+**7 s is above the contended device case and below the cold-simulator case.** D3.
 
 ## Out of scope
 
-Retry, and the typed provider outcome it needs (phase 2). The fallback-render silent failure (D0) and
-the `isPresenting` predicate (Risks) — both get their own issues. The 20 s ceiling, which is doing its
-own job. Blocking or gating Share. Negative caching. Naming reject reasons in the UI. Any change to
-when a raster is requested, to the prefetch, or to slot ownership. The already-shared-file residue: a
-rider who shares at 1 s shares generation 0 and no later upgrade changes a file already handed to
-Messages — ROH-126 accepted that and this does not reopen it.
+Retry and the typed provider outcome (ROH-176). The disk-cache re-probe, and with it the
+ceiling-nil-with-a-cached-raster case (ROH-176). The fallback-render silent failure (ROH-177). The
+share-sheet predicate (ROH-178). The 20 s ceiling. Blocking or gating Share. Negative caching. Naming
+reject reasons. Any change to when a raster is requested, to the prefetch, or to slot ownership. The
+already-shared-file residue, which ROH-126 accepted.
 
 ## Testing
 
-The pure phase machine, in `AuraKitTests`:
+The reducer, in `AuraKitTests`. The first test is the one that matters:
 
-- Provider success before the deadline → the line never appears.
-- Provider success after the deadline → line clears, phase reaches `upgraded`.
-- Provider nil before the deadline → terminal at the nil, **not** at the deadline (D8).
-- Deadline reached with no outcome yet → terminal.
-- A nil arriving after terminal → no-op.
-- Success at the deadline boundary → `successPending` wins; the terminal phase is not enterable from
-  it (D8's flash race).
-- Provider success with a failed upgrade render → terminal on the fallback, **not** `upgraded` (D11).
-- A cache hit supplied at the terminal boundary or on foreground → `upgraded` (D7).
+- **Totality:** every input in every phase yields a defined phase and never traps.
+- Deadline in `upgrading` → `settledOnFallback`. Deadline in `successPending` → no-op (D8's flash
+  race). Deadline in `upgraded` or `settledOnFallback` → no-op (the late-fire case).
+- Provider raster → `successPending`, from `upgrading` **and** from `settledOnFallback` (auto-apply).
+- Provider nothing in `upgrading` → `settledOnFallback` immediately. In any other phase → no-op.
+- Render card + **applied** → `upgraded`. Render card + **deferred** → stays `successPending` (D9).
+- Render nothing in `successPending` → `settledOnFallback` (D8).
+- Duplicate inputs: applied twice, deadline twice, nothing-then-raster → no wrong phase.
 
-*(Revision 1 also listed "deadline fires — no cancellation" and "repeated retries — no stacking."
-Both are dropped: a pure function over these inputs cannot observe cancellation or stack anything,
-and non-stacking is `SharePipelineSlot`'s property, already covered in `SharePipelineSlotTests`.)*
+*(Dropped from revision 2: "no cancellation" and "no stacking" — a pure reducer can observe neither,
+and non-stacking is `SharePipelineSlot`'s property, already covered by its own tests.)*
 
 Device pass, on a real phone:
 
-- **Swap-while-sheet-open**, now load-bearing rather than a named risk: present the sheet, land an
-  upgrade under it, confirm the sheet neither dismisses nor changes payload — **and** confirm the
-  deferred upgrade is eventually applied, on both the push and History paths.
-- **Airplane mode at ride end** → line appears; re-enable wifi, background and foreground the app →
-  does the re-probe find anything, and is that the right expectation?
-- **Lock through the entire window** → line on screen at unlock, per D6. Confirm no spinner.
-- Whether 7 s feels right; whether the line flashes ahead of an imminent success; whether the Done
-  button moving is a mis-tap hazard.
+- **Swap-while-sheet-open**, load-bearing rather than a named risk now that auto-apply makes it
+  routine: present the sheet, land an upgrade under it, confirm the sheet neither dismisses nor
+  changes payload, **and** that the deferred upgrade is eventually applied — on both the push and
+  History paths. This is where ROH-178 will show itself.
+- **Airplane mode at ride end** → line appears, stays, and Share still works.
+- **Lock through the whole window** → line on screen at unlock, no spinner (D6).
+- Whether 7 s feels right, and whether Done moving is a mis-tap hazard.
 
 ## Open questions
 
-1. Is 7 s right, or does the line appear too eagerly ahead of a landing pipeline?
-2. Does the auto-applied swap read as delightful or as a glitch to a rider looking at the card?
-3. What exactly does the line say? D2 fixes its job — an observation about the card — not its words.
-4. Phase 2's scoping question, recorded here so it is not lost: should retry exist on the ride-end
-   path only, given History already re-attempts on every open (D10)?
+1. What does the line say? D2 fixes its job, not its words.
+2. Is 7 s right on device?
+3. Should ROH-178 land first, given it can pin this feature's spinner on the History path?
