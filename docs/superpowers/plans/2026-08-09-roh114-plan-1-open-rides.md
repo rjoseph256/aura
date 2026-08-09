@@ -28,6 +28,23 @@ So revision 3 changes the rules rather than making a third attempt at the same t
 
 ---
 
+## Execution log
+
+**Tasks 1–4 are done and verified.** Evidence, not assertion:
+
+| Task | State | Evidence |
+| --- | --- | --- |
+| 1 — pgTAP + `0022` | **done** | CI `db-tests` green with both migrations applied and `0021_open_rides_test.sql … ok`. Step 4's discrimination check ran: with the gate at `0021:79` commented out, CI failed on **test 4 of 7 only** — "a client that does not declare open-ride support is refused" — then went green again on revert. The assertion reaches the gate and nothing else leans on it. |
+| 2 — app build | **done** | Clean build from a fresh derived-data path, `SupabaseGroupRideBackend.swift` confirmed recompiled rather than cached. This was the second thing `794d748` declared unverified. |
+| 3 — `RouteEnvelope` | **done** | 5 tests. **The plan was wrong here and was corrected during execution** — see Step 2. |
+| 4 — the `kind` seam | **done** | 888 package tests, lint clean, clean app build. The guest-joins-after-start test was mutation-checked: forcing the fake to stamp `.route` fails it. |
+
+Task 4 landed a **better design than this plan specified**. Rather than a defaulted trailing `kind:`, it made `kind` required with no default and added `GroupRide.replacing(...)`, so lifecycle rebuilds carry every field through and no site has to remember `kind` exists. The trap this plan spent two revisions describing is now structurally unreachable rather than merely documented. Doubly-optional date parameters keep "leave alone" distinct from "clear".
+
+**Remaining: Tasks 5–10.**
+
+---
+
 ## Preconditions
 
 - [ ] **Where the pgTAP actually runs.** `which supabase` and `docker info` both fail on the machine this plan was written on, so there is no local stack. The fallback the older plans name (`2026-06-29-group-rides-sp1-backend-identity.md:21`) — MCP `execute_sql` against a dev branch — **is also unavailable**: `supabase/config.toml`'s `project_id = "aura"` is the local CLI name, not a hosted ref, and no Aura project is reachable through the Supabase connector on this machine.
