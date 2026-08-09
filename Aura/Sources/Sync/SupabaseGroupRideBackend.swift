@@ -23,13 +23,19 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
     public nonisolated func currentUserID() async throws -> UUID {
         try await client.auth.session.user.id
     }
-    public nonisolated func createRide(route: Data) async throws -> GroupRide {
+    public nonisolated func createRide(route: Data?) async throws -> GroupRide {
         // Decode the route bytes into a JSON value so p_route arrives as real jsonb
         // (an object), not a quoted JSON string.
-        let routeJSON = try JSONDecoder().decode(AnyJSON.self, from: route)
+        //
+        // An open ride (nil) **omits the argument entirely** rather than sending
+        // `AnyJSON.null` (ROH-114). Sending null would store the jsonb scalar `'null'`, which
+        // is not SQL NULL: it satisfies `is not null`, has a non-zero `pg_column_size`, and
+        // would come back as four bytes on the next join. Omitting it lets `create_ride`'s
+        // `p_route jsonb default null` supply a real SQL NULL.
+        let params = try route.map { ["p_route": try JSONDecoder().decode(AnyJSON.self, from: $0)] } ?? [:]
         do {
             let row: GroupRideRow = try await client
-                .rpc("create_ride", params: ["p_route": routeJSON])
+                .rpc("create_ride", params: params)
                 .single().execute().value
             return try row.toDomain()
         } catch let error as PostgrestError where error.message.contains("rides_route_check")
@@ -40,7 +46,12 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
     public nonisolated func joinRide(code: JoinCode) async throws -> JoinedRide {
         do {
             let row: GroupRideRow = try await client
-                .rpc("join_ride", params: ["p_code": code.rawValue]).single().execute().value
+                // p_supports_open declares this build understands a route-less ride (ROH-114).
+                // A build predating migration 0021 omits it, the default false applies, and the
+                // server refuses the join rather than handing back a route it cannot decode.
+                .rpc("join_ride", params: ["p_code": AnyJSON.string(code.rawValue),
+                                           "p_supports_open": AnyJSON.bool(true)])
+                .single().execute().value
             return JoinedRide(ride: try row.toDomain(), route: try row.routeData())
         } catch { throw GroupRideError.joinFailed }
     }
@@ -133,7 +144,8 @@ private nonisolated struct GroupRideRow: Decodable {
     let joinCode: String
     let status: String
     let createdAt: Date
-    let route: AnyJSON
+    /// Optional, and `routeData()` also folds `.null` away — see there. ROH-114.
+    let route: AnyJSON?
     let startedAt: Date?
     let endedAt: Date?
     enum CodingKeys: String, CodingKey {
@@ -152,8 +164,21 @@ private nonisolated struct GroupRideRow: Decodable {
         return GroupRide(id: id, hostID: hostID, joinCode: code, status: rideStatus, createdAt: createdAt,
                          startedAt: startedAt, endedAt: endedAt)
     }
-    func routeData() throws -> Data {
-        try JSONEncoder().encode(route)
+    /// nil for a destination-free ride (ROH-114), and **`.null` folds to nil too**.
+    ///
+    /// This is the layer the first ROH-114 spec revision missed, and it was ship-dead.
+    /// `AnyJSON` has a `.null` case, so a SQL-NULL `route` column does not fail to decode and
+    /// does not arrive absent — a non-optional property would receive `.null` and encode back
+    /// to the four bytes `null`. `GroupRideSession.join` would then see non-nil bytes, fail the
+    /// `Route` decode, land in `.routeUnavailable`, and call `leaveRide` — showing every guest
+    /// of an open ride an error and removing them from the ride server-side.
+    ///
+    /// Making the property optional handles the usual decode path (`decodeIfPresent` returns
+    /// nil for a JSON null); the explicit `.null` fold covers a decoder that hands back the
+    /// case instead. Both roads lead to nil, which is the only value that means "open ride".
+    func routeData() throws -> Data? {
+        guard let route, route != .null else { return nil }
+        return try JSONEncoder().encode(route)
     }
 }
 

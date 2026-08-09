@@ -131,14 +131,16 @@ public final class GroupRideSession {
         self.sleep = sleep ?? { try await Task.sleep(for: $0) }
     }
 
-    public func create(route inputRoute: Route) async {
+    /// Creates a ride. `inputRoute` is nil for a destination-free ride (ROH-114); the backend
+    /// then stores a genuine absence, so a joining guest gets nil rather than bytes.
+    public func create(route inputRoute: Route?) async {
         guard DisplayName.normalized(displayNameProvider()) != nil else {
             phase = .needsDisplayName
             return
         }
         do {
             let resolvedSelfUserID = try await backend.currentUserID()
-            let routeData = try JSONEncoder().encode(inputRoute)
+            let routeData = try inputRoute.map { try JSONEncoder().encode($0) }
             let ride = try await backend.createRide(route: routeData)
             rideID = ride.id
             joinCode = ride.joinCode
@@ -168,10 +170,20 @@ public final class GroupRideSession {
             phase = .joinFailed
             return
         }
-        guard let decodedRoute = try? JSONDecoder().decode(Route.self, from: joined.route) else {
-            phase = .routeUnavailable
-            try? await backend.leaveRide(rideID: joined.ride.id)
-            return
+        // Three-way, and the two failure-looking cases must NOT be collapsed (ROH-114).
+        // nil route = an open ride, by design → proceed with `route` nil.
+        // Bytes that will not decode = a corrupt payload → error out AND leave the ride.
+        // Reading absence as corruption bounces every guest out of an open ride and removes
+        // them server-side; reading corruption as absence turns a lost route into a silent
+        // destination-free ride, which is data loss wearing a feature's clothes.
+        var decodedRoute: Route?
+        if let routeBytes = joined.route {
+            guard let decoded = try? JSONDecoder().decode(Route.self, from: routeBytes) else {
+                phase = .routeUnavailable
+                try? await backend.leaveRide(rideID: joined.ride.id)
+                return
+            }
+            decodedRoute = decoded
         }
         rideID = joined.ride.id
         joinCode = joined.ride.joinCode

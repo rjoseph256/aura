@@ -14,10 +14,15 @@ public enum AuthChange: Sendable, Equatable { case signedIn(UUID), signedOut }
 
 /// The result of joining a ride: the ride record plus the host's route bytes,
 /// so the guest can render the shared course without a second round trip.
+///
+/// `route` is optional because a destination-free ride has none (ROH-114). **Absent and
+/// undecodable are different**: nil means "open ride, by design" and proceeds, while bytes
+/// that fail to decode mean a corrupt payload and must not be silently reinterpreted as an
+/// open ride. See `GroupRideSession.join(code:)`.
 public struct JoinedRide: Sendable {
     public let ride: GroupRide
-    public let route: Data
-    public init(ride: GroupRide, route: Data) {
+    public let route: Data?
+    public init(ride: GroupRide, route: Data?) {
         self.ride = ride
         self.route = route
     }
@@ -44,7 +49,10 @@ public protocol GroupRideBackend: Sendable {
     func signIn(idToken: String, nonce: String, displayName: String?) async throws
     func renameDisplayName(_ name: String) async throws
     func currentUserID() async throws -> UUID
-    func createRide(route: Data) async throws -> GroupRide
+    /// `route` is nil for a destination-free ride (ROH-114). Conformers must store that as a
+    /// genuine absence — a SQL NULL, not a jsonb `'null'` — so `joinRide` can hand back nil
+    /// rather than four bytes spelling `null`.
+    func createRide(route: Data?) async throws -> GroupRide
     func joinRide(code: JoinCode) async throws -> JoinedRide
     func roster(rideID: UUID) async throws -> [RosterMember]
     func recordTrackPoints(rideID: UUID, points: [RemoteTrackPoint]) async throws

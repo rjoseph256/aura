@@ -6,7 +6,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var rides: [UUID: GroupRide] = [:]
         var members: [UUID: [UUID]] = [:]   // rideID -> [userID]
         var codes: [String: UUID] = [:]     // joinCode -> rideID
-        var routes: [UUID: Data] = [:]       // rideID -> route bytes
+        var routes: [UUID: Data] = [:]       // rideID -> route bytes; absent = open ride
         var names: [UUID: String] = [:]      // userID -> display name
         var leaveCalled = false              // test spy
         var forceCreateError: GroupRideError?    // test spy
@@ -48,7 +48,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
         return uid
     }
-    public func createRide(route: Data) async throws -> GroupRide {
+    public func createRide(route: Data?) async throws -> GroupRide {
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
         if let forced = store.forceCreateError { throw forced }
         let code = JoinCode(rawValue: "ABCDEFGH")!   // fixed valid code for the fake (one ride per store)
@@ -66,12 +66,12 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
               let ride = store.rides[rideID] else { throw GroupRideError.joinFailed }
         var members = store.members[rideID] ?? []
         if members.contains(uid) {
-            return JoinedRide(ride: ride, route: store.routes[rideID] ?? Data())
+            return JoinedRide(ride: ride, route: store.routes[rideID])
         }       // idempotent
         guard members.count < 8 else { throw GroupRideError.joinFailed }
         members.append(uid)
         store.members[rideID] = members
-        return JoinedRide(ride: ride, route: store.routes[rideID] ?? Data())
+        return JoinedRide(ride: ride, route: store.routes[rideID])
     }
     public func roster(rideID: UUID) async throws -> [RosterMember] {
         if let forced = store.forceRosterError { throw forced }
