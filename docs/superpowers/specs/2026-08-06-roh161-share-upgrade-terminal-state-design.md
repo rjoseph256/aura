@@ -3,17 +3,8 @@
 Date: 2026-08-06. Branch `adaws96/roh-161-share-map-upgrade-fails-silently-one-attempt-no-terminal`.
 Issue: https://linear.app/rohun/issue/ROH-161
 
-**Revision 3.** Revision 1 went through the three-reviewer adversarial gate and did not survive it;
-the record of what was wrong is at the end, under §What revision 1 got wrong, because most of it was
-wrong in ways the next person to touch this surface would repeat. Revision 2 rebuilt it around
-outcome-typed results. Revision 3 replaced the terminal state's error framing with an offer, after
-an earlier ungated ROH-161 draft was found on branch
-`adaws96/roh-161-share-map-upgrade-silent-failure` that had reached that conclusion independently
-of the product reviewer — see §Copy.
-
-That draft is a second, superseded spec for this issue. It should be deleted, or its branch closed,
-before this one merges; two specs for one issue is how a decision gets re-litigated by whoever finds
-the wrong one first.
+**Revision 4.** See §Revision history. This document is the single spec for ROH-161; an earlier
+independent draft was folded into it and is recorded there.
 
 > `humanizer` is mandated by `CLAUDE.md` for prose deliverables. It is **not installed on this
 > machine**, so this document did not go through it. Recorded here rather than skipped silently.
@@ -36,6 +27,20 @@ Every reject path logs a reason to Console, for a developer. The rider gets one 
 for all of them. (Nine distinct reject strings, not seven — `ShareMapSnapshotter.swift:225` alone
 covers four paths in one message, and the ceiling case logs no reject line at all, only
 `onCeiling`'s `log.info`.)
+
+### What is actually lost, and what is not
+
+Share is never blocked by a failed upgrade. The fallback card renders first, `shareImage` is set,
+and Share is enabled from the first frame (`RideSummaryView.swift:139-145`). A rider whose upgrade
+fails still has a complete, shareable card.
+
+So the loss is not "I cannot share." It is: **I got the polyline card, I was never told a better
+one was attempted, and I do not know that trying again on wifi would very likely work.** That
+framing drives every decision below, and it is the reason this is not an error-reporting feature —
+which in turn is why the terminal state is an offer rather than an apology (§Copy).
+
+*(This section is taken from the superseded draft's §D0, which stated the problem better than
+revision 2 did. Provenance in §Revision history.)*
 
 ## The finding that shapes this design
 
@@ -81,6 +86,9 @@ everything else in this document follows from it.
 - **Touching the 0.8 s sleep, the prefetch, or the slot's policy.** The slot's *return type*
   changes (below); none of its behavior does.
 - **A negative cache.** Its absence is what makes retry meaningful.
+- **The already-shared-file residue.** A rider who shares at 1 s hands generation 0 to Messages, and
+  no later upgrade can change a file already handed over. ROH-126 accepted that; this does not
+  reopen it.
 - **Lowering the 20 s ceiling.** It is correct for its job.
 - **History.** See §Scope.
 
@@ -196,6 +204,55 @@ Counted from the start of the attempt and from nothing else — **not** from the
 ROH-155 rev 3 died partly on that: the entrance window is 0.70 s, 0.65 s, or **zero** under Reduce
 Motion, so any gate expressed against it makes the rider who asked for no animation wait out an
 animation that does not exist. No Reduce Motion coupling, by construction.
+
+It is a **fourth** timeout, and deliberately none of the three that already exist, because all
+three serve someone other than the rider:
+
+| Bound | Value | Whose job |
+|---|---|---|
+| Slot ceiling | 20 s (`SharePipelineSlot.swift:74`) | Protect an app-lifetime singleton from a wedged pipeline |
+| Style belt | 4 s (`ShareMapSnapshotter.swift:268`) | Bound one SDK style load |
+| Render belt | 6 s (`ShareMapSnapshotter.swift:352`) | Bound one SDK render |
+| **Presentation deadline** | **6 s, new** | **Stop the rider waiting** |
+
+**The deadline must not cancel `raster(for:)`.** It changes what is on screen and nothing else. The
+pipeline's own comments argue this at length (`ShareMapSnapshotter.swift:161-178`): cancellation
+only ever stops a stage from *starting* and never discards a finished one, precisely because a late
+cancel "would have saved a 90×60 downsample and one draw, and thrown away ten seconds of style load
+and SDK render plus the cache write." With no negative cache, the next request would then pay the
+whole pipeline again.
+
+### Auto-apply: the deadline stops the spinner, not the work
+
+When the pipeline succeeds after the deadline, the card upgrades itself and the row clears. **No
+tap required.** This is existing behavior — the `.task` is still awaiting the provider — and this
+design's job is to not break it.
+
+It matters more than it looks, because it is the primary mechanism for the pocketed-phone case, not
+the auto-retry. The belts, the ceiling and the deadline all park under suspension and fire together
+on resume, so the rider who locks the phone through the whole window returns to either a finished
+map card or a terminal offer — never to a spinner mid-flight. The auto-retry below only covers the
+residual case where the parked pipeline *rejected*.
+
+The swap goes through the existing `applyOrDeferUpgrade` (`RideSummaryView.swift:376`), which
+already holds an upgrade back rather than swapping it out from under a presented share sheet. Retry
+promotes that path from rare to routine, which is why verifying it is mandatory rather than
+optional — see §Risks on the latch's 2 s appearance bound.
+
+### The alternative considered: no `slow` state at all
+
+The superseded draft (§D5) argued the deadline and a reject should present *identically* — one
+"offer" state either way — on the grounds that the rider's action is the same and the tap "does the
+right thing in both cases without needing to know which happened."
+
+Rejected, and the outcome types are why. At the deadline the pipeline is usually still running, and
+a tap then commits a second waiter to it, arms a fresh 20 s ceiling, and returns the result that
+auto-apply would have delivered anyway. That is an affordance which feels like an action and is
+not one. `slow` keeps the spinner and withholds the button until the app actually knows the wait is
+over — which, thanks to `.stoppedWaiting`, it now can know.
+
+The cost is that a rider in `slow` has nothing to do but wait. Accepted: they are waiting on
+something that is working, and auto-apply means waiting is the correct strategy.
 
 ### Minimum dwell, so nothing flashes
 
@@ -463,6 +520,16 @@ collect the current ride's, so this is an accepted cost, stated rather than inhe
 
 Items 7 and 8 overlap ROH-140 (the ROH-126 device-verification tail) on the same surface.
 
+**Open questions the device pass has to answer, not confirm.** These are the ones where the design
+is genuinely guessing, and they are phrased as questions on purpose — device-pass item 10 of
+revision 1 asked a tester to confirm that 6 s equals 6 s, which cannot fail and detects nothing.
+
+1. Is 6 s right, or does the terminal offer appear too eagerly ahead of a pipeline that was about
+   to land?
+2. Does the auto-applied swap read as delightful or as a glitch when the rider is looking at it?
+3. **Does the offer change sharing behaviour** — do riders wait for a map they would not otherwise
+   have waited for? (See §Risks.)
+
 ## Risks
 
 - **The share-sheet latch has a 2 s appearance bound** (`RideSummaryView.swift:398`): if
@@ -482,6 +549,16 @@ Items 7 and 8 overlap ROH-140 (the ROH-126 device-verification tail) on the same
   ride that will ever exist — History will not have it. The map failure matters more there than
   anywhere else and Done destroys the retry. This design treats `unavailable` identically in all
   cases; whether that state deserves special handling is a real product question, deferred.
+- **The offer may make riders wait to share who otherwise would not have.** An affordance implies
+  something better is coming. A rider who would have shared the polyline card at 3 s might now sit
+  and wait for a map that may never arrive — so the feature's cost is paid by riders it does not
+  help. This is a real behaviour change, it cannot be tested off-device, and it is the one risk here
+  that argues for the *absence* of the feature. Device-pass open question 3.
+  *(From the superseded draft's §Risks; neither revision 2 nor any of the three gate reviewers
+  raised it.)*
+- **Auto-apply changes a card under a rider who has already decided.** `applyOrDeferUpgrade` covers
+  the presented-sheet case. It does not cover a rider who is simply looking at the card when it
+  swaps. Accepted; device-pass open question 2.
 
 ## The ROH-126 clause
 
@@ -520,3 +597,43 @@ Kept because the failures are properties of this subsystem, not of one draft.
    spinner — this issue's own bug, reintroduced.
 9. **It claimed "this design stops the rider waiting"** on the 20 s ceiling. Nothing in it did.
 10. **Its single injected `sleep` closure could not support its own test list.**
+
+## Revision history
+
+**Revision 1** (`d081e03`). Two terminal states driven by a presentation deadline. Went to the
+three-reviewer adversarial gate and did not survive it; §What revision 1 got wrong is the record,
+kept because the failures are properties of this subsystem rather than of one draft.
+
+**Revision 2** (`2e89441`). Rebuilt around outcome-typed results after the gate's central finding:
+`raster(for:)` returning nil does not mean the pipeline failed. Scoped to ride-end, fixed the
+auto-retry's edge and its ordering race, replaced a fabricated success envelope with a
+minimum-dwell rule, made `begin`/`finish` structurally unskippable.
+
+**Revision 3** (`de798ef`). Terminal state became an offer rather than an apology.
+
+**Revision 4.** Folded in an earlier, independent ROH-161 draft — dated 2026-08-05, commit
+`7622501`, written on the local-only branch `adaws96/roh-161-share-map-upgrade-silent-failure` and
+never gated or pushed. It was found after revision 3 and it is the reason this section exists.
+
+It had reached several conclusions this line of work had not, and each is now incorporated with a
+pointer to it at the point of use:
+
+- **§D0**, the statement of what is actually lost — better than revision 2's, and now §Problem's
+  "What is actually lost, and what is not".
+- **§D2**, the offer-not-apology framing, reached independently of the gate's product reviewer.
+  Adopted in revision 3 and credited in §Copy.
+- **§D3**, the four-timeouts table and the rule that the deadline must not cancel `raster(for:)`.
+- **§D4**, auto-apply as the *primary* mechanism for the pocketed-phone case, which this line of
+  work had wrongly assigned to the auto-retry.
+- **§Risks**, that the offer may make riders wait to share who otherwise would not have — the one
+  risk here that argues against building the feature at all, and which neither revision 2 nor any
+  of the three gate reviewers raised.
+- **§D5**, that the deadline and a reject should present identically. This one is **rejected**, and
+  §The alternative considered says why: the outcome types make a distinction available that the
+  draft could not see.
+
+The draft's own §D7 claimed a retry "cannot stack pipelines… two rapid taps produce two awaiting
+callers of one pipeline, which is harmless." That is true of the same-key join and misses the
+ceiling case, which is the same error revision 1 made from the other direction — two independent
+drafts reaching it is the strongest evidence that `nil` from this provider is genuinely misleading,
+and the best argument for the seam change in §The seam.
