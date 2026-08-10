@@ -40,20 +40,32 @@ public enum AppRoute: Sendable {
     }
 }
 
-/// The entry point into the group-ride flow: either creating a session around a
-/// planned `Route`, or joining one via a `JoinCode`. `Hashable` is hand-written
-/// because `Route` is not `Hashable` (only `Equatable`) and `JoinCode` is only
-/// `Equatable` as well, so this hashes by `Route.id` / `JoinCode.rawValue`.
+/// The entry point into the group-ride flow: either creating a session, or joining one via a
+/// `JoinCode`. `Hashable` is hand-written because `Route` is not `Hashable` (only `Equatable`)
+/// and `JoinCode` is only `Equatable` as well, so this hashes by `Route.id` / `Place.id` /
+/// `JoinCode.rawValue`.
 public enum GroupRideEntry: Sendable {
-    case create(Route)
+    /// `route` is nil for a destination-free ride (ROH-114).
+    ///
+    /// `place` is what the host was heading to, and exists only so the lobby can say
+    /// "Heading to Blue Bottle" instead of naming nothing (D5.4). A `Route` carries bare
+    /// `Coordinate`s and no name, so without carrying the `Place` alongside it the name is
+    /// simply gone — `AppRoute.navigate(route:destination:)` already pairs the two for the solo
+    /// path, and this case was the one place in the app that threw the name away.
+    ///
+    /// It is nil for an open ride, and also for a guest, who joins by code and never had a
+    /// `Place` to begin with. Copy has to work without it.
+    case create(route: Route?, place: Place?)
     case join(JoinCode)
 }
 
 extension GroupRideEntry: Equatable {
     public static func == (lhs: GroupRideEntry, rhs: GroupRideEntry) -> Bool {
         switch (lhs, rhs) {
-        case let (.create(a), .create(b)):
-            return a.id == b.id
+        case let (.create(routeA, placeA), .create(routeB, placeB)):
+            // `Optional`'s own conformances do the work: two open creates are equal because
+            // nil == nil, with no invented discriminator (spec D1.3).
+            return routeA?.id == routeB?.id && placeA?.id == placeB?.id
         case let (.join(a), .join(b)):
             return a == b
         default:
@@ -65,9 +77,10 @@ extension GroupRideEntry: Equatable {
 extension GroupRideEntry: Hashable {
     public func hash(into hasher: inout Hasher) {
         switch self {
-        case let .create(route):
+        case let .create(route, place):
             hasher.combine(0)
-            hasher.combine(route.id)
+            hasher.combine(route?.id)
+            hasher.combine(place?.id)
         case let .join(code):
             hasher.combine(1)
             hasher.combine(code.rawValue)

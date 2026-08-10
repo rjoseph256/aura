@@ -148,7 +148,10 @@ struct GroupRideFlowView: View {
     /// valid name exists.
     private func invokeEntry() async {
         switch entry {
-        case let .create(route):
+        // The place is not passed to the session: it is presentation, read straight off the
+        // entry by the lobby (D5.4). The session's business is the route, which is nil for an
+        // open ride.
+        case let .create(route, _):
             await session.create(route: route)
         case let .join(code):
             await session.join(code: code)
