@@ -278,11 +278,48 @@ When the pipeline succeeds after the deadline, the card upgrades itself and the 
 tap required.** This is existing behavior — the `.task` is still awaiting the provider — and this
 design's job is to not break it.
 
-It matters more than it looks, because it is the primary mechanism for the pocketed-phone case, not
-the auto-retry. The belts, the ceiling and the deadline all park under suspension and fire together
-on resume, so the rider who locks the phone through the whole window returns to either a finished
-map card or a terminal offer — never to a spinner mid-flight. The auto-retry below only covers the
-residual case where the parked pipeline *rejected*.
+**Erratum, revision 6 — the suspension claim was false, and it was load-bearing.** Revisions 2–5
+said "the belts, the ceiling and the deadline all park under suspension and fire together on
+resume, so the rider who locks the phone through the whole window returns to either a finished map
+card or a terminal offer." Verified against the source, that is wrong, and the two halves run on
+different clocks:
+
+| Bound | Mechanism | Advances while the device sleeps? |
+|---|---|---|
+| Style belt (4 s), render belt (6 s) | `DispatchQueue.main.asyncAfter(deadline: .now() + n)` (`ShareMapSnapshotter.swift:281`, `:365`) | **No** — `DispatchTime` is the uptime clock |
+| Slot ceiling (20 s) | `Task.sleep(for:)` (`SharePipelineSlot.swift:106`) | **Yes** — `ContinuousClock` |
+| Presentation deadline (6 s, new) | `Task.sleep(for:)` | **Yes** |
+
+`RideInstant.swift:30-35` documents this split deliberately and for this exact case: *"on Darwin
+this is `mach_continuous_time`, which keeps advancing while the machine sleeps. A phone in a jersey
+pocket with the screen locked is exactly where a suspending clock under-counts."*
+
+So a phone in a pocket is the case where they diverge, not the case where they agree. The ceiling
+runs to 20 s and cancels while the belts are frozen mid-stage; the rider resumes to a **cancelled
+pipeline and a cold cache**, not a finished card. The deadline has also long since elapsed, so the
+phase on resume is `unavailable(.mayRejoin)` — which is precisely the retryability the automatic
+retry is forbidden to fire on.
+
+**Consequences for this design, stated rather than patched over:**
+
+1. Auto-apply is **not** the primary mechanism for the pocketed-phone case. It cannot be: there is
+   usually nothing left to apply. It remains correct and worth keeping for the *awake* slow case —
+   a rider watching the screen past 6 s — which is a real case, just a different one.
+2. The pocketed rider's only route back to a map is a fresh request against a cold cache. The
+   automatic retry's `.freshAttempt` gate blocks it, because a ceiling produces `.mayRejoin`.
+   **This is now the open hole in the design**, and it is the headline scenario. A disk-cache
+   re-probe on foreground does not close it either — the cache is cold, because the pipeline was
+   cancelled before it wrote anything.
+3. ROH-126's note that "suspension parks both belts and the ceiling together so they fire on the
+   same resume" inherits the same error. That claim was the decisive argument for reversing
+   erratum (a) in `2026-07-30-roh126-slot-watchdog-cancellation.md`. The *conclusion* there
+   survives on other grounds, but the reason given for it does not, and the note should be
+   corrected rather than left to be cited again.
+
+Nothing below has been rewritten to account for this yet. It is recorded here first because it was
+found during implementation, it invalidates a paragraph three gates read without catching, and
+guessing at the fix in the same edit that discovers the problem is how the earlier revisions of
+this document went wrong.
 
 The swap goes through the existing `applyOrDeferUpgrade` (`RideSummaryView.swift:376`), which
 already holds an upgrade back rather than swapping it out from under a presented share sheet. Retry
