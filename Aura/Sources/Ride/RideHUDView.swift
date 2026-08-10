@@ -29,11 +29,12 @@ struct RideHUDView: View {
     /// Live camera for the +/- zoom pill (ROH-57). Written every frame by `RideMapView`'s
     /// `.onCameraChanged`, read only at tap time, so it never re-renders the HUD.
     @State private var cameraBox = MapZoomCameraBox()
-    // Free rides are solo by construction — group rides use NavigateHUDView +
-    // GroupRideSession, never this HUD — so gem discovery is never suppressed here.
-    // (GemDiscoveryStore.isSuppressed exists for a future group-explore surface. That surface
-    // would be a rebuild, not a wiring-up: ROH-105 removed the last dormant peer path here.
-    // See docs/superpowers/specs/2026-07-27-roh105-dead-peer-split-deletion-design.md.)
+    // This HUD is no longer solo by construction (ROH-114): a destination-free crew ride rides
+    // here, with `groupSession` non-nil. Gem discovery still is not suppressed — discovery is
+    // what Explore is for, and D5.3 decided the crew layer does not switch it off — so
+    // `GemDiscoveryStore.isSuppressed` remains unwired, now by decision rather than by absence
+    // of a caller. ROH-105 named a stale doc comment on exactly this kind of type as its
+    // reusable lesson, so this one is rewritten rather than left describing the old world.
     // Built lazily in the appear .task: it needs SeenGemStore(container:) from `rideStore`,
     // which a @State initializer can't read.
     @State private var gems: GemDiscoveryStore?
@@ -50,7 +51,17 @@ struct RideHUDView: View {
     /// in-flight turn card's own formatting (sourced from `GuidanceViewModel.turn`, set once
     /// per leg in `GuidanceController.startGuidance`) would miss a metric rider's setting —
     /// a narrow, tracked gap; see Task 9 report.
-    init() {
+    /// The crew session when a destination-free group ride is riding here, nil for a solo free
+    /// ride (ROH-114 D4.1). Taken as an init parameter rather than a defaulted stored property:
+    /// this type declares its own `init`, which suppresses the memberwise one, so a stored
+    /// property alone would leave nothing to call. `NavigateHUDView` has the same shape.
+    ///
+    /// `@State` identity is positional, so the solo call site staying `RideHUDView()` keeps its
+    /// state across this change.
+    let groupSession: GroupRideSession?
+
+    init(groupSession: GroupRideSession? = nil) {
+        self.groupSession = groupSession
         let controller = GuidanceController(
             makeGuidance: { GuidanceViewModel(session: MapboxGuidanceSession()) },
             routing: MapboxDetourRouting(), heading: CompassHeadingProvider(),
@@ -213,9 +224,20 @@ struct RideHUDView: View {
             // Voice is not in play here: the detour never sets `onSpeak`.
             coordinator.pauseObserver = guidance
             gems = store
+            // groupSink attaches HERE, at `.task`, and nowhere else (ROH-114 D4.5). `start` is
+            // guarded `!recorder.isRecording`, so a sink absent from the FIRST start can never
+            // attach afterwards — and the failure is silent in the worst direction: the rider
+            // sees the whole crew on their own map while being invisible on everyone else's,
+            // because `tick` is what drives `publishIfDue`. Wiring it into the
+            // `State(initialValue:)` coordinator in `init` fails the same way, capturing the
+            // first init's value.
+            //
+            // Note both sinks are defaulted-nil on this one call, so omitting either compiles
+            // clean and ships dead. That is the failure mode ROH-105 documented.
             let outcome = coordinator.start(
                 location: rideLocation, saving: rideStore, units: settings.units,
                 authorization: rideAuthorization, saveToHealth: settings.saveToHealth,
+                groupSink: groupSession?.locationSink,
                 discoverySink: store)
             if outcome == .permissionDenied { showPermission = true }
         }
