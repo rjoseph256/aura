@@ -25,6 +25,10 @@ struct RideHUDView: View {
     @State private var guidance: GuidanceController
     @State private var showPermission: Bool
     @State private var showEndConfirm: Bool
+    /// The crew-aware exit, shown instead of `showEndConfirm` whenever this HUD is hosting a
+    /// group ride (ROH-114). Separate state rather than a reused flag because the two present
+    /// different affordances and a member has three answers, not two.
+    @State private var showGroupEndConfirm = false
     @State private var viewport: Viewport
     /// Live camera for the +/- zoom pill (ROH-57). Written every frame by `RideMapView`'s
     /// `.onCameraChanged`, read only at tap time, so it never re-renders the HUD.
@@ -43,6 +47,15 @@ struct RideHUDView: View {
     @State private var markToast: SavedPlace?
     @State private var showSavedPlacesFull = false
 
+    /// The crew session when a destination-free group ride is riding here, nil for a solo free
+    /// ride (ROH-114 D4.1). An init parameter rather than a defaulted stored property: this type
+    /// declares its own `init`, which suppresses the memberwise one, so a property alone would
+    /// leave nothing to call. `NavigateHUDView` has the same shape.
+    ///
+    /// `@State` identity is positional, so the solo call site staying `RideHUDView()` keeps its
+    /// state across this change.
+    let groupSession: GroupRideSession?
+
     /// Builds the detour `GuidanceController` from app concretes and injects it into a fresh
     /// coordinator. `settings.units` isn't reachable here (SwiftUI environment values aren't
     /// resolved during a view's synchronous `init`), so `guidance` starts at the `.imperial`
@@ -51,15 +64,6 @@ struct RideHUDView: View {
     /// in-flight turn card's own formatting (sourced from `GuidanceViewModel.turn`, set once
     /// per leg in `GuidanceController.startGuidance`) would miss a metric rider's setting —
     /// a narrow, tracked gap; see Task 9 report.
-    /// The crew session when a destination-free group ride is riding here, nil for a solo free
-    /// ride (ROH-114 D4.1). Taken as an init parameter rather than a defaulted stored property:
-    /// this type declares its own `init`, which suppresses the memberwise one, so a stored
-    /// property alone would leave nothing to call. `NavigateHUDView` has the same shape.
-    ///
-    /// `@State` identity is positional, so the solo call site staying `RideHUDView()` keeps its
-    /// state across this change.
-    let groupSession: GroupRideSession?
-
     init(groupSession: GroupRideSession? = nil) {
         self.groupSession = groupSession
         let controller = GuidanceController(
@@ -148,6 +152,20 @@ struct RideHUDView: View {
             Button("End ride", role: .destructive) { coordinator.finish() }
             Button("Keep riding", role: .cancel) { }
         }
+        // The crew exit (ROH-114, a named subset of D5.1). Mirrors navigate's dialog rather
+        // than inventing a second vocabulary for the same decision.
+        .confirmationDialog(groupEndTitle, isPresented: $showGroupEndConfirm,
+                            titleVisibility: .visible) {
+            if isGroupHost {
+                Button("End group ride", role: .destructive) { endGroupRideAsHost() }
+                Button("Keep riding", role: .cancel) { }
+            } else {
+                Button("Leave crew") { leaveCrewKeepRiding() }
+                Button("End ride", role: .destructive) { endRideAsMember() }
+                Button("Keep riding", role: .cancel) { }
+            }
+        }
+        .groupEndFeedback(isEnding: groupSession?.isEnding, endFailed: groupSession?.endFailed)
         .alert("Saved places is full. Remove one to save another.",
                isPresented: $showSavedPlacesFull) {
             Button("OK", role: .cancel) {}
@@ -264,7 +282,11 @@ struct RideHUDView: View {
         // Edge-swipe mirrors the back button: a just-started ride can be swiped away
         // (discard on teardown); once it's worth a summary, the swipe is disabled so a stray
         // gesture can't drop a real ride.
-        .swipeBackEnabled(canDiscard)
+        // Never on a crew ride, whatever the discard floor says. `.swipeBackEnabled` toggles the
+        // UIKit interactivePopGestureRecognizer, which a SwiftUI confirmation cannot intercept —
+        // so on the group path the swipe pops `GroupRideFlowView` and releases the session at
+        // `.riding` with no leave, exactly the silent abandonment this task exists to close.
+        .swipeBackEnabled(canDiscard && groupSession == nil)
     }
 }
 
@@ -313,7 +335,11 @@ private extension RideHUDView {
                     onMarkSpot: gems?.riderCoordinate != nil ? { markSpot() } : nil,
                     onZoomIn: { zoom(.zoomIn) },
                     onZoomOut: { zoom(.zoomOut) },
-                    onEndRide: { showEndConfirm = true })
+                    // Crew rides get the crew exit; ending one has to leave it, not just stop
+                    // recording (ROH-114).
+                    onEndRide: {
+                        if groupSession != nil { showGroupEndConfirm = true } else { showEndConfirm = true }
+                    })
             }
             .padding(.horizontal, AuraTheme.Spacing.lg)
 
@@ -362,7 +388,15 @@ private extension RideHUDView {
     }
 
     func backTapped() {
-        if canDiscard {
+        // On a crew ride the discard floor stops deciding whether the rider is ASKED. Every
+        // chevron opens the crew exit, however short the ride: below the floor this branch used
+        // to discard and pop straight out, which released the session with no leave and left
+        // the crew on a ride that stayed active server-side. The floor still decides what
+        // happens to the recording — see `finishOwnRideIfEnded` — never whether the crew is
+        // told (ROH-114, a named subset of D5.1).
+        if groupSession != nil {
+            showGroupEndConfirm = true
+        } else if canDiscard {
             // `discard`, not `cancel`: the rider is throwing this ride away, so any checkpoint
             // a pause left in the store goes too. (`cancel` deliberately keeps it — it also
             // runs from `onDisappear`, which can fire without the rider asking for anything.)
@@ -428,6 +462,27 @@ private extension RideHUDView {
                     savedPlaces.updateName(id: saved.id, to: name, ifCurrentlyNamed: "Marked spot")
                 }
             }
+        }
+    }
+}
+
+/// Deliberately not `private`: `RideHUDView+GroupCrew` calls this, and `private`/`fileprivate`
+/// are file-scoped, so a same-type extension in another file cannot see them. It stays in THIS
+/// file because it is the one piece needing `router` and `coordinator`, which do stay private.
+extension RideHUDView {
+    /// Finish this rider's own ride, or throw it away if it is below the discard floor — a rider
+    /// who joined a crew and pedalled 40 m has no summary worth showing (D5.5).
+    ///
+    /// **The discard must pop explicitly.** `discard()` never sets `finishedRide`, and
+    /// `showRideSummary` is reached only from `.onChange(of: coordinator.finishedRide)`, so
+    /// nothing else would move: the flow view would stay mounted over a torn-down coordinator
+    /// while `activeRideID` stayed non-nil and went on dropping deep links.
+    func finishOrDiscardOwnRide() {
+        if canDiscard {
+            coordinator.discard()
+            router.popToRoot()
+        } else {
+            coordinator.finish()
         }
     }
 }
