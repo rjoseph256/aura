@@ -11,7 +11,15 @@ struct GroupRideFlowView: View {
     let entry: GroupRideEntry
 
     @Environment(AppRouter.self) private var router
+    @Environment(SettingsStore.self) private var settings
     @Environment(\.scenePhase) private var scenePhase
+
+    /// The destination's name, carried on the entry so the lobby can name it (D5.4). A guest's
+    /// entry is `.join`, which has no place — the copy handles that.
+    private var entryPlaceName: String? {
+        if case let .create(_, place) = entry { return place?.name }
+        return nil
+    }
 
     @State private var session: GroupRideSession
     @State private var displayNameStore = DisplayNameStore(backend: SupabaseGroupRideBackend())
@@ -74,7 +82,11 @@ struct GroupRideFlowView: View {
             }
 
         case .lobby:
-            GroupLobbyView(session: session)
+            // The place name comes off the entry, not the session: it is presentation, and the
+            // session deliberately knows only about the route (D5.4).
+            GroupLobbyView(session: session,
+                           placeName: entryPlaceName,
+                           isImperial: settings.units == .imperial)
 
         // Reached only when `!didEnterRiding` (the `content` `if` owns the rode-then-ended
         // case): the ride ended while the rider was still in the lobby/join flow, so there's no
