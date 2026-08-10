@@ -30,7 +30,7 @@ So revision 3 changes the rules rather than making a third attempt at the same t
 
 ## Execution log
 
-**Tasks 1–4 are done and verified.** Evidence, not assertion:
+**Tasks 1–9 are done and verified.** Evidence, not assertion:
 
 | Task | State | Evidence |
 | --- | --- | --- |
@@ -38,10 +38,18 @@ So revision 3 changes the rules rather than making a third attempt at the same t
 | 2 — app build | **done** | Clean build from a fresh derived-data path, `SupabaseGroupRideBackend.swift` confirmed recompiled rather than cached. This was the second thing `794d748` declared unverified. |
 | 3 — `RouteEnvelope` | **done** | 5 tests. **The plan was wrong here and was corrected during execution** — see Step 2. |
 | 4 — the `kind` seam | **done** | 888 package tests, lint clean, clean app build. The guest-joins-after-start test was mutation-checked: forcing the fake to stamp `.route` fails it. |
+| 5 — the entry carries a place | **done** | 893 tests. Mutation-checked: dropping `place` from `==` fails `aDifferentPlaceIsADifferentEntry`. |
+| 6 — the lobby line | **done** | 902 tests. **Copy deviates from D5.4 deliberately** — see below. |
+| 7 — the D4.1 fork + D4.5 sink | **done** | Fork on stored `kind`; `groupSink` at `.task`. Landed as ONE commit: a fork without the sink builds green and records a ride that publishes nothing. |
+| 8 — the crew exit | **done** | The subset of D5.1 without which an open ride wedges `active` server-side for 36 h with nobody able to end it. |
+| 9 — the entry points | **done** | 902 tests, app + UITests targets build. |
+| 10 — two phones | **not done** | Needs devices and a project with `0021`/`0022` applied. |
 
-Task 4 landed a **better design than this plan specified**. Rather than a defaulted trailing `kind:`, it made `kind` required with no default and added `GroupRide.replacing(...)`, so lifecycle rebuilds carry every field through and no site has to remember `kind` exists. The trap this plan spent two revisions describing is now structurally unreachable rather than merely documented. Doubly-optional date parameters keep "leave alone" distinct from "clear".
+**Copy deviation (task 6).** D5.4 specifies "Open ride — no destination"; this ships **"No destination — just riding"**. The line sits directly above an eight-character join code in 40 pt numerals, and in that company "open" reads as *open to anyone* — a claim about who can get in rather than about where the ride goes. One string to revert.
 
-**Remaining: Tasks 5–10.**
+**Two things execution proved the plan wrong about**, beyond task 3's round-trip claim: task 4's design — a required `kind` plus `GroupRide.replacing(...)` beat the defaulted trailing parameter this plan specified, making the trap two revisions were spent describing structurally unreachable rather than merely documented, and task 8's file split — this plan implied the crew exit could be extracted with no access widening, but `finishOrDiscardOwnRide` had to leave the `private` extension, because `private`/`fileprivate` are file-scoped rather than type-scoped.
+
+**Remaining: task 10 only — the two-phone device pass.**
 
 ---
 
