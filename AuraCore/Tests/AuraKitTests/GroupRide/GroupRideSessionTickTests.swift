@@ -50,10 +50,17 @@ struct GroupRideSessionTickTests {
         await host.session.end()
         #expect(host.session.phase == .ended)
     }
-    @Test func tickDoesNotUseWallClock() async throws {
-        // Purely exercises the injected-time entry; a fixed `now` must be accepted with no real waiting.
+    /// The tick entry takes its instant from the caller, so a fixed one must drive a real publish
+    /// with no waiting. Asserts the publish rather than the phase: an earlier version of this test
+    /// only checked `phase == .riding`, which survives replacing `tick`'s entire body with a
+    /// no-op.
+    @Test func tickPublishesOnAnInjectedInstantWithNoWallClock() async throws {
         let host = try await ridingHost()
-        await host.session.tick(now: Date(timeIntervalSince1970: 500))
+        host.session.locationSink?.locationDidUpdate(
+            coordinate: Coordinate(latitude: 1, longitude: 1),
+            progressMeters: 10, speed: 5, at: Date(timeIntervalSince1970: 500))
+        await host.session.tick(now: .coherent(Date(timeIntervalSince1970: 500)))
+        #expect(host.transport.publishedBatches.isEmpty == false)
         #expect(host.session.phase == .riding)
     }
 }

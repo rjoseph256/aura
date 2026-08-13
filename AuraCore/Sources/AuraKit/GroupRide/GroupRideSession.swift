@@ -263,7 +263,7 @@ public final class GroupRideSession {
     /// The sole time entry point. Publishes buffered own-points when due, ages silent
     /// peers, then snapshots the inner session's state into the observable stored props
     /// so SwiftUI repaints promptly rather than waiting for the next tick.
-    public func tick(now: Date) async {
+    public func tick(now: RideInstant) async {
         guard let session = rideSession else { return }
         await session.publishIfDue(now: now, lifecycle: currentLifecycle)
         session.stalenessTick(now: now)
@@ -344,13 +344,13 @@ public final class GroupRideSession {
         return members
     }
 
-    /// Production-only: drives `tick(now:)` off a real wall clock. Tests never call this —
-    /// they drive `tick`/`ingest` directly with injected times.
+    /// Production-only: drives `tick(now:)` on a 1 s cadence. Tests never call this — they drive
+    /// `tick`/`ingest` directly with injected instants.
     func startTicker() {
         tickerTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                await self.tick(now: Date())
+                await self.tick(now: .now)
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }
