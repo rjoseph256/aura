@@ -200,12 +200,34 @@ written, and the difference is worth understanding rather than trusting blindly.
   left at user scope because a mandate naming agents a clone does not have degrades quietly
   into one generic reviewer, which is the failure that prompted all of this. Each declares a
   `tools:` list with no Agent tool, so a reviewer cannot spawn grandchildren by construction.
-- **The plugins** are declared in `.claude/settings.json`, so `superpowers`, `all-ios-skills`,
-  `apple-platform-build-tools`, and `ios-build-verify` resolve without a manual install. Claude
-  Code will ask you to trust the marketplaces on first run, which is expected. Approve them.
-  `all-ios-skills` is the one that matters most day to day, 84 framework skills routed by name.
-  `apple-platform-build-tools` provides the `builder` subagent that absorbs xcodebuild output,
-  and delegating builds to it is what keeps a session's context from filling with logs.
+- **The plugins** are declared in `.claude/settings.json`: `superpowers`, `all-ios-skills`,
+  `apple-platform-build-tools`, and `ios-build-verify`. Claude Code will ask you to trust the
+  marketplaces on first run, which is expected. Approve them. `all-ios-skills` is the one that
+  matters most day to day, 84 framework skills routed by name. `apple-platform-build-tools`
+  provides the `builder` subagent that absorbs xcodebuild output, and delegating builds to it is
+  what keeps a session's context from filling with logs.
+
+  **Declaring them is not the same as getting them, and on the second machine it was not.**
+  Only `superpowers` installed unattended. Expect to check, and to repair by hand:
+
+  - `all-ios-skills` and `apple-platform-build-tools` registered in
+    `~/.claude/plugins/installed_plugins.json` with the right scope and project path, but the
+    `installPath` directories they pointed at had never been created. The repair was to copy each
+    marketplace clone into the recorded `installPath` and write the `.claude-plugin/plugin.json`
+    that a working install has and neither of those repos ships. Both declare `"source": "./"`
+    in their marketplace manifest, meaning the plugin is the marketplace repo root; that is the
+    shape whose cache population did not happen. A third clone should expect the same wall.
+  - `ios-build-verify` never registered at all, and still has not. Its marketplace clones and
+    then nothing follows: no cache entry, no `installed_plugins.json` record, no skill. The cause
+    is still unknown. Two candidates have been ruled out — both its manifests are well-formed,
+    and the `{"source": "url"}` shape its marketplace uses is the same shape
+    `superpowers` uses successfully. Treat it as unavailable rather than as tooling you can plan
+    around.
+
+  Verify rather than assume: `~/.claude/plugins/installed_plugins.json` should carry a record for
+  each plugin, and the `installPath` in that record should be a directory that actually exists and
+  contains `.claude-plugin/plugin.json`. A missing skill at the moment you need it reads as the
+  model ignoring the mandate, which is the failure mode this whole document exists to prevent.
 - **The quality gate.** `.claude/settings.json` declares a `TaskCompleted` hook running
   `.claude/hooks/aura-task-gate.sh`, which runs `.claude/agent-gate.sh`: SwiftLint strict, the
   package suite with `--no-parallel`, and the two guard scripts. An agent that tries to call a
@@ -224,6 +246,23 @@ keeping the board honest is part of the flow rather than optional bookkeeping.
 `.claude/agent-gate.sh` as a project override on its own. The repo's wrapper detects that and
 steps aside, so the gate runs once rather than twice. You do not need the global hook for Aura;
 this only matters if you want the same gate everywhere else.
+
+> Know how that detection works before you put anything at that path. The wrapper's whole test is
+> whether `~/.claude/hooks/agent-gate.sh` is executable. It does not check that the file is
+> registered as a hook, or that it runs the project override, or that it does anything at all. An
+> executable file there — including an empty one — makes the wrapper step aside and Aura's gate
+> stops running, with nothing in the repo changed and no message anywhere. If you install a global
+> hook, register it and confirm it actually executes this repo's `.claude/agent-gate.sh`.
+
+**Picking up changes to `.claude/` mid-session.** Project configuration is read once, at session
+start. A `git pull` that updates `.claude/settings.json`, `.claude/agents/`, or the hook scripts
+does not reach the session you are sitting in — you have to start a new one. Nothing warns you.
+The first reviewer-dispatch attempt on ROH-123 failed exactly this way, with
+`Agent type 'review-skeptic' not found` in a session that had pulled the agents moments earlier.
+The dangerous version of this is silent rather than loud: a session started before the reviewers
+existed does not error, it just falls back to a single generic review pass, which is the original
+failure the checked-in config was meant to end. After pulling anything under `.claude/`, restart
+before you trust the mandate.
 
 **The design skills are deliberately not here.** The owner's `~/.claude/skills/` holds 17 loose
 skill directories, and they are not vendored into this repo for two reasons. Only `impeccable`

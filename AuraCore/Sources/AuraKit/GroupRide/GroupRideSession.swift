@@ -222,6 +222,22 @@ public final class GroupRideSession {
     /// `RideSession.ingest` (dots), so the group layer would never see names/toasts live.
     /// Idempotent (the lobby and the riding view both call it); tests may still drive
     /// `tick`/`ingest` directly for the deterministic seams.
+    ///
+    /// **`didBeginLive` is set before the first await on purpose — do not "fix" it.** Both
+    /// call sites can be in flight at once, and latching on entry is what makes the second
+    /// one return at the guard instead of opening a second subscription. Latching on success
+    /// instead would let both past and subscribe twice.
+    ///
+    /// That placement is only safe because nothing between the latch and `startManaged` can
+    /// skip the rest: `refreshRoster()` is non-throwing (it swallows the backend error with
+    /// `try?` and returns `[]`), and cancellation is cooperative with no checks on this path.
+    /// A failed roster fetch therefore costs display names, not the live layer —
+    /// `GroupRideSessionBeginLiveTests` is the guard on that. Making `refreshRoster` throwing,
+    /// or adding a cancellation check here, would turn this into a real defect: the latch
+    /// would be set with no subscription, no event loop and no ticker, and every later call
+    /// would return at the guard. Silent in both directions — no crew appears, and the rider
+    /// publishes nothing because `tick` drives `publishIfDue`. (Investigated under ROH-167,
+    /// which was filed as a live bug and closed as not one.)
     public func beginLiveSession() async {
         guard phase != .ended else { return }
         guard !didBeginLive, let session = rideSession else { return }

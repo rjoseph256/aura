@@ -29,9 +29,16 @@ already done.
 - iCloud sync: two devices signed into the *same* iCloud account. A second iPhone works; so does
   one iPhone plus a simulator signed into the same iCloud.
 
-**Building to the device.** Select your iPhone in Xcode and Run, or use the `ios-build-verify`
-tooling to deploy. For a second identity you may need a second physical phone; Sign in with Apple
-cannot run two accounts on one device at once.
+**Building to the device.** Select your iPhone in Xcode and Run, or delegate the build to the
+`apple-platform-build-tools` builder subagent, which can deploy to a connected device and absorbs
+the xcodebuild output. For a second identity you may need a second physical phone; Sign in with
+Apple cannot run two accounts on one device at once.
+
+> `ios-build-verify` is declared in `.claude/settings.json` but does not install. As of
+> 2026-08-02 its marketplace clones, yet no plugin is ever registered and no skill resolves from
+> it. The cause is not known: its manifests are well-formed, and the `{"source": "url"}` shape
+> its marketplace uses is the same shape `superpowers` uses successfully. Do not reach for it or
+> plan around it until that is fixed.
 
 **Capturing evidence.** Use Console.app filtered on the `Aura` process (or the Xcode console) for
 `os_log` output, the Health app for workouts, the CloudKit Dashboard at
