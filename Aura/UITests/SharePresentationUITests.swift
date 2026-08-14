@@ -1,19 +1,21 @@
 import XCTest
 import AuraKit
 
-/// ROH-178: `SharePresentation.isPresenting` asks whether the key window's root view controller
-/// has *any* presented view controller, and `beginShareSheetWatch` treats that as "my share sheet
-/// is up." On the History path the summary is itself a sheet, so the predicate is expected to be
-/// true for the summary's whole lifetime — which would leave `shareSheetUp` latched and every
-/// upgrade deferred into a dying view.
+/// ROH-178 regression guard. The removed predicate asked whether the key window's root view
+/// controller had *any* presented view controller, and `beginShareSheetWatch` treated that as "my
+/// share sheet is up." On the History path the summary is itself a sheet, so it was true for the
+/// summary's whole lifetime — leaving `shareSheetUp` latched and every upgrade deferred into a
+/// dying view.
 ///
-/// This is a verification-before-fix test (systematic debugging, phase 1). The pushed ride-end
+/// These began as verification-before-fix tests (systematic debugging, phase 1) and were kept as
+/// permanent guards: the first fails if the predicate ever goes back to answering "is anything
+/// presented", the second fails if the share sheet stops being identifiable. The pushed ride-end
 /// presentation is the control: same view, same probe, no enclosing sheet.
 ///
-/// It reads `RideTestID.summaryPresentationProbe`, which reports the whole presentation chain's
-/// depth plus whether any controller in it is a `UIActivityViewController`. `isPresenting` is
-/// `depth >= 1`; what it is *used* for is `activity == 1`. The gap between those two numbers on
-/// the History path is the defect.
+/// They read `RideTestID.summaryPresentationProbe`, which reports the whole presentation chain's
+/// depth, whether any controller in it is a `UIActivityViewController`, and what the shipping
+/// predicate answers. Depth stays 1 on the History path after the fix — only the *subject* of the
+/// question changed, which is why depth alone can never answer it.
 final class SharePresentationUITests: XCTestCase {
     override func setUp() {
         super.setUp()

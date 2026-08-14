@@ -35,19 +35,20 @@ public enum RideTestID {
     /// time comes from the fixture's own stamps rather than wall clock.
     public static let summaryMoving = "summary.moving"
     public static let historyRow = "history.row"
-    /// ROH-178 diagnostic: the summary's view-controller presentation state. Reports what
-    /// `SharePresentation.isPresenting` currently sees (a non-zero chain depth) alongside what it
-    /// is *supposed* to mean (a `UIActivityViewController` is up). The two disagree on the History
-    /// path, where the summary is itself a sheet — which is the whole bug.
+    /// ROH-178 diagnostic: the summary's view-controller presentation state. Reports the raw chain
+    /// depth alongside what the predicate is *supposed* to mean (a `UIActivityViewController` is
+    /// up). The two disagree on the History path, where the summary is itself a sheet — which was
+    /// the whole bug, and is why the shipping predicate keys on the activity sheet rather than depth.
     public static let summaryPresentationProbe = "summary.presentation.probe"
 }
 
 /// ROH-178 diagnostic probe line. `depth` is how many view controllers deep the presentation
 /// chain runs from the key window's root; `activity` is whether any of them is the share sheet.
 ///
-/// `SharePresentation.isPresenting` is `depth >= 1`. What it is used for is `activity == 1`. This
-/// probe exists so a UI test can show the gap rather than a reviewer having to reason about how
-/// SwiftUI resolves `.sheet` presentation.
+/// The predicate ROH-178 removed answered `depth >= 1`; what it was used for is `activity == 1`.
+/// This probe exists so a UI test can show that gap directly rather than a reviewer having to
+/// reason about how SwiftUI resolves `.sheet` presentation. `predicate` carries what the shipping
+/// code answers today, so the tests guard the real behaviour rather than a re-derivation of it.
 public enum SharePresentationProbe {
     public struct Values: Equatable, Sendable {
         public let depth: Int
