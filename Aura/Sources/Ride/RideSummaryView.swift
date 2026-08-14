@@ -125,6 +125,7 @@ struct RideSummaryView: View {
             .padding(.bottom, AuraTheme.Spacing.xxxl)
         }
         .background(AuraTheme.background.ignoresSafeArea())
+        .modifier(SharePresentationProbeOverlay())   // ROH-178 diagnostic; DEBUG + simulated only
         .onAppear {
             computeRecord()
             startAppearance()
@@ -397,10 +398,10 @@ extension RideSummaryView {
             var appeared = false
             for _ in 0..<20 {
                 try? await Task.sleep(for: .milliseconds(100))
-                if SharePresentation.isPresenting { appeared = true; break }
+                if SharePresentation.isPresentingShareSheet { appeared = true; break }
             }
             if appeared {
-                while SharePresentation.isPresenting, !Task.isCancelled {
+                while SharePresentation.isPresentingShareSheet, !Task.isCancelled {
                     try? await Task.sleep(for: .milliseconds(250))
                 }
             }
@@ -426,20 +427,4 @@ private struct CountUpText: View, Animatable {
     }
 
     var body: some View { Text(format(meters)) }
-}
-
-/// Whether the app is currently presenting a modal (the share sheet, in this view's case).
-///
-/// `ShareLink` exposes no presentation state, so this reads it from UIKit. Deliberately not a
-/// seam: it answers a question about the live UIKit window, which a stub could only lie about.
-@MainActor
-private enum SharePresentation {
-    static var isPresenting: Bool {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first { $0.isKeyWindow }?
-            .rootViewController?
-            .presentedViewController != nil
-    }
 }
