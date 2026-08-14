@@ -193,8 +193,9 @@ written, and the difference is worth understanding rather than trusting blindly.
 
 - **The standing mandates** are in the repo's [CLAUDE.md](../CLAUDE.md), under "How work gets
   done here": the full pipeline with its adversarial review gates for major work, iOS-skill
-  routing before writing Swift, device verification for UI, and `humanizer` for prose. Every
-  session in this repo reads them.
+  routing before writing Swift, and device verification for UI. Every session in this repo
+  reads them. Note that `humanizer` is now banned here rather than required, so the missing
+  install that earlier PR bodies apologised for is no longer worth mentioning.
 - **The three adversarial reviewers** the pipeline names are in `.claude/agents/`:
   `review-skeptic`, `review-product`, `review-architecture`. They are checked in rather than
   left at user scope because a mandate naming agents a clone does not have degrades quietly
