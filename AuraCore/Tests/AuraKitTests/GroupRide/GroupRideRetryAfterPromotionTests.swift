@@ -22,7 +22,8 @@ struct GroupRideRetryAfterPromotionTests {
               profile: .fastest, distanceMeters: 100, estimatedDurationSeconds: 60, elevationGainMeters: 0)
     }
 
-    /// The guest side of a started ride: their session, their backend, and the ride id.
+    /// The three handles a test needs on a guest who has joined a started ride. A named type
+    /// rather than a tuple so the arity can grow without tripping `large_tuple`.
     private struct RidingGuest {
         let session: GroupRideSession
         let backend: InMemoryGroupRideBackend
@@ -53,10 +54,10 @@ struct GroupRideRetryAfterPromotionTests {
 
     @Test func aRetryAfterBeingPromotedStillLeavesRatherThanEndingForEveryone() async throws {
         let ctrl = SleepControl(fireImmediately: true)
-        let fixture = try await ridingGuest(ctrl: ctrl)
-        let guest = fixture.session
-        let backend = fixture.backend
-        let rideID = fixture.rideID
+        let joined = try await ridingGuest(ctrl: ctrl)
+        let guest = joined.session
+        let backend = joined.backend
+        let rideID = joined.rideID
         let guestID = try #require(guest.selfUserID)
 
         // The member taps "End ride" and the call hangs past the timeout.
@@ -67,6 +68,8 @@ struct GroupRideRetryAfterPromotionTests {
 
         // Meanwhile the host leaves and the server promotes this rider (0018's rule).
         let ride = try #require(backend.store.rides[rideID])
+        // `replacing` rather than a positional rebuild: ROH-114 made `kind` a required field
+        // with no default, so every rebuild site would otherwise have to know it exists.
         backend.store.rides[rideID] = ride.replacing(hostID: guestID)
         await guest.reconcileFromStatus()
         #expect(guest.isHost == true, "the promotion has landed on this session")
