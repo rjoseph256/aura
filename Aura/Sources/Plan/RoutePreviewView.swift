@@ -247,7 +247,10 @@ struct RoutePreviewView: View {
 
             Button("Ride together") {
                 if let selected {
-                    router.startGroupRide(.create(selected))
+                    // The destination travels with the route: the lobby names it (D5.4), and this
+                    // was the one entry in the app that dropped it. `.navigate` at :241 has always
+                    // carried both.
+                    router.startGroupRide(.create(route: selected, place: destination))
                 }
             }
             .buttonStyle(.ctaSecondary)

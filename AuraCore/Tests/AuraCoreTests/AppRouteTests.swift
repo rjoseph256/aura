@@ -126,4 +126,44 @@ struct AppRouteTests {
         #expect(r != AppRoute.freeRide)
         #expect(r != AppRoute.history)
     }
+
+    // MARK: - GroupRideEntry (ROH-114)
+
+    /// Two destination-free creates are the same entry. This is the case the hand-written
+    /// conformances had to keep working when `route` went optional: `Optional`'s own `==` and
+    /// `hash` cover nil, so no discriminator had to be invented for "open".
+    @Test func openCreateEntriesAreEqualAndHashAlike() {
+        let a = GroupRideEntry.create(route: nil, place: nil)
+        let b = GroupRideEntry.create(route: nil, place: nil)
+        #expect(a == b)
+        #expect(a.hashValue == b.hashValue)
+        #expect(Set([a, b]).count == 1)
+    }
+
+    @Test func anOpenCreateIsNotARouteCreate() {
+        #expect(GroupRideEntry.create(route: nil, place: nil)
+                != GroupRideEntry.create(route: route(), place: nil))
+    }
+
+    @Test func createEntriesMatchOnRouteAndPlaceIdentity() {
+        let routeID = UUID(), placeID = UUID()
+        let a = GroupRideEntry.create(route: route(routeID, geometryCount: 2), place: place(placeID))
+        let b = GroupRideEntry.create(route: route(routeID, geometryCount: 40), place: place(placeID, "Renamed"))
+        #expect(a == b, "identity is the ids, not the payload")
+        #expect(a.hashValue == b.hashValue)
+    }
+
+    /// The place is part of the entry's identity, not decoration. These entries are pushed onto
+    /// the navigation path, so two rides to genuinely different destinations must not collapse
+    /// into one another there.
+    @Test func aDifferentPlaceIsADifferentEntry() {
+        let routeID = UUID()
+        #expect(GroupRideEntry.create(route: route(routeID), place: place())
+                != GroupRideEntry.create(route: route(routeID), place: place()))
+    }
+
+    @Test func aCreateIsNeverAJoin() {
+        #expect(GroupRideEntry.create(route: nil, place: nil)
+                != GroupRideEntry.join(JoinCode(rawValue: "ABCDEFGH")!))
+    }
 }

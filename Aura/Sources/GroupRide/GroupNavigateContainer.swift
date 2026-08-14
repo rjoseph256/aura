@@ -14,9 +14,11 @@ struct GroupNavigateContainer: View {
         if let route = session.route {
             NavigateHUDView(route: route, destination: nil, groupSession: session)
         } else {
-            // Guarded per the brief: `.riding` with no route is unreachable in practice
-            // (create/join both set `route` before this phase), but render something
-            // sane rather than a blank screen.
+            // Unreachable, and now for a stronger reason than before: `GroupRideFlowView`
+            // routes by the ride's stored `kind`, so a destination-free ride never arrives
+            // here at all (ROH-114 D4.1) — it rides the Explore cockpit. Only a route ride
+            // reaches this type, and its route is set before `phase` leaves `.idle`. Kept as
+            // a sane fallback rather than a crash.
             Color.clear
         }
     }

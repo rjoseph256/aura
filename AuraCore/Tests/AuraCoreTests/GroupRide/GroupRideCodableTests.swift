@@ -9,6 +9,7 @@ struct GroupRideCodableTests {
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
             hostID: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
             joinCode: code,
+            kind: .open,
             status: .active,
             createdAt: Date(timeIntervalSince1970: 0)
         )
@@ -33,7 +34,7 @@ struct GroupRideCodableTests {
         let started = Date(timeIntervalSince1970: 100)
         let ended = Date(timeIntervalSince1970: 200)
         let ride = GroupRide(id: UUID(), hostID: UUID(), joinCode: JoinCode(rawValue: "ABCDEFGH")!,
-                             status: .ended, createdAt: Date(timeIntervalSince1970: 0),
+                             kind: .route, status: .ended, createdAt: Date(timeIntervalSince1970: 0),
                              startedAt: started, endedAt: ended)
         let round = try JSONDecoder().decode(GroupRide.self, from: JSONEncoder().encode(ride))
         #expect(round.startedAt == started)
@@ -42,7 +43,7 @@ struct GroupRideCodableTests {
 
     @Test func groupRideDefaultsLifecycleToNil() {
         let ride = GroupRide(id: UUID(), hostID: UUID(), joinCode: JoinCode(rawValue: "ABCDEFGH")!,
-                             status: .active, createdAt: Date(timeIntervalSince1970: 0))
+                             kind: .route, status: .active, createdAt: Date(timeIntervalSince1970: 0))
         #expect(ride.startedAt == nil)
         #expect(ride.endedAt == nil)
     }

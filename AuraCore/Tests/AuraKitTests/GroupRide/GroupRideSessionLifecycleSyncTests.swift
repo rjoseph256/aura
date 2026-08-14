@@ -42,12 +42,12 @@ enum LifecycleFixtures {
     }
 
     /// Rewrites the ride's `hostID` server-side (simulates a host transfer/promotion),
-    /// looked up by join code. Rebuilds the value since `GroupRide`'s fields are `let`.
+    /// looked up by join code. `GroupRide`'s fields are `let`, so this replaces the value —
+    /// through `replacing(hostID:)`, which carries every other field (`kind` included) across
+    /// without this fixture having to know they exist.
     static func promoteHost(_ backend: InMemoryGroupRideBackend, forCode code: JoinCode, to newHostID: UUID) {
         guard let rideID = backend.store.codes[code.rawValue], let ride = backend.store.rides[rideID] else { return }
-        backend.store.rides[rideID] = GroupRide(id: ride.id, hostID: newHostID, joinCode: ride.joinCode,
-                                                 status: ride.status, createdAt: ride.createdAt,
-                                                 startedAt: ride.startedAt, endedAt: ride.endedAt)
+        backend.store.rides[rideID] = ride.replacing(hostID: newHostID)
     }
 }
 

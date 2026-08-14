@@ -11,6 +11,14 @@ import AuraKit
 /// `session.startRiding()` and `session.leave()`.
 struct GroupLobbyView: View {
     let session: GroupRideSession
+    /// The host's destination by name, for the kind line (ROH-114 D5.4). Nil for an open ride and
+    /// nil for every guest, who joined by code and never had a `Place`.
+    let placeName: String?
+    /// Passed in rather than read from `SettingsStore` in this view on purpose: the store is
+    /// injected only at the app root (`AuraApp`), so an `@Environment` lookup here would compile
+    /// and then trap at runtime in both previews below. No defaults on either of these, so a new
+    /// call site has to say what it means instead of silently inheriting imperial.
+    let isImperial: Bool
 
     @Environment(AppRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -89,6 +97,20 @@ struct GroupLobbyView: View {
                 .font(.subheadline)
                 .foregroundStyle(AuraTheme.textSecondary)
                 .multilineTextAlignment(.center)
+
+            // Which sort of ride this is (D5.4). Without it the lobby renders identically
+            // whether a guest is about to be navigated 8 km or turned loose, and they have no
+            // other signal — they got here by typing a code.
+            if let kindLine = GroupRideSubtitle.text(kind: session.rideKind,
+                                                     placeName: placeName,
+                                                     distanceMeters: session.route?.distanceMeters,
+                                                     isImperial: isImperial) {
+                Text(kindLine)
+                    .font(.subheadline)
+                    .foregroundStyle(AuraTheme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, AuraTheme.Spacing.xs)
+            }
         }
         .padding(.horizontal, AuraTheme.Spacing.xxl)
     }
@@ -340,7 +362,7 @@ private struct GroupLobbyPreviewHost: View {
     }
 
     var body: some View {
-        GroupLobbyView(session: session)
+        GroupLobbyView(session: session, placeName: "Blue Bottle", isImperial: true)
             .task {
                 let route = Route(id: UUID(),
                                   origin: Coordinate(latitude: 40.44, longitude: -79.99),
@@ -386,7 +408,7 @@ private struct GroupLobbyGuestPreviewHost: View {
     }
 
     var body: some View {
-        GroupLobbyView(session: guestSession)
+        GroupLobbyView(session: guestSession, placeName: nil, isImperial: true)
             .task {
                 let route = Route(id: UUID(),
                                   origin: Coordinate(latitude: 40.44, longitude: -79.99),

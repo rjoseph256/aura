@@ -30,6 +30,15 @@ public final class GroupRideSession {
     public private(set) var selfUserID: UUID?
     public private(set) var joinCode: JoinCode?
     public private(set) var route: Route?
+    /// What sort of ride this is (ROH-114) — `nil` until a ride has been created or joined.
+    ///
+    /// Always the value the server **stored**, taken off the `GroupRide` that `create`/`join`
+    /// returned. It is deliberately not re-derived from `route == nil` on this side: the server
+    /// derives kind once, at create, and migration 0022 constrains the column to agree with the
+    /// route, so a second derivation here would be a second authority that can disagree with the
+    /// first (spec D1.3). The lobby names the kind from this (D5.4) and the riding container forks
+    /// on it (D4.1).
+    public private(set) var rideKind: GroupRide.Kind?
     public private(set) var peers: [RidePeer] = []
     public private(set) var isLive: Bool = false
     /// userID -> display name, populated from `backend.roster(rideID:)`.
@@ -131,18 +140,21 @@ public final class GroupRideSession {
         self.sleep = sleep ?? { try await Task.sleep(for: $0) }
     }
 
-    public func create(route inputRoute: Route) async {
+    /// Creates a ride. `inputRoute` is nil for a destination-free ride (ROH-114); the backend
+    /// then stores a genuine absence, so a joining guest gets nil rather than bytes.
+    public func create(route inputRoute: Route?) async {
         guard DisplayName.normalized(displayNameProvider()) != nil else {
             phase = .needsDisplayName
             return
         }
         do {
             let resolvedSelfUserID = try await backend.currentUserID()
-            let routeData = try JSONEncoder().encode(inputRoute)
+            let routeData = try inputRoute.map { try JSONEncoder().encode($0) }
             let ride = try await backend.createRide(route: routeData)
             rideID = ride.id
             joinCode = ride.joinCode
             route = inputRoute
+            rideKind = ride.kind
             hostID = ride.hostID
             selfUserID = resolvedSelfUserID
             isHost = (ride.hostID == resolvedSelfUserID)
@@ -168,14 +180,25 @@ public final class GroupRideSession {
             phase = .joinFailed
             return
         }
-        guard let decodedRoute = try? JSONDecoder().decode(Route.self, from: joined.route) else {
-            phase = .routeUnavailable
-            try? await backend.leaveRide(rideID: joined.ride.id)
-            return
+        // Three-way, and the two failure-looking cases must NOT be collapsed (ROH-114).
+        // nil route = an open ride, by design → proceed with `route` nil.
+        // Bytes that will not decode = a corrupt payload → error out AND leave the ride.
+        // Reading absence as corruption bounces every guest out of an open ride and removes
+        // them server-side; reading corruption as absence turns a lost route into a silent
+        // destination-free ride, which is data loss wearing a feature's clothes.
+        var decodedRoute: Route?
+        if let routeBytes = joined.route {
+            guard let decoded = try? JSONDecoder().decode(Route.self, from: routeBytes) else {
+                phase = .routeUnavailable
+                try? await backend.leaveRide(rideID: joined.ride.id)
+                return
+            }
+            decodedRoute = decoded
         }
         rideID = joined.ride.id
         joinCode = joined.ride.joinCode
         route = decodedRoute
+        rideKind = joined.ride.kind
         hostID = joined.ride.hostID
         selfUserID = resolvedSelfUserID
         isHost = (joined.ride.hostID == resolvedSelfUserID)
