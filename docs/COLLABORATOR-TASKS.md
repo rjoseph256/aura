@@ -242,18 +242,17 @@ Claude Code access to the board. They authorize it themselves in claude.ai conne
 with `/mcp` in an interactive terminal. Until they do, their sessions cannot move issues, and
 keeping the board honest is part of the flow rather than optional bookkeeping.
 
-**The global `TaskCompleted` hook, optionally.** If you install one at
-`~/.claude/hooks/agent-gate.sh` for your other projects, it will find and run this repo's
-`.claude/agent-gate.sh` as a project override on its own. The repo's wrapper detects that and
-steps aside, so the gate runs once rather than twice. You do not need the global hook for Aura;
-this only matters if you want the same gate everywhere else.
-
-As of ROH-157 the repo's wrapper no longer tries to detect that, so if you install a global hook
-you will simply gate each task twice. Unregister one of the two if that bothers you; either alone
-runs the same gate. The detection is gone because its test was whether a file was executable, so a
-zero-byte file at that path turned Aura's gate off entirely with no message anywhere, and two
-attempts at a trustworthy version both failed review. `scripts/test-task-gate.sh` now pins the
-absence: no arrangement of that path makes the wrapper skip the gate.
+**The global `TaskCompleted` hook, optionally.** You do not need one for Aura; the checked-in
+project hook covers this repo. If you install a global hook at `~/.claude/hooks/agent-gate.sh`
+for your other projects, it will also find and run this repo's `.claude/agent-gate.sh` as a
+project override, so a machine carrying both gates each task twice. That is deliberate. The
+wrapper used to detect the global hook and step aside, but its whole test was whether a file at
+that path was executable, so a zero-byte file there turned Aura's gate off entirely with no
+message anywhere (ROH-157), and two attempts at a trustworthy detection both failed adversarial
+review. `scripts/test-task-gate.sh` now pins the absence: no arrangement of that path makes the
+wrapper skip the gate. The duplicate run is cheap — with a warm build cache the package suite is
+tens of seconds — and if it bothers you, the lever is the global hook: it is user-scope and yours
+to edit or unregister. Leave the project hook alone; it is what a fresh clone relies on.
 
 **Picking up changes to `.claude/` mid-session.** Project configuration is read once, at session
 start. A `git pull` that updates `.claude/settings.json`, `.claude/agents/`, or the hook scripts

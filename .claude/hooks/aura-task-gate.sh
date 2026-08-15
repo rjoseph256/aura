@@ -26,8 +26,9 @@
 # one. scripts/test-task-gate.sh pins that: no arrangement of the global hook can
 # make this stand aside.
 #
-# If you carry both hooks and want the single run back, unregister one of them.
-# Either one alone runs this same gate.
+# If you carry both hooks and want the single run back, the lever is the global
+# one: it is user-scope and yours to edit or unregister. The project hook is
+# checked in so that a fresh clone keeps its gate; do not remove it for this.
 #
 # The stdin drain matters: the hook payload has to be consumed or the writer can
 # block on a full pipe.

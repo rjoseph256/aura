@@ -25,12 +25,21 @@ cd "$(dirname "$0")/.." || exit 2
 # environment reach past the lab's synthetic HOME.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
 unset CLAUDE_CONFIG_DIR
+# Ambient git configuration is another way in: GIT_CONFIG_GLOBAL / _SYSTEM /
+# _COUNT and XDG_CONFIG_HOME all reach the lab's git invocations no matter what
+# HOME is set to.
+unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_COUNT XDG_CONFIG_HOME
 
 WRAPPER="$PWD/.claude/hooks/aura-task-gate.sh"
 [[ -x "$WRAPPER" ]] || { echo "FAIL: $WRAPPER missing or not executable"; exit 2; }
 
 LAB="$(mktemp -d)"
 trap 'rm -rf "$LAB"' EXIT
+# If TMPDIR ever sits inside a git repo, discovery from $LAB/notarepo would walk
+# up out of the lab and find that repo — and run whatever gate it carries. The
+# ceiling stops discovery at the lab boundary. (Verified: without it, a repo
+# enclosing TMPDIR is found; with it, rev-parse fails as the suite expects.)
+export GIT_CEILING_DIRECTORIES="$LAB"
 failures=0
 pass() { printf '  ok    %-50s %s\n' "$1" "$2"; }
 fail() { printf '  FAIL  %-50s %s\n' "$1" "$2"; failures=$((failures + 1)); }
