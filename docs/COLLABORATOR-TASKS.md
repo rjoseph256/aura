@@ -248,24 +248,12 @@ keeping the board honest is part of the flow rather than optional bookkeeping.
 steps aside, so the gate runs once rather than twice. You do not need the global hook for Aura;
 this only matters if you want the same gate everywhere else.
 
-Two mechanisms keep that honest, and the second is the one that matters (ROH-157).
-
-`.claude/agent-gate.sh` runs its checks **once per tree**. It fingerprints HEAD plus the
-content of every changed file, takes a lock, and records its verdict; a second gate reaching
-the same tree replays that verdict instead of repeating the work. So two hooks firing for one
-event cost one run, and a nested run costs nothing.
-
-The wrapper then steps aside only when it can confirm all of: the file is executable, its code
-(comments stripped) names `.claude/agent-gate.sh`, and `settings.json` registers **that same
-file**, compared by resolved path rather than by name. Anything short of that and it runs the
-gate itself. Because of the dedupe above, guessing wrong that way is nearly free, which is why
-it is allowed to guess at all. Set `AURA_GATE_VERBOSE=1` to see which way it went.
-`scripts/test-task-gate.sh` and `scripts/test-agent-gate-dedupe.sh` pin both, and run in CI.
-
-> Until ROH-157 was fixed the test was only whether that file was executable, so a zero-byte
-> file there turned Aura's gate off with nothing in the repo changed and no message anywhere.
-> If you are on a clone predating that fix, register your global hook and confirm it really
-> executes this repo's `.claude/agent-gate.sh`.
+As of ROH-157 the repo's wrapper no longer tries to detect that, so if you install a global hook
+you will simply gate each task twice. Unregister one of the two if that bothers you; either alone
+runs the same gate. The detection is gone because its test was whether a file was executable, so a
+zero-byte file at that path turned Aura's gate off entirely with no message anywhere, and two
+attempts at a trustworthy version both failed review. `scripts/test-task-gate.sh` now pins the
+absence: no arrangement of that path makes the wrapper skip the gate.
 
 **Picking up changes to `.claude/` mid-session.** Project configuration is read once, at session
 start. A `git pull` that updates `.claude/settings.json`, `.claude/agents/`, or the hook scripts
