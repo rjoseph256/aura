@@ -15,7 +15,7 @@
 #
 #   - The package needs `swift test --no-parallel`. The global gate runs a bare
 #     `swift test`, which races the SwiftData suites against each other.
-#   - Two guard scripts CI runs have no generic equivalent.
+#   - The guard scripts CI runs have no generic equivalent.
 #   - The package lives in AuraCore/, so a change confined to the app target
 #     should still run the package suite.
 #
@@ -31,6 +31,15 @@ set -uo pipefail
 
 MAX_LINES=40
 TEST_TIMEOUT=900   # the package suite is large; below this a slow machine reads as a failure
+LOCK_WAIT=900      # seconds a second gate will wait for the first one's verdict
+
+# ------------------------------------------------------------ re-entrancy guard
+# This gate runs scripts/test-task-gate.sh, which runs a copy of the task-gate
+# wrapper, which resolves a repo and can find its way back here. A nested run is a
+# child process, so an exported marker is enough to stop it. Without this the chain
+# is unbounded and each level costs a full lint-and-test pass (ROH-157 review).
+[[ -n "${AURA_GATE_RUNNING:-}" ]] && exit 0
+export AURA_GATE_RUNNING=1
 
 repo="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$repo" || exit 0
@@ -51,6 +60,62 @@ files="$(changed)"
 [[ -z "$files" ]] && exit 0
 
 has() { grep -qE "$1" <<<"$files"; }
+
+# --------------------------------------------------------------- sibling dedupe
+# A machine with the global hook installed has TWO TaskCompleted hooks registered,
+# and Claude Code runs matching hooks in parallel. Those are unrelated processes,
+# so the marker above cannot see across them. Without dedupe they become two
+# concurrent `swift test --no-parallel` runs contending for one SwiftPM build lock.
+#
+# The key is the tree, not the clock: HEAD plus the CONTENT of everything changed()
+# reports. Two hooks firing for one event see a byte-identical tree and agree; two
+# genuinely different tasks do not, so a stale verdict is never replayed. Content
+# rather than paths, because the same dirty file edited twice has an identical
+# `git status` line and a different right answer.
+fingerprint() {
+  { printf '%s\n' "$repo"
+    git rev-parse HEAD 2>/dev/null
+    while IFS= read -r f; do
+      [[ -f "$f" ]] && shasum "$f" 2>/dev/null || printf 'absent %s\n' "$f"
+    done <<<"$files"
+  } | shasum | cut -d' ' -f1
+}
+
+cache="${TMPDIR:-/tmp}/aura-gate-$(fingerprint)"
+lock="$cache.lock"
+
+# Replays a recorded verdict and exits, or returns 1 if there is nothing fresh to
+# replay. 15 minutes outlives the slowest legitimate gate and no more.
+take_verdict() {
+  [[ -f "$cache" ]] || return 1
+  [[ -n "$(find "$cache" -mmin -15 2>/dev/null)" ]] || return 1
+  local rc; rc="$(head -1 "$cache" 2>/dev/null)"
+  [[ "$rc" =~ ^[0-9]+$ ]] || return 1
+  [[ "$rc" -eq 0 ]] && exit 0
+  tail -n +2 "$cache" >&2
+  exit "$rc"
+}
+
+take_verdict || true
+
+if ! mkdir "$lock" 2>/dev/null; then
+  # Another gate owns this exact tree. Wait for its verdict rather than paying twice.
+  waited=0
+  while [[ -d "$lock" && $waited -lt $LOCK_WAIT ]]; do
+    # The EXIT trap below clears the lock on any ordinary exit, so a lock that has
+    # aged past the verdict TTL belongs to a process that was killed outright.
+    # Waiting the full LOCK_WAIT on a corpse would stall every later task.
+    if [[ -z "$(find "$lock" -maxdepth 0 -mmin -15 2>/dev/null)" ]]; then
+      rmdir "$lock" 2>/dev/null; break
+    fi
+    sleep 1; waited=$((waited + 1))
+  done
+  take_verdict || true
+  # It left without recording anything. Run it ourselves: a task must never pass on
+  # the strength of a missing file.
+  mkdir -p "$lock" 2>/dev/null
+fi
+trap 'rmdir "$lock" 2>/dev/null' EXIT
 
 failures=()
 
@@ -88,16 +153,26 @@ fi
 if has '\.swift$'; then
   run "monotonic instant guard" . bash scripts/check-monotonic-instants.sh
 fi
-# Keyed to the handoff itself rather than to Swift: this guard is about who runs this
-# script, so it matters exactly when the wrapper or its test moves (ROH-157).
+# Keyed to the handoff itself rather than to Swift: these are about who runs this
+# script and how often, so they matter exactly when that machinery moves (ROH-157).
+# Both are seconds, and both unset AURA_GATE_RUNNING so their labs work even though
+# this gate exported it.
 if has 'aura-task-gate\.sh$|test-task-gate\.sh$'; then
   run "task-gate handoff guard" . bash scripts/test-task-gate.sh
 fi
+if has 'agent-gate\.sh$|test-agent-gate-dedupe\.sh$'; then
+  run "agent-gate dedupe guard" . bash scripts/test-agent-gate-dedupe.sh
+fi
 
 # --------------------------------------------------------------------- verdict
-[[ ${#failures[@]} -eq 0 ]] && exit 0
+# Recorded as well as reported, so a sibling gate waiting on the lock above gets
+# this answer instead of recomputing it.
+if [[ ${#failures[@]} -eq 0 ]]; then
+  printf '0\n' >"$cache" 2>/dev/null
+  exit 0
+fi
 
-{
+verdict="$( {
   echo "Task blocked: Aura's quality gate failed on your changes."
   echo
   printf '%s\n\n' "${failures[@]}"
@@ -105,5 +180,8 @@ fi
   echo "the task complete again. Do not disable or work around the gate."
   echo
   echo "Note this gate does not build the app or run pgTAP. CI still can fail after it passes."
-} >&2
+} )"
+
+{ printf '2\n'; printf '%s\n' "$verdict"; } >"$cache" 2>/dev/null
+printf '%s\n' "$verdict" >&2
 exit 2

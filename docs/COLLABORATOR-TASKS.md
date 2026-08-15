@@ -248,12 +248,19 @@ keeping the board honest is part of the flow rather than optional bookkeeping.
 steps aside, so the gate runs once rather than twice. You do not need the global hook for Aura;
 this only matters if you want the same gate everywhere else.
 
-The wrapper steps aside only when it can confirm all three of: the file is executable, its
-text names this repo's `.claude/agent-gate.sh`, and a user-scope settings file registers it
-as a `TaskCompleted` hook. Anything short of that and the wrapper runs the gate itself, so a
-stub, a half-install, or a global gate that does its own checks costs you a duplicate run
-rather than silently costing you the gate. `scripts/test-task-gate.sh` pins all of it and runs
-in CI. Set `AURA_GATE_VERBOSE=1` to see which way the decision went.
+Two mechanisms keep that honest, and the second is the one that matters (ROH-157).
+
+`.claude/agent-gate.sh` runs its checks **once per tree**. It fingerprints HEAD plus the
+content of every changed file, takes a lock, and records its verdict; a second gate reaching
+the same tree replays that verdict instead of repeating the work. So two hooks firing for one
+event cost one run, and a nested run costs nothing.
+
+The wrapper then steps aside only when it can confirm all of: the file is executable, its code
+(comments stripped) names `.claude/agent-gate.sh`, and `settings.json` registers **that same
+file**, compared by resolved path rather than by name. Anything short of that and it runs the
+gate itself. Because of the dedupe above, guessing wrong that way is nearly free, which is why
+it is allowed to guess at all. Set `AURA_GATE_VERBOSE=1` to see which way it went.
+`scripts/test-task-gate.sh` and `scripts/test-agent-gate-dedupe.sh` pin both, and run in CI.
 
 > Until ROH-157 was fixed the test was only whether that file was executable, so a zero-byte
 > file there turned Aura's gate off with nothing in the repo changed and no message anywhere.

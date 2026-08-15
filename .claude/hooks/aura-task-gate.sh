@@ -5,17 +5,22 @@
 # It exists so that cloning the repo is enough to get Aura's quality gate, with no
 # user-scope install step. All it does is decide who runs the real gate:
 #
-#   - If a global hook is installed AND registered AND delegates to this repo's
-#     .claude/agent-gate.sh, do nothing. It is about to run the same gate, and
-#     running it here too would gate every task twice at full cost.
+#   - If a global hook is registered as a TaskCompleted hook, resolves to the file
+#     at <config>/hooks/agent-gate.sh, and that file delegates to this repo's
+#     .claude/agent-gate.sh, do nothing. It is about to run the same gate.
 #   - Otherwise run .claude/agent-gate.sh directly.
 #
 # The decision is deliberately asymmetric (ROH-157). Standing aside when nothing
 # else runs the gate is silent and total: no lint, no tests, no guard scripts, and
-# no message anywhere. Running when something else also ran costs time. So this
-# stands aside only on positive evidence, and treats every uncertainty — an
-# unreadable settings file, no python3 to parse it, a hook that does its own thing
-# — as a reason to run.
+# no message anywhere. Running when something else also ran is cheap, because
+# .claude/agent-gate.sh dedupes concurrent runs of the same tree. So this stands
+# aside only on positive evidence, and treats every uncertainty as a reason to run.
+#
+# What this is NOT: proof. It reads files belonging to Claude Code, not to this
+# repo, and a global hook that names the project gate inside a branch it never
+# takes will still pass. That residual weakness is affordable precisely because
+# the gate's own dedupe makes the "ran twice" outcome cheap — this check is an
+# optimisation, not the thing correctness rests on.
 #
 # The stdin drain matters in both branches: the hook payload has to be consumed or
 # the writer can block on a full pipe.
@@ -24,7 +29,10 @@ set -uo pipefail
 
 cat >/dev/null 2>&1 || true
 
-global_hook="$HOME/.claude/hooks/agent-gate.sh"
+# Unset HOME would abort under `set -u` and complete the task ungated, so it is
+# treated as "cannot confirm" like any other unknown.
+config_dir="${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}"
+global_hook="$config_dir/hooks/agent-gate.sh"
 
 # True only when a global TaskCompleted hook will demonstrably run this repo's gate.
 global_hook_covers_us() {
@@ -32,45 +40,67 @@ global_hook_covers_us() {
   #    zero-byte executable satisfied it.
   [[ -x "$global_hook" ]] || return 1
 
-  # 2. It has to delegate to the project gate. A global gate that runs its own
-  #    built-in checks is not a substitute: this repo needs `swift test
-  #    --no-parallel` (a bare `swift test` races the SwiftData suites, ROH-65) plus
-  #    four guard scripts a generic lint-and-test pass knows nothing about. Reading
-  #    someone else's script is inference, but "does it name our gate" is a far
-  #    narrower question than "does this file exist".
-  grep -q '\.claude/agent-gate\.sh' "$global_hook" 2>/dev/null || return 1
+  # 2. Its CODE has to name the project gate. Comments are stripped first: the
+  #    stock global hook documents the project-override contract in its header, so
+  #    a copy that keeps the prose and drops the delegation would otherwise pass.
+  sed 's/#.*//' "$global_hook" 2>/dev/null | grep -q '\.claude/agent-gate\.sh' || return 1
 
-  # 3. It has to be wired to TaskCompleted. A file at that path that no settings
-  #    file references never runs, which was ROH-157 itself. Parsed rather than
-  #    grepped, so a hook registered under some other event cannot pass for one
-  #    registered under this one.
-  command -v python3 >/dev/null 2>&1 || return 1
-  local settings
-  for settings in "$HOME/.claude/settings.json" "$HOME/.claude/settings.local.json"; do
-    [[ -f "$settings" ]] || continue
-    python3 -c '
-import json, sys
+  # 3. That exact file has to be the one wired to TaskCompleted. Matching on the
+  #    substring "agent-gate.sh" is not enough: a stale copy at this path plus a
+  #    settings entry pointing somewhere else satisfies it while nothing runs,
+  #    which is ROH-157 through a second door. Compare resolved paths instead, and
+  #    read `args` as well as `command` so the documented exec form is understood.
+  #
+  #    Only <config>/settings.json is consulted. Hooks can also arrive from managed
+  #    settings, plugins, and elsewhere; every one of those we cannot see makes us
+  #    run rather than stand aside, which is the safe direction.
+  python3 - "$global_hook" "$config_dir/settings.json" <<'PY' 2>/dev/null
+import json, os, shlex, sys
+
+target, settings = os.path.realpath(sys.argv[1]), sys.argv[2]
 try:
-    cfg = json.load(open(sys.argv[1]))
+    with open(settings) as fh:
+        cfg = json.load(fh)
 except Exception:
     sys.exit(1)
-for group in cfg.get("hooks", {}).get("TaskCompleted") or []:
+
+def tokens(hook):
+    out = []
+    command = hook.get("command")
+    if isinstance(command, str):
+        try:
+            out += shlex.split(command)
+        except ValueError:
+            out += command.split()
+    args = hook.get("args")
+    if isinstance(args, list):
+        out += [str(a) for a in args]
+    return out
+
+groups = cfg.get("hooks", {}).get("TaskCompleted") or []
+for group in groups:
     for hook in group.get("hooks") or []:
-        if "agent-gate.sh" in str(hook.get("command", "")):
-            sys.exit(0)
+        for token in tokens(hook):
+            path = os.path.expanduser(os.path.expandvars(token))
+            try:
+                if os.path.realpath(path) == target:
+                    sys.exit(0)
+            except (OSError, ValueError):
+                continue
 sys.exit(1)
-' "$settings" 2>/dev/null && return 0
-  done
-  return 1
+PY
 }
 
 if global_hook_covers_us; then
-  # Silent by default: this is the common, correct path on a machine with the
-  # two-tier setup, and a line here would print on every completed task.
+  # This line is what the test harness observes to tell "stood aside" apart from
+  # "died before deciding". Both leave the gate unrun; only one is correct.
   [[ -n "${AURA_GATE_VERBOSE:-}" ]] &&
     echo "aura-task-gate: standing aside; $global_hook is registered and delegates" >&2
   exit 0
 fi
+
+[[ -n "${AURA_GATE_VERBOSE:-}" ]] &&
+  echo "aura-task-gate: running the project gate; no global hook confirmed" >&2
 
 repo="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 gate="$repo/.claude/agent-gate.sh"

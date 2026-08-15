@@ -197,11 +197,13 @@ jobs:
         run: bash scripts/check-single-active-definition.sh
       - name: Monotonic instant guard
         run: bash scripts/check-monotonic-instants.sh
-      # ROH-157. The gate's own handoff decision is the one check nothing else covers:
-      # when it goes wrong toward "stand aside", every other guard on this list stops
-      # running locally and says nothing about it.
+      # ROH-157. The gate's own machinery is what nothing else covers: when the
+      # handoff goes wrong toward "stand aside", every other guard on this list stops
+      # running locally and says nothing about it. Seconds each.
       - name: Task-gate handoff guard
         run: bash scripts/test-task-gate.sh
+      - name: Agent-gate dedupe guard
+        run: bash scripts/test-agent-gate-dedupe.sh
 
   db-tests:
     name: DB tests (pgTAP)
