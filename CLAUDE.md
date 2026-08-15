@@ -104,10 +104,13 @@ yourself, because a user-scope file cannot be checked in.
 ## Session setup
 
 `.claude/settings.json` is checked in and declares the plugins this repo needs, so a clone
-gets the right toolset without a manual install. It also declares a `TaskCompleted` hook that
-runs `.claude/agent-gate.sh`, which lints and runs the package suite before an agent may call
-a task complete. The gate does not build the app or run pgTAP, so CI can still fail after it
-passes.
+gets the right toolset without a manual install. It also declares a `TaskCompleted` hook:
+`.claude/hooks/aura-task-gate.sh`, a wrapper that unconditionally runs `.claude/agent-gate.sh`,
+which lints and runs the package suite before an agent may call a task complete. The wrapper
+never stands aside — a detection of the user-scope global hook is what silently disabled the
+gate in ROH-157, so if a machine carries both hooks the gate simply runs twice; do not
+reintroduce a stand-aside, `scripts/test-task-gate.sh` pins its absence. The gate does not
+build the app or run pgTAP, so CI can still fail after it passes.
 
 `.claude/agents/` carries the three adversarial reviewers the pipeline above names:
 `review-skeptic`, `review-product`, `review-architecture`. They are checked in rather than
