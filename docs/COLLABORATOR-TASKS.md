@@ -248,12 +248,17 @@ keeping the board honest is part of the flow rather than optional bookkeeping.
 steps aside, so the gate runs once rather than twice. You do not need the global hook for Aura;
 this only matters if you want the same gate everywhere else.
 
-> Know how that detection works before you put anything at that path. The wrapper's whole test is
-> whether `~/.claude/hooks/agent-gate.sh` is executable. It does not check that the file is
-> registered as a hook, or that it runs the project override, or that it does anything at all. An
-> executable file there — including an empty one — makes the wrapper step aside and Aura's gate
-> stops running, with nothing in the repo changed and no message anywhere. If you install a global
-> hook, register it and confirm it actually executes this repo's `.claude/agent-gate.sh`.
+The wrapper steps aside only when it can confirm all three of: the file is executable, its
+text names this repo's `.claude/agent-gate.sh`, and a user-scope settings file registers it
+as a `TaskCompleted` hook. Anything short of that and the wrapper runs the gate itself, so a
+stub, a half-install, or a global gate that does its own checks costs you a duplicate run
+rather than silently costing you the gate. `scripts/test-task-gate.sh` pins all of it and runs
+in CI. Set `AURA_GATE_VERBOSE=1` to see which way the decision went.
+
+> Until ROH-157 was fixed the test was only whether that file was executable, so a zero-byte
+> file there turned Aura's gate off with nothing in the repo changed and no message anywhere.
+> If you are on a clone predating that fix, register your global hook and confirm it really
+> executes this repo's `.claude/agent-gate.sh`.
 
 **Picking up changes to `.claude/` mid-session.** Project configuration is read once, at session
 start. A `git pull` that updates `.claude/settings.json`, `.claude/agents/`, or the hook scripts

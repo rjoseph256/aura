@@ -88,6 +88,11 @@ fi
 if has '\.swift$'; then
   run "monotonic instant guard" . bash scripts/check-monotonic-instants.sh
 fi
+# Keyed to the handoff itself rather than to Swift: this guard is about who runs this
+# script, so it matters exactly when the wrapper or its test moves (ROH-157).
+if has 'aura-task-gate\.sh$|test-task-gate\.sh$'; then
+  run "task-gate handoff guard" . bash scripts/test-task-gate.sh
+fi
 
 # --------------------------------------------------------------------- verdict
 [[ ${#failures[@]} -eq 0 ]] && exit 0
