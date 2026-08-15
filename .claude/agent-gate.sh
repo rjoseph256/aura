@@ -41,10 +41,15 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # Nothing touched means nothing to verify. Research, planning, and review tasks
 # complete without paying for a build.
 changed() {
-  { git status --porcelain 2>/dev/null | sed -E 's/^.{3}//' | sed -E 's/^.* -> //'
+  # -uall: without it an untracked directory collapses to one "dir/" entry, so a
+  # brand-new source folder never matches the \.swift$ keys below and the gate
+  # skips lint and tests for it. Paths with spaces or non-ASCII arrive C-quoted
+  # ("like this"), so the trailing quote defeats the $-anchored keys too; the
+  # last sed strips the quotes.
+  { git status --porcelain -uall 2>/dev/null | sed -E 's/^.{3}//' | sed -E 's/^.* -> //'
     base="$(git rev-parse --verify -q origin/main || git rev-parse --verify -q main)" 2>/dev/null
     [[ -n "${base:-}" ]] && git diff --name-only "$base...HEAD" 2>/dev/null
-  } | sed '/^$/d' | sort -u
+  } | sed -E 's/^"(.*)"$/\1/' | sed '/^$/d' | sort -u
 }
 
 files="$(changed)"
