@@ -52,6 +52,15 @@ if [[ ! -f "$gate" ]]; then
 fi
 
 out="$(bash "$gate" </dev/null 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && exit 0
+if [[ $rc -eq 0 ]]; then
+  # Forward what the gate said even on success (ROH-156): the gate announces
+  # when it skips or widens its survey, and output swallowed here is output
+  # that never existed anywhere. Per the hooks reference, TaskCompleted stdout
+  # on exit 0 reaches only the debug log — nobody sees it live, but the
+  # decision becomes reconstructable, which a discarded string never is. The
+  # agent-visible channel stays exit 2, which the failure path uses.
+  [[ -n "$out" ]] && printf '%s\n' "$out"
+  exit 0
+fi
 printf '%s\n' "$out" >&2
 exit 2
