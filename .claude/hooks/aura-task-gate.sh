@@ -27,11 +27,45 @@
 # hook still fires. See docs/COLLABORATOR-TASKS.md. The project hook is checked in
 # so a fresh clone keeps its gate; do not remove it for this.
 #
+# The registration in .claude/settings.json invokes this file as
+# `bash "${CLAUDE_PROJECT_DIR:-.}"/.claude/hooks/aura-task-gate.sh || exit 2`
+# (ROH-187). Both halves are deliberate and this comment is their
+# documentation, since JSON carries none:
+#
+#   - The guarded expansion: the hooks reference lists where
+#     CLAUDE_PROJECT_DIR is set but does not guarantee it for every session
+#     type, and with the bare `"$CLAUDE_PROJECT_DIR"` form an unset or empty
+#     variable becomes `bash /.claude/hooks/...` -> exit 127 -> a NON-blocking
+#     hook error -> the task completes ungated with no message anywhere — the
+#     ROH-157 shape through the registration itself. `.` falls back to the
+#     hook's working directory.
+#   - The `|| exit 2` tail is the fail-closed backstop for every remaining
+#     launch failure (cwd not the project root with the variable unset, a
+#     deleted wrapper, an unreadable file): anything that stops this wrapper
+#     from rendering its own verdict becomes a BLOCK with bash's error as the
+#     reason, never a silent pass. The wrapper's benign exit-0 paths (outside
+#     a repo, foreign checkout) are unaffected.
+#
+# Authority is split on purpose: CLAUDE_PROJECT_DIR locates this FILE; the
+# repo under inspection comes from cwd (git rev-parse below). A worktree
+# session runs the parent checkout's registration with cwd inside the
+# worktree, and it is the worktree — the tree the task actually changed — that
+# must be gated. Deriving the repo from the variable would gate the wrong tree
+# in exactly that flow.
+#
+# scripts/test-task-gate.sh executes the registered command string with the
+# variable set, unset, and empty, from the repo root and from a subdirectory —
+# parsing alone cannot see a broken expansion.
+#
 # scripts/test-task-gate.sh pins this contract and CI runs it; the gate itself
 # re-runs it whenever this machinery changes.
 #
 # The stdin drain matters: the hook payload has to be consumed or the writer can
-# block on a full pipe.
+# block on a full pipe. It is an unbounded read and sits OUTSIDE the gate's
+# internal deadline — a harness that never closes the write end would hold it
+# to the hook timeout. Accepted: the harness closes stdin after the payload,
+# and a bounded drain would trade a theoretical hang for a real risk of
+# truncating the payload mid-write.
 
 set -uo pipefail
 

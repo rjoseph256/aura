@@ -27,21 +27,49 @@
 
 set -uo pipefail
 
-[[ -n "${AURA_SKIP_AGENT_GATE:-}" ]] && exit 0
+# The escape hatch is legitimate but never SILENT: an exported skip from a
+# stale profile or CI step would otherwise disable the gate with no trace,
+# indistinguishable from inspected-and-passed. The wrapper forwards this into
+# the debug log on exit 0.
+if [[ -n "${AURA_SKIP_AGENT_GATE:-}" ]]; then
+  echo "aura-gate: AURA_SKIP_AGENT_GATE is set — the gate is DISABLED for this run; nothing was inspected." >&2
+  exit 0
+fi
 
 MAX_LINES=40
-# Each child is individually bounded well under the hook's 900s timeout in
-# .claude/settings.json. A hook that hits ITS timeout is canceled and renders no
-# decision — the task completes ungated — while a command that hits an inner
-# bound becomes an ordinary failure and blocks with a reason. Any SINGLE wedged
-# child therefore blocks loudly. Honest arithmetic: the bounds do NOT sum under
-# 900 (600+300+120 exceeds it), so several children wedging in one run can
-# still cross the hook budget and pass ungated; that residual is ROH-159.
+# The hooks reference is explicit that a hook reaching its 900s timeout in
+# .claude/settings.json is CANCELED, its output discarded, and it "renders no
+# decision" — and anything that is not exit 2 is a non-blocking error. A gate
+# that overruns the hook budget therefore completes the task UNGATED. So this
+# gate never trusts the harness to fail closed (ROH-159): every child runs
+# under its own bound capped by what remains of an internal budget, and once
+# the budget is exhausted the gate stops starting children and renders exit 2
+# ITSELF. The per-child bounds may sum past the budget — that is fine, the
+# deadline is what encloses the CHILDREN. Stated narrowly on purpose: the
+# survey preflight (a handful of local git metadata commands, ~40ms measured)
+# is unbounded but charged against the budget; the wrapper's stdin drain runs
+# BEFORE this process starts, so its time is charged against nothing at all
+# (SECONDS restarts here). The case where either alone exceeds the hook
+# timeout (pathological filesystem, a harness that never closes stdin) is
+# accepted — CI covers the first, and the wrapper documents the second. The default keeps 60s of margin under the hook
+# timeout for kill latency and verdict assembly; scripts/test-task-gate.sh
+# pins that arithmetic statically and the deadline behavior in a lab.
+# AURA_GATE_BUDGET is the suite's seam and carries the same trust class as
+# AURA_SKIP_AGENT_GATE (ambient env can already disable the gate outright);
+# zero, octal-looking, and non-numeric values fall back to the default.
+GATE_BUDGET="${AURA_GATE_BUDGET:-840}"
+[[ "$GATE_BUDGET" =~ ^[1-9][0-9]*$ ]] || GATE_BUDGET=840
 TEST_TIMEOUT=600
 LINT_TIMEOUT=300
+GUARD_TIMEOUT=60
 
 repo="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$repo" || exit 0
+# Name the tree being certified: the repo comes from cwd (see the wrapper
+# header on split authority), and a session whose cwd diverged from where the
+# task's edits landed would otherwise pass with nothing reconstructable. On a
+# pass this reaches only the debug log through the wrapper.
+echo "aura-gate: inspecting $repo" >&2
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -165,55 +193,129 @@ fi
 has() { grep -qE "$1" <<<"$files"; }
 
 failures=()
-
-run() {  # run <label> <dir> <cmd...>
-  local label="$1" dir="$2"; shift 2
-  local out rc
-  # The group redirect captures a failed cd too: a missing directory must show
-  # up as its own error text, not as the command "failing" with an empty body.
-  out="$({ cd "$dir" && "$@"; } 2>&1)"; rc=$?
-  [[ $rc -eq 0 ]] && return 0
-  failures+=("--- ${label} (exit ${rc}) ---"$'\n'"$(tail -n "$MAX_LINES" <<<"$out")")
-}
+deadline_hit=""
+# One capture DIRECTORY cleaned on exit, one file per child inside it. Per
+# child, not shared: a writer that escaped the group kill (the setsid
+# residual) still holds its fd, and with a shared file its stale output lands
+# inside the NEXT child's failure report at an old offset. Per-child files
+# make orphan output land in a file nobody reads again.
+CAPDIR="$(mktemp -d 2>/dev/null)" || CAPDIR=""
+[[ -n "$CAPDIR" ]] && trap 'rm -rf "$CAPDIR"' EXIT
+CHILD_N=0
 
 # The perl fallback matters: stock macOS ships neither timeout nor gtimeout, and
 # an unbounded swift test is exactly what pushes the hook past ITS timeout, which
-# completes the task ungated (see the bounds comment above).
-tmo() { if have timeout; then timeout "$@"; elif have gtimeout; then gtimeout "$@"; else perl -e 'alarm shift; exec @ARGV' "$@"; fi; }
+# completes the task ungated (see the budget comment above).
+#
+# The fallback is a fork/setpgrp/KILL-the-group watchdog, not a bare
+# `alarm; exec`, for three review-confirmed reasons: (a) an exec'd child can
+# trap or cancel SIGALRM (bash's `read -t` does) and erase its own bound while
+# reporting success; (b) a single-process signal leaves grandchildren alive —
+# a killed swift test's SwiftPM workers keep holding the .build lock and wedge
+# the NEXT gate run; (c) a failed exec fell off the end of the perl program and
+# returned 0, a fail-open. KILL to the process group closes all three; a child
+# that setsid()s itself out of the group is the accepted residual. timeout and
+# gtimeout get -k 5 for the same reason: SIGTERM alone is opt-out.
+tmo() {
+  if have timeout; then timeout -k 5 "$@"
+  elif have gtimeout; then gtimeout -k 5 "$@"
+  else
+    perl -e '
+      my $t = shift;
+      my $pid = fork; defined $pid or exit 127;
+      if (!$pid) { setpgrp 0, 0; exec @ARGV or exit 127 }
+      $SIG{ALRM} = sub { kill "KILL", -$pid };
+      alarm $t;
+      my $r; 1 until (($r = waitpid($pid, 0)) > 0 or $r < 0);
+      exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
+    ' "$@"
+  fi
+}
+
+run() {  # run <label> <bound-seconds> <dir> <cmd...>
+  local label="$1" bound="$2" dir="$3"; shift 3
+  # SECONDS is bash's clock since the gate started; the deadline check runs
+  # before every child so an exhausted budget becomes a recorded, blocking
+  # failure — never a silent harness cancellation.
+  local rem=$(( GATE_BUDGET - SECONDS ))
+  if (( rem <= 0 )); then
+    deadline_hit=1
+    failures+=("--- ${label} (not run) ---"$'\n'"the gate's ${GATE_BUDGET}s internal deadline was reached before this step could start")
+    return
+  fi
+  local capped=""
+  if (( bound > rem )); then bound=$rem; capped=" — bound capped at ${rem}s by the gate's internal deadline"; fi
+  # Never hand tmo a zero or negative bound: `timeout 0` DISABLES the timeout,
+  # which would turn an off-by-one at the deadline into an unbounded child.
+  (( bound < 1 )) && bound=1
+  # Capture through a FILE, not a $(...) pipe. A killed child can leave
+  # grandchildren (a test runner's workers) holding the pipe's write end, and a
+  # substitution then waits for THEIR exit, not the child's — observed live as
+  # a 31s wall on a 2s budget in the suite's deadline lab. A file redirect
+  # returns when the direct child exits; orphans append to the file harmlessly.
+  # The subshell keeps the cd contained and captures a failed cd as error text.
+  local out rc cap
+  [[ -n "$CAPDIR" ]] || { failures+=("--- ${label} (setup) ---"$'\n'"mktemp failed; cannot capture output"); return; }
+  CHILD_N=$((CHILD_N + 1)); cap="$CAPDIR/child-$CHILD_N"
+  local t0=$SECONDS
+  ( cd "$dir" && tmo "$bound" "$@" ) >"$cap" 2>&1; rc=$?
+  local celapsed=$(( SECONDS - t0 ))
+  out="$(tail -n "$MAX_LINES" "$cap" 2>/dev/null)"
+  [[ $rc -eq 0 ]] && return 0
+  # A kill at the bound is not a test failure and must not read like one: an
+  # unlabeled 124/137/142 over forty lines of passing output reads as flake,
+  # and the natural response (retry) burns another full budget. The elapsed
+  # check keeps the label honest — a 137 from an OOM kill mid-run is NOT a
+  # timeout, and mislabeling it sends the agent to the wrong fix.
+  local note=""
+  case $rc in
+    124|137|142)
+      if (( celapsed >= bound )); then
+        note=" — timed out after ${bound}s"
+        [[ -n "$capped" ]] && deadline_hit=1
+      fi ;;
+  esac
+  failures+=("--- ${label} (exit ${rc})${note}${capped} ---"$'\n'"$out")
+}
 
 # ---------------------------------------------------------------------- Swift
 # Fail open when the toolchain is missing rather than blocking on a machine that
 # was never going to be able to run this.
 if has '\.swift$'; then
   # --quiet, or the per-file progress stream is all that survives the tail.
-  have swiftlint && run "swiftlint --strict" . tmo "$LINT_TIMEOUT" swiftlint lint --strict --quiet
-  have swift && run "swift test --no-parallel" AuraCore tmo "$TEST_TIMEOUT" swift test --no-parallel
+  have swiftlint && run "swiftlint --strict" "$LINT_TIMEOUT" . swiftlint lint --strict --quiet
+  have swift && run "swift test --no-parallel" "$TEST_TIMEOUT" AuraCore swift test --no-parallel
 fi
 
 # ---------------------------------------------------------------------- guards
 # All three are cheap greps over the tree, so they run whenever anything they inspect
 # could have moved. The terrain guard also owns the bundled style JSON.
-if has '\.swift$'; then
-  run "explore rename guard" . bash scripts/check-explore-rename.sh
+# The guards key on the files they inspect AND on the guard scripts
+# themselves: a rewrite of scripts/check-*.sh that ships unexercised can make
+# a guard vacuous, after which it is permanently green and permanently blind —
+# the ROH-157 shape one layer down. Running each guard exercises its self-test
+# on the very change that touched it. (The ROH-159 round-1 commit's own file
+# set matched no key at all; the architecture review caught it.)
+GUARD_KEY='\.swift$|scripts/check-[a-z0-9-]+\.sh$'
+if has "$GUARD_KEY"; then
+  run "explore rename guard" "$GUARD_TIMEOUT" . bash scripts/check-explore-rename.sh
 fi
-if has '\.swift$|AuraTerrainStyle\.json$'; then
-  run "terrain style guard" . bash scripts/check-terrain-style.sh
+if has "$GUARD_KEY|AuraTerrainStyle\\.json\$"; then
+  run "terrain style guard" "$GUARD_TIMEOUT" . bash scripts/check-terrain-style.sh
 fi
-if has '\.swift$'; then
-  run "single active-time definition" . bash scripts/check-single-active-definition.sh
+if has "$GUARD_KEY"; then
+  run "single active-time definition" "$GUARD_TIMEOUT" . bash scripts/check-single-active-definition.sh
 fi
-if has '\.swift$'; then
-  run "monotonic instant guard" . bash scripts/check-monotonic-instants.sh
+if has "$GUARD_KEY"; then
+  run "monotonic instant guard" "$GUARD_TIMEOUT" . bash scripts/check-monotonic-instants.sh
 fi
 # Keyed to the handoff machinery rather than to Swift: the wrapper, this gate,
 # the suite, and the settings file that registers the hook are all pieces whose
 # movement can stop the gate running, so any of them moving re-runs the suite
-# (which also pins the registration in settings.json).
+# (which also pins the registration in settings.json). The literal bound stays
+# a literal so the suite can pin it statically.
 if has 'aura-task-gate\.sh$|test-task-gate\.sh$|\.claude/agent-gate\.sh$|\.claude/settings\.json$'; then
-  # Bounded like the other children: the whole-tree fallback above matches this
-  # key on every firing, and an unbounded child on that path is exactly the
-  # hook-timeout ungated-pass hazard the bounds comment describes.
-  run "task-gate handoff guard" . tmo 120 bash scripts/test-task-gate.sh
+  run "task-gate handoff guard" 120 . bash scripts/test-task-gate.sh
 fi
 
 # --------------------------------------------------------------------- verdict
@@ -234,6 +336,17 @@ fi
     printf '%s\n\n' "${failures[@]}"
     echo "Fix these, re-run the failing command yourself to confirm it passes, then mark"
     echo "the task complete again. Do not disable or work around the gate."
+  fi
+  if [[ -n "$deadline_hit" ]]; then
+    echo
+    echo "The gate hit its ${GATE_BUDGET}s internal deadline and blocked rather than let"
+    echo "the harness cancel it (a canceled hook renders no decision, and the task would"
+    echo "have completed ungated — ROH-159). Entries marked '(not run)' have nothing to"
+    echo "fix; the budget ran out before them. If this machine legitimately needs longer"
+    echo "(cold build, fresh clone, toolchain bump), warm the build by running the slow"
+    echo "command yourself, then complete the task again. If that cannot work,"
+    echo "AURA_SKIP_AGENT_GATE=1 is the documented escape hatch — use it once and say so"
+    echo "where the task is tracked, never silently."
   fi
   echo
   echo "Note this gate does not build the app or run pgTAP. CI still can fail after it passes."
