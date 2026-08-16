@@ -45,7 +45,10 @@ LAB="$(mktemp -d)" && [[ -d "$LAB" ]] || { echo "FAIL: mktemp -d failed"; exit 2
 # evidence deletes itself cannot be diagnosed, only re-rolled (seen once as an
 # unreproducible one-in-fourteen failure during the ROH-159 review).
 trap 'if [[ "${failures:-0}" -eq 0 ]]; then rm -rf "$LAB"; else echo "suite lab preserved for diagnosis: $LAB"; fi' EXIT
-trap 'rm -rf "$LAB"; exit 143' TERM INT
+# A hung-and-killed suite is the LEAST reproducible failure class — exactly
+# the one whose evidence must survive, so TERM/INT preserve the lab too. The
+# cost is a leaked temp tree per killed run; the OS temp cleaner owns those.
+trap 'echo "suite lab preserved after kill: $LAB" >&2; exit 143' TERM INT
 # If TMPDIR ever sits inside a git repo (Linux mktemp honours TMPDIR; macOS
 # usually pins it elsewhere), discovery from $LAB/notarepo would walk up out of
 # the lab, find that repo, and run whatever gate it carries. The ceiling stops
@@ -686,8 +689,11 @@ survey_deadline_blocks
 # A gate child that legitimately overruns its budget is one thing; a child a
 # refactor quietly moved OUTSIDE run() is the regression that reopens every
 # hole at once — no bound, no deadline check, and the $() pipe capture hazard
-# at the wrapper. Pin structurally: every non-comment line that invokes a
-# child must go through run().
+# at the wrapper. This check is a TEXTUAL LINT over the realistic spellings
+# (swiftlint/swift/bash scripts/...), not a structural guarantee: a bypass
+# spelled `sh`, `python3`, or through a variable-held path is invisible to it.
+# It exists to kill the copy-paste regression class, which is the one that
+# actually survived review round 1.
 check_children_enclosed() {
   local stray
   stray="$(grep -nE 'swiftlint lint|swift test|bash scripts/' .claude/agent-gate.sh \

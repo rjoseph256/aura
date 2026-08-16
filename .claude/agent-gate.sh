@@ -47,10 +47,11 @@ MAX_LINES=40
 # ITSELF. The per-child bounds may sum past the budget — that is fine, the
 # deadline is what encloses the CHILDREN. Stated narrowly on purpose: the
 # survey preflight (a handful of local git metadata commands, ~40ms measured)
-# and the wrapper's stdin drain run before the first deadline check and are
-# not separately bounded; their time is charged against the budget, and the
-# case where they alone exceed the hook timeout (pathological filesystem) is
-# accepted — CI covers it. The default keeps 60s of margin under the hook
+# is unbounded but charged against the budget; the wrapper's stdin drain runs
+# BEFORE this process starts, so its time is charged against nothing at all
+# (SECONDS restarts here). The case where either alone exceeds the hook
+# timeout (pathological filesystem, a harness that never closes stdin) is
+# accepted — CI covers the first, and the wrapper documents the second. The default keeps 60s of margin under the hook
 # timeout for kill latency and verdict assembly; scripts/test-task-gate.sh
 # pins that arithmetic statically and the deadline behavior in a lab.
 # AURA_GATE_BUDGET is the suite's seam and carries the same trust class as
@@ -64,6 +65,11 @@ GUARD_TIMEOUT=60
 
 repo="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$repo" || exit 0
+# Name the tree being certified: the repo comes from cwd (see the wrapper
+# header on split authority), and a session whose cwd diverged from where the
+# task's edits landed would otherwise pass with nothing reconstructable. On a
+# pass this reaches only the debug log through the wrapper.
+echo "aura-gate: inspecting $repo" >&2
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -188,10 +194,14 @@ has() { grep -qE "$1" <<<"$files"; }
 
 failures=()
 deadline_hit=""
-# One capture file reused by every child, cleaned on exit; a per-child mktemp
-# would leak on any signal between creation and rm.
-CAPTURE="$(mktemp 2>/dev/null)" || CAPTURE=""
-[[ -n "$CAPTURE" ]] && trap 'rm -f "$CAPTURE"' EXIT
+# One capture DIRECTORY cleaned on exit, one file per child inside it. Per
+# child, not shared: a writer that escaped the group kill (the setsid
+# residual) still holds its fd, and with a shared file its stale output lands
+# inside the NEXT child's failure report at an old offset. Per-child files
+# make orphan output land in a file nobody reads again.
+CAPDIR="$(mktemp -d 2>/dev/null)" || CAPDIR=""
+[[ -n "$CAPDIR" ]] && trap 'rm -rf "$CAPDIR"' EXIT
+CHILD_N=0
 
 # The perl fallback matters: stock macOS ships neither timeout nor gtimeout, and
 # an unbounded swift test is exactly what pushes the hook past ITS timeout, which
@@ -216,7 +226,7 @@ tmo() {
       if (!$pid) { setpgrp 0, 0; exec @ARGV or exit 127 }
       $SIG{ALRM} = sub { kill "KILL", -$pid };
       alarm $t;
-      1 until waitpid($pid, 0) > 0;
+      my $r; 1 until (($r = waitpid($pid, 0)) > 0 or $r < 0);
       exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
     ' "$@"
   fi
@@ -244,17 +254,27 @@ run() {  # run <label> <bound-seconds> <dir> <cmd...>
   # a 31s wall on a 2s budget in the suite's deadline lab. A file redirect
   # returns when the direct child exits; orphans append to the file harmlessly.
   # The subshell keeps the cd contained and captures a failed cd as error text.
-  local out rc
-  [[ -n "$CAPTURE" ]] || { failures+=("--- ${label} (setup) ---"$'\n'"mktemp failed; cannot capture output"); return; }
-  : >"$CAPTURE"
-  ( cd "$dir" && tmo "$bound" "$@" ) >"$CAPTURE" 2>&1; rc=$?
-  out="$(tail -n "$MAX_LINES" "$CAPTURE" 2>/dev/null)"
+  local out rc cap
+  [[ -n "$CAPDIR" ]] || { failures+=("--- ${label} (setup) ---"$'\n'"mktemp failed; cannot capture output"); return; }
+  CHILD_N=$((CHILD_N + 1)); cap="$CAPDIR/child-$CHILD_N"
+  local t0=$SECONDS
+  ( cd "$dir" && tmo "$bound" "$@" ) >"$cap" 2>&1; rc=$?
+  local celapsed=$(( SECONDS - t0 ))
+  out="$(tail -n "$MAX_LINES" "$cap" 2>/dev/null)"
   [[ $rc -eq 0 ]] && return 0
   # A kill at the bound is not a test failure and must not read like one: an
   # unlabeled 124/137/142 over forty lines of passing output reads as flake,
-  # and the natural response (retry) burns another full budget.
+  # and the natural response (retry) burns another full budget. The elapsed
+  # check keeps the label honest — a 137 from an OOM kill mid-run is NOT a
+  # timeout, and mislabeling it sends the agent to the wrong fix.
   local note=""
-  case $rc in 124|137|142) note=" — timed out after ${bound}s"; [[ -n "$capped" ]] && deadline_hit=1 ;; esac
+  case $rc in
+    124|137|142)
+      if (( celapsed >= bound )); then
+        note=" — timed out after ${bound}s"
+        [[ -n "$capped" ]] && deadline_hit=1
+      fi ;;
+  esac
   failures+=("--- ${label} (exit ${rc})${note}${capped} ---"$'\n'"$out")
 }
 
@@ -276,7 +296,7 @@ fi
 # the ROH-157 shape one layer down. Running each guard exercises its self-test
 # on the very change that touched it. (The ROH-159 round-1 commit's own file
 # set matched no key at all; the architecture review caught it.)
-GUARD_KEY='\.swift$|scripts/check-[a-z-]+\.sh$'
+GUARD_KEY='\.swift$|scripts/check-[a-z0-9-]+\.sh$'
 if has "$GUARD_KEY"; then
   run "explore rename guard" "$GUARD_TIMEOUT" . bash scripts/check-explore-rename.sh
 fi
