@@ -39,7 +39,10 @@ WRAPPER="$PWD/.claude/hooks/aura-task-gate.sh"
 [[ -f "$WRAPPER" ]] || { echo "FAIL: $WRAPPER missing"; exit 2; }
 
 LAB="$(mktemp -d)" && [[ -d "$LAB" ]] || { echo "FAIL: mktemp -d failed"; exit 2; }
+# TERM/INT too: the gate runs this suite under a timeout, and bash does not run
+# EXIT traps on an uncaught SIGTERM — a timed-out run would leak the lab tree.
 trap 'rm -rf "$LAB"' EXIT
+trap 'rm -rf "$LAB"; exit 143' TERM INT
 # If TMPDIR ever sits inside a git repo (Linux mktemp honours TMPDIR; macOS
 # usually pins it elsewhere), discovery from $LAB/notarepo would walk up out of
 # the lab, find that repo, and run whatever gate it carries. The ceiling stops
@@ -300,34 +303,46 @@ make_survey_lab() {  # [default_branch]
   sgit -C "$w" add -A
   sgit -C "$w" commit -qm baseline
   sgit -C "$w" push -q origin "$branch"
+  # Production clones carry refs/remotes/origin/HEAD; the labs must too, or the
+  # gate's preferred baseline candidate is never exercised here.
+  sgit -C "$w" remote set-head origin "$branch"
   printf '%s\n' "$root"
 }
 
-run_survey() {  # <root> [workdir]; sets SURVEY_RC, SURVEY_OUT, SURVEY_INVOKED
+# Streams are captured separately on purpose: the wrapper's contract is
+# stdout on success (the debug log is where a passing hook's stdout goes) and
+# stderr on a block (what the agent is shown). A message on the wrong stream is
+# a message in the wrong place, and a merged capture could not see that.
+run_survey() {  # <root> [workdir]; sets SURVEY_RC, SURVEY_OUT, SURVEY_ERR, SURVEY_INVOKED
   local root="$1" w="${2:-$1/work}"
   rm -f "$root/INVOKED"
   SURVEY_OUT="$( cd "$w" && env HOME="$SURVEY_HOME" PATH="$root/bin:$PATH" \
-    bash ./.claude/hooks/aura-task-gate.sh </dev/null 2>&1 )"; SURVEY_RC=$?
+    bash ./.claude/hooks/aura-task-gate.sh </dev/null 2>"$root/ERR" )"; SURVEY_RC=$?
+  SURVEY_ERR="$(cat "$root/ERR" 2>/dev/null || true)"
   SURVEY_INVOKED="$(cat "$root/INVOKED" 2>/dev/null || true)"
 }
 
 inspected()  { grep -q '^swiftlint' <<<"$SURVEY_INVOKED" && grep -q '^swift test' <<<"$SURVEY_INVOKED"; }
 whole_tree() { grep -q '^handoff-suite' <<<"$SURVEY_INVOKED"; }
-survey_diag() { printf 'exit %s, invoked=[%s], out=[%s]' "$SURVEY_RC" "${SURVEY_INVOKED//$'\n'/, }" "${SURVEY_OUT//$'\n'/ | }"; }
+survey_diag() { printf 'exit %s, invoked=[%s], out=[%s], err=[%s]' "$SURVEY_RC" "${SURVEY_INVOKED//$'\n'/, }" "${SURVEY_OUT//$'\n'/ | }" "${SURVEY_ERR//$'\n'/ | }"; }
 
 # ROH-156 case 1: work committed and pushed on main, tree clean, HEAD ==
 # origin/main. The change survey is empty at exactly the moment the code left
 # the machine unverified — the gate must widen to the whole tree, and say so
 # through the wrapper, where an agent can actually encounter it.
 survey_published_clean() {
-  local root; root="$(make_survey_lab)"
+  local root expected; root="$(make_survey_lab)"
   printf 'struct A {}\n' >"$root/work/Aura/Sources/A.swift"
   sgit -C "$root/work" add -A && sgit -C "$root/work" commit -qm work && sgit -C "$root/work" push -q origin main
+  # The announced count is the teeth of "whole tree": a fallback that surveys a
+  # subset, or drops the union with the change survey, announces a wrong number.
+  expected="$(sgit -C "$root/work" ls-files | wc -l | tr -d ' ')"
   run_survey "$root"
-  if [[ $SURVEY_RC -eq 0 ]] && inspected && whole_tree && grep -q 'published tip' <<<"$SURVEY_OUT"; then
-    pass "published tip, clean tree: inspects whole tree" "lint+tests+handoff ran, announced"
+  if [[ $SURVEY_RC -eq 0 ]] && inspected && whole_tree && grep -q 'published tip' <<<"$SURVEY_OUT" \
+      && grep -q "($expected files)" <<<"$SURVEY_OUT"; then
+    pass "published tip, clean tree: inspects whole tree" "lint+tests+handoff ran, $expected files announced"
   else
-    fail "published tip, clean tree: inspects whole tree" "$(survey_diag)"
+    fail "published tip, clean tree: inspects whole tree" "expected ($expected files); $(survey_diag)"
   fi
 }
 survey_published_clean
@@ -337,15 +352,18 @@ survey_published_clean
 # not suppress the fallback. Emptiness is not the trigger; being at the
 # published tip is.
 survey_published_with_dirt() {
-  local root; root="$(make_survey_lab)"
+  local root expected; root="$(make_survey_lab)"
   printf 'struct A {}\n' >"$root/work/Aura/Sources/A.swift"
   sgit -C "$root/work" add -A && sgit -C "$root/work" commit -qm work && sgit -C "$root/work" push -q origin main
   printf 'stray\n' >>"$root/work/NOTES.md"
+  printf 'brand new\n' >"$root/work/UNTRACKED.md"
+  # Union pinned by arithmetic: every tracked file plus the one untracked file.
+  expected="$(( $(sgit -C "$root/work" ls-files | wc -l | tr -d ' ') + 1 ))"
   run_survey "$root"
-  if [[ $SURVEY_RC -eq 0 ]] && inspected && whole_tree; then
-    pass "published tip + non-Swift dirt still inspects" "fallback not suppressed by dirt"
+  if [[ $SURVEY_RC -eq 0 ]] && inspected && whole_tree && grep -q "($expected files)" <<<"$SURVEY_OUT"; then
+    pass "published tip + non-Swift dirt still inspects" "fallback not suppressed, union intact"
   else
-    fail "published tip + non-Swift dirt still inspects" "$(survey_diag)"
+    fail "published tip + non-Swift dirt still inspects" "expected ($expected files); $(survey_diag)"
   fi
 }
 survey_published_with_dirt
@@ -448,6 +466,109 @@ survey_no_baseline() {
   fi
 }
 survey_no_baseline
+
+# A LOCAL main must not shadow that fail-safe: with the origin/* refs gone but
+# a local main present (deleted refs, or an origin configured and never
+# fetched), the baseline degrades to a ref that proves nothing about what was
+# published. The gate must widen, not skip — a one-command ref deletion that
+# turns the gate off is the ROH-157 silent-disable class all over again.
+survey_local_main_shadow() {
+  local root; root="$(make_survey_lab)"
+  sgit -C "$root/work" update-ref -d refs/remotes/origin/main
+  sgit -C "$root/work" symbolic-ref -d refs/remotes/origin/HEAD 2>/dev/null || true
+  run_survey "$root"
+  if [[ $SURVEY_RC -eq 0 ]] && inspected && whole_tree; then
+    pass "local main cannot shadow the origin fail-safe" "deleted origin refs still inspect"
+  else
+    fail "local main cannot shadow the origin fail-safe" "$(survey_diag)"
+  fi
+}
+survey_local_main_shadow
+
+# A stale origin/HEAD naming a SUPERSET branch is the trap: the first-resolved
+# baseline then already contains HEAD, so the three-dot diff is empty AND the
+# first ref's SHA differs from HEAD — both signals quiet at once. The published
+# check must compare HEAD against every origin candidate, not just the first.
+survey_stale_origin_head() {
+  local root; root="$(make_survey_lab)"
+  sgit -C "$root/work" checkout -q -b stale
+  printf 'enum Ahead {}\n' >"$root/work/Aura/Sources/Ahead.swift"
+  sgit -C "$root/work" add -A && sgit -C "$root/work" commit -qm ahead
+  sgit -C "$root/work" push -q origin stale
+  sgit -C "$root/work" remote set-head origin stale
+  sgit -C "$root/work" checkout -q main   # back at the published tip of origin/main
+  run_survey "$root"
+  if [[ $SURVEY_RC -eq 0 ]] && inspected && whole_tree && grep -q 'origin/main' <<<"$SURVEY_OUT"; then
+    pass "stale origin/HEAD superset cannot mask the tip" "origin/main SHA match still fires"
+  else
+    fail "stale origin/HEAD superset cannot mask the tip" "$(survey_diag)"
+  fi
+}
+survey_stale_origin_head
+
+# origin/HEAD is what production actually resolves (whatever the remote calls
+# its default). A repo whose default branch is neither main nor master only has
+# origin/HEAD to offer — dropping it from the candidates must show up here.
+survey_published_trunk() {
+  local root; root="$(make_survey_lab trunk)"
+  run_survey "$root"
+  if [[ $SURVEY_RC -eq 0 ]] && inspected && whole_tree && grep -q 'published tip' <<<"$SURVEY_OUT"; then
+    pass "trunk-default repo resolves via origin/HEAD" "published tip recognized"
+  else
+    fail "trunk-default repo resolves via origin/HEAD" "$(survey_diag)"
+  fi
+}
+survey_published_trunk
+
+# The failure path through the wrapper: a failing tool at the published tip
+# must BLOCK, with the whole-tree blame line on stderr — the stream the agent
+# is shown. Without this, a mutation that downgrades whole-tree failures to a
+# warning passes every green-path check above.
+survey_published_failure_blocks() {
+  local root; root="$(make_survey_lab)"
+  printf '#!/bin/bash\necho "swiftlint $*" >> "%s/INVOKED"\necho "lab lint violation"\nexit 1\n' "$root" >"$root/bin/swiftlint"
+  run_survey "$root"
+  if [[ $SURVEY_RC -eq 2 ]] && grep -q 'whole-tree survey' <<<"$SURVEY_ERR" \
+      && grep -q 'lab lint violation' <<<"$SURVEY_ERR"; then
+    pass "failing tool at published tip blocks with whole-tree blame" "exit 2, reason on stderr"
+  else
+    fail "failing tool at published tip blocks with whole-tree blame" "$(survey_diag)"
+  fi
+}
+survey_published_failure_blocks
+
+# -uall is load-bearing: a brand-new untracked module must not collapse to one
+# "dir/" entry that matches no key (ROH-156 case 2, shipped in PR #135, pinned
+# here since the survey labs now exist to pin it).
+survey_untracked_module() {
+  local root; root="$(make_survey_lab)"
+  sgit -C "$root/work" checkout -q -b claude/newmod
+  # A non-Swift commit moves HEAD off the published tip without supplying the
+  # \.swift$ key — only the untracked module below can, so this red-flags a
+  # survey that collapses the directory.
+  printf 'docs\n' >>"$root/work/NOTES.md"
+  sgit -C "$root/work" add -A && sgit -C "$root/work" commit -qm docs
+  mkdir -p "$root/work/Aura/Sources/NewModule"
+  printf 'struct N {}\n' >"$root/work/Aura/Sources/NewModule/N.swift"
+  run_survey "$root"
+  if [[ $SURVEY_RC -eq 0 ]] && inspected && ! whole_tree; then
+    pass "untracked new module still inspects" "-uall expands the directory"
+  else
+    fail "untracked new module still inspects" "$(survey_diag)"
+  fi
+}
+survey_untracked_module
+
+# The handoff guard's time bound cannot be pinned behaviorally without a 120s
+# hang in every suite run, so it is pinned statically, like the registration.
+check_handoff_bound() {
+  if grep -qE 'run "task-gate handoff guard" \. tmo [0-9]+ bash scripts/test-task-gate\.sh' .claude/agent-gate.sh; then
+    pass "handoff guard child is time-bounded" "tmo present in agent-gate.sh"
+  else
+    fail "handoff guard child is time-bounded" "no tmo on the handoff guard run"
+  fi
+}
+check_handoff_bound
 
 echo
 if [[ $failures -eq 0 ]]; then echo "PASS"; exit 0; fi

@@ -55,9 +55,10 @@ out="$(bash "$gate" </dev/null 2>&1)"; rc=$?
 if [[ $rc -eq 0 ]]; then
   # Forward what the gate said even on success (ROH-156): the gate announces
   # when it skips or widens its survey, and output swallowed here is output
-  # that never existed anywhere. On exit 0 the harness surfaces hook stdout in
-  # the transcript only — that is the most visibility a passing hook gets, and
-  # it is the difference between "skipped, and said so" and a silent no-op.
+  # that never existed anywhere. Per the hooks reference, TaskCompleted stdout
+  # on exit 0 reaches only the debug log — nobody sees it live, but the
+  # decision becomes reconstructable, which a discarded string never is. The
+  # agent-visible channel stays exit 2, which the failure path uses.
   [[ -n "$out" ]] && printf '%s\n' "$out"
   exit 0
 fi
