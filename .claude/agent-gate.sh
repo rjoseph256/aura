@@ -44,9 +44,23 @@ cd "$repo" || exit 0
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# ------------------------------------------------------------- review baseline
+# The baseline is the shared branch this repo publishes to: origin/HEAD first
+# (whatever the remote actually calls its default), then the conventional names,
+# then local main/master for repos with no remote at all.
+base="" base_name=""
+for cand in origin/HEAD origin/main origin/master main master; do
+  if base="$(git rev-parse -q --verify "$cand^{commit}" 2>/dev/null)" && [[ -n "$base" ]]; then
+    base_name="$cand"; break
+  fi
+  base=""
+done
+head_sha="$(git rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null || true)"
+
 # ------------------------------------------------------------- changed-file survey
-# Nothing touched means nothing to verify. Research, planning, and review tasks
-# complete without paying for a build.
+# Nothing touched means nothing to verify — except at the published tip, where
+# that inference inverts; see the fallback below. Research, planning, and review
+# tasks elsewhere complete without paying for a build.
 changed() {
   # -uall: without it an untracked directory collapses to one "dir/" entry, so a
   # brand-new source folder never matches the \.swift$ keys below and the gate
@@ -58,34 +72,62 @@ changed() {
   # the last sed strips the quotes.
   { git --no-optional-locks status --porcelain -uall 2>/dev/null \
       | sed -E 's/^.{3}//' | sed -E 's/ -> /\n/'
-    base="$(git rev-parse --verify -q origin/main 2>/dev/null || git rev-parse --verify -q main 2>/dev/null)"
-    [[ -n "${base:-}" ]] && git diff --name-only --no-renames "$base...HEAD" 2>/dev/null
+    [[ -n "$base" ]] && git diff --name-only --no-renames "$base...HEAD" 2>/dev/null
   } | sed -E 's/^"(.*)"$/\1/' | sed '/^$/d' | sort -u
 }
 
 files="$(changed)"
-# An empty survey is NOT always "nothing to verify" (ROH-156). On main it means
-# the work was committed and pushed before the task completed — origin/main
-# advanced to HEAD, so the three-dot diff went empty at exactly the moment the
-# code left the machine unverified. Fall back to the whole tracked tree there:
-# completing a task on a clean, fully pushed main is rare in this repo's
-# worktree flow, so the cost lands only on the risk-bearing shape. On any other
-# branch an empty survey is the benign post-merge shape (tip already an ancestor
-# of origin/main, nothing new to check) and skipping is correct — but say so,
-# because a silent no-op is indistinguishable from inspected-and-passed, and
-# only one of those is safe.
+
+# ------------------------------------------- published work is never skipped (ROH-156)
+# The survey keys off "what differs from the baseline", and PUSHING MOVES THE
+# BASELINE: the moment work reaches the shared branch, the three-dot diff goes
+# empty — at exactly the moment the code left the machine unverified. So when
+# HEAD *is* the published tip, the survey widens to the whole tracked tree.
+#
+# The trigger is a SHA comparison, deliberately not a branch name and not
+# survey emptiness. A branch name discriminates nothing: a feature branch
+# pushed straight to origin/main is byte-identical in git to one that got there
+# by a reviewed merge, and a detached HEAD at the tip is the same state with no
+# name at all. And emptiness self-disarms: the gate's own `swift test` dirties
+# AuraCore/Package.resolved (ROH-182), and that one stray non-Swift line would
+# otherwise suppress the fallback forever on the primary checkout.
+#
+# Costs, decided deliberately: any task completed at the published tip — the
+# post-merge fast-forwarded main checkout included — pays the full suite, and a
+# red main blocks completions there that changed nothing (loudly, which is the
+# point: the alternative was certifying a broken published tree by silence).
+# The worktree/branch flow keeps most task completions off the published tip.
+# Known residual, accepted: work pushed to the shared branch that someone
+# else's merge then buries (HEAD strictly behind by completion time) is not
+# re-inspected here; CI still covers it.
+#
+# A repo with an origin but NO resolvable baseline (a single-branch clone of a
+# feature branch) cannot certify "nothing new to verify", so it fails safe into
+# the same whole-tree survey.
+fallback=""
+if [[ -n "$head_sha" && "$base_name" == origin/* && "$head_sha" == "$base" ]]; then
+  fallback="HEAD is the published tip of $base_name"
+elif [[ -z "$base" ]] && git config --get remote.origin.url >/dev/null 2>&1; then
+  fallback="no review baseline resolves (tried origin/HEAD, origin/main, origin/master, main, master) although an origin remote exists"
+fi
+if [[ -n "$fallback" ]]; then
+  echo "aura-gate: $fallback — surveying the whole tracked tree instead of only the change survey." >&2
+  # ls-files -z then NUL->newline: ls-files C-quotes unusual paths just like
+  # status does, and the quoting would defeat the $-anchored keys below.
+  files="$({ printf '%s\n' "$files"; git ls-files -z 2>/dev/null | tr '\0' '\n'; } | sed '/^$/d' | sort -u)"
+fi
 if [[ -z "$files" ]]; then
-  branch="$(git symbolic-ref --short -q HEAD 2>/dev/null)"
-  if [[ "$branch" == main || "$branch" == master ]]; then
-    echo "aura-gate: change survey is empty but HEAD is on $branch — this work is already published, so inspecting the whole tracked tree instead." >&2
-    # -z then NUL->newline: ls-files C-quotes unusual paths just like status
-    # does, and the quoting would defeat the $-anchored keys below.
-    files="$(git ls-files -z 2>/dev/null | tr '\0' '\n' | sed '/^$/d')"
+  # A silent no-op is indistinguishable from inspected-and-passed, and only one
+  # of those is safe — so the skip says what it skipped and why. The wrapper
+  # forwards this on success; it surfaces in the hook transcript, not to the
+  # agent (only exit 2 reaches the agent, and blocking on a benign skip would
+  # be worse than the message being quiet).
+  if [[ -n "$base" ]]; then
+    echo "aura-gate: nothing to inspect — clean tree and HEAD already contained in $base_name; skipping lint, tests, and guards." >&2
+  else
+    echo "aura-gate: nothing to inspect — clean tree, no commits, no baseline; skipping lint, tests, and guards." >&2
   fi
-  if [[ -z "$files" ]]; then
-    echo "aura-gate: nothing to inspect (clean tree, no commits beyond origin/main); skipping lint, tests, and guards." >&2
-    exit 0
-  fi
+  exit 0
 fi
 
 has() { grep -qE "$1" <<<"$files"; }
@@ -134,14 +176,22 @@ fi
 # movement can stop the gate running, so any of them moving re-runs the suite
 # (which also pins the registration in settings.json).
 if has 'aura-task-gate\.sh$|test-task-gate\.sh$|\.claude/agent-gate\.sh$|\.claude/settings\.json$'; then
-  run "task-gate handoff guard" . bash scripts/test-task-gate.sh
+  # Bounded like the other children: the whole-tree fallback above matches this
+  # key on every firing, and an unbounded child on that path is exactly the
+  # hook-timeout ungated-pass hazard the bounds comment describes.
+  run "task-gate handoff guard" . tmo 120 bash scripts/test-task-gate.sh
 fi
 
 # --------------------------------------------------------------------- verdict
 [[ ${#failures[@]} -eq 0 ]] && exit 0
 
 {
-  echo "Task blocked: Aura's quality gate failed on your changes."
+  if [[ -n "$fallback" ]]; then
+    echo "Task blocked: Aura's quality gate failed on the whole-tree survey ($fallback)."
+    echo "The failures below may predate your task — but the published tree is what's broken."
+  else
+    echo "Task blocked: Aura's quality gate failed on your changes."
+  fi
   echo
   printf '%s\n\n' "${failures[@]}"
   echo "Fix these, re-run the failing command yourself to confirm it passes, then mark"

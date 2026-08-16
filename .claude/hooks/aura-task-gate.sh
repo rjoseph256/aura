@@ -52,6 +52,14 @@ if [[ ! -f "$gate" ]]; then
 fi
 
 out="$(bash "$gate" </dev/null 2>&1)"; rc=$?
-[[ $rc -eq 0 ]] && exit 0
+if [[ $rc -eq 0 ]]; then
+  # Forward what the gate said even on success (ROH-156): the gate announces
+  # when it skips or widens its survey, and output swallowed here is output
+  # that never existed anywhere. On exit 0 the harness surfaces hook stdout in
+  # the transcript only — that is the most visibility a passing hook gets, and
+  # it is the difference between "skipped, and said so" and a silent no-op.
+  [[ -n "$out" ]] && printf '%s\n' "$out"
+  exit 0
+fi
 printf '%s\n' "$out" >&2
 exit 2
