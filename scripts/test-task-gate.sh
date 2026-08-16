@@ -250,6 +250,105 @@ run_home_unset() {
 }
 run_home_unset
 
+echo "agent-gate.sh — an empty change survey stays honest (ROH-156)"
+
+# These scenarios run the REAL gate, not a stub, inside an Aura-shaped lab repo
+# with a real origin. "Inspected" is observed the same way "ran" is above: PATH
+# stubs for swiftlint and swift record their own invocation, never inferred from
+# the gate's exit code — the silent-skip path and the inspected-and-passed path
+# both exit 0, which is exactly the indistinguishability being pinned here.
+REAL_GATE="$PWD/.claude/agent-gate.sh"
+
+make_survey_lab() {
+  local root="${LAB:?}/survey" w
+  rm -rf "$root"; mkdir -p "$root/bin"
+  printf '#!/bin/bash\necho "swiftlint $*" >> "%s/INVOKED"; exit 0\n' "$root" >"$root/bin/swiftlint"
+  printf '#!/bin/bash\necho "swift $*" >> "%s/INVOKED"; exit 0\n' "$root" >"$root/bin/swift"
+  chmod +x "$root/bin/swiftlint" "$root/bin/swift"
+  git init -q --bare "$root/origin.git"
+  git clone -q "$root/origin.git" "$root/work" 2>/dev/null
+  w="$root/work"
+  git -C "$w" config user.email lab@example.invalid
+  git -C "$w" config user.name lab
+  git -C "$w" checkout -q -b main
+  # Aura-shaped: a Swift source tree, an AuraCore dir for the test cd, and inert
+  # guard scripts. Deliberately NO scripts/test-task-gate.sh or .claude/ files —
+  # those names key the handoff guard, which does not exist in the lab.
+  mkdir -p "$w/Aura/Sources" "$w/scripts" "$w/AuraCore"
+  printf 'enum Seed {}\n' >"$w/Aura/Sources/Seed.swift"
+  local g
+  for g in check-explore-rename check-terrain-style check-single-active-definition check-monotonic-instants; do
+    printf '#!/bin/bash\nexit 0\n' >"$w/scripts/$g.sh"
+  done
+  git -C "$w" add -A
+  git -C "$w" commit -qm baseline
+  git -C "$w" push -q origin main
+  printf '%s\n' "$root"
+}
+
+run_survey() {  # <root>; sets SURVEY_RC, SURVEY_ERR, SURVEY_INVOKED
+  local root="$1"
+  rm -f "$root/INVOKED"
+  SURVEY_ERR="$( cd "$root/work" && PATH="$root/bin:$PATH" bash "$REAL_GATE" </dev/null 2>&1 >/dev/null )"; SURVEY_RC=$?
+  SURVEY_INVOKED="$(cat "$root/INVOKED" 2>/dev/null || true)"
+}
+
+# The ROH-156 case-1 shape: work committed and pushed directly on main, tree
+# clean, origin/main == HEAD. The union survey is empty, but the work reached
+# the shared branch without ever being linted or tested — the gate must fall
+# back to inspecting rather than pass on nothing.
+survey_main_published() {
+  local root; root="$(make_survey_lab)"
+  printf 'struct A {}\n' >"$root/work/Aura/Sources/A.swift"
+  git -C "$root/work" add -A
+  git -C "$root/work" commit -qm work
+  git -C "$root/work" push -q origin main
+  run_survey "$root"
+  if [[ $SURVEY_RC -eq 0 ]] && grep -q '^swiftlint' <<<"$SURVEY_INVOKED" \
+      && grep -q '^swift test' <<<"$SURVEY_INVOKED" \
+      && grep -q 'whole tracked tree' <<<"$SURVEY_ERR"; then
+    pass "clean pushed main still inspects" "lint+tests ran, fallback announced"
+  else
+    fail "clean pushed main still inspects" "exit $SURVEY_RC, invoked=[${SURVEY_INVOKED//$'\n'/, }], stderr=[$SURVEY_ERR]"
+  fi
+}
+survey_main_published
+
+# The benign shape sharing the root cause: a feature branch whose tip is an
+# ancestor of origin/main, e.g. right after its PR merged and main was fetched.
+# Nothing new exists to check, so skipping is correct — but the skip must be
+# visible, because a silent no-op is indistinguishable from inspected-and-passed.
+survey_branch_merged() {
+  local root; root="$(make_survey_lab)"
+  git -C "$root/work" checkout -q -b claude/merged-feature
+  run_survey "$root"
+  if [[ $SURVEY_RC -eq 0 && -z "$SURVEY_INVOKED" ]] && grep -q 'nothing to inspect' <<<"$SURVEY_ERR"; then
+    pass "merged feature tip skips visibly" "exit 0, no invocations, skip announced"
+  else
+    fail "merged feature tip skips visibly" "exit $SURVEY_RC, invoked=[${SURVEY_INVOKED//$'\n'/, }], stderr=[$SURVEY_ERR]"
+  fi
+}
+survey_branch_merged
+
+# Regression pin on the ordinary path: unpushed work on a feature branch keeps
+# inspecting exactly as before, with no fallback and no skip message.
+survey_branch_unpushed() {
+  local root; root="$(make_survey_lab)"
+  git -C "$root/work" checkout -q -b claude/wip
+  printf 'struct B {}\n' >"$root/work/Aura/Sources/B.swift"
+  git -C "$root/work" add -A
+  git -C "$root/work" commit -qm wip
+  run_survey "$root"
+  if [[ $SURVEY_RC -eq 0 ]] && grep -q '^swiftlint' <<<"$SURVEY_INVOKED" \
+      && grep -q '^swift test' <<<"$SURVEY_INVOKED" \
+      && ! grep -q 'whole tracked tree\|nothing to inspect' <<<"$SURVEY_ERR"; then
+    pass "unpushed feature work inspects as before" "lint+tests ran, no fallback"
+  else
+    fail "unpushed feature work inspects as before" "exit $SURVEY_RC, invoked=[${SURVEY_INVOKED//$'\n'/, }], stderr=[$SURVEY_ERR]"
+  fi
+}
+survey_branch_unpushed
+
 echo
 if [[ $failures -eq 0 ]]; then echo "PASS"; exit 0; fi
 echo "FAIL: $failures scenario(s)"

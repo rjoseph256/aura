@@ -64,7 +64,29 @@ changed() {
 }
 
 files="$(changed)"
-[[ -z "$files" ]] && exit 0
+# An empty survey is NOT always "nothing to verify" (ROH-156). On main it means
+# the work was committed and pushed before the task completed — origin/main
+# advanced to HEAD, so the three-dot diff went empty at exactly the moment the
+# code left the machine unverified. Fall back to the whole tracked tree there:
+# completing a task on a clean, fully pushed main is rare in this repo's
+# worktree flow, so the cost lands only on the risk-bearing shape. On any other
+# branch an empty survey is the benign post-merge shape (tip already an ancestor
+# of origin/main, nothing new to check) and skipping is correct — but say so,
+# because a silent no-op is indistinguishable from inspected-and-passed, and
+# only one of those is safe.
+if [[ -z "$files" ]]; then
+  branch="$(git symbolic-ref --short -q HEAD 2>/dev/null)"
+  if [[ "$branch" == main || "$branch" == master ]]; then
+    echo "aura-gate: change survey is empty but HEAD is on $branch — this work is already published, so inspecting the whole tracked tree instead." >&2
+    # -z then NUL->newline: ls-files C-quotes unusual paths just like status
+    # does, and the quoting would defeat the $-anchored keys below.
+    files="$(git ls-files -z 2>/dev/null | tr '\0' '\n' | sed '/^$/d')"
+  fi
+  if [[ -z "$files" ]]; then
+    echo "aura-gate: nothing to inspect (clean tree, no commits beyond origin/main); skipping lint, tests, and guards." >&2
+    exit 0
+  fi
+fi
 
 has() { grep -qE "$1" <<<"$files"; }
 
