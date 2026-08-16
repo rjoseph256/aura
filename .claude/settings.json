@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/aura-task-gate.sh",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}\"/.claude/hooks/aura-task-gate.sh",
             "timeout": 900,
             "statusMessage": "Running Aura quality gate..."
           }

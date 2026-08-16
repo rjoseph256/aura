@@ -131,8 +131,53 @@ scenario() {
   fi
 }
 
+# ROH-187: parsing the registration pins the string, but only EXECUTING it
+# proves the command line the harness actually runs reaches the gate. The hooks
+# reference lists where CLAUDE_PROJECT_DIR is set yet never guarantees it for
+# every session type (headless, SDK, scheduled), and an unset or empty variable
+# in the unguarded form becomes `bash /.claude/hooks/...` -> exit 127 -> a
+# NON-blocking hook error: the ROH-157 silent-ungated-pass shape through the
+# one link the by-path scenarios cannot see. The lab unsets CLAUDE_PROJECT_DIR
+# globally for hermeticity, so the "set" case reintroduces it explicitly here,
+# per scenario, rather than loosening the global unset.
+registration_scenario() {  # <name> <set|unset|empty>
+  local name="$1" mode="$2" cmd repo home rc
+  cmd="$(python3 - <<'EOF' 2>/dev/null
+import json
+cfg = json.load(open(".claude/settings.json"))
+for m in cfg.get("hooks", {}).get("TaskCompleted", []):
+    for h in m.get("hooks", []):
+        c = h.get("command", "")
+        if "aura-task-gate.sh" in c:
+            print(c)
+            raise SystemExit
+EOF
+)"
+  if [[ -z "$cmd" ]]; then
+    fail "$name" "could not extract the registered command from settings.json"
+    return
+  fi
+  repo="$(make_repo 0)"; home="$(make_home absent unregistered)"
+  rm -f "$LAB/PROJECT_GATE_RAN"
+  case "$mode" in
+    set)   ( cd "$repo" && env -u CLAUDE_PROJECT_DIR HOME="$home" CLAUDE_PROJECT_DIR="$repo" bash -c "$cmd" </dev/null >/dev/null 2>&1 ) ;;
+    unset) ( cd "$repo" && env -u CLAUDE_PROJECT_DIR HOME="$home" bash -c "$cmd" </dev/null >/dev/null 2>&1 ) ;;
+    empty) ( cd "$repo" && env -u CLAUDE_PROJECT_DIR HOME="$home" CLAUDE_PROJECT_DIR= bash -c "$cmd" </dev/null >/dev/null 2>&1 ) ;;
+  esac; rc=$?
+  if [[ ! -e "$LAB/PROJECT_GATE_RAN" ]]; then
+    fail "$name" "the registered command did not run the gate (exit $rc)"
+  elif [[ $rc -ne 0 ]]; then
+    fail "$name" "gate ran but the registered command exited $rc, not 0"
+  else
+    pass "$name" "registered command reached the gate"
+  fi
+}
+
 echo "aura-task-gate.sh — registration"
 check_registration
+registration_scenario "registered command runs, CLAUDE_PROJECT_DIR set"   set
+registration_scenario "registered command runs, CLAUDE_PROJECT_DIR unset" unset
+registration_scenario "registered command runs, CLAUDE_PROJECT_DIR empty" empty
 
 echo "aura-task-gate.sh — the gate always runs"
 
@@ -561,14 +606,86 @@ survey_untracked_module
 
 # The handoff guard's time bound cannot be pinned behaviorally without a 120s
 # hang in every suite run, so it is pinned statically, like the registration.
+# The bound is the second argument of run() — every child goes through the same
+# deadline-capped tmo inside run, so what this pins is that the call site
+# declares a numeric bound at all.
 check_handoff_bound() {
-  if grep -qE 'run "task-gate handoff guard" \. tmo [0-9]+ bash scripts/test-task-gate\.sh' .claude/agent-gate.sh; then
-    pass "handoff guard child is time-bounded" "tmo present in agent-gate.sh"
+  if grep -qE 'run "task-gate handoff guard" [0-9]+ \. bash scripts/test-task-gate\.sh' .claude/agent-gate.sh; then
+    pass "handoff guard child is time-bounded" "numeric bound present in agent-gate.sh"
   else
-    fail "handoff guard child is time-bounded" "no tmo on the handoff guard run"
+    fail "handoff guard child is time-bounded" "no numeric bound on the handoff guard run"
   fi
 }
 check_handoff_bound
+
+echo "agent-gate.sh — the gate encloses its own deadline (ROH-159)"
+
+# The hooks reference is explicit: a hook that reaches its timeout is CANCELED,
+# its output is discarded, and it "renders no decision" — and only exit 2
+# blocks. A gate that overruns the hook budget therefore lets the task through
+# ungated. The gate must never rely on the harness to fail closed: it encloses
+# every child under an internal budget and renders exit 2 ITSELF when the
+# budget is exhausted. AURA_GATE_BUDGET is the test seam for that budget; the
+# production default is pinned by check_budget_headroom below.
+survey_deadline_blocks() {
+  local root; root="$(make_survey_lab)"
+  # A swift that hangs far past any bound the 2s budget can grant. If the
+  # deadline logic is absent, this either passes after 30s (no truncation kills
+  # it early enough to matter) or hangs to the child's own 600s bound — both
+  # read as "no internal verdict", which is exactly the regression.
+  printf '#!/bin/bash\necho "swift $*" >> "%s/INVOKED"; sleep 30; exit 0\n' "$root" >"$root/bin/swift"
+  chmod +x "$root/bin/swift"
+  # The handoff stub records BEFORE hanging: children past the deadline must be
+  # SKIPPED, not started — a mutant that keeps blocking but still launches them
+  # is only distinguishable through the invocation record and the clock.
+  printf '#!/bin/bash\necho "handoff-suite" >> "%s/INVOKED"; sleep 30; exit 0\n' "$root" >"$root/work/scripts/test-task-gate.sh"
+  rm -f "$root/INVOKED"
+  # The wall-clock bound is load-bearing, not decoration: without the per-child
+  # bound capping, the hanging child runs its full 30s, later children still
+  # get deadline-skipped, and exit 2 + a deadline message both appear — the
+  # only observable difference between "encloses its children" and "waits them
+  # out" is elapsed time.
+  local t0=$SECONDS elapsed
+  SURVEY_OUT="$( cd "$root/work" && env HOME="$SURVEY_HOME" PATH="$root/bin:$PATH" AURA_GATE_BUDGET=2 \
+    bash ./.claude/hooks/aura-task-gate.sh </dev/null 2>"$root/ERR" )"; SURVEY_RC=$?
+  elapsed=$(( SECONDS - t0 ))
+  SURVEY_ERR="$(cat "$root/ERR" 2>/dev/null || true)"
+  SURVEY_INVOKED="$(cat "$root/INVOKED" 2>/dev/null || true)"
+  if [[ $SURVEY_RC -eq 2 ]] && grep -qi 'deadline' <<<"$SURVEY_ERR" && (( elapsed <= 15 )) \
+      && ! grep -q '^handoff-suite' <<<"$SURVEY_INVOKED"; then
+    pass "exhausted budget blocks with its own verdict" "exit 2 in ${elapsed}s, post-deadline children skipped"
+  else
+    fail "exhausted budget blocks with its own verdict" "elapsed ${elapsed}s; $(survey_diag)"
+  fi
+}
+survey_deadline_blocks
+
+# The arithmetic that makes the internal deadline sufficient: the gate's
+# default budget must sit meaningfully under the hook timeout in
+# .claude/settings.json, or the harness cancels the hook before the gate can
+# render its exit-2 verdict and the deadline logic above protects nothing.
+check_budget_headroom() {
+  local hook_timeout budget
+  hook_timeout="$(python3 - <<'EOF' 2>/dev/null
+import json
+cfg = json.load(open(".claude/settings.json"))
+for m in cfg.get("hooks", {}).get("TaskCompleted", []):
+    for h in m.get("hooks", []):
+        if "aura-task-gate.sh" in h.get("command", ""):
+            print(h.get("timeout", ""))
+            raise SystemExit
+EOF
+)"
+  budget="$(grep -oE 'AURA_GATE_BUDGET:-[0-9]+' .claude/agent-gate.sh | grep -oE '[0-9]+' | head -1)"
+  if [[ -z "$hook_timeout" || -z "$budget" ]]; then
+    fail "gate budget sits under the hook timeout" "could not parse (timeout=$hook_timeout, budget=$budget)"
+  elif (( budget + 30 <= hook_timeout )); then
+    pass "gate budget sits under the hook timeout" "budget ${budget}s + 30s margin <= hook ${hook_timeout}s"
+  else
+    fail "gate budget sits under the hook timeout" "budget ${budget}s leaves <30s margin under hook ${hook_timeout}s"
+  fi
+}
+check_budget_headroom
 
 echo
 if [[ $failures -eq 0 ]]; then echo "PASS"; exit 0; fi

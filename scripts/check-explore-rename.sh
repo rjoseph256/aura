@@ -16,6 +16,30 @@ detect() {
   sed -E 's|//.*$||' | grep -iE 'free ride' || true
 }
 
+# Corpus scan: greps the given directories and runs the detector. grep's exit 1
+# means "no match", which for this guard is the SUCCESS end-state the rename is
+# aiming for — under `set -euo pipefail` a bare pipeline turned that into a
+# silent fatal (ROH-158: the guard died at this line with empty output the
+# moment the last stale comment disappeared). Only exit >1 is a real error
+# (unreadable/missing directory), and that must stay loud, not be swallowed.
+scan() {
+  # A missing scan root is checked explicitly: grep flavors disagree on the
+  # exit code for a nonexistent path (GNU/BSD say 2, ugrep warns and says 1),
+  # so an exit-code test alone is not portable. The rc>1 branch stays as a
+  # backstop for other grep errors.
+  local d
+  for d in "$@"; do
+    [ -d "$d" ] || { echo "FAIL: scan directory missing: $d"; exit 2; }
+  done
+  local raw rc=0
+  raw="$(grep -rniE 'free ride' --include="*.swift" "$@")" || rc=$?
+  if [ "$rc" -gt 1 ]; then
+    echo "FAIL: grep error (exit $rc) while scanning: $*"
+    exit 2
+  fi
+  printf '%s\n' "$raw" | detect
+}
+
 # Self-test so the guard's own correctness is proven on every run (the reviewer's
 # false-PASS class: a real user string coexisting with a frozen identifier on one line).
 self_test() {
@@ -25,12 +49,27 @@ self_test() {
   [ -z "$(printf '%s\n' "$ident" | detect)" ] || { echo "SELF-TEST FAIL: flagged the freeRide identifier"; exit 2; }
   local comment='x.swift:1:    /// "Free ride" — legacy note'
   [ -z "$(printf '%s\n' "$comment" | detect)" ] || { echo "SELF-TEST FAIL: flagged a comment"; exit 2; }
+  # The empty-corpus path is the one that actually broke (ROH-158): a tree with
+  # no mention of the phrase at all must scan to empty output and survive, not
+  # die inside scan. Run the REAL scan function against a real clean directory.
+  local lab
+  lab="$(mktemp -d)" && [ -d "$lab" ] || { echo "SELF-TEST FAIL: mktemp -d failed"; exit 2; }
+  printf 'struct Clean {}\n' >"$lab/Clean.swift"
+  local out rc=0
+  out="$(scan "$lab")" || rc=$?
+  rm -rf "$lab"
+  [ "$rc" -eq 0 ] && [ -z "$out" ] || { echo "SELF-TEST FAIL: clean corpus should scan empty (exit $rc, out: $out)"; exit 2; }
+  # And a scan of a missing directory is a real error that must be LOUD — the
+  # || true class of fix would swallow it into a false PASS.
+  local missing_rc=0
+  out="$(scan "$lab/does-not-exist" 2>&1)" || missing_rc=$?
+  [ "$missing_rc" -ne 0 ] && [ -n "$out" ] || { echo "SELF-TEST FAIL: missing directory must fail loudly (exit $missing_rc)"; exit 2; }
 }
 
 self_test
 # Scope to the shipping surfaces (app sources + widgets), NOT test code — a UI test may
 # legitimately assert the OLD copy is absent (e.g. buttons["Free ride"] does not exist).
-matches=$(grep -rniE 'free ride' --include="*.swift" Aura/Sources Aura/Widgets | detect)
+matches=$(scan Aura/Sources Aura/Widgets)
 if [ -n "$matches" ]; then
   echo "FAIL: user-facing 'free ride' strings remain:"
   echo "$matches"

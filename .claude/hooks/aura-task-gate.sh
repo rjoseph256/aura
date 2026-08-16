@@ -27,6 +27,19 @@
 # hook still fires. See docs/COLLABORATOR-TASKS.md. The project hook is checked in
 # so a fresh clone keeps its gate; do not remove it for this.
 #
+# The registration in .claude/settings.json invokes this file as
+# `bash "${CLAUDE_PROJECT_DIR:-.}"/.claude/hooks/aura-task-gate.sh` (ROH-187).
+# The guarded expansion is deliberate and this comment is its documentation,
+# since JSON carries none: the hooks reference lists where CLAUDE_PROJECT_DIR
+# is set but does not guarantee it for every session type, and with the bare
+# `"$CLAUDE_PROJECT_DIR"` form an unset or empty variable becomes
+# `bash /.claude/hooks/...` -> exit 127 -> a NON-blocking hook error -> the
+# task completes ungated with no message anywhere — the ROH-157 shape through
+# the registration itself. `.` falls back to the hook's working directory (the
+# project root), where this wrapper's own git discovery below takes over.
+# scripts/test-task-gate.sh executes the registered command string with the
+# variable set, unset, and empty — parsing alone cannot see a broken expansion.
+#
 # scripts/test-task-gate.sh pins this contract and CI runs it; the gate itself
 # re-runs it whenever this machinery changes.
 #
