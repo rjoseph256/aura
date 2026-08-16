@@ -41,7 +41,10 @@ WRAPPER="$PWD/.claude/hooks/aura-task-gate.sh"
 LAB="$(mktemp -d)" && [[ -d "$LAB" ]] || { echo "FAIL: mktemp -d failed"; exit 2; }
 # TERM/INT too: the gate runs this suite under a timeout, and bash does not run
 # EXIT traps on an uncaught SIGTERM — a timed-out run would leak the lab tree.
-trap 'rm -rf "$LAB"' EXIT
+# On a FAILING run the lab is preserved and its path printed: a failure whose
+# evidence deletes itself cannot be diagnosed, only re-rolled (seen once as an
+# unreproducible one-in-fourteen failure during the ROH-159 review).
+trap 'if [[ "${failures:-0}" -eq 0 ]]; then rm -rf "$LAB"; else echo "suite lab preserved for diagnosis: $LAB"; fi' EXIT
 trap 'rm -rf "$LAB"; exit 143' TERM INT
 # If TMPDIR ever sits inside a git repo (Linux mktemp honours TMPDIR; macOS
 # usually pins it elsewhere), discovery from $LAB/notarepo would walk up out of
@@ -158,13 +161,27 @@ EOF
     return
   fi
   repo="$(make_repo 0)"; home="$(make_home absent unregistered)"
-  rm -f "$LAB/PROJECT_GATE_RAN"
+  rm -f "$LAB/PROJECT_GATE_RAN"; mkdir -p "$repo/sub"
   case "$mode" in
     set)   ( cd "$repo" && env -u CLAUDE_PROJECT_DIR HOME="$home" CLAUDE_PROJECT_DIR="$repo" bash -c "$cmd" </dev/null >/dev/null 2>&1 ) ;;
     unset) ( cd "$repo" && env -u CLAUDE_PROJECT_DIR HOME="$home" bash -c "$cmd" </dev/null >/dev/null 2>&1 ) ;;
     empty) ( cd "$repo" && env -u CLAUDE_PROJECT_DIR HOME="$home" CLAUDE_PROJECT_DIR= bash -c "$cmd" </dev/null >/dev/null 2>&1 ) ;;
+    # The subdir modes are the discriminating ones: cwd != project root is the
+    # only shape where the variable does real work, so a registration that
+    # quietly ignores it (bash ./.claude/...) can only be caught from here.
+    subdir-set)   ( cd "$repo/sub" && env -u CLAUDE_PROJECT_DIR HOME="$home" CLAUDE_PROJECT_DIR="$repo" bash -c "$cmd" </dev/null >/dev/null 2>&1 ) ;;
+    subdir-unset) ( cd "$repo/sub" && env -u CLAUDE_PROJECT_DIR HOME="$home" bash -c "$cmd" </dev/null >/dev/null 2>&1 ) ;;
   esac; rc=$?
-  if [[ ! -e "$LAB/PROJECT_GATE_RAN" ]]; then
+  if [[ "$mode" == subdir-unset ]]; then
+    # With the variable unset AND cwd off the root, the wrapper may be
+    # unreachable — that is allowed, but only as a BLOCK (exit 2), never as a
+    # silent ungated pass. Running the gate normally is also fine.
+    if [[ -e "$LAB/PROJECT_GATE_RAN" && $rc -eq 0 ]] || [[ $rc -eq 2 ]]; then
+      pass "$name" "no silent ungated pass (exit $rc)"
+    else
+      fail "$name" "silent ungated pass shape: gate ran=$([[ -e $LAB/PROJECT_GATE_RAN ]] && echo yes || echo no), exit $rc"
+    fi
+  elif [[ ! -e "$LAB/PROJECT_GATE_RAN" ]]; then
     fail "$name" "the registered command did not run the gate (exit $rc)"
   elif [[ $rc -ne 0 ]]; then
     fail "$name" "gate ran but the registered command exited $rc, not 0"
@@ -178,6 +195,8 @@ check_registration
 registration_scenario "registered command runs, CLAUDE_PROJECT_DIR set"   set
 registration_scenario "registered command runs, CLAUDE_PROJECT_DIR unset" unset
 registration_scenario "registered command runs, CLAUDE_PROJECT_DIR empty" empty
+registration_scenario "registered command from a subdir, var set"         subdir-set
+registration_scenario "registered command from a subdir, var unset"       subdir-unset
 
 echo "aura-task-gate.sh — the gate always runs"
 
@@ -340,7 +359,7 @@ make_survey_lab() {  # [default_branch]
   : >"$w/AuraCore/.keep"   # tracked, so clones of the lab get the dir too
   local g
   for g in check-explore-rename check-terrain-style check-single-active-definition check-monotonic-instants; do
-    printf '#!/bin/bash\nexit 0\n' >"$w/scripts/$g.sh"
+    printf '#!/bin/bash\necho "guard %s" >> "%s/INVOKED"; exit 0\n' "$g" "$root" >"$w/scripts/$g.sh"
   done
   printf '#!/bin/bash\necho "handoff-suite" >> "%s/INVOKED"; exit 0\n' "$root" >"$w/scripts/test-task-gate.sh"
   cp "$REAL_GATE" "$w/.claude/agent-gate.sh"
@@ -633,7 +652,11 @@ survey_deadline_blocks() {
   # deadline logic is absent, this either passes after 30s (no truncation kills
   # it early enough to matter) or hangs to the child's own 600s bound — both
   # read as "no internal verdict", which is exactly the regression.
-  printf '#!/bin/bash\necho "swift $*" >> "%s/INVOKED"; sleep 30; exit 0\n' "$root" >"$root/bin/swift"
+  # The hanging child IGNORES the signals a naive bound relies on: a bare
+  # `perl alarm; exec` delivers SIGALRM to a child that can trap it away, and
+  # `timeout` without -k sends only SIGTERM. A bound that a child can opt out
+  # of is not a bound — the stub opting out is what pins the enforcement.
+  printf '#!/bin/bash\ntrap "" ALRM TERM\necho "swift $*" >> "%s/INVOKED"; sleep 30; exit 0\n' "$root" >"$root/bin/swift"
   chmod +x "$root/bin/swift"
   # The handoff stub records BEFORE hanging: children past the deadline must be
   # SKIPPED, not started — a mutant that keeps blocking but still launches them
@@ -660,6 +683,83 @@ survey_deadline_blocks() {
 }
 survey_deadline_blocks
 
+# A gate child that legitimately overruns its budget is one thing; a child a
+# refactor quietly moved OUTSIDE run() is the regression that reopens every
+# hole at once — no bound, no deadline check, and the $() pipe capture hazard
+# at the wrapper. Pin structurally: every non-comment line that invokes a
+# child must go through run().
+check_children_enclosed() {
+  local stray
+  stray="$(grep -nE 'swiftlint lint|swift test|bash scripts/' .claude/agent-gate.sh \
+    | grep -vE '^[0-9]+:[[:space:]]*#' | grep -vE 'run "' || true)"
+  if [[ -z "$stray" ]]; then
+    pass "every gate child goes through run()" "no invocation bypasses the deadline"
+  else
+    fail "every gate child goes through run()" "bypasses run(): $stray"
+  fi
+}
+check_children_enclosed
+
+# Guard scripts are enforcement too: a change to scripts/check-*.sh must run
+# the guards, or a rewrite that makes one vacuous ships unexercised and the
+# guard goes permanently green and permanently blind (the ROH-157 shape one
+# layer down — this gap shipped in the ROH-159 round-1 commit itself, whose
+# file set matched no key at all).
+survey_guard_script_change_runs_guards() {
+  local root; root="$(make_survey_lab)"
+  sgit -C "$root/work" checkout -q -b claude/guardfix
+  printf '# tweak\n' >>"$root/work/scripts/check-terrain-style.sh"
+  sgit -C "$root/work" add -A && sgit -C "$root/work" commit -qm guardfix
+  run_survey "$root"
+  if [[ $SURVEY_RC -eq 0 ]] && grep -q '^guard check-terrain-style' <<<"$SURVEY_INVOKED" \
+      && grep -q '^guard check-explore-rename' <<<"$SURVEY_INVOKED" \
+      && ! grep -q '^swift test' <<<"$SURVEY_INVOKED"; then
+    pass "guard-script change runs the guards" "guards ran without a Swift key"
+  else
+    fail "guard-script change runs the guards" "$(survey_diag)"
+  fi
+}
+survey_guard_script_change_runs_guards
+
+# The escape hatch must never be a SILENT disable: an exported
+# AURA_SKIP_AGENT_GATE from a stale profile or CI step turns the gate off for
+# every run, and without an announcement that state is indistinguishable from
+# inspected-and-passed (the gate's own ROH-156 standard).
+survey_skip_env_announces() {
+  local root; root="$(make_survey_lab)"
+  rm -f "$root/INVOKED"
+  SURVEY_OUT="$( cd "$root/work" && env HOME="$SURVEY_HOME" PATH="$root/bin:$PATH" AURA_SKIP_AGENT_GATE=1 \
+    bash ./.claude/hooks/aura-task-gate.sh </dev/null 2>"$root/ERR" )"; SURVEY_RC=$?
+  SURVEY_ERR="$(cat "$root/ERR" 2>/dev/null || true)"
+  SURVEY_INVOKED="$(cat "$root/INVOKED" 2>/dev/null || true)"
+  if [[ $SURVEY_RC -eq 0 && -z "$SURVEY_INVOKED" ]] && grep -q 'AURA_SKIP_AGENT_GATE' <<<"$SURVEY_OUT"; then
+    pass "escape hatch announces itself" "skip recorded through the wrapper"
+  else
+    fail "escape hatch announces itself" "$(survey_diag)"
+  fi
+}
+survey_skip_env_announces
+
+# AURA_GATE_BUDGET=0 (or octal-looking input) must fall back to the default,
+# not survive validation and deadline-skip every child on arrival.
+survey_budget_zero_falls_back() {
+  local root; root="$(make_survey_lab)"
+  # Restore an instant swift stub for this scenario — the default one hangs.
+  printf '#!/bin/bash\necho "swift $*" >> "%s/INVOKED"; exit 0\n' "$root" >"$root/bin/swift"
+  chmod +x "$root/bin/swift"
+  rm -f "$root/INVOKED"
+  SURVEY_OUT="$( cd "$root/work" && env HOME="$SURVEY_HOME" PATH="$root/bin:$PATH" AURA_GATE_BUDGET=0 \
+    bash ./.claude/hooks/aura-task-gate.sh </dev/null 2>"$root/ERR" )"; SURVEY_RC=$?
+  SURVEY_ERR="$(cat "$root/ERR" 2>/dev/null || true)"
+  SURVEY_INVOKED="$(cat "$root/INVOKED" 2>/dev/null || true)"
+  if [[ $SURVEY_RC -eq 0 ]] && inspected; then
+    pass "budget of 0 falls back to the default" "children ran normally"
+  else
+    fail "budget of 0 falls back to the default" "$(survey_diag)"
+  fi
+}
+survey_budget_zero_falls_back
+
 # The arithmetic that makes the internal deadline sufficient: the gate's
 # default budget must sit meaningfully under the hook timeout in
 # .claude/settings.json, or the harness cancels the hook before the gate can
@@ -679,10 +779,10 @@ EOF
   budget="$(grep -oE 'AURA_GATE_BUDGET:-[0-9]+' .claude/agent-gate.sh | grep -oE '[0-9]+' | head -1)"
   if [[ -z "$hook_timeout" || -z "$budget" ]]; then
     fail "gate budget sits under the hook timeout" "could not parse (timeout=$hook_timeout, budget=$budget)"
-  elif (( budget + 30 <= hook_timeout )); then
-    pass "gate budget sits under the hook timeout" "budget ${budget}s + 30s margin <= hook ${hook_timeout}s"
+  elif (( budget + 60 <= hook_timeout )); then
+    pass "gate budget sits under the hook timeout" "budget ${budget}s + 60s margin <= hook ${hook_timeout}s"
   else
-    fail "gate budget sits under the hook timeout" "budget ${budget}s leaves <30s margin under hook ${hook_timeout}s"
+    fail "gate budget sits under the hook timeout" "budget ${budget}s leaves <60s margin under hook ${hook_timeout}s (the gate's comment claims 60)"
   fi
 }
 check_budget_headroom

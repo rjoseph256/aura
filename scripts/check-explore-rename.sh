@@ -27,14 +27,20 @@ scan() {
   # exit code for a nonexistent path (GNU/BSD say 2, ugrep warns and says 1),
   # so an exit-code test alone is not portable. The rc>1 branch stays as a
   # backstop for other grep errors.
+  #
+  # Error text goes to STDERR: scan is only ever called inside a command
+  # substitution, and a message on stdout is captured into the variable and
+  # discarded when the substitution's exit kills the script — the silent-death
+  # shape ROH-158 was filed about, reintroduced for a different input (both
+  # round-2 reviewers reproduced it through the real gate).
   local d
   for d in "$@"; do
-    [ -d "$d" ] || { echo "FAIL: scan directory missing: $d"; exit 2; }
+    [ -d "$d" ] || { echo "FAIL: scan directory missing: $d" >&2; exit 2; }
   done
   local raw rc=0
   raw="$(grep -rniE 'free ride' --include="*.swift" "$@")" || rc=$?
   if [ "$rc" -gt 1 ]; then
-    echo "FAIL: grep error (exit $rc) while scanning: $*"
+    echo "FAIL: grep error (exit $rc) while scanning: $*" >&2
     exit 2
   fi
   printf '%s\n' "$raw" | detect
@@ -60,16 +66,24 @@ self_test() {
   rm -rf "$lab"
   [ "$rc" -eq 0 ] && [ -z "$out" ] || { echo "SELF-TEST FAIL: clean corpus should scan empty (exit $rc, out: $out)"; exit 2; }
   # And a scan of a missing directory is a real error that must be LOUD — the
-  # || true class of fix would swallow it into a false PASS.
-  local missing_rc=0
-  out="$(scan "$lab/does-not-exist" 2>&1)" || missing_rc=$?
-  [ "$missing_rc" -ne 0 ] && [ -n "$out" ] || { echo "SELF-TEST FAIL: missing directory must fail loudly (exit $missing_rc)"; exit 2; }
+  # || true class of fix would swallow it into a false PASS. The capture takes
+  # ONLY stderr (2>&1 >/dev/null): the production call site discards scan's
+  # stdout into a substitution, so a message there is a message nowhere, and a
+  # self-test that folded the streams together could not tell the difference.
+  local missing_rc=0 err
+  err="$(scan "$lab/does-not-exist" 2>&1 >/dev/null)" || missing_rc=$?
+  [ "$missing_rc" -ne 0 ] && [ -n "$err" ] || { echo "SELF-TEST FAIL: missing directory must fail loudly on stderr (exit $missing_rc)"; exit 2; }
 }
 
 self_test
 # Scope to the shipping surfaces (app sources + widgets), NOT test code — a UI test may
 # legitimately assert the OLD copy is absent (e.g. buttons["Free ride"] does not exist).
-matches=$(scan Aura/Sources Aura/Widgets)
+# The if-guard keeps a scan error LOUD at this call site: a bare `matches=$(scan ...)`
+# under set -e dies inside the substitution with scan's stdout captured and unread.
+if ! matches=$(scan Aura/Sources Aura/Widgets); then
+  echo "FAIL: explore-rename scan errored; see the message above." >&2
+  exit 2
+fi
 if [ -n "$matches" ]; then
   echo "FAIL: user-facing 'free ride' strings remain:"
   echo "$matches"
