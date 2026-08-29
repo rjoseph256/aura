@@ -115,13 +115,55 @@ call site is `AuraApp.swift:131` (not the HUD views); `run` has two literal `ret
 
 ---
 
+## Revision 4 — what execution changed
+
+Tasks 4–9 are implemented. Three things departed from the text above, each because the text was
+wrong or silent about something the code forced a decision on.
+
+**Task 5's re-check needed a releaser.** `applyOrDeferUpgrade` now defers on a live modal, as
+specified — but the deferral the specified change creates has nobody to drain it. The latch's own
+releaser only runs for a deferral the latch caused; a modal the latch never knew about would strand
+the upgrade forever, leaving the row saying "Map added" over a card with no map. That is a worse
+failure than the swap it prevents. The deferral therefore starts the same watch the Share tap
+starts, which is a no-op when the latch is already up. `beginShareSheetWatch` is renamed
+`beginModalWatch` for having two honest entry conditions: predictive on the tap, observational from
+the deferral.
+
+**Task 8's second announcement clause is unreachable, and a counter replaced the `onChange`.** The
+rule as reconciled reads "announce on entry to `unavailable` from a non-`unavailable` phase, and on
+any `unavailable` reached from a rider tap". The second clause adds nothing: `attempt(origin:
+.riderTap)` calls `enterIndicator()` synchronously, so a tap always leaves `unavailable` before it
+returns to it, and the first clause already covers it. What the plan missed is the opposite hazard —
+that leaving `unavailable` and returning to it is *invisible* to `onChange(of: phase)` if SwiftUI
+evaluates no body in between, which nothing guarantees on a warm cache hit. The rider who asked
+would be the one told nothing. `ShareUpgradePresenter.announcements` is a monotone counter written
+at the single point that sets the phase; the view watches it and speaks
+`ShareUpgradeCopy.announcement(for:hasFailedARiderTap:)`. Two mutations confirm the tests bite:
+deleting the `unavailable → unavailable` dedupe makes the deadline announce twice, and widening
+`.upgraded(confirming: true)` to any `.upgraded` makes the silent fast path speak.
+
+**Task 6's ordering moved, and `RideSummaryView` split.** The map request is resolved before the
+fallback render rather than after. It is pure geometry, it is what Task 7 gates the reserved row on,
+and resolving it after a 1080×1350 `ImageRenderer` pass would insert the row a few hundred
+milliseconds into the entrance — the one thing the reservation forbids. A render failure still shows
+no offer, because `noUpgradePossible()` parks the presenter in `.idle`, which draws nothing.
+`RideSummaryView` was at its 500-line limit, so the whole upgrade concern lives in
+`RideSummaryView+ShareUpgrade.swift`; the state it reads is internal for the same reason
+`NavigateHUDView`'s is.
+
+**What remains is Task 10's device pass.** Steps 1 and 2 are green. Step 5's whole-branch review is
+dropped by PO direction for this class of work.
+
+---
+
+
 ### Task 1: `SlotOutcome` — stop collapsing "rejected" into "stopped waiting"
 
 **Files:**
 - Modify: `AuraCore/Sources/AuraKit/Sharing/SharePipelineSlot.swift:89-136`
 - Test: `AuraCore/Tests/AuraKitTests/SharePipelineSlotTests.swift`
 
-- [ ] **Step 1: Add the type and change the return**
+- [x] **Step 1: Add the type and change the return**
 
 Above the class:
 
@@ -153,7 +195,7 @@ Then `run` returns `SlotOutcome<Value>`, with `:96` and `:128` → `.finished(va
 and `:134` → `.stoppedWaiting`. **Change nothing else** — not the ceiling policy, not who
 cancels, not who frees the slot, not `onCeiling`.
 
-- [ ] **Step 2: Update the existing tests — and the `begin` harness**
+- [x] **Step 2: Update the existing tests — and the `begin` harness**
 
 Revision 1 called this "mechanical, assertions only." It is not: `begin` at
 `SharePipelineSlotTests.swift:142` returns `Task<String?, Never>` and must become
@@ -166,7 +208,7 @@ keeps its `log.started == 1` assertion untouched; its `XCTAssertNil(retry)` beco
 pipeline's outcome" — a reviewer instrumented it and the retry trips its own waiter ceiling
 without ever observing that pipeline. The spec carries this as an erratum.
 
-- [ ] **Step 3: Add one new test — and NOT the two below**
+- [x] **Step 3: Add one new test — and NOT the two below**
 
 > **Corrected after Task 1's review.** The two tests specified below are **exact duplicates** of
 > `testSlotIsReleasedWhenWorkReturnsNil` (`:295-306`) — same slot construction, same call, same
@@ -217,7 +259,7 @@ the test case is `@MainActor` and an `async let` child would send `self` across 
 
 </details>
 
-- [ ] **Step 4: Run the package suite**
+- [x] **Step 4: Run the package suite**
 
 ```bash
 swift test --package-path AuraCore --no-parallel
@@ -225,7 +267,7 @@ swift test --package-path AuraCore --no-parallel
 
 Expected: green, no test deleted, none weakened.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add AuraCore/Sources/AuraKit/Sharing/SharePipelineSlot.swift AuraCore/Tests/AuraKitTests/SharePipelineSlotTests.swift
@@ -249,7 +291,7 @@ because the verified artifact is one artifact.
 - Create: `AuraCore/Sources/AuraKit/Sharing/ShareUpgradePresenter.swift`
 - Create: `AuraCore/Tests/AuraKitTests/ShareUpgradePresenterTests.swift`
 
-- [ ] **Step 1: Write the tests first and watch them fail to compile**
+- [x] **Step 1: Write the tests first and watch them fail to compile**
 
 The full file, verified. Expected first run: `cannot find 'ShareUpgradePresenter' in scope`.
 
@@ -575,7 +617,7 @@ final class ShareUpgradePresenterTests: XCTestCase {
 }
 ```
 
-- [ ] **Step 2: Create `ShareUpgradePhase.swift`**
+- [x] **Step 2: Create `ShareUpgradePhase.swift`**
 
 ```swift
 import Foundation
@@ -611,7 +653,7 @@ verified shape, not the finished file. `slow` is **gone** (revision 5); `Attempt
 revision 1's `isRetry`, which conflated "the rider asked" with "skip the show-delay" and so would
 have given the pocketed-phone rider an unprompted spinner and an unprompted "Map added".
 
-- [ ] **Step 3: Create `ShareUpgradePresenter.swift`**
+- [x] **Step 3: Create `ShareUpgradePresenter.swift`**
 
 ```swift
 import Foundation
@@ -801,7 +843,7 @@ Five things in there are load-bearing and are the plan gate's findings made stru
 5. **`onAutomaticRetry` is `@ObservationIgnored`.** It is set from the view; without this,
    assigning it is a tracked mutation and can invalidate during view update.
 
-- [ ] **Step 4: Run**
+- [x] **Step 4: Run**
 
 ```bash
 swift test --package-path AuraCore --no-parallel --filter ShareUpgradePresenterTests
@@ -811,7 +853,7 @@ Expected: **16 tests, 0 failures.** If any test *hangs* rather than fails, you h
 `ManualTimer` — its banked credit is what stops a hop that arms after `fire()` from waiting
 forever. A hung test burns the agent gate's full 900 s and reads as a slow machine.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ---
 
@@ -833,7 +875,7 @@ that actually breaks.
 - Modify: `Aura/Sources/Ride/RideSummaryView.swift:185-193` (the consumer, minimally — full
   rewiring is Task 6)
 
-- [ ] **Step 1:**
+- [x] **Step 1:**
 
 ```swift
 enum ShareMapOutcome: Sendable {
@@ -850,7 +892,7 @@ protocol ShareMapRasterProviding: Sendable {
 }
 ```
 
-- [ ] **Step 2: Map in `raster(for:)`**
+- [x] **Step 2: Map in `raster(for:)`**
 
 | Source | Result |
 |---|---|
@@ -862,11 +904,11 @@ protocol ShareMapRasterProviding: Sendable {
 
 `prefetchShareMap` already discards its result and needs no change beyond compiling.
 
-- [ ] **Step 3: Switch at the consumer**, preserving today's `!Task.isCancelled` guard — Task 6
+- [x] **Step 3: Switch at the consumer**, preserving today's `!Task.isCancelled` guard — Task 6
       decides its fate deliberately, this task must not drop it silently.
-- [ ] **Step 4: Delegate a build.** Expected: compiles clean. This is the first step in the plan
+- [x] **Step 4: Delegate a build.** Expected: compiles clean. This is the first step in the plan
       where that claim is actually true.
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 
 ---
 
@@ -874,13 +916,13 @@ protocol ShareMapRasterProviding: Sendable {
 
 **Files:** `Aura/Sources/Ride/ShareCard/ShareCardFileStore.swift:10, 26-31`
 
-- [ ] **Step 1:** Update the doc comment — generation 0 is the fallback and each upgrade attempt
+- [x] **Step 1:** Update the doc comment — generation 0 is the fallback and each upgrade attempt
       that produces a card writes the next generation. `url(generation:)` needs no signature
       change; the counter lives in the view.
-- [ ] **Step 2:** Record the accepted cost: files accumulate per attempt under the presentation's
+- [x] **Step 2:** Record the accepted cost: files accumulate per attempt under the presentation's
       UUID directory, bounded by rider taps, in `tmp`, and `sweepOtherRides()` structurally cannot
       collect the current ride's subtree.
-- [ ] **Step 3: Commit.**
+- [x] **Step 3: Commit.**
 
 ---
 
@@ -892,11 +934,11 @@ under a live sheet and a late upgrade assigns `shareImage` beneath it — which 
 device pass watched dismiss a presented sheet. Retry is what makes late landings routine, so this
 change is what makes the hazard reachable.
 
-- [ ] **Step 1:** `applyOrDeferUpgrade` (`:376-382`) re-checks `SharePresentation.isPresenting` at
+- [x] **Step 1:** `applyOrDeferUpgrade` (`:376-382`) re-checks `SharePresentation.isPresenting` at
       assignment time rather than trusting the latch alone, and defers if any modal is up.
-- [ ] **Step 2:** Note in the comment that `isPresenting` is true for *any* modal, so an unrelated
+- [x] **Step 2:** Note in the comment that `isPresenting` is true for *any* modal, so an unrelated
       system alert also defers. That is the safe direction.
-- [ ] **Step 3: Delegate a build. Commit.**
+- [x] **Step 3: Delegate a build. Commit.**
 
 ---
 
@@ -904,11 +946,11 @@ change is what makes the hazard reachable.
 
 **Files:** `Aura/Sources/Ride/RideSummaryView.swift:26-37`, `:132-196`
 
-- [ ] **Step 1:** `isUpgrading` and `showHint` go; add
+- [x] **Step 1:** `isUpgrading` and `showHint` go; add
       `@State private var upgrade = ShareUpgradePresenter()` and `@State private var generation = 0`.
       Keep `shareImage`, `shareSheetUp`, `deferredUpgrade` as they are.
 
-- [ ] **Step 2: Extract `runUpgrade(glanceDebounce:origin:)`**
+- [x] **Step 2: Extract `runUpgrade(glanceDebounce:origin:)`**
 
 **The 0.8 s sleep stays OUTSIDE `presenter.attempt`.** Putting `attempt` first would arm the
 300 ms show-delay inside the sleep, so "Adding your map…" appears at t+0.3 s — mid-entrance on
@@ -945,22 +987,22 @@ the raster is now cached, so an automatic retry would warm-hit and fail at the s
 deterministically — spending the one-shot budget on something that cannot succeed. `.mayRejoin`
 still offers the rider the button; it just refuses to press it for them.
 
-- [ ] **Step 3:** `.task` keeps its guards and its fallback render, and calls
+- [x] **Step 3:** `.task` keeps its guards and its fallback render, and calls
       `runUpgrade(glanceDebounce: true, origin: .first)`. Where it currently returns because
       `ShareMapRequest.init` gave nil (`:146-147`) or the fallback render failed (`:145`), call
       `upgrade.noUpgradePossible()` first — those are the two paths that must never show an offer.
 
-- [ ] **Step 4:** Hold `content`, `fileStore`, `title`, `request` in `@State`. `ShareCardFileStore`
+- [x] **Step 4:** Hold `content`, `fileStore`, `title`, `request` in `@State`. `ShareCardFileStore`
       mints its `presentationID` in `init`, so build it **once** and never rebuild it in the retry
       path. Add `.id(ride.id)` where `HistoryView` presents the sheet, so a reused content view
       cannot carry another ride's file store.
 
-- [ ] **Step 5:** Decide the `!Task.isCancelled` guard **explicitly**. It exists today at `:187`
+- [x] **Step 5:** Decide the `!Task.isCancelled` guard **explicitly**. It exists today at `:187`
       and stops a 1080×1350 main-actor `ImageRenderer` pass running for a view being torn down.
       Keep it for the `.first` path; for `.riderTap`/`.automatic` the enclosing task is not
       `.task`'s, so state what you chose in a comment. Revision 1 dropped it silently.
 
-- [ ] **Step 6: Delegate a build. Commit.**
+- [x] **Step 6: Delegate a build. Commit.**
 
 ---
 
@@ -968,7 +1010,7 @@ still offers the rider the button; it just refuses to press it for them.
 
 **Files:** `Aura/Sources/Ride/RideSummaryView.swift:107-114`
 
-- [ ] **Step 1: The row**
+- [x] **Step 1: The row**
 
 | Phase | Content |
 |---|---|
@@ -990,7 +1032,7 @@ accent-coloured, `minHeight: 44`, `.contentShape(Rectangle())` — the hit-targe
 `GroupLobbyView.swift:225-234`, which is worth keeping even though its colour is not. **No SF
 Symbol**: `arrow.clockwise` would reintroduce the retry-after-failure reading the copy avoids.
 
-- [ ] **Step 2: Reserve the height — as a `ZStack`, not a fixed frame**
+- [x] **Step 2: Reserve the height — as a `ZStack`, not a fixed frame**
 
 Render every phase's content in a `ZStack`, only the active one visible, the rest
 `.accessibilityHidden(true)`. That sizes to the tallest state at **any** Dynamic Type size by
@@ -1006,27 +1048,27 @@ Done must not move: it is the only exit (`AuraApp.swift:124-135` hides the nav b
 button and swipe-back) and sits below the fold, so a rider scrolling to it as the row grows lands
 on the offer and starts a pipeline they never wanted.
 
-- [ ] **Step 3:** Both presentations. Spec revision 5 reversed the ride-end-only scope, so there is
+- [x] **Step 3:** Both presentations. Spec revision 5 reversed the ride-end-only scope, so there is
       no `presentation:` parameter and no call-site change.
-- [ ] **Step 4:** `Button(ShareUpgradeCopy.offer) { Task { await runUpgrade(glanceDebounce: false, origin: .riderTap) } }`,
+- [x] **Step 4:** `Button(ShareUpgradeCopy.offer) { Task { await runUpgrade(glanceDebounce: false, origin: .riderTap) } }`,
       with `.accessibilityLabel(ShareUpgradeCopy.offerAccessibilityLabel)`.
 
-- [ ] **Step 4b: The connectivity caption (spec revision 10).** Render
+- [x] **Step 4b: The connectivity caption (spec revision 10).** Render
       `ShareUpgradeCopy.caption(for: presenter.phase, hasFailedARiderTap: presenter.hasFailedARiderTap)`
       under the button when it is non-nil. Take every string and the condition from that type —
       the rule is tested there, and re-deriving it in the view puts it somewhere with no test
       bundle. Treat it as part of the tallest state when reserving the row's height in Step 2:
       the caption appears *below* the button, so a row sized only for the button moves Done the
       first time a tap fails.
-- [ ] **Step 5:** Give the row a `reduceMotion`-aware cross-fade. With the height reserved it is
+- [x] **Step 5:** Give the row a `reduceMotion`-aware cross-fade. With the height reserved it is
       free, and unspecified means a hard pop.
-- [ ] **Step 6: Delegate a build. Commit.**
+- [x] **Step 6: Delegate a build. Commit.**
 
 ---
 
 ### Task 8: Background return and accessibility
 
-- [ ] **Step 1: The edge**
+- [x] **Step 1: The edge**
 
 ```swift
 .onChange(of: scenePhase) { _, phase in
@@ -1048,13 +1090,13 @@ Note the edge is wider than "the rider pocketed the phone": sharing to another a
 Files, taking a call and following a link all produce a real `.background`. That is why the
 arming is gated on `.freshAttempt` and bounded to one, and why device-pass item 7 exists.
 
-- [ ] **Step 2: Announcements** — posted by the view; AuraKit imports no UIKit.
+- [x] **Step 2: Announcements** — posted by the view; AuraKit imports no UIKit.
   - Announce entry into `unavailable` **once**.
   - **Not** a second `unavailable` from a failed automatic retry. `AttemptOrigin` is what makes
     this expressible — the phase carries no provenance, so revision 1 asked the view to suppress
     something it had no way to detect.
   - Button accessibility label: "Add the map to your share card".
-- [ ] **Step 3: Delegate a build. Commit.**
+- [x] **Step 3: Delegate a build. Commit.**
 
 ---
 
@@ -1064,17 +1106,17 @@ The 6 s constant rests on device-pass item 1, and nothing in revision 1 made it 
 tester's only tool was eyeballing Console timestamps across nine reject strings, one of which
 covers four code paths.
 
-- [ ] **Step 1:** Log attempt duration and outcome once per attempt, at `.notice`, in the existing
+- [x] **Step 1:** Log attempt duration and outcome once per attempt, at `.notice`, in the existing
       `app.aura.ios` / `ShareCard` category, so a sysdiagnose answers "how long do upgrades
       actually take at ride end, on wifi and on cellular" without inference.
-- [ ] **Step 2: Commit.**
+- [x] **Step 2: Commit.**
 
 ---
 
 ### Task 10: Verification
 
-- [ ] **Step 1:** `swift test --package-path AuraCore --no-parallel`
-- [ ] **Step 2:** App build via the `apple-platform-build-tools` builder subagent.
+- [x] **Step 1:** `swift test --package-path AuraCore --no-parallel`
+- [x] **Step 2:** App build via the `apple-platform-build-tools` builder subagent.
 - [ ] **Step 3: Device pass — a real device.** A clean build proves nothing here.
 
 1. **Measure** (Task 9's log): upgrade durations and reject timings at ride end, wifi and
