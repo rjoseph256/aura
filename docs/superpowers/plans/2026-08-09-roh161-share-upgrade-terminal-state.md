@@ -83,8 +83,12 @@ reserved row is a permanent ~44 pt cost on every ride summary, and the number th
 arrives after the row ships. Not reordered here, since the row is owed regardless as a fix to
 today's unreserved conditional insert, but worth a look before Task 7.
 
-**Not in scope, filed separately:** the share-sheet 2 s re-arm is ROH-185, not this plan, despite
-spec §Risks saying it would be fixed "here".
+**Task 5 and ROH-185 are the same hazard, and Task 5 is the fix.** An earlier draft of this section
+said ROH-185 was out of scope; that was wrong. ROH-185 describes the 2 s watch giving up under a
+live sheet, and Task 5 closes it — not by re-arming the watch, but by having `applyOrDeferUpgrade`
+re-check `SharePresentation.isPresenting` at assignment time instead of trusting the latch. Close
+ROH-185 when this merges, and say which mechanism closed it, since the issue proposes a different
+one.
 
 ---
 
