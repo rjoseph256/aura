@@ -3,14 +3,18 @@
 Date: 2026-08-06. Branch `adaws96/roh-161-share-map-upgrade-fails-silently-one-attempt-no-terminal`.
 Issue: https://linear.app/rohun/issue/ROH-161
 
-**Revision 8.** See §Revision history. This document is the single spec for ROH-161; an earlier
+**Revision 9.** See §Revision history. This document is the single spec for ROH-161; an earlier
 independent draft was folded into it and is recorded there.
 
-> **Revision 8 cuts the automatic retry.** A PO decision on 2026-08-29, after the revision 7 gate
-> refuted the mechanism for the third time. The rationale, the cost, and the defect the cut
-> surfaced are in §The automatic retry, and why it is cut. Revision 7 itself was never pushed —
-> commit `39ab494` exists only on the author's machine — so this document continues from revision 6
-> and treats the revision 7 gate's findings, recorded in the Linear issue, as input.
+> **The automatic retry is cut** — a PO decision on 2026-08-29. Revision 8 made the cut and
+> justified it with an impossibility claim; the spec gate refuted that claim by running it, so
+> revision 9 keeps the decision and replaces the argument. It also drops `.futile`, revision 8's
+> one addition, which all three reviewers refuted independently. See §The automatic retry, and why
+> it is cut.
+>
+> Revision 7 was never pushed — commit `39ab494` exists only on its author's machine — so this
+> document continues from revision 6 and treats the revision 7 gate's findings, recorded in the
+> Linear issue, as input rather than as repository fact.
 
 ## Problem
 
@@ -48,12 +52,12 @@ revision 2 did. Provenance in §Revision history.)*
 ## The finding that shapes this design
 
 **`raster(for:)` returning nil does not mean the pipeline failed.** The slot was deliberately
-rewritten so that it doesn't. `SharePipelineSlot.swift:97-111` is explicit — a waiter's ceiling
+rewritten so that it doesn't. `SharePipelineSlot.swift:131-145` is explicit — a waiter's ceiling
 "unblocks THIS caller and nothing else… it must not clear the slot, **because the pipeline is
 still alive**." The owner's ceiling cancels but does not free the slot (`:129-134`), and
 cancellation is not honoured past the render anyway (`ShareMapSnapshotter.swift:227-230`).
 
-So one nil carries three different situations, and they call for three different responses:
+So one nil carries two different situations, and they call for different responses (the *type* distinguishes three — waiter ceiling, owner ceiling, and a pipeline returning nil — but the first two call for the same response here):
 
 | What happened | Is the pipeline dead? | Is a retry a real second attempt? |
 |---|---|---|
@@ -67,18 +71,23 @@ ceiling case is not a corner — it is the ride-end shape.
 **Erratum, revision 5.** Revisions 2–4 cited
 `AuraCore/Tests/AuraKitTests/SharePipelineSlotTests.swift:261`,
 `testSameKeyRetryDuringUnwindJoinsTheDyingPipeline`, as "the checked-in proof that they are
-different." It is not. A reviewer instrumented it: the retry trips its **own waiter ceiling** at
-`SharePipelineSlot.swift:111` and returns before ever observing the dying pipeline's result. The
+different." It is not.
+
+> Renamed since, by `bc8e99f`, to `testSameKeyRetryDuringUnwindStartsNoSecondPipeline`
+> (`SharePipelineSlotTests.swift:284`) — named for what it actually proves, so the next citation
+> has something to check against. The name in this paragraph is kept because the paragraph is a
+> record of what was cited. A reviewer instrumented it: the retry trips its **own waiter ceiling** at
+`SharePipelineSlot.swift:145` and returns before ever observing the dying pipeline's result. The
 test produces one of the two cases and so demonstrates nothing about the distinction, and its name
 is misleading about its own mechanism. What it does prove — `log.started == 1`, no second pipeline
 for a live key — is real and is why it exists.
 
-The finding above stands on the type's own documented behaviour (`SharePipelineSlot.swift:97-111`,
+The finding above stands on the type's own documented behaviour (`SharePipelineSlot.swift:131-145`,
 `:129-134`) rather than on that test. Stated because a citation that survived three revisions and
 three reviewers, and was wrong, is worth more as a correction than as a quiet deletion.
 
 **Second erratum: `.finished(nil)` does not always mean "ran and produced nothing."** At
-`SharePipelineSlot.swift:96` a same-key waiter returns whatever the *owner's* task produced — and
+`SharePipelineSlot.swift:130` a same-key waiter returns whatever the *owner's* task produced — and
 if the owner's ceiling fired, `task.cancel()` ran and `runPipeline` returns nil via
 `cancelledBeforeStarting` (`ShareMapSnapshotter.swift:174-178`). The joiner then reads
 `.finished(nil)`. Since this document says the ride-end summary *is* that joiner, the automatic
@@ -94,7 +103,6 @@ everything else in this document follows from it.
 - A rider who is told so can ask again, and the app only promises a second attempt when it can
   deliver one.
 - A rider whose pipeline is merely slow is never told it failed.
-- A rider is never offered a button that cannot succeed.
 - Every timing rule is unit-testable in a target that has tests, and `begin`/`finish` pairing is
   structurally impossible to get wrong.
 
@@ -131,7 +139,7 @@ What the exclusion cost is much larger than what it saved, and it broke the feat
 §Problem says the loss is "I do not know that trying again on wifi would very likely work." The
 rider who acts on that goes home, opens History, and taps the ride — and under ride-end-only gets
 today's vanishing spinner. Ride end is destroyed by the one button a rider must press to leave it
-(`AuraApp.swift:124-135` hides the nav bar, the back button and swipe-back, so Done is the only
+(`AuraApp.swift:124-135` hides the nav bar, the back button and swipe-back, so Done is very nearly the only
 exit). Ride-end-only is a recovery path that exists for about thirty seconds, on the screen where
 the rider is least likely to be on wifi. ROH-126 designated the History reopen as *the* recovery
 path; excluding it inverted that far more than including the offer does.
@@ -166,7 +174,9 @@ precisely the confusion that erratum exists to clear up.
 Verified at implementation: a reviewer extracted the pre-change implementation and ran a
 seven-scenario differential against the new one — return values, the full `onCeiling` sequence,
 `isRunning` at every checkpoint, and the work log — and got identical traces on all seven. The
-"no behaviour changes" claim is tested, not asserted.
+"no behaviour changes" claim was tested rather than asserted — but the harness was never checked
+in, so it cannot be re-run. Treat it as a well-provenanced assertion, which is the category the
+revision 5 errata exist to warn about.
 
 `ShareMapRasterProviding` follows:
 
@@ -205,12 +215,11 @@ public enum AttemptOrigin: Equatable, Sendable {
     case riderTap     // an explicit tap: indicator immediately, confirmation on success
 }
 
-/// What a tap from a terminal phase would actually do. Revision 8 repurposes this: it used to
-/// gate the automatic retry, and now decides whether the offer is a live button at all.
+/// What the spec promises about a tap from a terminal phase. The automatic retry was the only
+/// thing that ever BRANCHED on this; both cases now render the same live offer.
 public enum Retryability: Equatable, Sendable {
     case freshAttempt   // from .rejected — retry re-runs the pipeline
     case mayRejoin      // from .stoppedWaiting — retry warm-hits or re-joins the live pipeline
-    case futile         // a retry is guaranteed to re-fail — offer nothing (revision 8)
 }
 ```
 
@@ -221,7 +230,6 @@ public enum Retryability: Equatable, Sendable {
 | `upgradingVisible` | `.first` +300 ms; **immediately** for `.riderTap` | spinner + "Adding your map…" | no |
 | `unavailable(.mayRejoin)` | **the 6 s deadline elapses with the attempt outstanding**, or `.stoppedWaiting` | "Add map to card" | **yes** |
 | `unavailable(.freshAttempt)` | `.rejected` | "Add map to card" | **yes** |
-| `unavailable(.futile)` | the raster landed and the upgrade re-render failed | nothing | no |
 | `upgraded(confirming: true)` | map applied when the rider had asked and an indicator was on screen | "Map added", persists | no |
 | `upgraded(confirming: false)` | map applied with no tap behind it, or before any indicator showed | nothing | no |
 
@@ -237,9 +245,8 @@ finished after we stopped waiting — `raster(for:)` probes the disk cache befor
 re-runs the pipeline in full. Both are real routes to a map and both were asked for, so the
 rider-facing treatment is identical.
 
-`.futile` is the case where it is not. Revision 8 added it, because cutting the automatic retry
-promoted a distinction that had been carrying two meanings under one name — see §The automatic
-retry, and why it is cut.
+The upgrade re-render failure also lands here, on `.mayRejoin`. Revision 8 routed it to a third
+case that showed no button; revision 9 reverses that — see §The automatic retry, and why it is cut.
 
 ### The presentation deadline: 6 s, and what it is for
 
@@ -248,7 +255,7 @@ justification, and it needs no measurement to stand up.
 
 **At 6 s the spinner stops and the offer appears, as `unavailable(.mayRejoin)`.** Nothing here
 stops the rider *waiting* in the sense of bounding the pipeline — the slot's own doc notes the
-wait is not even bounded by one ceiling (`SharePipelineSlot.swift:24-27`: N different-key
+wait is not even bounded by one ceiling (`SharePipelineSlot.swift:50-53`: N different-key
 pipelines cost a waiter up to N × ceiling). What the deadline does is stop the rider staring at
 a spinner with no way to act, which is the complaint this issue is filed on.
 
@@ -271,9 +278,9 @@ three serve someone other than the rider:
 
 | Bound | Value | Whose job |
 |---|---|---|
-| Slot ceiling | 20 s (`SharePipelineSlot.swift:74`) | Protect an app-lifetime singleton from a wedged pipeline |
-| Style belt | 4 s (`ShareMapSnapshotter.swift:268`) | Bound one SDK style load |
-| Render belt | 6 s (`ShareMapSnapshotter.swift:352`) | Bound one SDK render |
+| Slot ceiling | 20 s (`SharePipelineSlot.swift:101`) | Protect an app-lifetime singleton from a wedged pipeline |
+| Style belt | 4 s (`ShareMapSnapshotter.swift:276`) | Bound one SDK style load |
+| Render belt | 6 s (`ShareMapSnapshotter.swift:360`) | Bound one SDK render |
 | **Presentation deadline** | **6 s, new** | **Stop the rider waiting** |
 
 **The deadline must not cancel `raster(for:)`.** It changes what is on screen and nothing else. The
@@ -297,7 +304,7 @@ different clocks:
 
 | Bound | Mechanism | Advances while the device sleeps? |
 |---|---|---|
-| Style belt (4 s), render belt (6 s) | `DispatchQueue.main.asyncAfter(deadline: .now() + n)` (`ShareMapSnapshotter.swift:281`, `:365`) | **No** — `DispatchTime` is the uptime clock |
+| Style belt (4 s), render belt (6 s) | `DispatchQueue.main.asyncAfter(deadline: .now() + n)` (`ShareMapSnapshotter.swift:276`, `:360`) | **No** — `DispatchTime` is the uptime clock |
 | Slot ceiling (20 s) | `Task.sleep(for:)` (`SharePipelineSlot.swift:106`) | **Yes** — `ContinuousClock` |
 | Presentation deadline (6 s, new) | `Task.sleep(for:)` | **Yes** |
 
@@ -322,10 +329,19 @@ retry is forbidden to fire on.
    re-probe on foreground does not close it either — the cache is cold, because the pipeline was
    cancelled before it wrote anything.
 
-   > **Closed in revision 8, by removing the mechanism rather than repairing it.** A fresh request
-   > against a cold cache is exactly what the offer's button already issues, and it is not gated on
-   > `Retryability` at all. The hole was only ever a hole in the *automatic* path. See §The
-   > automatic retry, and why it is cut.
+   > **Closed by removing the mechanism rather than repairing it.** A fresh request against a cold
+   > cache is what the offer's button already issues, and it is not gated on `Retryability` at all.
+   > The hole was only ever a hole in the *automatic* path. See §The automatic retry, and why it is
+   > cut.
+   >
+   > **And the "cold cache" above is over-stated.** Cancellation past the render is a deliberate
+   > no-op (`ShareMapSnapshotter.swift:227-230`), which this document relies on two sections
+   > earlier to argue the deadline must not cancel. A suspension that lands in the tail therefore
+   > completes on resume, writes the cache, and returns an image. So the pocketed rider's outcome
+   > is **nondeterministic** — a finished card or a live offer, depending on which stage the freeze
+   > caught — and device-pass item 5 must record which of the two it saw across repeats rather than
+   > assert one as expected. The other ROH-161 branch's spec says exactly this and the code sides
+   > with it.
 3. ROH-126's note that "suspension parks both belts and the ceiling together so they fire on the
    same resume" inherits the same error. That claim was the decisive argument for reversing
    erratum (a) in `2026-07-30-roh126-slot-watchdog-cancellation.md`. The *conclusion* there
@@ -392,8 +408,8 @@ it, a dwell hop armed under attempt *n* re-applies attempt *n*'s terminal phase 
 
 ### Minimum dwell, so nothing flashes
 
-A reject can land at essentially any time up to ~10 s: the style belt caps at 4 s (`:268`) and the
-render belt at 6 s (`:352`), and they are caps, not durations — if the render belt fires,
+A reject can land at essentially any time up to ~10 s: the style belt caps at 4 s (`:276`) and the
+render belt at 6 s (`:360`), and they are caps, not durations — if the render belt fires,
 `renderMapRasterWithChrome` returns nil at `:373` and `runPipeline` rejects at `:222-226` without
 ever reaching acceptance. So there is no deadline value that cleanly separates rejects from the
 deadline; some rejects will always land just after it.
@@ -448,9 +464,20 @@ public enum ShareUpgradeResult: Sendable { case gotMap, rejected, stoppedWaiting
 ```
 
 `attempt` is the whole answer to "what if `finish` is never called": there is no `finish` to skip.
-It applies the terminal phase in a `defer`, so a cancelled or throwing `work` still leaves the
-machine in a terminal state rather than an absorbing spinner. It is a no-op if an attempt is
-already in flight, so re-entrancy cannot arm two deadline hops that then fight over the phase.
+
+**Two sentences stood here through revisions 2–8 and were false in the committed code.** Removed in
+revision 9 rather than reworded, because §Testing asked for a test of each and an implementer
+working from the list would have written both.
+
+* *"It applies the terminal phase in a `defer`."* There is no `defer`; the phase is applied inline
+  after `await work()`. Revision 5's erratum 7 already retracted the behavioural claim and §Error
+  handling contradicts it in bold, but this paragraph and §Testing were never updated. `work` is
+  also non-throwing, so "a throwing `work`" was never expressible.
+* *"It is a no-op if an attempt is already in flight."* It is not, and it must not be. §One
+  rider-visible attempt abolishes that rule on purpose: the offer is live *while* an attempt is
+  outstanding — which at the deadline is the normal ride-end shape — so a guard here would swallow
+  the most likely tap in the feature and produce the dead button this issue exists to remove. The
+  real rule is the generation: a new attempt supersedes, and hops are cancelled.
 
 `ShareUpgradeResult` is deliberately image-free so the type stays in AuraKit; the app maps its
 `ShareMapOutcome` onto it and keeps the `UIImage`.
@@ -464,7 +491,7 @@ constants into the test) or by call order. Tests also need the `Gate` half of th
 Each timer is `nil`-defaulted with the real closure built **inside** the initializer, in the
 defining module. ROH-110: an async closure *default argument* is duplicated into every module
 referencing the declaration and the copies can disagree about frame size, which aborts the process
-(`SharePipelineSlot.swift:59-67`).
+(`SharePipelineSlot.swift:90-93`).
 
 ### Where `attempt` sits relative to the 0.8 s sleep
 
@@ -481,7 +508,7 @@ So the extracted function is `runUpgrade(glanceDebounce:origin:)`, and the sleep
 ### Retry and the exclusive slot — an accepted, named cost
 
 `slot.run` has no cancellation point: both its awaits go through `withCheckedContinuation` and the
-pipeline is an unstructured `Task` (`SharePipelineSlot.swift:117`). **Nothing the view does can
+pipeline is an unstructured `Task` (`SharePipelineSlot.swift:151`). **Nothing the view does can
 retract a committed retry.** A rider who taps Try again, then immediately leaves and opens another
 ride, leaves a pipeline running for a ride nobody is looking at, with the next ride queued behind
 it — the ROH-155 rev-3 reproduction reached through the button instead of the sleep.
@@ -503,94 +530,132 @@ here depends on that happening.
 
 ### The automatic retry, and why it is cut
 
-**Revision 8 removes it.** No `wasBackgrounded` flag, no arming, no consumption, no one-shot
-budget, no `scenePhase` handler in `RideSummaryView`. Recovery from a terminal phase is a rider
-tap and nothing else.
+**Removed.** No `wasBackgrounded` flag, no arming, no consumption, no one-shot budget, no
+`scenePhase` handler in `RideSummaryView`. Recovery from a terminal phase is a rider tap.
 
-This is a PO decision taken on 2026-08-29. It is recorded here at length rather than deleted
-quietly, because the mechanism was load-bearing in four revisions and the reasons it failed are
-properties of this subsystem, not of any one draft — the same standard §What revision 1 got wrong
-is kept to.
+A PO decision taken on 2026-08-29, recorded at length rather than deleted quietly, because the
+mechanism was load-bearing in four revisions.
 
-**It failed three times, each time for a different proximate reason and the same structural one.**
+**It failed three times, each with a different proximate cause.**
 
 | Revision | The mechanism | How it failed |
 |---|---|---|
 | 1 | Read the phase at the `scenePhase` edge | The reject loses that race by five-plus main-actor hops, so it read `slow` and did nothing. The headline scenario was a no-op. |
 | 2–5 | Arm at the edge, consume when the phase becomes `unavailable(.freshAttempt)` | Erratum, revision 6: a pocketed phone's ceiling fires while the belts are frozen, so the phase on resume is `.mayRejoin` — the one value the gate forbids. Recorded there as "the open hole in the design". |
-| 7 (unpushed) | One-time reclassification of `.mayRejoin` → `.freshAttempt` on the scene edge | Three reviewers, all REVISE. One implemented it and ran the headline scenario: `FINAL_PHASE=unavailable(mayRejoin) AUTO_RETRIES=0`. The outstanding attempt writes its terminal phase unconditionally after the reclassification, so the arm can never be consumed. It also read the phase at the scene edge, which revisions 2–5 had forbidden in bold as the defect that killed revision 1. |
+| 7 (unpushed) | One-time reclassification of `.mayRejoin` → `.freshAttempt` on the scene edge | Three reviewers, all REVISE. One implemented it and ran the headline scenario: `FINAL_PHASE=unavailable(mayRejoin) AUTO_RETRIES=0`. It also read the phase at the scene edge, which revisions 2–5 had forbidden in bold as the defect that killed revision 1. |
 
-The structural reason is the same each time. **To act without being asked, the app has to know at
-the scene edge whether the in-flight attempt is going to produce a map — and `SharePipelineSlot`
-is deliberately built so that it cannot know.** The slot stops a *caller* without stopping the
-*pipeline* (`SharePipelineSlot.swift:97-111`), cancellation is not honoured past the render
-(`ShareMapSnapshotter.swift:227-230`), and `.finished(nil)` is reachable from an owner-cancelled
-task as well as an exhausted one (§The finding, second erratum). Every revision has tried to
-recover that knowledge through a different proxy — the scene edge, the terminal phase, a
-reclassification — and the proxy has been wrong every time, because the information is not there
-to recover.
+#### Revision 8 claimed this was impossible. It is not, and the gate proved it by running it
 
-A rider tap does not need it. The rider supplies the intent the automatic path has to infer, and
-a tap carries no budget to spend wrongly: if it re-joins a live pipeline, the rider waits and
-usually gets the map; if it re-runs, they get a real second attempt; if nothing comes back, the
-button is still there.
+Revision 8 argued that the app cannot know, at a scene edge, whether an in-flight attempt will
+produce a map, because `SharePipelineSlot` is deliberately built so that it cannot — and concluded
+the information was unrecoverable. **That argument is withdrawn.**
 
-**What the rider loses is exactly one tap.** §Phases already gives both `unavailable` cases the
-same live "Add map to card" button. The pocketed rider — the headline scenario, and the case the
-erratum said was uncovered — comes back to `unavailable(.mayRejoin)` and a button that works. The
-automatic retry was never the difference between recovery and no recovery. It was the difference
-between recovery and recovery-without-asking.
+A spec reviewer changed one predicate — the consume gate from `.freshAttempt` to any terminal
+`unavailable` — and replayed the headline scenario against the committed presenter:
 
-**Held against the goal it was written for**, §Goals asked that "the automatic recovery fires on a
-signal that actually correlates with the failure's cause". Four revisions could not find that
-signal, and the reason is now understood rather than suspected. Revision 8 drops the goal instead
-of continuing to fail it, and adds the one this issue can actually keep: a rider is never offered
-a button that cannot succeed.
+```
+testPocketedPhoneCeilingThenForegroundFiresOneAutomaticRetry — passed
+  phase == .unavailable(.mayRejoin), AUTO_RETRIES == 1
+```
 
-#### The defect the cut surfaced: `Retryability` had three meanings under two names
+Two things follow. The arm/consume design **already** does not read the phase at the scene edge —
+that is what arming is for — so revision 7's failure is evidence that *reclassification on the
+scene edge* fails, not that the mechanism cannot work. And `SharePipelineSlot.isRunning` is public
+and documented as *"observable rather than inferred"*, so the sentence "built so that it cannot
+know" was wrong about the type. It is not reachable from the view — `ShareMapSnapshotter.slot` is
+`private` and the seam exposes only `raster(for:)` — so using it would need a seam change, but that
+is a cost, not an impossibility.
 
-Removing the automatic retry promotes `Retryability` from "may the app act unasked" to "is the
-offer a live button", and under that load it breaks.
+Generalising three failed mechanisms into an impossibility was the weakest step in revision 8, and
+handing the PO a proof where the honest answer was a judgement call was the wrong way to get a
+decision.
 
-`.mayRejoin` was reached from two unrelated places. From a **ceiling or the deadline**, a tap is
-genuinely useful — warm-hit or re-join. From an **upgrade re-render failure**, §Error handling
-routed to `.mayRejoin` precisely *because* a retry warm-hits the now-cached raster and re-fails at
-the same renderer, deterministically. That routing was correct when `.mayRejoin` meant "do not
-auto-retry". It is wrong now, because it produces a button the rider can press that cannot ever
-succeed.
+#### The actual reason, which is a cost and survives scrutiny
 
-That is this issue's own symptom wearing a different costume, and the design already has the
-principle that forbids it. §Phases says of `idle`: *"a Try again that can never succeed would be
-a lie."*
+Firing on `.mayRejoin` means the app commits a second waiter to a pipeline that may still be
+alive, on the rider's behalf, without being asked. That is precisely what `.mayRejoin` was
+introduced to forbid. The one-line version buys back the rider's tap by doing the thing the design
+spent four revisions deciding not to do — and it would need its own device pass to establish that
+the unasked re-join is harmless.
 
-So revision 8 adds `.futile`, reached only from the re-render failure, and the offer row shows
-nothing for it. The rider keeps the fallback card and keeps Share, which is what they had; they
-are simply not invited to press something inert. This is a narrowing of the offer, not of the
-feature, and it is the one behavioural change the cut introduces beyond the deletion itself.
+**Against that, the rider loses exactly one tap.** §Phases gives both `unavailable` cases the same
+live "Add map to card" button, so the pocketed rider — the headline scenario, and the case the
+revision 6 erratum said was uncovered — returns to a button that works. The automatic retry was
+never the difference between recovery and no recovery; it was the difference between recovery and
+recovery-without-asking. For a defect whose user-visible payload is a button, that is not worth a
+mechanism with this failure record.
 
-**Open for the gate.** `.futile` leaves that rider with no recourse and no explanation, which is
-close to today's silent failure for that one path. The alternative is a live button whose tap
-bypasses the disk cache and forces a fresh render. That is strictly better for the rider and
-strictly more code — a new parameter through `ShareMapRasterProviding` — and it is not obviously
-worth it for a path nobody has measured the frequency of. Recommendation: ship `.futile`, and
-instrument it (§Testing) so the next pass has a number instead of an argument.
+The goal revisions 2–8 carried — *"the automatic recovery fires on a signal that actually
+correlates with the failure's cause"* — is dropped rather than failed a fourth time.
+
+#### Revision 8's `.futile` is also gone
+
+Revision 8 added a third `Retryability` case for the upgrade re-render failure, showing no button,
+reasoning that a retry warm-hits the cached raster and re-fails *deterministically*. All three
+reviewers refuted it independently, and they were right on both halves:
+
+* **It was unreachable.** No `ShareUpgradeResult` case maps to it, `phase` is `private(set)`, and
+  §Files listed no new result case. It was a state nothing could enter.
+* **The determinism premise is false.** `RideCardRenderer.make` returns nil on `ImageRenderer`
+  producing no image, on `pngData()`, or on the write throwing — memory and disk pressure, none of
+  them a function of the raster. And the *same renderer* succeeded on the fallback card seconds
+  earlier, or we would be in `idle` with Share disabled; the only deltas on the second call are an
+  extra 1080×1350 raster in memory and a different write URL. Transient pressure is therefore the
+  leading explanation, and ride end — HealthKit write, Live Activity, widget reload — is exactly
+  when it bites.
+
+Revision 8 also priced the alternative wrongly, calling it "a new parameter through
+`ShareMapRasterProviding`". The failure is not in the raster pipeline; the raster is fine and
+cached. The alternative is **doing nothing**: leave the case on `.mayRejoin`, and the existing
+offer warm-hits the cached raster and re-runs the renderer for free. So `.futile` would have added
+code in order to guarantee a rider no recovery on a path where the free option gives them a real
+chance of one — and it did so by designing in the silent failure this issue was filed to remove,
+which §Goals forbids in its first line.
 
 #### What comes out of the code
 
-All of this is committed and tested, so the deletion is real work, not a scope note:
+All of this was committed and tested, so the deletion is real work:
 
 | Symbol | File | Disposition |
 |---|---|---|
 | `AttemptOrigin.automatic` | `ShareUpgradePhase.swift` | deleted |
 | `onAutomaticRetry` | `ShareUpgradePresenter.swift` | deleted |
 | `armedAutomaticRetry`, `hasAutomaticallyRetried` | `ShareUpgradePresenter.swift` | deleted |
-| `armAutomaticRetry()`, `consumeAutomaticRetryIfDue()` | `ShareUpgradePresenter.swift` | deleted |
-| `terminal(for:origin:)`'s `origin != .automatic` clause | `ShareUpgradePresenter.swift` | simplifies to `confirming: indicatorShown` |
-| the automatic-retry cases in `ShareUpgradePresenterTests` | `ShareUpgradePresenterTests.swift` | deleted with their subject |
-| `Retryability.futile` | `ShareUpgradePhase.swift` | **added** |
+| `armAutomaticRetry()`, `consumeAutomaticRetryIfDue()` and its call site | `ShareUpgradePresenter.swift` | deleted |
+| `isAttempting` | `ShareUpgradePresenter.swift` | deleted — its only consumer was a deleted test |
+| `terminal(for:origin:)` | `ShareUpgradePresenter.swift` | loses the parameter entirely: `origin` is no longer read there, and `confirming` is just `indicatorShown` |
+| the four automatic-retry tests | `ShareUpgradePresenterTests.swift` | deleted with their subject |
+| doc comments asserting the automatic retry | `ShareUpgradePhase.swift` | rewritten — `Retryability`, `AttemptOrigin` and `upgraded(confirming:)` each justified themselves by citing the deleted case |
 
-Plan Task 8 loses its background-return half and keeps its accessibility half. Nothing else in
-Tasks 1–2 changes, so the two committed tasks survive the descope intact.
+`AttemptOrigin` keeps two cases. It is read in exactly one place (whether the show-delay applies),
+and it could collapse to the boolean revision 5 replaced it with — but a named case at the call
+site says more than `isRetry: false`, and churn here buys nothing.
+
+Plan Task 8 loses its background-return half. Its accessibility half **also changes**, contrary to
+revision 8's claim that it survives: the announcement rule is rewritten above and the plan's step
+names `AttemptOrigin.automatic` as its mechanism. Task 6 Step 2's render-failure routing is
+unchanged after all, since `.futile` is gone. Tasks 1–2 survive apart from the deletions above and
+the ROH-186 fix below.
+
+#### ROH-186 is fixed here, not deferred
+
+The gate reproduced it: the minimum dwell did not exist in production. `cancelHops()` runs one line
+before `attempt` awaits the dwell gate, and the production timer is a cancellable `Task.sleep`
+whose cancellation `try?` swallows — so the hop fell through to `gate.open()` immediately and a
+1000 ms floor measured **10.8 ms**. Every test missed it because `ManualTimer` ignores cancellation,
+so they asserted the double's semantics on the one axis that mattered.
+
+It is fixed on this branch rather than left to ROH-186, because the cut makes the rider tap the
+only recovery path and the dwell is what makes a tap that warm-hits in milliseconds visible at all.
+The dwell hop now lives outside `cancelHops()`' reach. Guarding it on `Task.isCancelled` instead
+would wedge: the gate would never open, `attempt` would never return, and the phase would stick on
+an absorbing `.upgradingVisible`.
+
+**One related gap is recorded, not fixed.** §Minimum dwell says the floor applies to *any*
+transition out of `upgradingVisible`, but the deadline hop writes `.unavailable(.mayRejoin)`
+without consulting the gate. That is currently harmless only because 300 ms and 6 s are far apart —
+and device-pass open question 1 is chartered to change exactly that spacing. If the deadline drops
+below roughly 1.3 s, this needs building.
 
 ### Copy
 
@@ -692,11 +757,18 @@ celebration screen is worse than a gap. Device pass item 7 is where it gets judg
 
 - The announcement is posted by the **view**, not the presenter: AuraKit imports no UIKit and
   cannot post one.
-- Announce **every** transition into `unavailable`. Revisions 2–5 suppressed the second one,
-  because a failed *automatic* retry would have interrupted a VoiceOver rider unprompted seconds
-  after they unlocked the phone. Revision 8 removes that case: every retry is a tap now, and a
-  rider who asked is owed the outcome whether it succeeded or not.
-- `.futile` announces nothing and exposes no button, because it presents nothing.
+- Announce on entry to `unavailable` **from a non-`unavailable` phase**, and on any `unavailable`
+  reached from a rider tap. Not on a `Retryability` change within `unavailable`.
+  
+  Revision 8 said "announce every transition into `unavailable`" and that was wrong in a case it
+  did not consider: a single first attempt with no taps at all can hit the deadline at 6 s
+  (`.mayRejoin`) and then reject at ~10 s (`.freshAttempt`), which §Testing lists as reachable.
+  Both render the identical row, so "every" interrupts a VoiceOver rider twice to say one thing,
+  with nobody having asked. The rationale offered for widening it — "every retry is a tap now" —
+  does not cover that sequence, because it is not a retry.
+- The announcement string must state an **outcome**, and a failed tap must not sound like a
+  successful one. Revision 8 widened the rule without specifying the copy, which would have left a
+  VoiceOver rider unable to tell "Map added" from "still no map".
 - The button's accessibility label names what it acts on ("Add the map to your share card"). Its
   *visible* label now does too ("Add map to card") — see §Copy.
 - The row's identity changes from a `Text` to a `Button` at the terminal phase, which drops
@@ -736,11 +808,11 @@ collect the current ride's, so this is an accepted cost, stated rather than inhe
 | Pipeline rejects (any of the nine paths) | `unavailable(.freshAttempt)`, offer shown |
 | Ceiling fires while the summary waits | `unavailable(.mayRejoin)`, offer shown |
 | Pipeline succeeds after the deadline | `unavailable(.mayRejoin) → upgraded`, no failure ever claimed |
-| Raster arrives, upgrade re-render fails | `unavailable(.futile)` — fallback kept, Share enabled, **no offer**. The raster is now cached, so a retry warm-hits and fails at the same renderer, deterministically. Revision 8 changed this from `.mayRejoin`; under the old meaning that value only suppressed the automatic retry, and with the automatic retry gone it would have shown a button that cannot succeed |
+| Raster arrives, upgrade re-render fails | `unavailable(.mayRejoin)` — fallback kept, Share enabled, offer shown. Revision 8 routed this to a no-offer state on the grounds that a retry re-fails deterministically; revision 9 reverses that, because `RideCardRenderer.make` fails on `ImageRenderer` returning nil, a PNG encode, or a write, none of which is a function of the raster — and the same renderer succeeded on the fallback seconds earlier, so transient memory or disk pressure is the leading explanation and a retry has a real chance |
 | Retry warm-hits a cache the pipeline filled after we stopped waiting | `upgraded(confirming: true)`, held ≥1 s by the dwell |
 | Retry lands while the share sheet is up | held by `applyOrDeferUpgrade`; see §Risks |
 | Backgrounded during the window | belts fire on resume → the phase settles terminal → the offer is on screen and live. No automatic action (revision 8) |
-| View dismissed mid-attempt | **`attempt` does not return and no terminal phase is applied.** `slot.run` has no cancellation point (`SharePipelineSlot.swift:141-143` — both awaits are `withCheckedContinuation` or a non-throwing `Task.value`), so cancelling the view's task never makes `work()` return. Harmless, because the view is gone; but revisions 2–4 claimed the opposite, and a test written against a cancellable stub would have asserted the stub rather than the system. **The slot is not freed** — see §Risks |
+| View dismissed mid-attempt | **`attempt` does not return and no terminal phase is applied.** `slot.run` has no cancellation point (`SharePipelineSlot.swift:176-177` — both awaits are `withCheckedContinuation` or a non-throwing `Task.value`), so cancelling the view's task never makes `work()` return. Harmless, because the view is gone; but revisions 2–4 claimed the opposite, and a test written against a cancellable stub would have asserted the stub rather than the system. **The slot is not freed** — see §Risks |
 | History presentation | identical to ride end (revision 5 — see §Scope) |
 
 ## Testing
@@ -759,8 +831,13 @@ collect the current ride's, so this is an accepted cost, stated rather than inhe
   `unavailable(.mayRejoin) → unavailable(.freshAttempt)` (then it rejected) both reachable
 - an older attempt's `.rejected` never overwrites a newer attempt's live indicator; an older
   attempt's **map** is still applied
-- `attempt` applies a terminal phase even when `work` is cancelled — never an absorbing spinner
-- `attempt` while an attempt is in flight is a no-op and arms no second deadline hop
+- a second `attempt` while one is in flight supersedes it by generation, and the older attempt's
+  reject never overwrites the newer attempt's live indicator. **Fire the newer attempt's dwell
+  before resolving the older one**, or the older attempt parks on that gate and returns without
+  ever reaching the guard — a mutation run with both generation guards deleted passed 16/16
+- the minimum dwell holds against a timer that HONOURS cancellation, not only against the fake.
+  `cancelHops()` runs one line before `attempt` awaits the dwell gate, so a cancellable production
+  timer used to open it instantly (ROH-186)
 - `noUpgradePossible()` parks in `idle` and no hop fires
 
 **Device pass (real device, per `CLAUDE.md`):**
@@ -780,8 +857,9 @@ collect the current ride's, so this is an accepted cost, stated rather than inhe
    the phase and the row do not move until tapped.
 7. Reach for Done as the phase changes → Done must not move. Repeat at an accessibility text size.
 8. Retry while the share sheet is open → sheet stays up, card swaps on dismissal.
-9. VoiceOver: `unavailable` announced once; a failed rider-initiated retry does not announce
-   again. Confirm `.futile` announces nothing and exposes no button.
+9. VoiceOver: entering `unavailable` announces once; the deadline-then-reject sequence on a single
+   attempt announces **once**, not twice; a failed rider-initiated retry does announce, and is
+   distinguishable from the success announcement.
 10. Reduce Motion on → identical deadline behavior.
 
 Items 7 and 8 overlap ROH-140 (the ROH-126 device-verification tail) on the same surface.
@@ -964,9 +1042,53 @@ the offer button already covers both terminal cases. Three consequences:
    never offered a button that cannot succeed.
 2. `Retryability` gains `.futile` for the upgrade re-render failure, which was routed to
    `.mayRejoin` only to suppress the automatic retry and would otherwise have become a dead button.
-   This is the one behavioural change the cut introduces.
+   This is the one behavioural change the cut introduces. **Dropped in revision 9** — the premise
+   was false and the case was unreachable.
 3. `AttemptOrigin.automatic` and the presenter's arming machinery are deleted, along with their
    tests. Tasks 1–2 otherwise survive intact.
 
 The `humanizer` notes carried by revisions 1–5 are removed. This repository's `CLAUDE.md` excludes
 specs from that skill outright, so their absence was never a gap to record.
+
+**Revision 9.** The reconciliation of revision 8's spec gate — three independent reviewers, skeptic,
+architecture and product lenses. The PO's decision to cut the automatic retry stands; two things
+revision 8 said about it do not.
+
+1. **The impossibility argument is withdrawn.** A reviewer changed one predicate in the consume
+   gate and the headline scenario fired (`AUTO_RETRIES == 1`). Revision 7's failure was evidence
+   against reclassifying on the scene edge, not against the mechanism. `isRunning` is public, so
+   "built so that it cannot know" was also wrong about the type. §The automatic retry now carries
+   the cost argument, which is what the decision actually rests on.
+2. **`.futile` is dropped**, refuted independently by all three reviewers: unreachable as specified
+   (no `ShareUpgradeResult` case, `phase` is `private(set)`), and built on a determinism claim
+   `RideCardRenderer` contradicts — it fails on `ImageRenderer`, encode or write, none of them a
+   function of the raster, and the same renderer succeeded on the fallback moments earlier. The
+   free alternative — leave it on `.mayRejoin` — was mispriced as a seam change.
+
+Defects the gate found that predate revision 8, all fixed here:
+
+3. **§The presenter asserted a `defer` that does not exist and a no-op-when-in-flight rule that
+   contradicts §One rider-visible attempt**, with §Testing asking for a test of each. Following
+   that list would have added the guard and produced a dead button on the commonest path.
+4. **ROH-186: the minimum dwell did not exist in production** — measured 10.8 ms against 1000 ms.
+   Fixed on this branch, with a test whose timer honours cancellation.
+5. **The generation guards had no coverage.** Deleting both left 16/16 green, because the stale
+   attempt parked on the newer attempt's dwell gate and never reached the guard.
+6. **A committed test was flaky at 35%** — `settle()`'s twelve yields are not a quiescence bound.
+7. **The app target had not compiled for 13 commits.** `SlotOutcome` landed with no app-side
+   caller update; the `ShareMapOutcome` seam (Task 3) is what makes Task 1 compile.
+8. **Every `SharePipelineSlot.swift` citation was stale by ~32 lines**, including the two this
+   document leans on immediately after retiring a bad citation, and both belt line numbers were
+   wrong in both tables that give them. All re-verified against the committed source.
+9. **The announcement rule** widened in revision 8 fires twice on a single attempt with no rider
+   action; narrowed, and the copy requirement stated.
+10. **The "cold cache" claim is over-general** — cancellation past the render is a deliberate no-op,
+    so the pocketed rider's outcome is nondeterministic. Device-pass item 5 records which of two
+    states it sees rather than asserting one.
+
+**Still open, for the PO.** §Problem says the rider's real loss is *"I do not know that trying again
+on wifi would very likely work"*, and §Copy forbids every sentence that would say so. Under revisions
+2–8 the app closed that gap by acting; with the automatic retry gone it can only close it by telling.
+The product reviewer proposes one caption under the button after a failed rider-initiated attempt —
+"Works best on wifi" or similar, no apology and no error styling, one `Text` in an already-reserved
+row. Not built: it is a scope addition to a descope and the call is the PO's.

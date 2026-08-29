@@ -4,8 +4,9 @@
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
 
-**Revision 2**, after a three-reviewer plan gate against revision 1. See §What revision 1 got
-wrong — it is kept because the failures are properties of this work, not of one draft.
+**Revision 3**, after the spec gate against revision 8. See §Revision 3 below for what changed per
+task, and §What revision 1 got wrong, which is kept because the failures are properties of this
+work rather than of one draft.
 
 **Goal:** Give the post-ride share-map upgrade a deadline, a terminal state that offers another
 attempt, and a retry — so a rider who loses the map is told, and can ask again.
@@ -16,13 +17,74 @@ ceiling fired while you waited" into one `nil`; `ShareMapRasterProviding` carrie
 timers so they are unit-tested in CI. `RideSummaryView` renders the phase and supplies effects.
 
 **Spec:** `docs/superpowers/specs/2026-08-06-roh161-share-upgrade-terminal-state-design.md`
-(**revision 5** — read it first; revisions 2–4 differ materially).
+(**revision 9** — read it first; revisions 2–8 differ materially, and revision 8's `.futile` was
+dropped).
 
 **Commands.** Package tests: `swift test --package-path AuraCore --no-parallel`. The app build
 goes to the `apple-platform-build-tools` builder subagent — never run `xcodebuild` inline.
 
 **`swift test` rewrites `AuraCore/Package.resolved`** (strips ~137 lines) on every run. Restore it
-and keep it out of every commit in this plan unless a task says otherwise. Found in Task 1.
+and keep it out of every commit in this plan unless a task says otherwise. Found in Task 1, filed
+as ROH-182, and it has since been seen sitting dirty in the primary checkout on `main` — where a
+broad `git commit -a` would publish a lockfile that resolves no Mapbox SDK at all.
+
+---
+
+## Revision 3 — what the spec gate changed, per task
+
+Three independent reviewers ran against spec revision 8. The PO's decision to cut the automatic
+retry stands; the argument for it changed, and revision 8's one addition was refuted. Spec
+§Revision history has the full list. What it means for execution:
+
+**Tasks 1–2 are done, and were amended rather than re-run.** Commit `7daff9b` deletes the
+automatic-retry machinery (`onAutomaticRetry`, `armAutomaticRetry()`, `consumeAutomaticRetryIfDue()`,
+`armedAutomaticRetry`, `hasAutomaticallyRetried`, `AttemptOrigin.automatic`, `isAttempting`, and
+four tests), drops the now-unread `origin` parameter from `terminal(for:)`, and fixes two defects
+the gate found in Task 2's committed code:
+
+* **ROH-186 — the minimum dwell did not exist.** `cancelHops()` runs one line before `attempt`
+  awaits the dwell gate, and the production timer is a cancellable `Task.sleep` whose cancellation
+  `try?` swallows, so the hop fell through to `gate.open()` immediately: a 1000 ms floor measured
+  10.8 ms. Every test missed it because `ManualTimer` ignores cancellation. The dwell hop now lives
+  outside `cancelHops()`' reach; guarding on `Task.isCancelled` instead wedges.
+* **The generation guards had no coverage.** Deleting both left 16/16 green, because the stale
+  attempt parked on the newer attempt's dwell gate and never reached the guard. The staleness test
+  now fires that gate first. A second test was flaky at 35% — `settle()` is not a quiescence bound.
+
+**Task 3 is done** (same commit). It was never optional cleanup: `SlotOutcome` landed in Task 1
+with no app-side caller update, so the app target had not compiled for 13 commits. `agent-gate.sh`
+does not build the app and the package suite was green, so nothing local caught it. `ShareMapOutcome`
+is in `ShareMapRasterProviding.swift`; `RideSummaryView` consumes it through `.image` until Task 6
+wires the phase.
+
+**Task 6 Step 2 is unchanged after all.** Revision 8 would have routed the upgrade re-render failure
+to a new no-offer state; revision 9 drops that, so `else { return .stoppedWaiting }` stands.
+
+**Task 6 Step 5 — decide the `!Task.isCancelled` guard rather than leaving it to the implementer.**
+The rider-tap `Task` is not the view's `.task`, so a rider who taps and immediately presses Done can
+otherwise fire a 1080×1350 main-actor `ImageRenderer` pass during the pop-to-Home animation. Guard
+it.
+
+**Task 7 Step 2 — the inactive `ZStack` layers must be `.allowsHitTesting(false)`, not merely
+hidden.** The requirement as written covers VoiceOver only, so an `.opacity(0)` reading leaves the
+offer button tappable in every phase — including `idle` and `upgraded` — directly above Done, which
+is below the fold and the only exit. That is the mis-tap the reservation exists to prevent.
+
+**Task 8 loses its background-return half entirely**, and its accessibility half is **rewritten**,
+not kept: revision 8 claimed the accessibility half survived and that was wrong twice over. The rule
+is now "announce on entry to `unavailable` from a non-`unavailable` phase, and on any `unavailable`
+reached from a rider tap" — because a single first attempt with no taps can hit the deadline at 6 s
+and reject at ~10 s, and "announce every" interrupts a VoiceOver rider twice to say one thing. The
+announcement copy must also state an outcome distinguishable from "Map added"; the plan never
+specified the string.
+
+**Task 9 — consider moving the instrumentation ahead of Task 7.** The product reviewer's point: the
+reserved row is a permanent ~44 pt cost on every ride summary, and the number that would justify it
+arrives after the row ships. Not reordered here, since the row is owed regardless as a fix to
+today's unreserved conditional insert, but worth a look before Task 7.
+
+**Not in scope, filed separately:** the share-sheet 2 s re-arm is ROH-185, not this plan, despite
+spec §Risks saying it would be fixed "here".
 
 ---
 
