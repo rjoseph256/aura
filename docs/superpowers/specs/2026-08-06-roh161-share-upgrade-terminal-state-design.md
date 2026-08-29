@@ -3,7 +3,7 @@
 Date: 2026-08-06. Branch `adaws96/roh-161-share-map-upgrade-fails-silently-one-attempt-no-terminal`.
 Issue: https://linear.app/rohun/issue/ROH-161
 
-**Revision 9.** See §Revision history. This document is the single spec for ROH-161; an earlier
+**Revision 10.** See §Revision history. This document is the single spec for ROH-161; an earlier
 independent draft was folded into it and is recorded there.
 
 > **The automatic retry is cut** — a PO decision on 2026-08-29. Revision 8 made the cut and
@@ -662,7 +662,8 @@ below roughly 1.3 s, this needs building.
 | Phase | Line |
 |---|---|
 | `upgradingVisible` | "Adding your map…" (unchanged) |
-| `unavailable` (both) | **"Add map to card"** — a button, and no sentence |
+| `unavailable` (both), before any rider tap | **"Add map to card"** — a button, and no sentence |
+| `unavailable` (both), after a rider tap has failed | the same button, plus **"Works best on Wi-Fi"** |
 | `upgraded(confirming: true)` | "Map added" — persists, does not self-clear |
 
 **The button names its destination.** Revisions 2–4 said "Add the map", and §Accessibility then
@@ -686,9 +687,31 @@ simply `an indicator was visible` — revision 8 removed the `origin != .automat
 with the origin it tested. Every attempt now has a rider behind it, the first implicitly and a
 retry explicitly, so there is no longer an attempt whose success has to stay silent.
 
-**The terminal state is an offer, not an apology.** No failure sentence, no destructive colour, no
-warning glyph, no "couldn't". Nothing is broken: the card is finished and Share is enabled. The map
-is an upgrade that did not land, and the rider is offered another go.
+**The one thing the design does say, added in revision 10.** §Problem states the rider's real loss
+as *"I do not know that trying again on wifi would very likely work"* — and every rule below forbids
+the sentence that would carry it. That was tolerable while the automatic retry existed, because the
+app closed the gap by *acting*: the rider who did nothing sometimes got the map anyway. Cutting it
+leaves telling as the only channel, so the row gains one caption, **"Works best on Wi-Fi"**.
+
+It is **withheld until a rider-initiated attempt has failed**, and that is the whole design of it.
+On first presentation the offer stands alone: the rider has not tried anything, and a hint there
+pre-empts a tap that usually works. After a failed tap it is the difference between a rider who
+learns the recovery path — go home, reopen the ride in History, which really does re-run the whole
+pipeline — and one who taps twice, concludes the feature is broken, and presses Done, which
+destroys the screen for good.
+
+It also answers the one thing the retry loop otherwise lacks: every failed tap previously returned
+an identical row, so a rider offline could tap five times and learn nothing.
+
+The rule and the strings are `ShareUpgradeCopy` in AuraKit, not the view, and
+`ShareUpgradePresenter.hasFailedARiderTap` supplies the condition — the app target has no unit-test
+bundle, so a rule expressed in `RideSummaryView` is compile-verified and nothing more.
+
+**Otherwise the terminal state is an offer, not an apology.** No failure sentence, no destructive
+colour, no warning glyph, no "couldn't". Nothing is broken: the card is finished and Share is
+enabled. The map is an upgrade that did not land, and the rider is offered another go. The caption
+is a hint about conditions, not a diagnosis — which is why it names no cause and does not mention
+the attempt that just failed.
 
 Revision 2 originally said "Couldn't add the map to your card". Two independent sources rejected
 that framing, and they are right:
@@ -767,8 +790,12 @@ celebration screen is worse than a gap. Device pass item 7 is where it gets judg
   with nobody having asked. The rationale offered for widening it — "every retry is a tap now" —
   does not cover that sequence, because it is not a retry.
 - The announcement string must state an **outcome**, and a failed tap must not sound like a
-  successful one. Revision 8 widened the rule without specifying the copy, which would have left a
-  VoiceOver rider unable to tell "Map added" from "still no map".
+  successful one: `ShareUpgradeCopy.announcement(for:hasFailedARiderTap:)` gives "Map added"
+  against "No map yet". Revision 8 widened the rule without specifying any copy, which would have
+  left a VoiceOver rider unable to tell the two apart.
+- **The announcement carries the caption exactly when the row does**, so a VoiceOver rider and a
+  sighted rider are told the same thing about the same state. Pinned by a test rather than left to
+  the two call sites to keep in step.
 - The button's accessibility label names what it acts on ("Add the map to your share card"). Its
   *visible* label now does too ("Add map to card") — see §Copy.
 - The row's identity changes from a `Text` to a `Button` at the terminal phase, which drops
@@ -1086,9 +1113,8 @@ Defects the gate found that predate revision 8, all fixed here:
     so the pocketed rider's outcome is nondeterministic. Device-pass item 5 records which of two
     states it sees rather than asserting one.
 
-**Still open, for the PO.** §Problem says the rider's real loss is *"I do not know that trying again
-on wifi would very likely work"*, and §Copy forbids every sentence that would say so. Under revisions
-2–8 the app closed that gap by acting; with the automatic retry gone it can only close it by telling.
-The product reviewer proposes one caption under the button after a failed rider-initiated attempt —
-"Works best on wifi" or similar, no apology and no error styling, one `Text` in an already-reserved
-row. Not built: it is a scope addition to a descope and the call is the PO's.
+**Revision 10.** The PO approved the connectivity caption the product reviewer proposed, and it is
+built: `ShareUpgradeCopy` in AuraKit carries the strings and the rule, `hasFailedARiderTap` on the
+presenter supplies the condition, and Task 7 renders it. Withheld until a rider-initiated attempt
+has failed — see §Copy. This is the one scope addition to the descope, and it exists because cutting
+the automatic retry removed the app's ability to close §Problem's gap by acting.

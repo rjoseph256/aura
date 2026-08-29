@@ -23,6 +23,15 @@ private final class DwellGate {
 public final class ShareUpgradePresenter {
     public private(set) var phase: ShareUpgradePhase = .idle
 
+    /// True once a rider-initiated attempt has ended without a map. Drives the connectivity
+    /// caption — see `ShareUpgradeCopy.caption(for:hasFailedARiderTap:)`.
+    ///
+    /// Deliberately NOT folded into `ShareUpgradePhase`. The phase says what the row shows now;
+    /// this says what the rider has already tried, and putting history into the phase would make
+    /// every existing equality assertion depend on it. Never reset within a presentation: once a
+    /// tap has failed, the hint stays earned, and a later success renders `.upgraded` anyway.
+    public private(set) var hasFailedARiderTap = false
+
     @ObservationIgnored private let showDelayDuration: Duration
     @ObservationIgnored private let deadlineDuration: Duration
     @ObservationIgnored private let dwellDuration: Duration
@@ -100,7 +109,14 @@ public final class ShareUpgradePresenter {
         // still outstanding, which is exactly what the "a map is a map" rule creates.
         if case .upgraded = phase { return }
 
+        record(result, origin: origin)
+    }
+
+    /// Extracted from `attempt` only to keep it under the cyclomatic-complexity limit; the two
+    /// writes belong together, since the caption is a fact about the phase that was just applied.
+    private func record(_ result: ShareUpgradeResult, origin: AttemptOrigin) {
         phase = terminal(for: result)
+        if origin == .riderTap, result != .gotMap { hasFailedARiderTap = true }
     }
 
     private func enterIndicator() {

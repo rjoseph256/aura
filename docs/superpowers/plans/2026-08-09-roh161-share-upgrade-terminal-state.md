@@ -970,7 +970,8 @@ still offers the rider the button; it just refuses to press it for them.
 |---|---|
 | `.idle`, `.upgrading`, `.upgraded(confirming: false)` | empty |
 | `.upgradingVisible` | `ProgressView` + "Adding your map…" |
-| `.unavailable` (either) | **"Add map to card"** — a button, no sentence |
+| `.unavailable` (either), `hasFailedARiderTap == false` | **"Add map to card"** — a button, no sentence |
+| `.unavailable` (either), `hasFailedARiderTap == true` | the same button, plus the caption from `ShareUpgradeCopy.caption(for:hasFailedARiderTap:)` |
 | `.upgraded(confirming: true)` | "Map added" — persists, does not self-clear |
 
 **An offer, not an apology.** No failure sentence, no destructive colour, no warning glyph, no
@@ -1003,7 +1004,16 @@ on the offer and starts a pipeline they never wanted.
 
 - [ ] **Step 3:** Both presentations. Spec revision 5 reversed the ride-end-only scope, so there is
       no `presentation:` parameter and no call-site change.
-- [ ] **Step 4:** `Button("Add map to card") { Task { await runUpgrade(glanceDebounce: false, origin: .riderTap) } }`
+- [ ] **Step 4:** `Button(ShareUpgradeCopy.offer) { Task { await runUpgrade(glanceDebounce: false, origin: .riderTap) } }`,
+      with `.accessibilityLabel(ShareUpgradeCopy.offerAccessibilityLabel)`.
+
+- [ ] **Step 4b: The connectivity caption (spec revision 10).** Render
+      `ShareUpgradeCopy.caption(for: presenter.phase, hasFailedARiderTap: presenter.hasFailedARiderTap)`
+      under the button when it is non-nil. Take every string and the condition from that type —
+      the rule is tested there, and re-deriving it in the view puts it somewhere with no test
+      bundle. Treat it as part of the tallest state when reserving the row's height in Step 2:
+      the caption appears *below* the button, so a row sized only for the button moves Done the
+      first time a tap fails.
 - [ ] **Step 5:** Give the row a `reduceMotion`-aware cross-fade. With the height reserved it is
       free, and unspecified means a hard pop.
 - [ ] **Step 6: Delegate a build. Commit.**
