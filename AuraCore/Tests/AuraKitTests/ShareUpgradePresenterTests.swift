@@ -45,6 +45,13 @@ private func neverFires() -> @Sendable (Duration) async -> Void {
     { _ in try? await Task.sleep(for: .seconds(3600)) }
 }
 
+/// The inverse of `neverFires()`: a hop whose timing a test does not care about. Written as a
+/// factory for the same reason — a bare `{ _ in }` literal on the right of `??` is not inferred
+/// as `@Sendable` and fails strict concurrency.
+private func firesImmediately() -> @Sendable (Duration) async -> Void {
+    { _ in }
+}
+
 /// Holds `work` open until the test resolves it.
 private final class WorkGate: Sendable {
     private let state = OSAllocatedUnfairLock(initialState: [CheckedContinuation<ShareUpgradeResult, Never>]())
@@ -367,5 +374,82 @@ final class ShareUpgradeFailedTapTests: XCTestCase {
         let p = presenter()
         await p.attempt(origin: .riderTap) { .gotMap }
         XCTAssertFalse(p.hasFailedARiderTap)
+    }
+}
+
+/// The announcement counter. Its whole reason for existing is that `phase` cannot carry these
+/// events — see `ShareUpgradePresenter.announcements`.
+@MainActor
+final class ShareUpgradeAnnouncementTests: XCTestCase {
+
+    private func makePresenter(deadline: ManualTimer? = nil,
+                               dwell: ManualTimer? = nil) -> ShareUpgradePresenter {
+        ShareUpgradePresenter(showDelayTimer: { _ in },
+                              deadlineTimer: deadline?.closure ?? neverFires(),
+                              dwellTimer: dwell?.closure ?? firesImmediately())
+    }
+
+    func testNothingIsAnnouncedWhileAnAttemptIsInFlight() async {
+        let presenter = makePresenter()
+        let work = WorkGate()
+        let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
+        await settle()
+
+        XCTAssertEqual(presenter.phase, .upgradingVisible)
+        XCTAssertEqual(presenter.announcements, 0, "a spinner is not news")
+
+        work.resolve(.gotMap); _ = await running.value
+    }
+
+    func testTheDeadlineAndItsOwnRejectAnnounceOnce() async {
+        let deadline = ManualTimer()
+        let presenter = makePresenter(deadline: deadline)
+        let work = WorkGate()
+
+        let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
+        await settle()
+        deadline.fire(); await settle()
+        XCTAssertEqual(presenter.phase, .unavailable(.mayRejoin))
+        XCTAssertEqual(presenter.announcements, 1)
+
+        // The attempt itself now resolves, four seconds later in real time, and moves the
+        // retryability. The rider has already been told there is no map.
+        work.resolve(.rejected); _ = await running.value
+        XCTAssertEqual(presenter.phase, .unavailable(.freshAttempt), "the phase did change")
+        XCTAssertEqual(presenter.announcements, 1, "and the rider is not told the same thing twice")
+    }
+
+    func testAFailedTapIsAnnouncedEvenThoughThePhaseEndsWhereItStarted() async {
+        let presenter = makePresenter()
+        await presenter.attempt(origin: .first) { .rejected }
+        XCTAssertEqual(presenter.announcements, 1)
+        let before = presenter.phase
+
+        await presenter.attempt(origin: .riderTap) { .rejected }
+
+        XCTAssertEqual(presenter.phase, before,
+                       "same phase in and out — which is why watching the phase cannot work")
+        XCTAssertEqual(presenter.announcements, 2, "the rider asked, so the rider is answered")
+        XCTAssertEqual(ShareUpgradeCopy.announcement(for: presenter.phase,
+                                                     hasFailedARiderTap: presenter.hasFailedARiderTap),
+                       "No map yet. \(ShareUpgradeCopy.connectivityHint).")
+    }
+
+    func testAMapThatLandsWithNoIndicatorOnScreenIsSilent() async {
+        let presenter = makePresenter()
+        await presenter.attempt(origin: .first) { .gotMap }
+        XCTAssertEqual(presenter.phase, .upgraded(confirming: false))
+        XCTAssertEqual(presenter.announcements, 0,
+                       "the entrance is not interrupted to report something nobody asked about")
+    }
+
+    func testAMapTheRiderWaitedForIsAnnouncedOnce() async {
+        let presenter = makePresenter()
+        await presenter.attempt(origin: .riderTap) { .gotMap }
+        XCTAssertEqual(presenter.phase, .upgraded(confirming: true))
+        XCTAssertEqual(presenter.announcements, 1)
+        XCTAssertEqual(ShareUpgradeCopy.announcement(for: presenter.phase,
+                                                     hasFailedARiderTap: presenter.hasFailedARiderTap),
+                       ShareUpgradeCopy.confirmation)
     }
 }

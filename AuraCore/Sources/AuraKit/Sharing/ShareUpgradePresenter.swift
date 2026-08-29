@@ -32,6 +32,17 @@ public final class ShareUpgradePresenter {
     /// tap has failed, the hint stays earned, and a later success renders `.upgraded` anyway.
     public private(set) var hasFailedARiderTap = false
 
+    /// Counts the moments a VoiceOver rider is owed a sentence. Read it with `onChange` and speak
+    /// `ShareUpgradeCopy.announcement(for:hasFailedARiderTap:)`; the count itself means nothing.
+    ///
+    /// A counter rather than the view watching `phase`, because `phase` loses the events. A rider
+    /// tap goes `.unavailable` → `.upgradingVisible` → `.unavailable`, and if SwiftUI evaluates no
+    /// body between the first and last write — which nothing guarantees, since `attempt` sets the
+    /// indicator synchronously and a warm cache hit resolves in one hop — an `onChange(of: phase)`
+    /// sees equal values and never fires. The rider who asked would be the one told nothing. A
+    /// monotone counter cannot be coalesced away.
+    public private(set) var announcements = 0
+
     @ObservationIgnored private let showDelayDuration: Duration
     @ObservationIgnored private let deadlineDuration: Duration
     @ObservationIgnored private let dwellDuration: Duration
@@ -64,7 +75,7 @@ public final class ShareUpgradePresenter {
     public func noUpgradePossible() {
         cancelHops()
         generation += 1
-        phase = .idle
+        enter(.idle)
     }
 
     public func attempt(origin: AttemptOrigin, _ work: () async -> ShareUpgradeResult) async {
@@ -75,7 +86,7 @@ public final class ShareUpgradePresenter {
 
         if origin == .first {
             indicatorShown = false
-            phase = .upgrading
+            enter(.upgrading)
             arm { [weak self] in
                 guard let self else { return }
                 await self.showDelayTimer(self.showDelayDuration)
@@ -91,7 +102,7 @@ public final class ShareUpgradePresenter {
             await self.deadlineTimer(self.deadlineDuration)
             guard !Task.isCancelled, mine == self.generation,
                   self.phase == .upgrading || self.phase == .upgradingVisible else { return }
-            self.phase = .unavailable(.mayRejoin)
+            self.enter(.unavailable(.mayRejoin))
         }
 
         let result = await work()
@@ -115,13 +126,36 @@ public final class ShareUpgradePresenter {
     /// Extracted from `attempt` only to keep it under the cyclomatic-complexity limit; the two
     /// writes belong together, since the caption is a fact about the phase that was just applied.
     private func record(_ result: ShareUpgradeResult, origin: AttemptOrigin) {
-        phase = terminal(for: result)
+        // `hasFailedARiderTap` first: `enter` decides nothing from it, but the view reads the two
+        // together the moment `announcements` changes, and a caption that arrives one write late
+        // is a caption the announcement omits.
         if origin == .riderTap, result != .gotMap { hasFailedARiderTap = true }
+        enter(terminal(for: result))
+    }
+
+    /// The one place `phase` is written, so the announcement rule is stated once.
+    ///
+    /// A rider is told when the row becomes an offer, and when a map they asked for arrives.
+    /// Not on `.upgraded(confirming: false)` — that is the fast path where the map landed before
+    /// any indicator showed, and speaking there interrupts the summary's entrance to report
+    /// something the rider never asked about. Not on `.unavailable` → `.unavailable` either: the
+    /// 6 s deadline and the attempt's own reject at ~10 s are one event to the rider, and saying
+    /// it twice is worse than saying it once.
+    private func enter(_ next: ShareUpgradePhase) {
+        switch (phase, next) {
+        case (.unavailable, .unavailable):
+            break
+        case (_, .unavailable), (_, .upgraded(confirming: true)):
+            announcements += 1
+        default:
+            break
+        }
+        phase = next
     }
 
     private func enterIndicator() {
         indicatorShown = true
-        phase = .upgradingVisible
+        enter(.upgradingVisible)
         let gate = DwellGate()
         dwellGate = gate
         // ROH-186. This hop is deliberately NOT armed through `arm`, because `cancelHops()` runs
