@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import AuraCore
 import AuraKit
+import os
 
 struct RideSummaryView: View {
     let ride: Ride
@@ -16,25 +17,43 @@ struct RideSummaryView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(SettingsStore.self) private var settings
     @Environment(RideStore.self) private var store
-    @Environment(ShareMapProviderBox.self) private var shareMap
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(ShareMapProviderBox.self) var shareMap
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
+    @Environment(\.colorSchemeContrast) var contrast
 
+    // The upgrade-row state below is internal rather than private: `RideSummaryView+ShareUpgrade`
+    // is an extension in another file, and Swift's `private` does not reach across one. Same
+    // arrangement as `NavigateHUDView` and its `+GroupCrew` / `+Cockpit` halves.
     @State private var isLongest = false
     @State private var animatedMeters: Double = 0
     @State private var revealed = false
-    @State private var shareImage: RideShareImage?
-    /// True while the map upgrade is in flight (raster request + re-render); drives the hint.
-    @State private var isUpgrading = false
-    /// Shown 300 ms into an upgrade so a warm cache hit never flashes it.
-    @State private var showHint = false
+    @State var shareImage: RideShareImage?
+    /// Every timing rule the upgrade row obeys — show-delay, deadline, minimum dwell — lives in
+    /// AuraKit, where there is a test bundle. This target has none, which is the documented
+    /// reason the ROH-126 ceiling defect survived to a whole-branch review.
+    @State var upgrade = ShareUpgradePresenter()
+    /// Which card file the next successful attempt writes. 0 is the fallback; see
+    /// `ShareCardFileStore`.
+    @State var generation = 0
     /// Set the moment Share is tapped and cleared once the system sheet is gone. While it is
     /// true the map upgrade is held in `deferredUpgrade` rather than assigned (spec ROH-126
     /// §Risks, "swap latch"; device pass 2026-07-31 saw a presented sheet dismiss itself when
     /// the swap landed under it).
-    @State private var shareSheetUp = false
+    @State var shareSheetUp = false
     /// An upgrade that finished while the sheet was up, applied on dismissal.
-    @State private var deferredUpgrade: RideShareImage?
+    @State var deferredUpgrade: RideShareImage?
+
+    // The card's inputs, resolved once in `.task` and held so a rider tap re-runs the upgrade
+    // without rebuilding them. `ShareCardFileStore` in particular MUST NOT be rebuilt: it mints
+    // its presentation UUID in `init`, and a second one would hand the retry a fresh directory
+    // while a live share sheet is still reading a URL under the first.
+    @State var cardContent: ShareCardContent?
+    @State var cardFileStore: ShareCardFileStore?
+    @State var cardTitle = ""
+    @State var mapRequest: ShareMapRequest?
+    /// A rider tap's attempt. Held so `.onDisappear` can cancel it — nothing else would, since
+    /// this task is not a child of the view's `.task`.
+    @State var tapUpgrade: Task<Void, Never>?
 
     // Brand (SF Pro Rounded) is fixed-size, so @ScaledMetric drives Dynamic Type for the
     // hero. (Cockpit Saira self-scales via relativeTo: — not used here.)
@@ -96,7 +115,7 @@ struct RideSummaryView: View {
                             // `simultaneousGesture`, not an action: ShareLink owns its own tap
                             // and presents the sheet itself. This only observes that a sheet is
                             // about to exist so the upgrade can hold off.
-                            .simultaneousGesture(TapGesture().onEnded { beginShareSheetWatch() })
+                            .simultaneousGesture(TapGesture().onEnded { beginModalWatch() })
                         } else {
                             Button("Share") {}.disabled(true)
                         }
@@ -104,13 +123,8 @@ struct RideSummaryView: View {
                     .buttonStyle(.ctaSecondary)
                     .padding(.top, AuraTheme.Spacing.md)
 
-                    if showHint {
-                        HStack(spacing: AuraTheme.Spacing.xs) {
-                            ProgressView()
-                            Text("Adding your map…")
-                        }
-                        .font(.caption)
-                        .foregroundStyle(AuraTheme.secondaryText(contrast))
+                    if mapRequest != nil {
+                        upgradeRow
                     }
                 }
 
@@ -136,64 +150,39 @@ struct RideSummaryView: View {
             let fileStore = ShareCardFileStore(rideID: ride.id)
             fileStore.sweepOtherRides()
             let title = "Aura ride · \(content.distanceValue) \(content.distanceUnit) · \(content.dateText)"
+            cardContent = content
+            cardFileStore = fileStore
+            cardTitle = title
+            // Resolved BEFORE the fallback render although it is not needed until after it. It is
+            // pure geometry and costs nothing, and it is what the reserved row is gated on —
+            // deciding it after a 1080×1350 ImageRenderer pass would insert the row a few hundred
+            // milliseconds into the entrance, which is the one thing the reservation forbids.
+            mapRequest = ShareMapRequest(rideID: ride.id, segments: content.routeSegments,
+                                         style: settings.mapStyle)
             // Fallback card first: Share is enabled from the first frame; the map upgrades
             // in place below. A failed fallback render leaves Share disabled (spec promise).
             shareImage = await RideCardRenderer.make(content, mapImage: nil, title: title,
                                                      writeTo: fileStore.url(generation: 0))
-            // No fallback, no upgrade: Share stays disabled, unchanged (spec error table) —
-            // an "Adding your map…" spinner under a dead Share button would be a lie.
-            guard shareImage != nil else { return }
-            guard let request = ShareMapRequest(rideID: ride.id, segments: content.routeSegments,
-                                                style: settings.mapStyle) else { return }
-            // Three jobs. The third is the one that makes this delay load-bearing, and it
-            // was written down nowhere until ROH-155 went looking for a reason to delete it.
-            //
-            // 1. Ride-end: the HUD prefetch fired at +0.7 s and this request dedups onto it.
-            // 2. History: keeps a warm hit's upgrade render — a 1080×1350 main-actor
-            //    ImageRenderer pass — out of the entrance animation. Ride-end can't warm-hit:
-            //    `cacheKey` carries the rideID and the ride has never been rendered.
-            // 3. It debounces committing the process-wide pipeline slot. `slot.run` has NO
-            //    cancellation point — both its awaits go through `withCheckedContinuation`
-            //    and the pipeline task is unstructured — so a cancelled caller neither
-            //    returns nor frees the slot. This sleep plus the guard below is the only
-            //    thing stopping a sub-second History glance from committing the single slot
-            //    to a ride nobody is looking at; the ride the rider IS looking at then
-            //    queues behind it. Reproduced at three glances: the on-screen ride resolved
-            //    at 2.18 s instead of 1.36 s, because the post-release wake-up is a
-            //    thundering herd rather than a queue.
-            //
-            // So ride-end and History want opposite policies here — asking early is pure
-            // insurance for one ride, and a ghost queue for unbounded glances. Any change
-            // that treats the two paths alike is wrong in one of them. ROH-155 was closed
-            // after three design revisions failed on exactly that; the analysis is in
-            // docs/superpowers/specs/2026-07-31-share-prefetch-ownership-design.md.
-            try? await Task.sleep(for: .seconds(0.8))
-            // Load-bearing with job 3: this is what turns a glance into no pipeline at all.
-            guard !Task.isCancelled else { return }
-            isUpgrading = true
-            // Hint show-delay, counted from the isUpgrading transition. A plain Task (NOT
-            // `async let` — a child task is nonisolated and cannot touch @State) inherits
-            // the MainActor. The isCancelled check is load-bearing: `try?` swallows the
-            // sleep's CancellationError, so a warm cache hit's hint.cancel() would
-            // otherwise fall through and flash the hint mid-render — the exact case the
-            // show-delay exists to prevent. isUpgrading guards the late-flash case.
-            let hint = Task {
-                try? await Task.sleep(for: .seconds(0.3))
-                guard !Task.isCancelled, isUpgrading else { return }
-                showHint = true
+            // No fallback, no upgrade: Share stays disabled, unchanged (spec error table) — an
+            // "Adding your map…" spinner under a dead Share button would be a lie, and an offer
+            // to add a map to a card that does not exist is a worse one. `noUpgradePossible()`
+            // parks the presenter in `.idle`, where the reserved row draws nothing at all.
+            guard shareImage != nil, mapRequest != nil else {
+                upgrade.noUpgradePossible()
+                return
             }
-            let raster = await shareMap.provider.raster(for: request).image
-            hint.cancel()
-            if let raster, !Task.isCancelled,
-               let upgraded = await RideCardRenderer.make(content, mapImage: raster, title: title,
-                                                          writeTo: fileStore.url(generation: 1)) {
-                // Never assign nil over a working fallback — and never swap the item out from
-                // under a presented share sheet (see `applyOrDeferUpgrade`).
-                applyOrDeferUpgrade(upgraded)
-            }
-            isUpgrading = false
-            showHint = false
+            await runUpgrade(glanceDebounce: true, origin: .first)
         }
+        .onChange(of: upgrade.announcements) {
+            // The presenter decides WHEN (see its `announcements` doc for why a counter and not
+            // the phase); `ShareUpgradeCopy` decides WHAT. Neither belongs here: AuraKit imports
+            // no UIKit, and this target has no test bundle.
+            if let line = ShareUpgradeCopy.announcement(for: upgrade.phase,
+                                                        hasFailedARiderTap: upgrade.hasFailedARiderTap) {
+                AccessibilityAnnouncer.announce(line)
+            }
+        }
+        .onDisappear { tapUpgrade?.cancel() }
     }
 
     // MARK: Sections
@@ -360,59 +349,6 @@ struct RideSummaryView: View {
     }
 }
 
-// MARK: Share-sheet swap latch
-
-extension RideSummaryView {
-    /// Assign the upgraded card, unless a share sheet is up — in which case hold it until the
-    /// sheet is gone.
-    ///
-    /// `ShareLink`'s `item:` is what the presented `UIActivityViewController` was built from.
-    /// Changing it mid-presentation is the case the spec flagged as a risk and never verified;
-    /// the 2026-07-31 device pass then watched a presented sheet dismiss itself the moment a
-    /// swap landed, with a no-swap control run holding its sheet open across the same window.
-    /// Deferring costs nothing when no sheet is open, which is the overwhelmingly common path
-    /// (the upgrade resolves ~1.5 s after the summary appears on wifi, usually before a rider
-    /// can even reach the button).
-    private func applyOrDeferUpgrade(_ upgraded: RideShareImage) {
-        if shareSheetUp {
-            deferredUpgrade = upgraded
-        } else {
-            shareImage = upgraded
-        }
-    }
-
-    /// Watches for the share sheet's lifetime. Latches on the tap, waits for the sheet to
-    /// actually present, then waits for it to go away and releases any held upgrade.
-    ///
-    /// It polls `presentedViewController` because SwiftUI gives `ShareLink` no presentation
-    /// binding to observe — there is no callback, and the sheet is a system-owned
-    /// `UIActivityViewController`. The poll is bounded on both ends and stops as soon as the
-    /// sheet closes, so it costs nothing outside the seconds a sheet is actually up.
-    private func beginShareSheetWatch() {
-        guard !shareSheetUp else { return }
-        shareSheetUp = true
-        Task {
-            // Wait for presentation (bounded — if the sheet never appears, don't hold the
-            // upgrade hostage; a rider who somehow never got a sheet still gets the map card).
-            var appeared = false
-            for _ in 0..<20 {
-                try? await Task.sleep(for: .milliseconds(100))
-                if SharePresentation.isPresenting { appeared = true; break }
-            }
-            if appeared {
-                while SharePresentation.isPresenting, !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(250))
-                }
-            }
-            shareSheetUp = false
-            if let deferredUpgrade {
-                shareImage = deferredUpgrade
-                self.deferredUpgrade = nil
-            }
-        }
-    }
-}
-
 /// A number that ticks up to its target: SwiftUI interpolates `meters` (its `animatableData`)
 /// each frame and the body re-formats with the screen's own formatter, so the final frame is
 /// byte-identical to the static value (no visible snap). Reduce Motion uses a plain Text instead.
@@ -426,20 +362,4 @@ private struct CountUpText: View, Animatable {
     }
 
     var body: some View { Text(format(meters)) }
-}
-
-/// Whether the app is currently presenting a modal (the share sheet, in this view's case).
-///
-/// `ShareLink` exposes no presentation state, so this reads it from UIKit. Deliberately not a
-/// seam: it answers a question about the live UIKit window, which a stub could only lie about.
-@MainActor
-private enum SharePresentation {
-    static var isPresenting: Bool {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first { $0.isKeyWindow }?
-            .rootViewController?
-            .presentedViewController != nil
-    }
 }

@@ -50,7 +50,11 @@ struct HistoryView: View {
             summaries = (try? store.summaries()) ?? []
         }
         .sheet(item: $selected) { ride in
-            RideSummaryView(ride: ride)
+            // `.id` so a reused content view cannot carry another ride's `ShareCardFileStore`.
+            // That store is held in `@State` and mints a presentation UUID once, so a summary
+            // recycled across two rides would write the second ride's cards under the first
+            // ride's directory — and the sweep spares the ride it thinks is current.
+            RideSummaryView(ride: ride).id(ride.id)
         }
         .confirmationDialog("Delete this ride?",
                             isPresented: Binding(get: { pendingDelete != nil },
