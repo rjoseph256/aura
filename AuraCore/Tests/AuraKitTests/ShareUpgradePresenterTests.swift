@@ -152,7 +152,7 @@ final class ShareUpgradePresenterTests: XCTestCase {
         work.resolve(.gotMap); dwell.fire(); await running.value
 
         XCTAssertEqual(presenter.phase, .upgraded(confirming: true),
-                       "an indicator was on screen and no automatic retry was behind it")
+                       "an indicator was on screen, so a visible result is owed")
     }
 
     // MARK: dwell
@@ -208,12 +208,17 @@ final class ShareUpgradePresenterTests: XCTestCase {
         await settle()
         XCTAssertEqual(presenter.phase, .upgradingVisible)
 
-        first.resolve(.rejected); await settle()
+        // Open the newer attempt's dwell gate BEFORE the older one resolves. Without this the
+        // older attempt parks on that gate and returns without ever reaching the generation
+        // guard, so this test passed with the guard deleted — a mutation run proved it, twice
+        // over (both `mine == generation` sites removed, 16/16 green, 3 runs of 3).
+        dwell.fire(); await settle()
+
+        first.resolve(.rejected); _ = await older.value
         XCTAssertEqual(presenter.phase, .upgradingVisible,
                        "the older attempt's reject must not overwrite the newer attempt's indicator")
 
-        second.resolve(.rejected); dwell.fire()
-        _ = await older.value; _ = await newer.value
+        second.resolve(.rejected); _ = await newer.value
         XCTAssertEqual(presenter.phase, .unavailable(.freshAttempt))
     }
 
@@ -227,11 +232,12 @@ final class ShareUpgradePresenterTests: XCTestCase {
         let newer = Task { await presenter.attempt(origin: .riderTap) { await second.result() } }
         await settle()
 
-        first.resolve(.gotMap); dwell.fire(); await settle()
+        // `_ = await older.value` rather than `settle()`: 12 `Task.yield()`s is not a
+        // quiescence bound, and this assertion failed 7 times in 20 runs against it.
+        first.resolve(.gotMap); dwell.fire(); _ = await older.value
         XCTAssertEqual(presenter.phase, .upgraded(confirming: true), "a map is a map")
 
-        second.resolve(.rejected)
-        _ = await older.value; _ = await newer.value
+        second.resolve(.rejected); _ = await newer.value
     }
 
     func testNoUpgradePossibleParksInIdle() async {
@@ -240,80 +246,28 @@ final class ShareUpgradePresenterTests: XCTestCase {
         XCTAssertEqual(presenter.phase, .idle)
     }
 
-    // MARK: automatic retry
+    // MARK: the dwell floor actually exists (ROH-186)
 
-    func testArmingDuringAnInFlightAttemptFiresWhenItLaterRejects() async {
-        let showDelay = ManualTimer(), deadline = ManualTimer(), dwell = ManualTimer()
-        let presenter = makePresenter(showDelay: showDelay, deadline: deadline, dwell: dwell)
-        let work = WorkGate()
-        let fired = OSAllocatedUnfairLock(initialState: 0)
-        let flagWhenFired = OSAllocatedUnfairLock(initialState: true)
-        presenter.onAutomaticRetry = {
-            fired.withLock { $0 += 1 }
-            // Read on the MainActor, outside the lock's Sendable closure.
-            let inFlight = presenter.isAttempting
-            flagWhenFired.withLock { $0 = inFlight }
-        }
+    /// The ONLY test in this file whose dwell timer honours cancellation, which is why it is the
+    /// only one that could ever have caught ROH-186. `ManualTimer` ignores cancellation; the
+    /// production timer is `try? await Task.sleep`, which swallows it and returns immediately. So
+    /// `cancelHops()` — one line before `attempt` awaits the dwell gate — used to open that gate
+    /// instantly and collapse a 1000 ms floor to ~10 ms. Every other assertion here passed
+    /// throughout, because they all assert the fake's semantics on this axis.
+    func testTheDwellSurvivesTerminalPathHopCancellation() async {
+        let presenter = ShareUpgradePresenter(showDelay: .zero,
+                                              deadline: .seconds(3600),
+                                              minimumDwell: .milliseconds(300),
+                                              showDelayTimer: { _ in },
+                                              deadlineTimer: neverFires(),
+                                              dwellTimer: { try? await Task.sleep(for: $0) })
 
-        let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
-        await settle(); showDelay.fire(); await settle(); deadline.fire(); await settle()
+        let start = ContinuousClock.now
+        await presenter.attempt(origin: .riderTap) { .rejected }
+        let elapsed = ContinuousClock.now - start
 
-        // The pocketed phone: the scene edge arrives while the parked pipeline is still
-        // unwinding, so evaluating the phase here would find mayRejoin and do nothing.
-        presenter.armAutomaticRetry()
-        await settle()
-        XCTAssertEqual(fired.withLock { $0 }, 0, "nothing to retry yet")
-
-        work.resolve(.rejected); dwell.fire(); await running.value
-        await settle()
-
-        XCTAssertEqual(fired.withLock { $0 }, 1, "consumed when the phase became freshAttempt")
-        XCTAssertFalse(flagWhenFired.withLock { $0 },
-                       "must fire with no attempt in flight, or the retry it triggers is swallowed")
-    }
-
-    func testArmingNeverFiresOnMayRejoin() async {
-        let presenter = makePresenter()
-        let fired = OSAllocatedUnfairLock(initialState: 0)
-        presenter.onAutomaticRetry = { fired.withLock { $0 += 1 } }
-
-        await presenter.attempt(origin: .first) { .stoppedWaiting }
-        presenter.armAutomaticRetry()
-        await settle()
-
-        XCTAssertEqual(presenter.phase, .unavailable(.mayRejoin))
-        XCTAssertEqual(fired.withLock { $0 }, 0,
-                       "re-joining a live pipeline on the rider's behalf is what mayRejoin forbids")
-    }
-
-    func testOnlyOneAutomaticRetryPerPresentation() async {
-        // The dwell timer is firable because the SECOND attempt has origin .automatic, which
-        // shows its indicator immediately and therefore waits on the dwell. A test that leaves
-        // it unfirable does not fail — it hangs, and `swift test --no-parallel` wedges until the
-        // agent gate's 900 s timeout reports it as a slow machine.
-        let dwell = ManualTimer()
-        let presenter = makePresenter(dwell: dwell)
-        let fired = OSAllocatedUnfairLock(initialState: 0)
-        presenter.onAutomaticRetry = { fired.withLock { $0 += 1 } }
-
-        await presenter.attempt(origin: .first) { .rejected }
-        presenter.armAutomaticRetry(); await settle()
-        XCTAssertEqual(fired.withLock { $0 }, 1)
-
-        let second = Task { await presenter.attempt(origin: .automatic) { .rejected } }
-        await settle(); dwell.fire(); await second.value
-        presenter.armAutomaticRetry(); await settle()
-        XCTAssertEqual(fired.withLock { $0 }, 1, "one per presentation, however many background cycles")
-    }
-
-    func testTheAutomaticRetryNeverShowsAConfirmation() async {
-        let dwell = ManualTimer()
-        let presenter = makePresenter(dwell: dwell)
-
-        let running = Task { await presenter.attempt(origin: .automatic) { .gotMap } }
-        await settle(); dwell.fire(); await running.value
-
-        XCTAssertEqual(presenter.phase, .upgraded(confirming: false),
-                       "the rider did not ask; the map simply appears")
+        XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(200),
+                                    "the indicator must hold for the dwell; ROH-186 made this ~0")
+        XCTAssertEqual(presenter.phase, .unavailable(.freshAttempt))
     }
 }

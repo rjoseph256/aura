@@ -140,7 +140,7 @@ private nonisolated enum StyleLoadOutcome: Sendable {
                                                       // TerrainSnapshots would let two prune
                                                       // budgets evict each other's files
 
-    func raster(for request: ShareMapRequest) async -> UIImage? {
+    func raster(for request: ShareMapRequest) async -> ShareMapOutcome {
         // Fast path, BEFORE the same-key join and the wait loop: a warm cache hit must
         // not queue behind an unrelated in-flight pipeline (~10 s worst case, reproduced
         // in review). Small file read on main — same balance as the in-pipeline read.
@@ -148,12 +148,20 @@ private nonisolated enum StyleLoadOutcome: Sendable {
         // entry would pin the fallback card forever; falling through re-renders and
         // overwrites the bad file.
         if let data = cache.read(request.cacheKey), let image = UIImage(data: data, scale: request.scale) {
-            return image
+            return .map(image)
         }
         // Everything past the fast path — the same-key join, the one-pipeline invariant
         // and the watchdog ceiling — belongs to the slot.
-        return await slot.run(key: request.cacheKey) { [weak self] in
+        let outcome = await slot.run(key: request.cacheKey) { [weak self] in
             await self?.runPipeline(request) ?? nil
+        }
+        // The mapping is the whole point of the seam: `.finished(nil)` is a pipeline that ran and
+        // produced nothing, which a retry genuinely re-runs; `.stoppedWaiting` is a ceiling, where
+        // the pipeline may still be alive and a retry re-joins or warm-hits instead.
+        switch outcome {
+        case .finished(let image?): return .map(image)
+        case .finished(nil):        return .rejected
+        case .stoppedWaiting:       return .stoppedWaiting
         }
     }
 

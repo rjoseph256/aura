@@ -23,8 +23,6 @@ private final class DwellGate {
 public final class ShareUpgradePresenter {
     public private(set) var phase: ShareUpgradePhase = .idle
 
-    @ObservationIgnored public var onAutomaticRetry: (@MainActor () -> Void)?
-
     @ObservationIgnored private let showDelayDuration: Duration
     @ObservationIgnored private let deadlineDuration: Duration
     @ObservationIgnored private let dwellDuration: Duration
@@ -37,8 +35,8 @@ public final class ShareUpgradePresenter {
     @ObservationIgnored private var indicatorShown = false
     @ObservationIgnored private var dwellGate: DwellGate?
     @ObservationIgnored private var hops: [Task<Void, Never>] = []
-    @ObservationIgnored private var armedAutomaticRetry = false
-    @ObservationIgnored private var hasAutomaticallyRetried = false
+    /// Held apart from `hops` on purpose — see `enterIndicator` (ROH-186).
+    @ObservationIgnored private var dwellHop: Task<Void, Never>?
 
     public init(showDelay: Duration = .milliseconds(300),
                 deadline: Duration = .seconds(6),
@@ -53,8 +51,6 @@ public final class ShareUpgradePresenter {
         self.deadlineTimer = deadlineTimer ?? { try? await Task.sleep(for: $0) }
         self.dwellTimer = dwellTimer ?? { try? await Task.sleep(for: $0) }
     }
-
-    public var isAttempting: Bool { attemptsInFlight > 0 }
 
     public func noUpgradePossible() {
         cancelHops()
@@ -104,29 +100,7 @@ public final class ShareUpgradePresenter {
         // still outstanding, which is exactly what the "a map is a map" rule creates.
         if case .upgraded = phase { return }
 
-        phase = terminal(for: result, origin: origin)
-        consumeAutomaticRetryIfDue()
-    }
-
-    /// A real background→foreground return happened. Arms one automatic retry, consumed when the
-    /// phase next becomes `.unavailable(.freshAttempt)` — or now, if it already is and nothing is
-    /// in flight. Never evaluated at the scene edge: on resume the parked belts are many
-    /// main-actor hops behind, so reading the phase there would always be too early.
-    public func armAutomaticRetry() {
-        guard !hasAutomaticallyRetried else { return }
-        armedAutomaticRetry = true
-        consumeAutomaticRetryIfDue()
-    }
-
-    private func consumeAutomaticRetryIfDue() {
-        guard armedAutomaticRetry, !hasAutomaticallyRetried, attemptsInFlight == 0,
-              phase == .unavailable(.freshAttempt) else { return }
-        armedAutomaticRetry = false
-        hasAutomaticallyRetried = true
-        let callback = onAutomaticRetry
-        // NEVER invoked synchronously from inside `attempt`: the callback re-enters this type,
-        // and a hop keeps that re-entry out of the current attempt's unwind.
-        Task { @MainActor in callback?() }
+        phase = terminal(for: result)
     }
 
     private func enterIndicator() {
@@ -134,16 +108,31 @@ public final class ShareUpgradePresenter {
         phase = .upgradingVisible
         let gate = DwellGate()
         dwellGate = gate
-        arm { [weak self] in
-            guard let self else { return }
-            await self.dwellTimer(self.dwellDuration)
+        // ROH-186. This hop is deliberately NOT armed through `arm`, because `cancelHops()` runs
+        // one line before `attempt` awaits this gate. The production timer is a cancellable
+        // `Task.sleep` whose cancellation `try?` swallows, so a cancelled dwell hop falls
+        // straight through to `gate.open()` and the floor evaporates — measured at 10.8 ms
+        // against a specified 1000 ms. Every ManualTimer-based test missed it because the fake
+        // ignores cancellation; `testTheDwellSurvivesTerminalPathHopCancellation` uses a
+        // cancellation-honouring timer for exactly that reason.
+        //
+        // Cancelling the PREVIOUS hop is safe and bounds the live count at one: `attempt` reads
+        // `dwellGate` at the moment it waits, so it always waits on the newest gate, which the
+        // newest hop opens. Guarding on `Task.isCancelled` instead would wedge — the gate would
+        // never open, `attempt` would never return, and the phase would stick on an absorbing
+        // `.upgradingVisible`.
+        dwellHop?.cancel()
+        dwellHop = Task { [dwellTimer, dwellDuration] in
+            await dwellTimer(dwellDuration)
             gate.open()
         }
     }
 
-    private func terminal(for result: ShareUpgradeResult, origin: AttemptOrigin) -> ShareUpgradePhase {
+    private func terminal(for result: ShareUpgradeResult) -> ShareUpgradePhase {
         switch result {
-        case .gotMap:        return .upgraded(confirming: origin != .automatic && indicatorShown)
+        // `origin` is no longer consulted: with the automatic retry gone every attempt has a
+        // rider behind it, so an indicator that was on screen is the whole question.
+        case .gotMap:        return .upgraded(confirming: indicatorShown)
         case .rejected:      return .unavailable(.freshAttempt)
         case .stoppedWaiting: return .unavailable(.mayRejoin)
         }

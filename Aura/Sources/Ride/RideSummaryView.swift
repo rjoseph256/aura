@@ -182,7 +182,7 @@ struct RideSummaryView: View {
                 guard !Task.isCancelled, isUpgrading else { return }
                 showHint = true
             }
-            let raster = await shareMap.provider.raster(for: request)
+            let raster = await shareMap.provider.raster(for: request).image
             hint.cancel()
             if let raster, !Task.isCancelled,
                let upgraded = await RideCardRenderer.make(content, mapImage: raster, title: title,
