@@ -66,7 +66,9 @@ Two fixed per-surface states, drawn in code from theme tokens:
   heading wedge via `bearingImage`; the SDK accuracy ring (mint, low opacity, themed via
   `accuracyRingColor`/`accuracyRingBorderColor`) as the only ambient element. Home's map
   is north-up, so the wedge is the part that rotates and informs.
-- **Riding puck** (both HUDs): white arrowhead, ink outline, mint edge accent. Honest
+- **Riding puck** (both HUDs): white ROUNDED TRIANGLE, ink outline, 2.5pt mint edge
+  (gate 1a locked 2026-08-31: PO rejected the notched dart, picked the rounded
+  triangle from a four-variant sheet, and bumped the mint edge from 1.5pt). Honest
   rationale (gate finding): under `followPuck(bearing: .heading)` the map rotates and
   the arrow points screen-up almost always — its value is the "this is me, moving"
   grammar plus correct rotation whenever the rider pans off-follow. No accuracy ring.

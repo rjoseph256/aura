@@ -407,6 +407,12 @@ struct PuckMetricsTests {
         #expect(m.canvasSide >= diagonal)
     }
 
+    @Test func ridingCornersLeaveAFlatBase() {
+        // Rounding both base corners must not consume the whole base edge.
+        let m = RidingPuckMetrics.standard
+        #expect(m.cornerRadius * 2 < m.arrowWidth)
+    }
+
     // Invariant 3: one Puck2D scale feeds every image — relationships are ratios in
     // one type, and both states share one canvas convention so scale math can't fork.
     @Test func bothStatesUseSquareCanvases() {
@@ -441,15 +447,20 @@ public struct BrowsePuckMetrics {
 }
 
 public struct RidingPuckMetrics {
-    public let arrowLength: Double      // tip to tail
-    public let arrowWidth: Double       // across the tail
+    public let arrowLength: Double      // triangle height, tip to base
+    public let arrowWidth: Double       // base width
+    public let cornerRadius: Double     // rounding on all three corners
     public let inkOutlineWidth: Double
-    public let mintEdgeWidth: Double    // accent edging on the arrow
+    public let mintEdgeWidth: Double    // accent edging — 2.5, PO-bumped at gate 1a
+
     public let canvasSide: Double
 
+    // Rounded-TRIANGLE silhouette, locked at gate 1a (2026-08-31): the PO rejected
+    // the notched dart, picked the rounded triangle, and asked for a heavier mint
+    // edge (1.5 → 2.5).
     public static let standard = RidingPuckMetrics(
-        arrowLength: 24, arrowWidth: 18, inkOutlineWidth: 1.5,
-        mintEdgeWidth: 1.5, canvasSide: 30)
+        arrowLength: 22, arrowWidth: 20, cornerRadius: 3,
+        inkOutlineWidth: 1.5, mintEdgeWidth: 2.5, canvasSide: 32)
 }
 ```
 
@@ -527,31 +538,51 @@ enum AuraPuck {
         }
     }()
 
-    /// Riding arrowhead: white, ink outline, mint edge (ROH-220).
+    /// Riding puck: ROUNDED TRIANGLE, locked at PO gate 1a (2026-08-31) — white body,
+    /// ink outline, bumped 2.5pt mint edge. Corner rounding comes from fill+stroke
+    /// with a round line join (stroke width = 2 × cornerRadius) — the same pass at
+    /// every layer, so the three silhouettes stay concentric.
     static let ridingBearing: UIImage = {
         let m = RidingPuckMetrics.standard
         let side = CGFloat(m.canvasSide)
         return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { ctx in
             let c = ctx.cgContext
-            let cx = side / 2, cy = side / 2
-            let halfL = CGFloat(m.arrowLength) / 2, halfW = CGFloat(m.arrowWidth) / 2
-            let path = UIBezierPath()
-            path.move(to: CGPoint(x: cx, y: cy - halfL))                 // tip
-            path.addLine(to: CGPoint(x: cx + halfW, y: cy + halfL))      // right tail
-            path.addLine(to: CGPoint(x: cx, y: cy + halfL * 0.55))       // notch
-            path.addLine(to: CGPoint(x: cx - halfW, y: cy + halfL))      // left tail
-            path.close()
-            // Three concentric fills of the same silhouette, scaled about center:
-            // mint edge → ink outline → white body. Scale factors are the pt-accurate
-            // stand-ins for mintEdgeWidth/inkOutlineWidth at these metrics; tune at
-            // gate 1b alongside the metrics, keeping the PuckMetricsTests invariants.
-            path.fill(with: AuraTheme.routeUIColor, in: c)               // mint edge
-            inset(path, about: CGPoint(x: cx, y: cy), scale: 0.92)
-                .fill(with: AuraTheme.routeCasingUIColor, in: c)         // ink outline
-            inset(path, about: CGPoint(x: cx, y: cy), scale: 0.80)
-                .fill(with: UIColor.white, in: c)                        // white body
+            let center = CGPoint(x: side / 2, y: side / 2)
+            c.setLineJoin(.round)
+            let layers: [(scale: Double, color: UIColor)] = [
+                (1.0, AuraTheme.routeUIColor),                                   // mint edge
+                (insetScale(m, by: m.mintEdgeWidth), AuraTheme.routeCasingUIColor), // ink
+                (insetScale(m, by: m.mintEdgeWidth + m.inkOutlineWidth), .white),   // body
+            ]
+            for layer in layers {
+                let path = trianglePath(m, center: center, scale: layer.scale)
+                c.setFillColor(layer.color.cgColor)
+                c.setStrokeColor(layer.color.cgColor)
+                c.setLineWidth(2 * CGFloat(m.cornerRadius) * CGFloat(layer.scale))
+                c.addPath(path.cgPath)
+                c.drawPath(using: .fillStroke)
+            }
         }
     }()
+
+    /// The riding triangle, scaled about the canvas center.
+    private static func trianglePath(_ m: RidingPuckMetrics, center: CGPoint,
+                                     scale: Double) -> UIBezierPath {
+        let halfL = CGFloat(m.arrowLength * scale) / 2
+        let halfW = CGFloat(m.arrowWidth * scale) / 2
+        let path = UIBezierPath()
+        path.move(to: CGPoint(x: center.x, y: center.y - halfL))
+        path.addLine(to: CGPoint(x: center.x + halfW, y: center.y + halfL))
+        path.addLine(to: CGPoint(x: center.x - halfW, y: center.y + halfL))
+        path.close()
+        return path
+    }
+
+    /// Scale that insets the triangle by `points` all around (height-ratio
+    /// approximation — exact enough at these sizes; gate 1b judges the pixels).
+    private static func insetScale(_ m: RidingPuckMetrics, by points: Double) -> Double {
+        max(0, (m.arrowLength - 2 * points) / m.arrowLength)
+    }
 
     /// Mandatory transparent top for the riding state: a nil topImage falls back to
     /// Mapbox's stock blue dot rendered ON TOP of the bearing arrow (spec §3.1).
@@ -564,25 +595,12 @@ enum AuraPuck {
                                  width: radius * 2, height: radius * 2))
     }
 
-    private static func inset(_ path: UIBezierPath, about center: CGPoint,
-                              scale: CGFloat) -> UIBezierPath {
-        let copy = path.copy() as! UIBezierPath
-        copy.apply(CGAffineTransform(translationX: -center.x, y: -center.y)
-            .concatenating(.init(scaleX: scale, y: scale))
-            .concatenating(.init(translationX: center.x, y: center.y)))
-        return copy
-    }
-}
-
-private extension UIBezierPath {
-    func fill(with color: UIColor, in c: CGContext) {
-        c.setFillColor(color.cgColor)
-        c.addPath(cgPath)
-        c.fillPath()
-    }
 }
 ```
-(The exact arrow silhouette iterates at gate 1b against the PO's approved mockup — the shapes above are the mockup's geometry; adjust constants, keep the `PuckMetrics` invariants.)
+(Gate 1a is LOCKED (2026-08-31): browse dot approved as mocked; riding = rounded
+triangle with the 2.5pt mint edge, PO-confirmed "bumped is the way". Gate 1b still
+re-checks the real in-app render at cockpit zoom; tune constants there only within
+the `PuckMetrics` invariants.)
 
 - [ ] **Step 2: Wire the browse state**
 
