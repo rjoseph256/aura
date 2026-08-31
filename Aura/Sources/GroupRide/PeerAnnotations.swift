@@ -30,6 +30,7 @@ struct PeerAnnotations: MapContent {
 struct PeerDot: Identifiable, Equatable {
     var userID: UUID
     var coordinate: Coordinate
+    /// Screen angle (camera bearing already subtracted), not geographic — ROH-213.
     var bearing: Double?
     var status: PeerStatus
     var colorIndex: Int
@@ -89,9 +90,13 @@ final class PeerAnnotationDriver {
     }
 
     /// Resolve the frame for wall-clock `now`. `project` maps a coordinate to a screen point (nil
-    /// if off-screen/unavailable). Declutter is the one intentional per-frame derivation (needs live
-    /// positions; O(k²), k ≤ 7). Everything else was memoised in `updateSet`.
-    func frame(now: Date, project: (Coordinate) -> ClusterDeclutter.Point2D?) -> PeerFrame {
+    /// if off-screen/unavailable). `cameraBearing` is the live map rotation: annotation views are
+    /// screen-aligned, so each dot's geographic bearing is converted to a screen angle here
+    /// (ROH-213) — the deadband below stays in geographic space, where "the peer turned" and "the
+    /// camera turned" are distinct. Declutter is the one intentional per-frame derivation (needs
+    /// live positions; O(k²), k ≤ 7). Everything else was memoised in `updateSet`.
+    func frame(now: Date, cameraBearing: Double,
+               project: (Coordinate) -> ClusterDeclutter.Point2D?) -> PeerFrame {
         let coords: [(RidePeer, Coordinate)] = visible.compactMap { p in
             interpolators.position(p.userID, at: now).map { (p, $0) }
         }
@@ -115,7 +120,9 @@ final class PeerAnnotationDriver {
         let pulsePhase = (anyRiding && !reduceMotion) ? triangleWave(now) : 0
         let dots: [PeerDot] = coords.enumerated().map { i, pc in
             let (peer, coord) = pc
-            let shown = displayedBearing(peer.userID, raw: interpolators.bearing(peer.userID, at: now))
+            let shown = PeerBearing.screenAngle(
+                bearing: displayedBearing(peer.userID, raw: interpolators.bearing(peer.userID, at: now)),
+                cameraBearing: cameraBearing)
             return PeerDot(userID: peer.userID, coordinate: coord, bearing: shown,
                            status: peer.status, colorIndex: colorIndex[peer.userID] ?? 0,
                            monogram: monograms[peer.userID] ?? "?",
@@ -226,7 +233,9 @@ final class PeerAnnotationDriver {
     // ones. Resolving at `now` instead would render Mara/Mira mid-glide and break the declutter
     // geometry this preview claims to show.
     return Map(viewport: $viewport) {
-        PeerAnnotations(frame: driver.frame(now: now.addingTimeInterval(3), project: project))
+        // A `.camera` viewport with no bearing is north-up, so the screen angle equals the raw one.
+        PeerAnnotations(frame: driver.frame(now: now.addingTimeInterval(3), cameraBearing: 0,
+                                            project: project))
     }
     .ignoresSafeArea()
 }

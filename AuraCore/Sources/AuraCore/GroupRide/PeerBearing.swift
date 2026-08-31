@@ -16,4 +16,14 @@ public enum PeerBearing {
         guard let a, let b, a != b else { return nil }
         return heading(from: a, to: b)
     }
+
+    /// On-screen rotation for a screen-aligned annotation's pointer (ROH-213). A map view
+    /// annotation does not rotate with the camera, so a geographic bearing drawn raw is wrong by
+    /// exactly the camera's own bearing on any rotated (course-up) map — subtract it. A non-finite
+    /// camera frame falls back to the raw bearing rather than poisoning the rotation with NaN.
+    public static func screenAngle(bearing: Double?, cameraBearing: Double) -> Double? {
+        guard let bearing else { return nil }
+        guard cameraBearing.isFinite else { return bearing }
+        return (bearing - cameraBearing + 360).truncatingRemainder(dividingBy: 360)
+    }
 }
