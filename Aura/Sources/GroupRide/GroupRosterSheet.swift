@@ -3,19 +3,25 @@ import AuraCore
 
 /// The crew presence control over the group-ride map (ROH-214): collapsed to a compact
 /// circular button in the map-control family — a crew glyph with a rider-count badge that
-/// shifts to the warning tint when anyone is stopped or dropped — and expanded to the full
-/// `RosterRow` card. The old collapsed state was a full-width pill that covered the map right
-/// where the eye travels while riding, without earning that space. Pure presentation — every
-/// row, count, and label is derived from the `[RosterRow]` this view is handed, so it
-/// previews standalone and composes with a live session without knowing about one.
+/// shifts to the warning tint only when a rider has dropped (signal lost; a stopped rider is
+/// a red light, not an emergency), and to a quiet neutral while nobody has joined yet — and
+/// expanded to the full `RosterRow` card. The old collapsed state was a full-width pill that
+/// covered the map right where the eye travels while riding, without earning that space.
+/// Pure presentation — every row, count, and label is derived from the `[RosterRow]` this
+/// view is handed, so it previews standalone and composes with a live session without
+/// knowing about one.
 struct GroupRosterSheet: View {
     let rows: [RosterRow]
+    /// Shown in the expanded empty state so a host waiting on their crew can actually share
+    /// the code — the lobby (the only other place it lives) is gone once the ride starts.
+    let joinCode: String?
     /// Starting detent. Real presentation always starts collapsed (the default);
     /// previews use `true` to show the expanded list without a tap.
     @State private var isExpanded: Bool
 
-    init(rows: [RosterRow], startsExpanded: Bool = false) {
+    init(rows: [RosterRow], joinCode: String? = nil, startsExpanded: Bool = false) {
         self.rows = rows
+        self.joinCode = joinCode
         _isExpanded = State(initialValue: startsExpanded)
     }
 
@@ -57,8 +63,10 @@ struct GroupRosterSheet: View {
 
     /// Same drawn-circle/hit-target metrics as the right-side cluster (ROH-75), so the crew
     /// control reads as one more member of the map-control family. The badge carries the
-    /// headcount; its tint (and the glyph's) is the status signal the old pill spelled out
-    /// in words — warning when someone is stopped, dropped, or still waiting.
+    /// headcount; its tint is a three-state signal: neutral while nobody has joined, accent
+    /// for a healthy crew, warning only when a rider has dropped — the one state worth acting
+    /// on. Stopped and awaiting stay calm (the review gate showed alarming on them turns the
+    /// tint amber at every ride start and every red light).
     private var crewButton: some View {
         Button {
             toggle()
@@ -75,19 +83,30 @@ struct GroupRosterSheet: View {
         .accessibilityHint("Shows the crew roster.")
     }
 
+    private var badgeTint: (fill: Color, ink: Color) {
+        if summary.needsAttention { return (AuraTheme.warning, AuraTheme.onWarning) }
+        if summary.isWaitingForCrew { return (AuraTheme.textSecondary, AuraTheme.background) }
+        return (AuraTheme.accent, AuraTheme.onAccent)
+    }
+
     private var countBadge: some View {
         Text("\(summary.riderCount)")
-            .font(.system(size: 11, weight: .bold, design: .rounded))
+            // A text style, not a fixed size, so the one number the collapsed control shows
+            // scales with Dynamic Type (the capsule grows with it).
+            .font(.system(.caption2, design: .rounded).weight(.bold))
             .monospacedDigit()
-            .foregroundStyle(summary.needsAttention ? AuraTheme.onWarning : AuraTheme.onAccent)
+            .foregroundStyle(badgeTint.ink)
             .padding(.horizontal, 5)
             .frame(minWidth: 18, minHeight: 18)
-            .background(summary.needsAttention ? AuraTheme.warning : AuraTheme.accent, in: Capsule())
+            .background(badgeTint.fill, in: Capsule())
             .overlay(Capsule().strokeBorder(AuraTheme.background, lineWidth: 1.5))
             // Pull the badge onto the drawn circle's shoulder: the button's frame is the
             // enlarged hit target, whose corner sits (hit − size) / 2 outside the circle.
             .offset(x: -CGFloat(HUDControlMetrics.ride.resolvedHitTarget - HUDControlMetrics.ride.size) / 2,
                     y: CGFloat(HUDControlMetrics.ride.resolvedHitTarget - HUDControlMetrics.ride.size) / 2)
+            // Decorative: without this the capsule sits on the circle's shoulder as a dead
+            // spot in the ROH-75 tap target (an overlay hit-tests above its base view).
+            .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
 
@@ -95,13 +114,7 @@ struct GroupRosterSheet: View {
 
     private var expandedCard: some View {
         VStack(spacing: 0) {
-            handle
-                .contentShape(Rectangle())
-                .onTapGesture { toggle() }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Collapse crew roster")
-                .accessibilityHint(summary.spokenSummary)
-                .accessibilityAddTraits(.isButton)
+            collapseHeader
             expandedList
         }
         .padding(.bottom, AuraTheme.Spacing.md)
@@ -113,7 +126,35 @@ struct GroupRosterSheet: View {
         )
     }
 
-    // MARK: - Handle
+    // MARK: - Collapse header
+
+    /// The whole top of the card — grab handle, summary line, and chevron — is one collapse
+    /// control. The first cut made only the 17 pt handle strip tappable and left the chevron
+    /// a dead affordance (review-gate finding): the way back to the map deserves at least the
+    /// same target the ROH-75 controls get, since collapsing is now the primary interaction.
+    private var collapseHeader: some View {
+        VStack(spacing: 0) {
+            handle
+            HStack {
+                Text(isSoloCrew ? "Crew" : summary.displaySummary)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AuraTheme.textSecondary)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(AuraTheme.textSecondary)
+            }
+            .padding(.horizontal, AuraTheme.Spacing.lg)
+            .padding(.bottom, AuraTheme.Spacing.sm)
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+        .onTapGesture { toggle() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Collapse crew roster")
+        .accessibilityValue(Text(summary.spokenSummary))
+        .accessibilityAddTraits(.isButton)
+    }
 
     private var handle: some View {
         Capsule()
@@ -128,18 +169,6 @@ struct GroupRosterSheet: View {
 
     private var expandedList: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(isSoloCrew ? "Crew" : summary.displaySummary)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AuraTheme.textSecondary)
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.down")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(AuraTheme.textSecondary)
-            }
-            .padding(.horizontal, AuraTheme.Spacing.lg)
-            .padding(.bottom, AuraTheme.Spacing.sm)
-
             if isSoloCrew {
                 emptyState
             } else {
@@ -161,6 +190,9 @@ struct GroupRosterSheet: View {
         }
     }
 
+    /// The join code renders right here when the host has one: this card is the only crew
+    /// surface left once the ride starts (the lobby is gone), so telling the rider to "share
+    /// your ride code" without showing a code was a dead end (review-gate finding).
     private var emptyState: some View {
         VStack(spacing: AuraTheme.Spacing.xs) {
             Image(systemName: "person.2.wave.2")
@@ -169,9 +201,20 @@ struct GroupRosterSheet: View {
             Text("Waiting for your crew…")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(AuraTheme.textPrimary)
-            Text("Share your ride code so they can join.")
-                .font(.footnote)
-                .foregroundStyle(AuraTheme.textSecondary)
+            if let joinCode {
+                Text(joinCode)
+                    .font(.system(.title3, design: .monospaced).weight(.bold))
+                    .kerning(2)
+                    .foregroundStyle(AuraTheme.accent)
+                    .padding(.top, AuraTheme.Spacing.xs)
+                Text("Share this code so they can join.")
+                    .font(.footnote)
+                    .foregroundStyle(AuraTheme.textSecondary)
+            } else {
+                Text("Riders join from the ride they were invited to.")
+                    .font(.footnote)
+                    .foregroundStyle(AuraTheme.textSecondary)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, AuraTheme.Spacing.xl)
@@ -300,11 +343,18 @@ struct RosterRowView: View {
     previewHost(rows: rows, startsExpanded: false)
 }
 
-#Preview("Collapsed button — needs attention") {
+#Preview("Collapsed button — peer dropped (warning)") {
     let rows: [RosterRow] = [
         RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil),
         RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
-        RosterRow(id: UUID(), name: "Devon", isSelf: false, status: .stopped, distanceLabel: "0.6 mi behind")
+        RosterRow(id: UUID(), name: "Sam", isSelf: false, status: .dropped, distanceLabel: "no signal")
+    ]
+    previewHost(rows: rows, startsExpanded: false)
+}
+
+#Preview("Collapsed button — solo (waiting)") {
+    let rows: [RosterRow] = [
+        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil)
     ]
     previewHost(rows: rows, startsExpanded: false)
 }
@@ -326,11 +376,12 @@ struct RosterRowView: View {
     previewHost(rows: rows, startsExpanded: true)
 }
 
-#Preview("One dropped peer") {
+#Preview("One dropped, one awaiting") {
     let rows: [RosterRow] = [
         RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil),
         RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
-        RosterRow(id: UUID(), name: "Sam", isSelf: false, status: .dropped, distanceLabel: "no signal")
+        RosterRow(id: UUID(), name: "Sam", isSelf: false, status: .dropped, distanceLabel: "no signal"),
+        RosterRow(id: UUID(), name: "Lee", isSelf: false, status: .awaiting, distanceLabel: nil)
     ]
     previewHost(rows: rows, startsExpanded: true)
 }
@@ -341,7 +392,8 @@ private func previewHost(rows: [RosterRow], startsExpanded: Bool) -> some View {
         AuraTheme.background.ignoresSafeArea()
         VStack {
             Spacer()
-            GroupRosterSheet(rows: rows, startsExpanded: startsExpanded)
+            GroupRosterSheet(rows: rows, joinCode: rows.count <= 1 ? "MX4T7Q" : nil,
+                             startsExpanded: startsExpanded)
                 .padding(.horizontal, AuraTheme.Spacing.md)
         }
     }

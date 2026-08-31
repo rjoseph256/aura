@@ -111,16 +111,23 @@ Device B as rider 2.
    or the `aura://join?code=` link. On B, join by the code or the link.
    Pass: both reach the rolling-join lobby, then the live navigate HUD. Each device shows the other
    as a named dot on the map, colored by status (white for you, mint riding, amber stopped, grey
-   dropped). The roster sheet shows ahead or behind distance for each peer.
-2. Membership toasts. Watch for the join, left, and host-ended toasts as riders come and go.
-3. Host End. The host taps End. On the member's device the crew layer should dissolve while solo
+   dropped). The crew button (bottom-left circle, badge = rider count) expands to the roster card,
+   which shows ahead or behind distance for each peer; the badge turns amber only when a peer
+   drops, and reads grey while nobody has joined.
+2. Heading pointer (ROH-213). While both riders are moving, watch the other rider's dot: its
+   pointer must aim in their actual direction of travel *as drawn on your rotated course-up
+   map* — e.g. a peer riding the same road the same way as you points screen-up. Turn a corner
+   yourself (the map rotates) and confirm their pointer stays true rather than swinging with
+   your rotation.
+3. Membership toasts. Watch for the join, left, and host-ended toasts as riders come and go.
+4. Host End. The host taps End. On the member's device the crew layer should dissolve while solo
    turn-by-turn navigation keeps running.
-4. Member Leave. A member taps Leave. They keep riding solo, the host sees them go, and the ride
+5. Member Leave. A member taps Leave. They keep riding solo, the host sees them go, and the ride
    frees their slot.
-5. Reconnect. Put Device B in airplane mode for about 30 seconds mid-ride. Expect the
+6. Reconnect. Put Device B in airplane mode for about 30 seconds mid-ride. Expect the
    "Reconnecting..." pill while the connection is down, then peers reappearing after the snapshot
    re-seeds on reconnect.
-6. Load. If you can get up to eight riders into one ride, watch the map stay smooth with eight
+7. Load. If you can get up to eight riders into one ride, watch the map stay smooth with eight
    peer annotations and the pulse animation running.
 
 Pass: each step behaves as described, positions stay roughly accurate, and no rider's dot lingers

@@ -81,7 +81,8 @@ extension NavigateHUDView {
         VStack(spacing: AuraTheme.Spacing.sm) {
             HStack(alignment: .bottom, spacing: AuraTheme.Spacing.md) {
                 if showsGroupChrome, let groupSession {
-                    GroupRosterSheet(rows: rosterRows(for: groupSession))
+                    GroupRosterSheet(rows: rosterRows(for: groupSession),
+                                     joinCode: groupSession.joinCode?.rawValue)
                         .frame(maxHeight: hudHeight > 0
                                ? hudHeight * HUDLayoutMetrics.groupRosterMaxHeightFraction
                                : HUDLayoutMetrics.groupRosterFallbackMaxHeight,

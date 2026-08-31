@@ -84,7 +84,10 @@ final class PeerAnnotationDriver {
 
     /// Keep the clock alive while any tween runs OR (any peer is riding and not Reduce Motion) —
     /// the second clause keeps a stationary rider's liveness pulse animating (it must not freeze
-    /// just because they stopped moving).
+    /// just because they stopped moving). Since ROH-213 this is also what keeps the pointer's
+    /// screen angle tracking the rotating camera: with the clock paused (Reduce Motion + no
+    /// active tween), the angle only refreshes when the session's 1 Hz peer tick invalidates the
+    /// host body — visibly steppy through a turn, never stuck.
     func shouldAnimate(now: Date) -> Bool {
         interpolators.anyActive(at: now) || (anyRiding && !reduceMotion)
     }
@@ -133,9 +136,13 @@ final class PeerAnnotationDriver {
         return PeerFrame(dots: dots, pulsePhase: pulsePhase)
     }
 
-    /// Deadband (~10°) so a noisy bearing doesn't jitter the pointer; Reduce Motion snaps to the
-    /// 8-point compass (45° steps) so there's no continuous rotation. Holds last when direction is
-    /// unknown, so a stopped dot's pointer (already hidden by status) never resets to north.
+    /// Deadband (~10°) so a noisy bearing doesn't jitter the pointer; Reduce Motion snaps the
+    /// *geographic* bearing to the 8-point compass (45° steps) so peer movement alone never
+    /// spins the pointer continuously. (Since ROH-213 the rendered angle also subtracts the
+    /// live camera bearing, so on a course-up map the pointer still turns with the map — which
+    /// is the map's own rotation, happening under Reduce Motion regardless; freezing the screen
+    /// angle instead would just make it wrong again.) Holds last when direction is unknown, so
+    /// a stopped dot's pointer (already hidden by status) never resets to north.
     private func displayedBearing(_ id: UUID, raw: Double?) -> Double? {
         guard let raw else { return displayBearing[id] }
         if reduceMotion {

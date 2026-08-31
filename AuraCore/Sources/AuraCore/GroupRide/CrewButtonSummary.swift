@@ -1,39 +1,61 @@
 import Foundation
 
 /// Everything the compact crew button (ROH-214) and the expanded roster header derive from a
-/// `[RosterRow]`: the badge headcount, whether any crew member deserves a glance, and the
-/// display/spoken summaries the old collapsed bar carried. One derivation, shared by the button
-/// glyph, the header text, and VoiceOver — no independent source of truth for "who's riding".
+/// `[RosterRow]`. One derivation, shared by the badge, the header text, and VoiceOver — the
+/// three can never disagree about the crew, which the review gate caught the first cut doing
+/// (badge counted the whole crew while the text counted only the others).
 public struct CrewButtonSummary: Equatable, Sendable {
     /// The whole crew, self included — the number on the button's badge.
     public let riderCount: Int
-    /// True when any non-self peer is not actively riding (stopped, dropped, or still
-    /// awaiting) — the button shifts to the warning tint so a changed crew state is
-    /// glanceable without expanding the card.
+    /// True only when a peer has actually dropped (signal lost) — the one state a rider should
+    /// act on. Not `.stopped` (a red light; alarming on it cries wolf all ride) and not
+    /// `.awaiting` (every peer starts there, which made a healthy ride begin amber).
     public let needsAttention: Bool
+    /// Still a crew of one: nobody has joined yet. The button renders this quietly distinct
+    /// from a healthy crew, and the spoken summary says it in words.
+    public let isWaitingForCrew: Bool
 
-    private let riding: Int
     private let stopped: Int
     private let dropped: Int
+    private let awaiting: Int
 
     public init(rows: [RosterRow]) {
         riderCount = rows.count
+        isWaitingForCrew = rows.count <= 1
         let others = rows.filter { !$0.isSelf }
-        riding = others.filter { $0.status == .riding }.count
         stopped = others.filter { $0.status == .stopped }.count
-        dropped = others.filter { $0.status == .dropped || $0.status == .awaiting }.count
-        needsAttention = stopped > 0 || dropped > 0
+        dropped = others.filter { $0.status == .dropped }.count
+        awaiting = others.filter { $0.status == .awaiting }.count
+        needsAttention = dropped > 0
     }
 
-    /// "3 riding · 1 stopped" — omits zero-count clauses; falls back to a dropped-only
-    /// clause if that's the only signal, and to "Crew" for a still-solo crew.
+    /// "4 riders · 1 stopped · 1 no signal" — the badge's population first, then only the
+    /// exception clauses, so the header and the badge always agree. "Crew" for a solo crew
+    /// (the expanded empty state carries the waiting words).
     public var displaySummary: String {
-        var clauses: [String] = []
-        if riding > 0 { clauses.append("\(riding) riding") }
-        if stopped > 0 { clauses.append("\(stopped) stopped") }
-        if clauses.isEmpty, dropped > 0 { clauses.append("\(dropped) no signal") }
-        return clauses.isEmpty ? "Crew" : clauses.joined(separator: " · ")
+        guard !isWaitingForCrew else { return "Crew" }
+        return ([headcountClause] + exceptionClauses(awaitingLabel: "waiting"))
+            .joined(separator: " · ")
     }
 
-    public var spokenSummary: String { displaySummary }
+    /// The VoiceOver value: same shape as `displaySummary`, comma-joined (the "·" separator is
+    /// read literally by some voices), with `.awaiting` spelled out the way the roster row
+    /// speaks it, and the solo case said in words instead of a bare count.
+    public var spokenSummary: String {
+        guard !isWaitingForCrew else { return "No riders have joined yet" }
+        return ([headcountClause] + exceptionClauses(awaitingLabel: "waiting to start"))
+            .joined(separator: ", ")
+    }
+
+    private var headcountClause: String {
+        "\(riderCount) riders"
+    }
+
+    private func exceptionClauses(awaitingLabel: String) -> [String] {
+        var clauses: [String] = []
+        if stopped > 0 { clauses.append("\(stopped) stopped") }
+        if dropped > 0 { clauses.append("\(dropped) no signal") }
+        if awaiting > 0 { clauses.append("\(awaiting) \(awaitingLabel)") }
+        return clauses
+    }
 }
