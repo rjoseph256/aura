@@ -1,11 +1,13 @@
 import SwiftUI
 import AuraCore
 
-/// The draggable crew-roster panel over the group-ride map: collapsed to a grab handle,
-/// an avatar stack, and a one-line summary; expanded to the full `RosterRow` list. Pure
-/// presentation — every row, count, and label is derived from the `[RosterRow]` this view
-/// is handed, so it previews standalone and composes with a live session without knowing
-/// about one (Task 17 wires that up).
+/// The crew presence control over the group-ride map (ROH-214): collapsed to a compact
+/// circular button in the map-control family — a crew glyph with a rider-count badge that
+/// shifts to the warning tint when anyone is stopped or dropped — and expanded to the full
+/// `RosterRow` card. The old collapsed state was a full-width pill that covered the map right
+/// where the eye travels while riding, without earning that space. Pure presentation — every
+/// row, count, and label is derived from the `[RosterRow]` this view is handed, so it
+/// previews standalone and composes with a live session without knowing about one.
 struct GroupRosterSheet: View {
     let rows: [RosterRow]
     /// Starting detent. Real presentation always starts collapsed (the default);
@@ -21,34 +23,24 @@ struct GroupRosterSheet: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
-    private var summary: RosterSummary { RosterSummary(rows: rows) }
+    private var summary: CrewButtonSummary { CrewButtonSummary(rows: rows) }
     private var isSoloCrew: Bool { rows.count <= 1 }
 
     var body: some View {
-        VStack(spacing: 0) {
-            handle
-                .contentShape(Rectangle())
-                .onTapGesture { toggle() }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(isExpanded ? "Collapse crew roster" : "Expand crew roster")
-                .accessibilityHint(summary.spokenSummary)
-                .accessibilityAddTraits(.isButton)
-
+        // The collapsed button hugs the leading edge of the cockpit slot the old pill filled;
+        // maxWidth keeps this view occupying that flexible slot either way, so the host row's
+        // layout (controls pinned trailing) never shifts on toggle.
+        ZStack(alignment: .bottomLeading) {
             if isExpanded {
-                expandedList
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+                expandedCard
+                    .transition(reduceMotion ? .opacity
+                        : .scale(scale: 0.3, anchor: .bottomLeading).combined(with: .opacity))
             } else {
-                collapsedSummary
+                crewButton
                     .transition(.opacity)
             }
         }
-        .padding(.bottom, AuraTheme.Spacing.md)
-        .background(background)
-        .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.xl))
-        .overlay(
-            RoundedRectangle(cornerRadius: AuraTheme.Radius.xl)
-                .strokeBorder(AuraTheme.hairline(contrast))
-        )
+        .frame(maxWidth: .infinity, alignment: .bottomLeading)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: isExpanded)
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
@@ -61,6 +53,66 @@ struct GroupRosterSheet: View {
         }
     }
 
+    // MARK: - Collapsed (compact crew button)
+
+    /// Same drawn-circle/hit-target metrics as the right-side cluster (ROH-75), so the crew
+    /// control reads as one more member of the map-control family. The badge carries the
+    /// headcount; its tint (and the glyph's) is the status signal the old pill spelled out
+    /// in words — warning when someone is stopped, dropped, or still waiting.
+    private var crewButton: some View {
+        Button {
+            toggle()
+        } label: {
+            // Tinted here, inside the label: `HUDControlButton` sets its own foreground on
+            // the label from outside, so an outer modifier could never win this one.
+            Image(systemName: "person.2.fill")
+                .foregroundStyle(summary.needsAttention ? AuraTheme.warning : AuraTheme.textPrimary)
+        }
+        .buttonStyle(.hudControl(active: false, metrics: .ride))
+        .overlay(alignment: .topTrailing) { countBadge }
+        .accessibilityLabel("Crew")
+        .accessibilityValue(Text(summary.spokenSummary))
+        .accessibilityHint("Shows the crew roster.")
+    }
+
+    private var countBadge: some View {
+        Text("\(summary.riderCount)")
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(summary.needsAttention ? AuraTheme.onWarning : AuraTheme.onAccent)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 18, minHeight: 18)
+            .background(summary.needsAttention ? AuraTheme.warning : AuraTheme.accent, in: Capsule())
+            .overlay(Capsule().strokeBorder(AuraTheme.background, lineWidth: 1.5))
+            // Pull the badge onto the drawn circle's shoulder: the button's frame is the
+            // enlarged hit target, whose corner sits (hit − size) / 2 outside the circle.
+            .offset(x: -CGFloat(HUDControlMetrics.ride.resolvedHitTarget - HUDControlMetrics.ride.size) / 2,
+                    y: CGFloat(HUDControlMetrics.ride.resolvedHitTarget - HUDControlMetrics.ride.size) / 2)
+            .accessibilityHidden(true)
+    }
+
+    // MARK: - Expanded card
+
+    private var expandedCard: some View {
+        VStack(spacing: 0) {
+            handle
+                .contentShape(Rectangle())
+                .onTapGesture { toggle() }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Collapse crew roster")
+                .accessibilityHint(summary.spokenSummary)
+                .accessibilityAddTraits(.isButton)
+            expandedList
+        }
+        .padding(.bottom, AuraTheme.Spacing.md)
+        .background(background)
+        .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.xl))
+        .overlay(
+            RoundedRectangle(cornerRadius: AuraTheme.Radius.xl)
+                .strokeBorder(AuraTheme.hairline(contrast))
+        )
+    }
+
     // MARK: - Handle
 
     private var handle: some View {
@@ -70,29 +122,6 @@ struct GroupRosterSheet: View {
             .padding(.top, AuraTheme.Spacing.sm)
             .padding(.bottom, AuraTheme.Spacing.xs)
             .frame(maxWidth: .infinity)
-    }
-
-    // MARK: - Collapsed
-
-    private var collapsedSummary: some View {
-        HStack(spacing: AuraTheme.Spacing.md) {
-            AvatarStack(rows: rows)
-            if isSoloCrew {
-                Text("Waiting for your crew…")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AuraTheme.textSecondary)
-            } else {
-                Text(summary.displaySummary)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AuraTheme.textPrimary)
-            }
-            Spacer(minLength: 0)
-            Image(systemName: "chevron.up")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(AuraTheme.textSecondary)
-        }
-        .padding(.horizontal, AuraTheme.Spacing.lg)
-        .padding(.bottom, AuraTheme.Spacing.sm)
     }
 
     // MARK: - Expanded
@@ -260,93 +289,24 @@ struct RosterRowView: View {
     }
 }
 
-// MARK: - Avatar stack (collapsed handle)
-
-/// A leading-edge overlapping stack of up to 4 avatars for the collapsed handle. Purely
-/// decorative — the accessibility label lives on the handle's summary text, not here.
-private struct AvatarStack: View {
-    let rows: [RosterRow]
-    private static let maxShown = 4
-    private static let diameter: CGFloat = 26
-    private static let overlap: CGFloat = 10
-
-    var body: some View {
-        let shown = Array(rows.prefix(Self.maxShown))
-        HStack(spacing: -Self.overlap) {
-            ForEach(Array(shown.enumerated()), id: \.element.id) { index, row in
-                dot(for: row)
-                    .zIndex(Double(shown.count - index))
-            }
-        }
-        .frame(height: Self.diameter)
-        .accessibilityHidden(true)
-    }
-
-    private func dot(for row: RosterRow) -> some View {
-        let color: Color = row.isSelf ? AuraTheme.textPrimary
-            : row.status == .riding ? AuraTheme.accent
-            : row.status == .stopped ? AuraTheme.warning
-            : AuraTheme.textSecondary
-        return ZStack {
-            Circle()
-                .fill(color)
-                .frame(width: Self.diameter, height: Self.diameter)
-            Circle()
-                .strokeBorder(AuraTheme.surface, lineWidth: 2)
-                .frame(width: Self.diameter, height: Self.diameter)
-            Text(String(row.name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
-                .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(AuraTheme.background)
-        }
-    }
-}
-
-// MARK: - Collapsed-summary derivation
-
-/// Counts derived from the same `[RosterRow]` the list renders — no independent source
-/// of truth for "who's riding" vs. "who's stopped".
-private struct RosterSummary {
-    let riding: Int
-    let stopped: Int
-    let dropped: Int
-
-    init(rows: [RosterRow]) {
-        let others = rows.filter { !$0.isSelf }
-        riding = others.filter { $0.status == .riding }.count
-        stopped = others.filter { $0.status == .stopped }.count
-        dropped = others.filter { $0.status == .dropped || $0.status == .awaiting }.count
-    }
-
-    /// "3 riding · 1 stopped" — omits zero-count clauses; falls back to a dropped-only
-    /// clause if that's the only signal.
-    var displaySummary: String {
-        var clauses: [String] = []
-        if riding > 0 { clauses.append("\(riding) riding") }
-        if stopped > 0 { clauses.append("\(stopped) stopped") }
-        if clauses.isEmpty, dropped > 0 { clauses.append("\(dropped) no signal") }
-        return clauses.isEmpty ? "Crew" : clauses.joined(separator: " · ")
-    }
-
-    var spokenSummary: String { displaySummary }
-}
-
 // MARK: - Previews
 
-#Preview("4 riders — mixed status") {
+#Preview("Collapsed button — all riding") {
     let rows: [RosterRow] = [
         RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil),
         RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
-        RosterRow(id: UUID(), name: "Marcus", isSelf: false, status: .riding, distanceLabel: "0.1 mi behind"),
+        RosterRow(id: UUID(), name: "Marcus", isSelf: false, status: .riding, distanceLabel: "0.1 mi behind")
+    ]
+    previewHost(rows: rows, startsExpanded: false)
+}
+
+#Preview("Collapsed button — needs attention") {
+    let rows: [RosterRow] = [
+        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil),
+        RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
         RosterRow(id: UUID(), name: "Devon", isSelf: false, status: .stopped, distanceLabel: "0.6 mi behind")
     ]
-    ZStack(alignment: .bottom) {
-        AuraTheme.background.ignoresSafeArea()
-        VStack {
-            Spacer()
-            GroupRosterSheet(rows: rows)
-                .padding(.horizontal, AuraTheme.Spacing.md)
-        }
-    }
+    previewHost(rows: rows, startsExpanded: false)
 }
 
 #Preview("4 riders — expanded") {

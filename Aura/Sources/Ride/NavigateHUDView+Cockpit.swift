@@ -66,10 +66,10 @@ extension NavigateHUDView {
     }
 
     /// The bottom cockpit: a crew-roster + map-controls row floating above the bottom-pinned
-    /// instrument panel (hero speed + to-go + ETA). The roster (only in a live group ride)
-    /// shares that row with the controls as a pill to their left, its bottom edge aligned
-    /// with the End (stop) button — bottom alignment keeps the collapsed one-line pill beside
-    /// the stop button, and expanding it grows upward. `bottomCockpit` sits in a
+    /// instrument panel (hero speed + to-go + ETA). The crew control (only in a live group ride)
+    /// shares that row with the controls: collapsed it's a compact circular rider-count button
+    /// at the slot's leading edge (ROH-214), bottom-aligned with the End (stop) button, and
+    /// tapping it expands the full roster card upward in place. `bottomCockpit` sits in a
     /// `ZStack(alignment: .bottom)` with the turn card as a separate `.overlay(alignment: .top)`
     /// declared after it, so growth here does not clip or push anything off-screen — a full
     /// crew instead grows the column tall enough that the turn card draws over the cluster,
