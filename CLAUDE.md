@@ -76,8 +76,13 @@ does anything. The Terrain-RGB elevation bug compiled fine and returned flat eve
 the app and look, and prefer a real device over the simulator for anything involving GPS,
 haptics, background recording, widgets, Live Activities, or a locked screen.
 
-**Prose deliverables run through `humanizer`.** Specs, docs, PR bodies, issue descriptions,
-anything a person reads. Not commit messages, code comments, or short status replies.
+**Do not run `humanizer` on anything in this repo.** Specs, plans, design docs, PR bodies,
+issue descriptions, board comments, READMEs: none of it takes that pass. The skill exists for
+creative prose, and on technical writing it was costing more than it returned. Write plainly
+and specifically instead, which is the standard the rest of this file already asks for. If your
+own `~/.claude/CLAUDE.md` still carries a blanket prose mandate, this repo is an exception to
+it. A session that announces it is running `humanizer` on a spec, or that notes the skill is
+unavailable as though that were a gap, is not following this repo.
 
 Visual design of native SwiftUI surfaces follows the iOS skills and direct design judgment.
 **Never route native UI work through the web design skills by default** (`impeccable`,
@@ -99,10 +104,13 @@ yourself, because a user-scope file cannot be checked in.
 ## Session setup
 
 `.claude/settings.json` is checked in and declares the plugins this repo needs, so a clone
-gets the right toolset without a manual install. It also declares a `TaskCompleted` hook that
-runs `.claude/agent-gate.sh`, which lints and runs the package suite before an agent may call
-a task complete. The gate does not build the app or run pgTAP, so CI can still fail after it
-passes.
+gets the right toolset without a manual install. It also declares a `TaskCompleted` hook:
+`.claude/hooks/aura-task-gate.sh`, a wrapper that unconditionally runs `.claude/agent-gate.sh`,
+which lints and runs the package suite before an agent may call a task complete. The wrapper
+never stands aside — a detection of the user-scope global hook is what silently disabled the
+gate in ROH-157, so if a machine carries both hooks the gate simply runs twice; do not
+reintroduce a stand-aside, `scripts/test-task-gate.sh` pins its absence. The gate does not
+build the app or run pgTAP, so CI can still fail after it passes.
 
 `.claude/agents/` carries the three adversarial reviewers the pipeline above names:
 `review-skeptic`, `review-product`, `review-architecture`. They are checked in rather than

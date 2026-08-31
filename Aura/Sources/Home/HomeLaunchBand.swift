@@ -2,7 +2,7 @@ import SwiftUI
 import AuraCore
 
 /// The one dominant launch band, pinned in the reachable lower area: a full-width mint
-/// "Where to?" primary on top, with Explore / Join a ride / Saved as a demoted chip row
+/// "Where to?" primary on top, with Explore / Crew / Saved as a demoted chip row
 /// beneath. Mint lives only on the primary fill; the chips are glass (iOS 26) or a mint
 /// capsule fallback. Tapping the primary expands search.
 struct HomeLaunchBand: View {
@@ -30,7 +30,11 @@ struct HomeLaunchBand: View {
                     HomeChip(title: "Explore", systemImage: "safari", action: onExplore)
                         .accessibilitySortPriority(1)
                         .accessibilityIdentifier("home.explore")
-                    HomeChip(title: "Join a ride", systemImage: "person.2.badge.plus", action: onJoin)
+                    // "Crew", not "Join a ride": the screen behind it now both starts and joins
+                    // (ROH-114 D2). The identifier stays `home.join` — the UI tests key off it,
+                    // and renaming an identifier to match a label is a test change wearing a
+                    // copy change's clothes.
+                    HomeChip(title: "Crew", systemImage: "person.2.badge.plus", action: onJoin)
                         .accessibilitySortPriority(1)
                         .accessibilityIdentifier("home.join")
                     if hasSaved {

@@ -193,8 +193,9 @@ written, and the difference is worth understanding rather than trusting blindly.
 
 - **The standing mandates** are in the repo's [CLAUDE.md](../CLAUDE.md), under "How work gets
   done here": the full pipeline with its adversarial review gates for major work, iOS-skill
-  routing before writing Swift, device verification for UI, and `humanizer` for prose. Every
-  session in this repo reads them.
+  routing before writing Swift, and device verification for UI. Every session in this repo
+  reads them. Note that `humanizer` is now banned here rather than required, so the missing
+  install that earlier PR bodies apologised for is no longer worth mentioning.
 - **The three adversarial reviewers** the pipeline names are in `.claude/agents/`:
   `review-skeptic`, `review-product`, `review-architecture`. They are checked in rather than
   left at user scope because a mandate naming agents a clone does not have degrades quietly
@@ -230,9 +231,12 @@ written, and the difference is worth understanding rather than trusting blindly.
   model ignoring the mandate, which is the failure mode this whole document exists to prevent.
 - **The quality gate.** `.claude/settings.json` declares a `TaskCompleted` hook running
   `.claude/hooks/aura-task-gate.sh`, which runs `.claude/agent-gate.sh`: SwiftLint strict, the
-  package suite with `--no-parallel`, and the two guard scripts. An agent that tries to call a
-  task done with any of those red gets blocked and told why. The gate does not build the app or
-  run pgTAP, both too slow per task, so CI can still fail after it passes.
+  package suite with `--no-parallel`, the guard scripts (explore-rename, terrain-style,
+  single-active-definition, monotonic-instants), and the task-gate handoff suite when that
+  machinery itself changes. An agent that tries to call a task done with any of those red gets
+  blocked and told why. The gate does not build the app or run pgTAP, both too slow per task, so
+  CI can still fail after it passes. `AURA_SKIP_AGENT_GATE=1` skips it entirely — scope that to
+  a single command when you need it; exported from a profile it recreates ROH-157 by hand.
 
 ### What does not, and cannot
 
@@ -241,18 +245,33 @@ Claude Code access to the board. They authorize it themselves in claude.ai conne
 with `/mcp` in an interactive terminal. Until they do, their sessions cannot move issues, and
 keeping the board honest is part of the flow rather than optional bookkeeping.
 
-**The global `TaskCompleted` hook, optionally.** If you install one at
-`~/.claude/hooks/agent-gate.sh` for your other projects, it will find and run this repo's
-`.claude/agent-gate.sh` as a project override on its own. The repo's wrapper detects that and
-steps aside, so the gate runs once rather than twice. You do not need the global hook for Aura;
-this only matters if you want the same gate everywhere else.
+**The global `TaskCompleted` hook, optionally.** You do not need one for Aura; the checked-in
+project hook covers this repo. A global hook at `~/.claude/hooks/agent-gate.sh` shaped like the
+one this repo's flow assumes (the stock one runs `<repo>/.claude/agent-gate.sh` as a project
+override) will also run this repo's gate, so a machine carrying both runs the gate twice per
+task. The two runs are concurrent — hooks for one event run in parallel — and serialize on
+SwiftPM's build lock; warm that costs tens of seconds, cold it is two builds back to back, and
+a failure is reported by both hooks, so expect the blocked-task text doubled.
 
-> Know how that detection works before you put anything at that path. The wrapper's whole test is
-> whether `~/.claude/hooks/agent-gate.sh` is executable. It does not check that the file is
-> registered as a hook, or that it runs the project override, or that it does anything at all. An
-> executable file there — including an empty one — makes the wrapper step aside and Aura's gate
-> stops running, with nothing in the repo changed and no message anywhere. If you install a global
-> hook, register it and confirm it actually executes this repo's `.claude/agent-gate.sh`.
+That duplication is deliberate. The wrapper used to detect the global hook and step aside, but
+its whole test was whether a file at that path was executable, so a zero-byte file there turned
+Aura's gate off entirely with no message anywhere (ROH-157), and two attempts at a trustworthy
+detection both failed adversarial review. `scripts/test-task-gate.sh` now pins the absence: no
+arrangement of that path, no settings file, and no lost executable bit makes the wrapper skip
+the gate, and CI runs that suite.
+
+If the double run bothers you, put the stand-aside in your GLOBAL hook, not here — that is the
+side where guessing wrong is safe, because the checked-in project hook still runs the gate no
+matter what the global one decides. The stock edit is one line early in
+`~/.claude/hooks/agent-gate.sh`:
+
+```sh
+# Aura carries its own TaskCompleted wrapper (ROH-157): let the project hook run the gate.
+[[ -f .claude/hooks/aura-task-gate.sh ]] && exit 0
+```
+
+Unregistering the global hook instead also works but costs you its gate in every other repo.
+Leave the project hook alone; it is what a fresh clone relies on.
 
 **Picking up changes to `.claude/` mid-session.** Project configuration is read once, at session
 start. A `git pull` that updates `.claude/settings.json`, `.claude/agents/`, or the hook scripts

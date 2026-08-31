@@ -4,7 +4,7 @@ import XCTest
 final class HomeUITests: XCTestCase {
     override func setUp() { super.setUp(); continueAfterFailure = false }
 
-    // The dominant launch action is "Where to?"; "Explore" and "Join a ride" are the demoted
+    // The dominant launch action is "Where to?"; "Explore" and "Crew" are the demoted
     // secondaries. None of them render the old "Free ride" copy.
     func testLaunchBandShowsWhereToAndExplore_notFreeRide() {
         let app = XCUIApplication.launched(onboarded: true)

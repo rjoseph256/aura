@@ -5,13 +5,24 @@ import AuraKit
 /// Owns the group-ride session for one navigation-stack entry: constructs the live
 /// `GroupRideSession` around the app's real Supabase backend/transport, drives the
 /// create-or-join call the entry asks for, and switches on `session.phase` to present
-/// the right screen. `.riding` renders `GroupNavigateContainer`, which composes the crew
-/// chrome (roster/toasts/pill) over the existing solo `NavigateHUDView`.
+/// the right screen. `.riding` forks on the ride's stored `kind` (ROH-114 D4.1): a route ride
+/// renders `GroupNavigateContainer`, which composes the crew chrome (roster/toasts/pill) over
+/// the solo `NavigateHUDView`; a destination-free ride renders the Explore cockpit
+/// (`RideHUDView`), which has no route to follow and so nothing for the navigation cockpit to
+/// show (D8).
 struct GroupRideFlowView: View {
     let entry: GroupRideEntry
 
     @Environment(AppRouter.self) private var router
+    @Environment(SettingsStore.self) private var settings
     @Environment(\.scenePhase) private var scenePhase
+
+    /// The destination's name, carried on the entry so the lobby can name it (D5.4). A guest's
+    /// entry is `.join`, which has no place — the copy handles that.
+    private var entryPlaceName: String? {
+        if case let .create(_, place) = entry { return place?.name }
+        return nil
+    }
 
     @State private var session: GroupRideSession
     @State private var displayNameStore = DisplayNameStore(backend: SupabaseGroupRideBackend())
@@ -74,7 +85,11 @@ struct GroupRideFlowView: View {
             }
 
         case .lobby:
-            GroupLobbyView(session: session)
+            // The place name comes off the entry, not the session: it is presentation, and the
+            // session deliberately knows only about the route (D5.4).
+            GroupLobbyView(session: session,
+                           placeName: entryPlaceName,
+                           isImperial: settings.units == .imperial)
 
         // Reached only when `!didEnterRiding` (the `content` `if` owns the rode-then-ended
         // case): the ride ended while the rider was still in the lobby/join flow, so there's no
@@ -115,16 +130,26 @@ struct GroupRideFlowView: View {
     /// counts as "entered riding" once this container has mounted. `.task` is keyed to
     /// this view's identity, not to phase, so the ended transition doesn't restart it.
     @ViewBuilder private var ridingContainer: some View {
-        if session.route != nil {
+        if session.rideKind == .open {
+            // A destination-free crew ride rides the Explore cockpit (D4.1/D8): there is no
+            // route to follow, so the navigation cockpit has nothing to show.
+            RideHUDView(groupSession: session)
+                .task {
+                    didEnterRiding = true
+                    await session.beginLiveSession()
+                }
+        } else if session.route != nil {
             GroupNavigateContainer(session: session)
                 .task {
                     didEnterRiding = true
                     await session.beginLiveSession()
                 }
         } else {
-            // Guarded per the brief: `.riding` with no route is unreachable in
-            // practice (create/join both set `route` before this phase), but
-            // render something sane rather than a blank screen.
+            // Now genuinely a corrupt payload: a ride whose stored kind says it HAS a route,
+            // whose route did not survive to this screen. Before ROH-114 this branch also
+            // caught destination-free rides and told their riders their route had failed to
+            // load — a dead end whose only control popped the flow view without leaving the
+            // ride, stranding the crew on a ride nobody could end.
             dismissMessage(
                 title: "Couldn't load this ride's route.",
                 systemImage: "exclamationmark.triangle"
@@ -148,7 +173,10 @@ struct GroupRideFlowView: View {
     /// valid name exists.
     private func invokeEntry() async {
         switch entry {
-        case let .create(route):
+        // The place is not passed to the session: it is presentation, read straight off the
+        // entry by the lobby (D5.4). The session's business is the route, which is nil for an
+        // open ride.
+        case let .create(route, _):
             await session.create(route: route)
         case let .join(code):
             await session.join(code: code)

@@ -115,7 +115,7 @@ struct RideSummaryView: View {
                             // `simultaneousGesture`, not an action: ShareLink owns its own tap
                             // and presents the sheet itself. This only observes that a sheet is
                             // about to exist so the upgrade can hold off.
-                            .simultaneousGesture(TapGesture().onEnded { beginModalWatch() })
+                            .simultaneousGesture(TapGesture().onEnded { beginShareSheetWatch() })
                         } else {
                             Button("Share") {}.disabled(true)
                         }
@@ -139,6 +139,7 @@ struct RideSummaryView: View {
             .padding(.bottom, AuraTheme.Spacing.xxxl)
         }
         .background(AuraTheme.background.ignoresSafeArea())
+        .modifier(SharePresentationProbeOverlay())   // ROH-178 diagnostic; DEBUG + simulated only
         .onAppear {
             computeRecord()
             startAppearance()

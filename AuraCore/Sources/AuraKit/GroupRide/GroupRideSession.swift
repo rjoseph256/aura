@@ -30,6 +30,15 @@ public final class GroupRideSession {
     public private(set) var selfUserID: UUID?
     public private(set) var joinCode: JoinCode?
     public private(set) var route: Route?
+    /// What sort of ride this is (ROH-114) — `nil` until a ride has been created or joined.
+    ///
+    /// Always the value the server **stored**, taken off the `GroupRide` that `create`/`join`
+    /// returned. It is deliberately not re-derived from `route == nil` on this side: the server
+    /// derives kind once, at create, and migration 0022 constrains the column to agree with the
+    /// route, so a second derivation here would be a second authority that can disagree with the
+    /// first (spec D1.3). The lobby names the kind from this (D5.4) and the riding container forks
+    /// on it (D4.1).
+    public private(set) var rideKind: GroupRide.Kind?
     public private(set) var peers: [RidePeer] = []
     public private(set) var isLive: Bool = false
     /// userID -> display name, populated from `backend.roster(rideID:)`.
@@ -131,18 +140,21 @@ public final class GroupRideSession {
         self.sleep = sleep ?? { try await Task.sleep(for: $0) }
     }
 
-    public func create(route inputRoute: Route) async {
+    /// Creates a ride. `inputRoute` is nil for a destination-free ride (ROH-114); the backend
+    /// then stores a genuine absence, so a joining guest gets nil rather than bytes.
+    public func create(route inputRoute: Route?) async {
         guard DisplayName.normalized(displayNameProvider()) != nil else {
             phase = .needsDisplayName
             return
         }
         do {
             let resolvedSelfUserID = try await backend.currentUserID()
-            let routeData = try JSONEncoder().encode(inputRoute)
+            let routeData = try inputRoute.map { try JSONEncoder().encode($0) }
             let ride = try await backend.createRide(route: routeData)
             rideID = ride.id
             joinCode = ride.joinCode
             route = inputRoute
+            rideKind = ride.kind
             hostID = ride.hostID
             selfUserID = resolvedSelfUserID
             isHost = (ride.hostID == resolvedSelfUserID)
@@ -168,14 +180,25 @@ public final class GroupRideSession {
             phase = .joinFailed
             return
         }
-        guard let decodedRoute = try? JSONDecoder().decode(Route.self, from: joined.route) else {
-            phase = .routeUnavailable
-            try? await backend.leaveRide(rideID: joined.ride.id)
-            return
+        // Three-way, and the two failure-looking cases must NOT be collapsed (ROH-114).
+        // nil route = an open ride, by design → proceed with `route` nil.
+        // Bytes that will not decode = a corrupt payload → error out AND leave the ride.
+        // Reading absence as corruption bounces every guest out of an open ride and removes
+        // them server-side; reading corruption as absence turns a lost route into a silent
+        // destination-free ride, which is data loss wearing a feature's clothes.
+        var decodedRoute: Route?
+        if let routeBytes = joined.route {
+            guard let decoded = try? JSONDecoder().decode(Route.self, from: routeBytes) else {
+                phase = .routeUnavailable
+                try? await backend.leaveRide(rideID: joined.ride.id)
+                return
+            }
+            decodedRoute = decoded
         }
         rideID = joined.ride.id
         joinCode = joined.ride.joinCode
         route = decodedRoute
+        rideKind = joined.ride.kind
         hostID = joined.ride.hostID
         selfUserID = resolvedSelfUserID
         isHost = (joined.ride.hostID == resolvedSelfUserID)
@@ -222,6 +245,22 @@ public final class GroupRideSession {
     /// `RideSession.ingest` (dots), so the group layer would never see names/toasts live.
     /// Idempotent (the lobby and the riding view both call it); tests may still drive
     /// `tick`/`ingest` directly for the deterministic seams.
+    ///
+    /// **`didBeginLive` is set before the first await on purpose — do not "fix" it.** Both
+    /// call sites can be in flight at once, and latching on entry is what makes the second
+    /// one return at the guard instead of opening a second subscription. Latching on success
+    /// instead would let both past and subscribe twice.
+    ///
+    /// That placement is only safe because nothing between the latch and `startManaged` can
+    /// skip the rest: `refreshRoster()` is non-throwing (it swallows the backend error with
+    /// `try?` and returns `[]`), and cancellation is cooperative with no checks on this path.
+    /// A failed roster fetch therefore costs display names, not the live layer —
+    /// `GroupRideSessionBeginLiveTests` is the guard on that. Making `refreshRoster` throwing,
+    /// or adding a cancellation check here, would turn this into a real defect: the latch
+    /// would be set with no subscription, no event loop and no ticker, and every later call
+    /// would return at the guard. Silent in both directions — no crew appears, and the rider
+    /// publishes nothing because `tick` drives `publishIfDue`. (Investigated under ROH-167,
+    /// which was filed as a live bug and closed as not one.)
     public func beginLiveSession() async {
         guard phase != .ended else { return }
         guard !didBeginLive, let session = rideSession else { return }
@@ -247,7 +286,7 @@ public final class GroupRideSession {
     /// The sole time entry point. Publishes buffered own-points when due, ages silent
     /// peers, then snapshots the inner session's state into the observable stored props
     /// so SwiftUI repaints promptly rather than waiting for the next tick.
-    public func tick(now: Date) async {
+    public func tick(now: RideInstant) async {
         guard let session = rideSession else { return }
         await session.publishIfDue(now: now, lifecycle: currentLifecycle)
         session.stalenessTick(now: now)
@@ -328,13 +367,13 @@ public final class GroupRideSession {
         return members
     }
 
-    /// Production-only: drives `tick(now:)` off a real wall clock. Tests never call this —
-    /// they drive `tick`/`ingest` directly with injected times.
+    /// Production-only: drives `tick(now:)` on a 1 s cadence. Tests never call this — they drive
+    /// `tick`/`ingest` directly with injected instants.
     func startTicker() {
         tickerTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                await self.tick(now: Date())
+                await self.tick(now: .now)
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
             }
         }

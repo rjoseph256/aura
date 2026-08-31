@@ -52,18 +52,18 @@ struct RideSessionTests {
         await session.start(roster: [])
         session.locationDidUpdate(coordinate: Coordinate(latitude: 1, longitude: 1),
                                   progressMeters: 10, speed: 5, at: t0)
-        // first call publishes (lastPublish starts at .distantPast)
-        await session.publishIfDue(now: t0, lifecycle: .foreground)
+        // first call publishes (nothing has gone out yet)
+        await session.publishIfDue(now: .coherent(t0), lifecycle: .foreground)
         #expect(transport.publishedBatches.count == 1)
         // immediately again: not due yet (interval 2s)
         session.locationDidUpdate(coordinate: Coordinate(latitude: 1, longitude: 1),
                                   progressMeters: 11, speed: 5, at: t0.addingTimeInterval(0.5))
-        await session.publishIfDue(now: t0.addingTimeInterval(0.5), lifecycle: .foreground)
+        await session.publishIfDue(now: .coherent(t0.addingTimeInterval(0.5)), lifecycle: .foreground)
         #expect(transport.publishedBatches.count == 1)
         // after the interval: publishes again
         session.locationDidUpdate(coordinate: Coordinate(latitude: 1, longitude: 1),
                                   progressMeters: 12, speed: 5, at: t0.addingTimeInterval(3))
-        await session.publishIfDue(now: t0.addingTimeInterval(3), lifecycle: .foreground)
+        await session.publishIfDue(now: .coherent(t0.addingTimeInterval(3)), lifecycle: .foreground)
         #expect(transport.publishedBatches.count == 2)
         session.stop()
     }
@@ -74,7 +74,8 @@ struct RideSessionTests {
         await session.ingest(.position(LivePositionPayload(userID: alex,
             coordinate: Coordinate(latitude: 1, longitude: 2),
             progressMeters: 100, recordedAt: t0, motionState: .moving)))
-        session.stalenessTick(now: t0.addingTimeInterval(120))   // advance time only
+        // advance time only
+        session.stalenessTick(now: .coherent(t0.addingTimeInterval(120)))
         #expect(session.peers.first { $0.userID == alex }?.status == .dropped)
         session.stop()
     }

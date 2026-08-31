@@ -15,7 +15,7 @@
 #
 #   - The package needs `swift test --no-parallel`. The global gate runs a bare
 #     `swift test`, which races the SwiftData suites against each other.
-#   - Two guard scripts CI runs have no generic equivalent.
+#   - The guard scripts CI runs have no generic equivalent.
 #   - The package lives in AuraCore/, so a change confined to the app target
 #     should still run the package suite.
 #
@@ -27,77 +27,327 @@
 
 set -uo pipefail
 
-[[ -n "${AURA_SKIP_AGENT_GATE:-}" ]] && exit 0
+# The escape hatch is legitimate but never SILENT: an exported skip from a
+# stale profile or CI step would otherwise disable the gate with no trace,
+# indistinguishable from inspected-and-passed. The wrapper forwards this into
+# the debug log on exit 0.
+if [[ -n "${AURA_SKIP_AGENT_GATE:-}" ]]; then
+  echo "aura-gate: AURA_SKIP_AGENT_GATE is set — the gate is DISABLED for this run; nothing was inspected." >&2
+  exit 0
+fi
 
 MAX_LINES=40
-TEST_TIMEOUT=900   # the package suite is large; below this a slow machine reads as a failure
+# The hooks reference is explicit that a hook reaching its 900s timeout in
+# .claude/settings.json is CANCELED, its output discarded, and it "renders no
+# decision" — and anything that is not exit 2 is a non-blocking error. A gate
+# that overruns the hook budget therefore completes the task UNGATED. So this
+# gate never trusts the harness to fail closed (ROH-159): every child runs
+# under its own bound capped by what remains of an internal budget, and once
+# the budget is exhausted the gate stops starting children and renders exit 2
+# ITSELF. The per-child bounds may sum past the budget — that is fine, the
+# deadline is what encloses the CHILDREN. Stated narrowly on purpose: the
+# survey preflight (a handful of local git metadata commands, ~40ms measured)
+# is unbounded but charged against the budget; the wrapper's stdin drain runs
+# BEFORE this process starts, so its time is charged against nothing at all
+# (SECONDS restarts here). The case where either alone exceeds the hook
+# timeout (pathological filesystem, a harness that never closes stdin) is
+# accepted — CI covers the first, and the wrapper documents the second. The default keeps 60s of margin under the hook
+# timeout for kill latency and verdict assembly; scripts/test-task-gate.sh
+# pins that arithmetic statically and the deadline behavior in a lab.
+# AURA_GATE_BUDGET is the suite's seam and carries the same trust class as
+# AURA_SKIP_AGENT_GATE (ambient env can already disable the gate outright);
+# zero, octal-looking, and non-numeric values fall back to the default.
+GATE_BUDGET="${AURA_GATE_BUDGET:-840}"
+[[ "$GATE_BUDGET" =~ ^[1-9][0-9]*$ ]] || GATE_BUDGET=840
+TEST_TIMEOUT=600
+LINT_TIMEOUT=300
+GUARD_TIMEOUT=60
 
 repo="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 cd "$repo" || exit 0
+# Name the tree being certified: the repo comes from cwd (see the wrapper
+# header on split authority), and a session whose cwd diverged from where the
+# task's edits landed would otherwise pass with nothing reconstructable. On a
+# pass this reaches only the debug log through the wrapper.
+echo "aura-gate: inspecting $repo" >&2
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# ------------------------------------------------------------- review baseline
+# The diff baseline is the shared branch this repo publishes to: origin/HEAD
+# first (whatever the remote actually calls its default), then the conventional
+# names, then local main/master for repos with no remote at all. A local name
+# is a legitimate diff base but proves nothing about what was published — the
+# fail-safe below treats it that way.
+base="" base_name=""
+for cand in origin/HEAD origin/main origin/master main master; do
+  if base="$(git rev-parse -q --verify "$cand^{commit}" 2>/dev/null)" && [[ -n "$base" ]]; then
+    base_name="$cand"; break
+  fi
+  base=""
+done
+head_sha="$(git rev-parse -q --verify 'HEAD^{commit}' 2>/dev/null || true)"
+# The published-tip check compares HEAD against EVERY origin candidate, not
+# just the first that resolved: a stale origin/HEAD naming a superset branch
+# would otherwise pick a baseline that already contains HEAD, silencing the
+# three-dot diff and the SHA match at once — reopening the exact hole this
+# section closes. Any origin ref equal to HEAD means this state is published.
+published_name=""
+if [[ -n "$head_sha" ]]; then
+  for cand in origin/HEAD origin/main origin/master; do
+    if tip="$(git rev-parse -q --verify "$cand^{commit}" 2>/dev/null)" && [[ "$tip" == "$head_sha" ]]; then
+      # Name the branch, not the symref, in what the agent reads.
+      if [[ "$cand" == origin/HEAD ]] && t="$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null)"; then
+        cand="${t#refs/remotes/}"
+      fi
+      published_name="$cand"; break
+    fi
+  done
+fi
+
 # ------------------------------------------------------------- changed-file survey
-# Nothing touched means nothing to verify. Research, planning, and review tasks
-# complete without paying for a build.
+# Nothing touched means nothing to verify — except at the published tip, where
+# that inference inverts; see the fallback below. Research, planning, and review
+# tasks elsewhere complete without paying for a build.
 changed() {
-  { git status --porcelain 2>/dev/null | sed -E 's/^.{3}//' | sed -E 's/^.* -> //'
-    base="$(git rev-parse --verify -q origin/main || git rev-parse --verify -q main)" 2>/dev/null
-    [[ -n "${base:-}" ]] && git diff --name-only "$base...HEAD" 2>/dev/null
-  } | sed '/^$/d' | sort -u
+  # -uall: without it an untracked directory collapses to one "dir/" entry, so a
+  # brand-new source folder never matches the \.swift$ keys below and the gate
+  # skips lint and tests for it. Rename lines ("old -> new") must keep BOTH sides:
+  # `git mv Foo.swift Foo.bak` deletes a Swift file from the build, and surveying
+  # only the destination classifies that as a non-Swift change (--no-renames keeps
+  # the committed case honest the same way). Paths with spaces or non-ASCII arrive
+  # C-quoted ("like this"), so the trailing quote defeats the $-anchored keys too;
+  # the last sed strips the quotes.
+  { git --no-optional-locks status --porcelain -uall 2>/dev/null \
+      | sed -E 's/^.{3}//' | sed -E 's/ -> /\n/'
+    [[ -n "$base" ]] && git diff --name-only --no-renames "$base...HEAD" 2>/dev/null
+  } | sed -E 's/^"(.*)"$/\1/' | sed '/^$/d' | sort -u
 }
 
 files="$(changed)"
-[[ -z "$files" ]] && exit 0
+
+# ---------------------------------------- published work must not skip (ROH-156)
+# The survey keys off "what differs from the baseline", and PUSHING MOVES THE
+# BASELINE: the moment work reaches the shared branch, the three-dot diff goes
+# empty — at exactly the moment the code left the machine unverified. So when
+# HEAD *is* the published tip, the survey widens to the whole tracked tree.
+#
+# The trigger is a SHA comparison, deliberately not a branch name and not
+# survey emptiness. A branch name discriminates nothing: a feature branch
+# pushed straight to origin/main is byte-identical in git to one that got there
+# by a reviewed merge, and a detached HEAD at the tip is the same state with no
+# name at all. And emptiness self-disarms: the gate's own `swift test` dirties
+# AuraCore/Package.resolved (ROH-182), and that one stray non-Swift line would
+# otherwise suppress the fallback forever on the primary checkout.
+#
+# Costs, decided deliberately: any task completed at the published tip — the
+# post-merge fast-forwarded main checkout included — pays the full suite, and a
+# red main blocks completions there that changed nothing (loudly, which is the
+# point: the alternative was certifying a broken published tree by silence).
+# The worktree/branch flow keeps most task completions off the published tip.
+#
+# Known residuals, accepted: (a) published-but-uninspected history that later
+# commits bury — HEAD strictly ahead of the tip by a follow-up commit, or
+# strictly behind after someone else's merge — is not re-inspected here. A
+# stateless gate cannot tell inspected-published from uninspected-published
+# history, and an ancestor-based trigger would whole-tree-survey every ordinary
+# feature branch. (b) sparse checkouts survey index paths that may be absent on
+# disk, and the affected child then fails loudly rather than accurately. CI
+# covers both.
+#
+# A repo whose baseline is not an origin ref even though an origin remote
+# exists (a single-branch clone of a feature branch; deleted or never-fetched
+# origin refs shadowed by a local main) cannot certify "nothing new to verify",
+# so it fails safe into the same whole-tree survey. That shadowing would
+# otherwise be a one-command silent disable, the ROH-157 class.
+fallback=""
+if [[ -n "$published_name" ]]; then
+  fallback="HEAD is the published tip of $published_name"
+elif [[ "$base_name" != origin/* ]] && git remote get-url origin >/dev/null 2>&1; then
+  fallback="an origin remote exists but no origin baseline resolves (tried origin/HEAD, origin/main, origin/master)"
+fi
+if [[ -n "$fallback" ]]; then
+  # ls-files -z disables C-quoting entirely (that is the point of -z), so this
+  # half needs no dequote pass; the sort -u dedupes it against the survey half.
+  files="$({ printf '%s\n' "$files"; git ls-files -z 2>/dev/null | tr '\0' '\n'; } | sed '/^$/d' | sort -u)"
+  if [[ -n "$files" ]]; then
+    count="$(wc -l <<<"$files" | tr -d ' ')"
+    echo "aura-gate: $fallback — surveying the whole tracked tree instead of only the change survey ($count files)." >&2
+  fi
+fi
+if [[ -z "$files" ]]; then
+  # A silent no-op is indistinguishable from inspected-and-passed, and only one
+  # of those is safe — so the skip says what it skipped and why. The wrapper
+  # forwards this on success into the debug log (only exit 2 reaches the agent,
+  # and blocking on a benign skip would be worse than the message being quiet).
+  if [[ -n "$fallback" ]]; then
+    echo "aura-gate: nothing to inspect — the whole-tree survey found no files at all; skipping lint, tests, and guards." >&2
+  elif [[ -n "$base" ]]; then
+    echo "aura-gate: nothing to inspect — clean tree and no file changes relative to $base_name; skipping lint, tests, and guards." >&2
+  else
+    echo "aura-gate: nothing to inspect — clean tree and no resolvable baseline; skipping lint, tests, and guards." >&2
+  fi
+  exit 0
+fi
 
 has() { grep -qE "$1" <<<"$files"; }
 
 failures=()
+deadline_hit=""
+# One capture DIRECTORY cleaned on exit, one file per child inside it. Per
+# child, not shared: a writer that escaped the group kill (the setsid
+# residual) still holds its fd, and with a shared file its stale output lands
+# inside the NEXT child's failure report at an old offset. Per-child files
+# make orphan output land in a file nobody reads again.
+CAPDIR="$(mktemp -d 2>/dev/null)" || CAPDIR=""
+[[ -n "$CAPDIR" ]] && trap 'rm -rf "$CAPDIR"' EXIT
+CHILD_N=0
 
-run() {  # run <label> <dir> <cmd...>
-  local label="$1" dir="$2"; shift 2
-  local out rc
-  out="$(cd "$dir" 2>/dev/null && "$@" 2>&1)"; rc=$?
-  [[ $rc -eq 0 ]] && return 0
-  failures+=("--- ${label} (exit ${rc}) ---"$'\n'"$(tail -n "$MAX_LINES" <<<"$out")")
+# The perl fallback matters: stock macOS ships neither timeout nor gtimeout, and
+# an unbounded swift test is exactly what pushes the hook past ITS timeout, which
+# completes the task ungated (see the budget comment above).
+#
+# The fallback is a fork/setpgrp/KILL-the-group watchdog, not a bare
+# `alarm; exec`, for three review-confirmed reasons: (a) an exec'd child can
+# trap or cancel SIGALRM (bash's `read -t` does) and erase its own bound while
+# reporting success; (b) a single-process signal leaves grandchildren alive —
+# a killed swift test's SwiftPM workers keep holding the .build lock and wedge
+# the NEXT gate run; (c) a failed exec fell off the end of the perl program and
+# returned 0, a fail-open. KILL to the process group closes all three; a child
+# that setsid()s itself out of the group is the accepted residual. timeout and
+# gtimeout get -k 5 for the same reason: SIGTERM alone is opt-out.
+tmo() {
+  if have timeout; then timeout -k 5 "$@"
+  elif have gtimeout; then gtimeout -k 5 "$@"
+  else
+    perl -e '
+      my $t = shift;
+      my $pid = fork; defined $pid or exit 127;
+      if (!$pid) { setpgrp 0, 0; exec @ARGV or exit 127 }
+      $SIG{ALRM} = sub { kill "KILL", -$pid };
+      alarm $t;
+      my $r; 1 until (($r = waitpid($pid, 0)) > 0 or $r < 0);
+      exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
+    ' "$@"
+  fi
 }
 
-tmo() { if have timeout; then timeout "$@"; elif have gtimeout; then gtimeout "$@"; else shift; "$@"; fi; }
+run() {  # run <label> <bound-seconds> <dir> <cmd...>
+  local label="$1" bound="$2" dir="$3"; shift 3
+  # SECONDS is bash's clock since the gate started; the deadline check runs
+  # before every child so an exhausted budget becomes a recorded, blocking
+  # failure — never a silent harness cancellation.
+  local rem=$(( GATE_BUDGET - SECONDS ))
+  if (( rem <= 0 )); then
+    deadline_hit=1
+    failures+=("--- ${label} (not run) ---"$'\n'"the gate's ${GATE_BUDGET}s internal deadline was reached before this step could start")
+    return
+  fi
+  local capped=""
+  if (( bound > rem )); then bound=$rem; capped=" — bound capped at ${rem}s by the gate's internal deadline"; fi
+  # Never hand tmo a zero or negative bound: `timeout 0` DISABLES the timeout,
+  # which would turn an off-by-one at the deadline into an unbounded child.
+  (( bound < 1 )) && bound=1
+  # Capture through a FILE, not a $(...) pipe. A killed child can leave
+  # grandchildren (a test runner's workers) holding the pipe's write end, and a
+  # substitution then waits for THEIR exit, not the child's — observed live as
+  # a 31s wall on a 2s budget in the suite's deadline lab. A file redirect
+  # returns when the direct child exits; orphans append to the file harmlessly.
+  # The subshell keeps the cd contained and captures a failed cd as error text.
+  local out rc cap
+  [[ -n "$CAPDIR" ]] || { failures+=("--- ${label} (setup) ---"$'\n'"mktemp failed; cannot capture output"); return; }
+  CHILD_N=$((CHILD_N + 1)); cap="$CAPDIR/child-$CHILD_N"
+  local t0=$SECONDS
+  ( cd "$dir" && tmo "$bound" "$@" ) >"$cap" 2>&1; rc=$?
+  local celapsed=$(( SECONDS - t0 ))
+  out="$(tail -n "$MAX_LINES" "$cap" 2>/dev/null)"
+  [[ $rc -eq 0 ]] && return 0
+  # A kill at the bound is not a test failure and must not read like one: an
+  # unlabeled 124/137/142 over forty lines of passing output reads as flake,
+  # and the natural response (retry) burns another full budget. The elapsed
+  # check keeps the label honest — a 137 from an OOM kill mid-run is NOT a
+  # timeout, and mislabeling it sends the agent to the wrong fix.
+  local note=""
+  case $rc in
+    124|137|142)
+      if (( celapsed >= bound )); then
+        note=" — timed out after ${bound}s"
+        [[ -n "$capped" ]] && deadline_hit=1
+      fi ;;
+  esac
+  failures+=("--- ${label} (exit ${rc})${note}${capped} ---"$'\n'"$out")
+}
 
 # ---------------------------------------------------------------------- Swift
 # Fail open when the toolchain is missing rather than blocking on a machine that
 # was never going to be able to run this.
 if has '\.swift$'; then
   # --quiet, or the per-file progress stream is all that survives the tail.
-  have swiftlint && run "swiftlint --strict" . swiftlint lint --strict --quiet
-  have swift && run "swift test --no-parallel" AuraCore tmo "$TEST_TIMEOUT" swift test --no-parallel
+  have swiftlint && run "swiftlint --strict" "$LINT_TIMEOUT" . swiftlint lint --strict --quiet
+  have swift && run "swift test --no-parallel" "$TEST_TIMEOUT" AuraCore swift test --no-parallel
 fi
 
 # ---------------------------------------------------------------------- guards
 # All three are cheap greps over the tree, so they run whenever anything they inspect
 # could have moved. The terrain guard also owns the bundled style JSON.
-if has '\.swift$'; then
-  run "explore rename guard" . bash scripts/check-explore-rename.sh
+# The guards key on the files they inspect AND on the guard scripts
+# themselves: a rewrite of scripts/check-*.sh that ships unexercised can make
+# a guard vacuous, after which it is permanently green and permanently blind —
+# the ROH-157 shape one layer down. Running each guard exercises its self-test
+# on the very change that touched it. (The ROH-159 round-1 commit's own file
+# set matched no key at all; the architecture review caught it.)
+GUARD_KEY='\.swift$|scripts/check-[a-z0-9-]+\.sh$'
+if has "$GUARD_KEY"; then
+  run "explore rename guard" "$GUARD_TIMEOUT" . bash scripts/check-explore-rename.sh
 fi
-if has '\.swift$|AuraTerrainStyle\.json$'; then
-  run "terrain style guard" . bash scripts/check-terrain-style.sh
+if has "$GUARD_KEY|AuraTerrainStyle\\.json\$"; then
+  run "terrain style guard" "$GUARD_TIMEOUT" . bash scripts/check-terrain-style.sh
 fi
-if has '\.swift$'; then
-  run "single active-time definition" . bash scripts/check-single-active-definition.sh
+if has "$GUARD_KEY"; then
+  run "single active-time definition" "$GUARD_TIMEOUT" . bash scripts/check-single-active-definition.sh
 fi
-if has '\.swift$'; then
-  run "monotonic instant guard" . bash scripts/check-monotonic-instants.sh
+if has "$GUARD_KEY"; then
+  run "monotonic instant guard" "$GUARD_TIMEOUT" . bash scripts/check-monotonic-instants.sh
+fi
+# Keyed to the handoff machinery rather than to Swift: the wrapper, this gate,
+# the suite, and the settings file that registers the hook are all pieces whose
+# movement can stop the gate running, so any of them moving re-runs the suite
+# (which also pins the registration in settings.json). The literal bound stays
+# a literal so the suite can pin it statically.
+if has 'aura-task-gate\.sh$|test-task-gate\.sh$|\.claude/agent-gate\.sh$|\.claude/settings\.json$'; then
+  run "task-gate handoff guard" 120 . bash scripts/test-task-gate.sh
 fi
 
 # --------------------------------------------------------------------- verdict
 [[ ${#failures[@]} -eq 0 ]] && exit 0
 
 {
-  echo "Task blocked: Aura's quality gate failed on your changes."
-  echo
-  printf '%s\n\n' "${failures[@]}"
-  echo "Fix these, re-run the failing command yourself to confirm it passes, then mark"
-  echo "the task complete again. Do not disable or work around the gate."
+  if [[ -n "$fallback" ]]; then
+    echo "Task blocked: Aura's quality gate failed on the whole-tree survey ($fallback)."
+    echo "The failures below may predate your task — the published tree itself is broken."
+    echo
+    printf '%s\n\n' "${failures[@]}"
+    echo "Fix what you can. If a failure predates your work and cannot be fixed in this"
+    echo "task, AURA_SKIP_AGENT_GATE=1 is the documented escape hatch — use it once and"
+    echo "say so where the task is tracked, never silently."
+  else
+    echo "Task blocked: Aura's quality gate failed on your changes."
+    echo
+    printf '%s\n\n' "${failures[@]}"
+    echo "Fix these, re-run the failing command yourself to confirm it passes, then mark"
+    echo "the task complete again. Do not disable or work around the gate."
+  fi
+  if [[ -n "$deadline_hit" ]]; then
+    echo
+    echo "The gate hit its ${GATE_BUDGET}s internal deadline and blocked rather than let"
+    echo "the harness cancel it (a canceled hook renders no decision, and the task would"
+    echo "have completed ungated — ROH-159). Entries marked '(not run)' have nothing to"
+    echo "fix; the budget ran out before them. If this machine legitimately needs longer"
+    echo "(cold build, fresh clone, toolchain bump), warm the build by running the slow"
+    echo "command yourself, then complete the task again. If that cannot work,"
+    echo "AURA_SKIP_AGENT_GATE=1 is the documented escape hatch — use it once and say so"
+    echo "where the task is tracked, never silently."
+  fi
   echo
   echo "Note this gate does not build the app or run pgTAP. CI still can fail after it passes."
 } >&2

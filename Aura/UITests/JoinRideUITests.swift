@@ -11,7 +11,7 @@ final class JoinRideUITests: XCTestCase {
         XCTAssertTrue(home.whereTo.waitForExistence(timeout: 30))
         let joinButton = home.joinRideButton
         XCTAssertTrue(joinButton.waitForExistence(timeout: 5), "Join a ride button missing")
-        // "Join a ride" is a demoted secondary in the always-visible launch band.
+        // "Crew" (identifier `home.join`) is a demoted secondary in the always-visible launch band.
         if !joinButton.isHittable { app.swipeUp() }
         joinButton.tap()
 

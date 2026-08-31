@@ -239,40 +239,46 @@ extension RideSummaryView {
     /// (the upgrade resolves ~1.5 s after the summary appears on wifi, usually before a rider
     /// can even reach the button).
     private func applyOrDeferUpgrade(_ upgraded: RideShareImage) {
-        // Two questions, and the second one is ROH-185. The latch covers the window before the
-        // sheet exists — set on the tap, when there is nothing to observe yet. It does not cover
-        // the window after `beginModalWatch` gives up: that wait is bounded at 20 × 100 ms, and a
-        // cold first share can take longer, so `shareSheetUp` goes false under a sheet that is
-        // very much alive. Assigning there is what the 2026-07-31 device pass watched dismiss a
-        // presented sheet. Reading UIKit at assignment time closes it, and the retry is what makes
-        // late landings routine enough to matter.
+        // Two questions, and the second one is ROH-185 — which ROH-178 named as the half it did
+        // not fix: "the presentation wait is one-shot and bounded at 2 s, so a sheet that presents
+        // later than that leaves shareSheetUp false."
         //
-        // `isPresenting` is true for ANY modal, not only the share sheet — a permission alert or
-        // an incoming call defers too. That is the safe direction: deferring costs a second of
-        // fallback card, assigning under a modal can take the rider's half-written message with it.
-        guard !shareSheetUp, !SharePresentation.isPresenting else {
+        // The latch answers "did the rider tap Share", and it is set before there is anything to
+        // observe. It stops answering once `beginShareSheetWatch` gives up waiting at 20 × 100 ms,
+        // which a cold first share can outlast — and assigning under a live sheet is what the
+        // 2026-07-31 device pass watched dismiss one. So ask UIKit again at the moment of
+        // assignment, when there IS something to observe.
+        //
+        // `isPresentingShareSheet`, never a broader predicate. ROH-178 measured the naive reading
+        // (`presentedViewController != nil`) at chain depth 1 on the History path with no sheet
+        // tapped, because `RideSummaryView` is itself the presented sheet there — which would
+        // defer every upgrade for the summary's whole lifetime. Widening this to "any modal"
+        // reintroduces that, and it is a tempting mistake: an alert or an incoming call really
+        // would be safer to defer under. Not safe enough to pay for it on every History ride.
+        guard !shareSheetUp, !SharePresentation.isPresentingShareSheet else {
             deferredUpgrade = upgraded
             // A deferral nobody drains is worse than the swap: the row would say "Map added"
-            // over a card with no map, permanently. The latch already has a releaser; a modal
-            // the latch never knew about does not, so start one. No-ops when the latch is up.
-            beginModalWatch()
+            // over a card with no map, permanently. The latch already has a releaser; a sheet
+            // that came up after the latch gave up does not, so start one. No-ops when the
+            // latch is up.
+            beginShareSheetWatch()
             return
         }
         shareImage = upgraded
     }
 
-    /// Watches a modal's lifetime and releases any held upgrade when it ends.
+    /// Watches the share sheet's lifetime and releases any held upgrade when it ends.
     ///
     /// Two entry conditions, deliberately. The Share tap calls it *predictively* — no sheet exists
     /// yet, which is why the first loop is a bounded wait for one to appear. `applyOrDeferUpgrade`
-    /// calls it *observationally*, having just read a live modal, so that wait is satisfied on the
-    /// first poll.
+    /// calls it *observationally*, having just read a live sheet, so that wait is satisfied on
+    /// the first poll.
     ///
     /// It polls `presentedViewController` because SwiftUI gives `ShareLink` no presentation
     /// binding to observe — there is no callback, and the sheet is a system-owned
-    /// `UIActivityViewController`. The poll stops as soon as the modal closes, so it costs
+    /// `UIActivityViewController`. The poll stops as soon as the sheet closes, so it costs
     /// nothing outside the seconds one is actually up.
-    func beginModalWatch() {
+    func beginShareSheetWatch() {
         guard !shareSheetUp else { return }
         shareSheetUp = true
         Task {
@@ -281,10 +287,10 @@ extension RideSummaryView {
             var appeared = false
             for _ in 0..<20 {
                 try? await Task.sleep(for: .milliseconds(100))
-                if SharePresentation.isPresenting { appeared = true; break }
+                if SharePresentation.isPresentingShareSheet { appeared = true; break }
             }
             if appeared {
-                while SharePresentation.isPresenting, !Task.isCancelled {
+                while SharePresentation.isPresentingShareSheet, !Task.isCancelled {
                     try? await Task.sleep(for: .milliseconds(250))
                 }
             }
@@ -294,21 +300,5 @@ extension RideSummaryView {
                 self.deferredUpgrade = nil
             }
         }
-    }
-}
-
-/// Whether the app is currently presenting a modal (the share sheet, in this view's case).
-///
-/// `ShareLink` exposes no presentation state, so this reads it from UIKit. Deliberately not a
-/// seam: it answers a question about the live UIKit window, which a stub could only lie about.
-@MainActor
-private enum SharePresentation {
-    static var isPresenting: Bool {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .first { $0.isKeyWindow }?
-            .rootViewController?
-            .presentedViewController != nil
     }
 }

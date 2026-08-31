@@ -6,13 +6,14 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var rides: [UUID: GroupRide] = [:]
         var members: [UUID: [UUID]] = [:]   // rideID -> [userID]
         var codes: [String: UUID] = [:]     // joinCode -> rideID
-        var routes: [UUID: Data] = [:]       // rideID -> route bytes
+        var routes: [UUID: Data] = [:]       // rideID -> route bytes; absent = open ride
         var names: [UUID: String] = [:]      // userID -> display name
         var leaveCalled = false              // test spy
         var forceCreateError: GroupRideError?    // test spy
         var forceRenameError: GroupRideError?    // test spy
         var forceDeleteError: GroupRideError?    // test spy
         var forceStartError: GroupRideError?     // test spy
+        var forceRosterError: GroupRideError?    // test spy
         var forceEndError: GroupRideError?       // test spy, one-shot: cleared on throw so a retry succeeds
         var hangEndLeave = false                          // test spy: park endRide/leaveRide until cancelled
         var onEndLeaveEntered: (@Sendable () -> Void)?    // test spy: fired when end/leave is entered
@@ -47,11 +48,16 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
         return uid
     }
-    public func createRide(route: Data) async throws -> GroupRide {
+    public func createRide(route: Data?) async throws -> GroupRide {
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
         if let forced = store.forceCreateError { throw forced }
         let code = JoinCode(rawValue: "ABCDEFGH")!   // fixed valid code for the fake (one ride per store)
+        // `kind` is derived here, from the absence of route bytes, exactly as `create_ride` derives
+        // it in SQL (`0021_open_rides.sql`). A fake that stamped a fixed `.route` instead would
+        // report every ride as a route ride — including the route-less ones this whole feature is
+        // about — and the lifecycle rebuilds below would then faithfully carry the wrong answer.
         let ride = GroupRide(id: UUID(), hostID: uid, joinCode: code,
+                             kind: route == nil ? .open : .route,
                              status: .active, createdAt: Date(timeIntervalSince1970: 0))
         store.rides[ride.id] = ride
         store.members[ride.id] = [uid]
@@ -65,15 +71,16 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
               let ride = store.rides[rideID] else { throw GroupRideError.joinFailed }
         var members = store.members[rideID] ?? []
         if members.contains(uid) {
-            return JoinedRide(ride: ride, route: store.routes[rideID] ?? Data())
+            return JoinedRide(ride: ride, route: store.routes[rideID])
         }       // idempotent
         guard members.count < 8 else { throw GroupRideError.joinFailed }
         members.append(uid)
         store.members[rideID] = members
-        return JoinedRide(ride: ride, route: store.routes[rideID] ?? Data())
+        return JoinedRide(ride: ride, route: store.routes[rideID])
     }
     public func roster(rideID: UUID) async throws -> [RosterMember] {
-        (store.members[rideID] ?? []).map {
+        if let forced = store.forceRosterError { throw forced }
+        return (store.members[rideID] ?? []).map {
             RosterMember(userID: $0, displayName: store.names[$0] ?? "Rider",
                          role: $0 == store.rides[rideID]?.hostID ? .host : .member)
         }
@@ -87,9 +94,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
         guard let ride = store.rides[rideID], ride.hostID == uid else { throw GroupRideError.notHost }
         guard ride.startedAt == nil, ride.endedAt == nil else { return }   // idempotent
-        store.rides[rideID] = GroupRide(id: ride.id, hostID: ride.hostID, joinCode: ride.joinCode,
-                                        status: ride.status, createdAt: ride.createdAt,
-                                        startedAt: Date(timeIntervalSince1970: 10), endedAt: ride.endedAt)
+        store.rides[rideID] = ride.replacing(startedAt: Date(timeIntervalSince1970: 10))
     }
 
     public func rideStatus(rideID: UUID) async throws -> RideLifecycleStatus {
@@ -104,9 +109,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         if let forced = store.forceEndError { store.forceEndError = nil; throw forced }
         guard let uid = store.lock.withLock({ store.currentUserID }), let ride = store.rides[rideID], ride.hostID == uid
         else { throw GroupRideError.notHost }
-        store.rides[rideID] = GroupRide(id: ride.id, hostID: ride.hostID, joinCode: ride.joinCode,
-                                        status: .ended, createdAt: ride.createdAt,
-                                        startedAt: ride.startedAt, endedAt: Date(timeIntervalSince1970: 20))
+        store.rides[rideID] = ride.replacing(status: .ended, endedAt: Date(timeIntervalSince1970: 20))
     }
     public func leaveRide(rideID: UUID) async throws {
         store.endLeaveCallCount += 1

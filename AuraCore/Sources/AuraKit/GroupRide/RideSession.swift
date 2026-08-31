@@ -24,6 +24,16 @@ public protocol GroupLocationSink: AnyObject {
 /// Thin by design — all logic lives in the pure AuraCore types. Time is injected via
 /// `publishIfDue(now:)` / `stalenessTick(now:)` (the owner's ticker supplies it), so the
 /// session contains no `Date()` and no `Task.sleep`.
+///
+/// Those two take a `RideInstant` rather than a `Date` because the publish cadence is measured on
+/// its monotonic half (ROH-151). The owner reads the clock **once** per tick and hands the same
+/// instant to both, matching `RideSessionCoordinator`'s ticker.
+///
+/// **Presence staleness is still wall-clock, and still compares against a wire timestamp**
+/// (`stalenessTick` -> `LivePresenceState.tick` -> `RidePeer.lastUpdate`, which is the publishing
+/// device's `recordedAt`). That is ROH-148, deliberately left open here: the review of this change
+/// established it cannot be fixed by swapping clocks, because a snapshot row's age has no
+/// clock-proof client-side answer. See ROH-152.
 @MainActor
 public final class RideSession: GroupLocationSink {
     private let rideID: UUID
@@ -39,7 +49,11 @@ public final class RideSession: GroupLocationSink {
 
     private var speedSamples: [SpeedSample] = []
     private var ownMotion: MotionState = .moving
-    private var lastPublish: Date = .distantPast
+    /// The monotonic reading at the last successful drain, or `nil` if nothing has gone out yet
+    /// (ROH-151). Not a `Date`: subtracting two wall stamps let a backward NTP step drive the
+    /// interval negative, which silenced the rider's dot on everyone else's map for the width of
+    /// the step.
+    private var lastPublish: TimeInterval?
     /// Most recent progress the rider published. Held across a pause, when the coordinator
     /// sends `nil` progress (see `GroupLocationSink`).
     private var lastProgressMeters: Double = 0
@@ -126,14 +140,15 @@ public final class RideSession: GroupLocationSink {
 
     /// Called by the owner's ticker. Publishes the buffered own-points when the cadence
     /// interval (for the current motion + lifecycle) has elapsed.
-    public func publishIfDue(now: Date, lifecycle: RideLifecycle) async {
+    public func publishIfDue(now instant: RideInstant, lifecycle: RideLifecycle) async {
         guard !outbox.isEmpty else { return }
+        let now = instant.monotonicSeconds
         // Duration -> seconds WITHOUT truncation. `.components.seconds` is whole seconds
         // only, so a sub-second foregroundInterval (the spec's "lowerable to ~1s") would
         // otherwise collapse to 0 and defeat the throttle.
         let c = cadence.interval(for: ownMotion, lifecycle: lifecycle).components
         let interval = Double(c.seconds) + Double(c.attoseconds) / 1e18
-        guard now.timeIntervalSince(lastPublish) >= interval else { return }
+        if let lastPublish, now - lastPublish < interval { return }
         let batch = outbox.drain()
         lastPublish = now
         do {
@@ -145,8 +160,8 @@ public final class RideSession: GroupLocationSink {
     }
 
     /// Called by the owner's ticker to age silent peers to `dropped`.
-    public func stalenessTick(now: Date) {
-        presence.tick(now: now)
+    public func stalenessTick(now instant: RideInstant) {
+        presence.tick(now: instant.date)
     }
 
     public func stop() {

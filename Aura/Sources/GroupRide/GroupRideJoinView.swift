@@ -2,12 +2,22 @@ import SwiftUI
 import UIKit
 import AuraCore
 
-/// The "Join a ride" screen: an 8-character code entry rendered as individual boxes, a
-/// paste affordance, and a single "Join" CTA. Validation is purely local — `JoinCode(rawValue:)`
-/// decides whether the code is well-formed, and "Join" only enables once it is. The CTA pushes
-/// `.groupRide(.join(code))`; any *server-side* rejection (wrong code / full / ended / rate
-/// limited) is a distinct failure surfaced afterward by `GroupRideFlowView`'s `.joinFailed`
-/// phase — this view never guesses at that outcome.
+/// The Crew screen: **two** ways into a group ride. Start one with no destination (ROH-114), or
+/// enter the 8-character code a host shared. Code validation is purely local —
+/// `JoinCode(rawValue:)` decides whether it is well-formed, and "Join" only enables once it is.
+/// Either action replaces this screen with `.groupRide(…)`; any *server-side* rejection (wrong
+/// code / full / ended / rate limited) is a distinct failure surfaced afterward by
+/// `GroupRideFlowView`'s `.joinFailed` phase — this view never guesses at that outcome.
+///
+/// It does not autofocus. A host arriving to *start* a ride used to be met by a keyboard, eight
+/// code boxes and a disabled Join, which read as "you are in the wrong place" (D2.1).
+///
+/// **Known gap, deferred:** once the keyboard is up it still cannot be dismissed. The background
+/// tap gesture re-focuses, and there is no scroll view for `scrollDismissesKeyboard`. Inverting
+/// that gesture is not the fix — the real `TextField` is `.opacity(0.02)` with no height behind
+/// boxes that are `.allowsHitTesting(false)`, so dismissing on background tap would shrink the
+/// entry target to a ~22 pt strip and make a near-miss actively unfocus. It needs the scroll
+/// view; that is D2.1's third fix and belongs with plan 3's copy pass.
 struct GroupRideJoinView: View {
     @Environment(AppRouter.self) private var router
     @Environment(\.dismiss) private var dismiss
@@ -37,8 +47,16 @@ struct GroupRideJoinView: View {
             header
                 .padding(.top, AuraTheme.Spacing.xl)
 
+            startOpenRideButton
+                .padding(.top, AuraTheme.Spacing.xl)
+                .padding(.horizontal, AuraTheme.Spacing.xxl)
+
+            orDivider
+                .padding(.top, AuraTheme.Spacing.lg)
+                .padding(.horizontal, AuraTheme.Spacing.xxl)
+
             codeEntry
-                .padding(.top, AuraTheme.Spacing.xxl)
+                .padding(.top, AuraTheme.Spacing.lg)
                 .padding(.horizontal, AuraTheme.Spacing.xxl)
 
             pasteButton
@@ -52,9 +70,11 @@ struct GroupRideJoinView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AuraTheme.background.ignoresSafeArea())
+        // Tap anywhere to focus the code field. NOT inverted to dismiss — see the type's doc
+        // comment: the real TextField is a ~22 pt strip, so dismiss-on-background-tap would make
+        // a near-miss unfocus rather than focus.
         .contentShape(Rectangle())
         .onTapGesture { isFocused = true }
-        .task { isFocused = true }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
@@ -67,15 +87,45 @@ struct GroupRideJoinView: View {
 
     private var header: some View {
         VStack(spacing: AuraTheme.Spacing.xs) {
-            Text("Join a ride")
+            Text("Crew")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AuraTheme.textPrimary)
-            Text("Enter the 8-character code your host shared")
+            Text("Start a ride together, or enter a code to join one")
                 .font(.subheadline)
                 .foregroundStyle(AuraTheme.textSecondary)
                 .multilineTextAlignment(.center)
         }
         .padding(.horizontal, AuraTheme.Spacing.xxl)
+    }
+
+    // MARK: - Start an open ride
+
+    /// Starts a crew ride with no destination (ROH-114 D2.2).
+    ///
+    /// `replaceTopWithGroupRide`, never `startGroupRide`: the latter *pushes*, leaving this code
+    /// screen underneath, so Back from the lobby would land the host on a code form with a
+    /// keyboard; and signed out it stashes the intent without popping, so sign-in resumes on top
+    /// of this stale screen. `replaceTopWithGroupRide` exists for exactly this and applies the
+    /// same sign-in gate.
+    private var startOpenRideButton: some View {
+        Button("Start a ride") {
+            isFocused = false
+            router.replaceTopWithGroupRide(.create(route: nil, place: nil))
+        }
+        .buttonStyle(.ctaPrimary)
+        .accessibilityIdentifier("crew.startOpenRide")
+    }
+
+    private var orDivider: some View {
+        HStack(spacing: AuraTheme.Spacing.sm) {
+            Rectangle().fill(AuraTheme.border).frame(height: 1)
+            Text("or join with a code")
+                .font(.caption)
+                .foregroundStyle(AuraTheme.textSecondary)
+                .fixedSize()
+            Rectangle().fill(AuraTheme.border).frame(height: 1)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Code entry

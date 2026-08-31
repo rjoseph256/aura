@@ -197,6 +197,10 @@ jobs:
         run: bash scripts/check-single-active-definition.sh
       - name: Monotonic instant guard
         run: bash scripts/check-monotonic-instants.sh
+      # ROH-157. Nothing else can catch this one: when the wrapper stops running the
+      # gate, every other guard on this list silently stops running locally too.
+      - name: Task-gate handoff guard
+        run: bash scripts/test-task-gate.sh
 
   db-tests:
     name: DB tests (pgTAP)
