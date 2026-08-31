@@ -95,6 +95,20 @@ private enum Ceiling {
             if isFirst { try? await Task.sleep(for: .seconds(3600)) }
         }
     }
+
+    /// The inverse: the owner's arm fires at once and no later arm ever does. Lets a test
+    /// strand a cancelled-but-unfinished pipeline in the slot and then have a same-key
+    /// waiter join it and read its result, instead of tripping a ceiling of its own.
+    static func firesOnlyForTheFirstArm() -> @Sendable (Duration) async -> Void {
+        let armCount = OSAllocatedUnfairLock(initialState: 0)
+        return { _ in
+            let isFirst = armCount.withLock { count -> Bool in
+                count += 1
+                return count == 1
+            }
+            if !isFirst { try? await Task.sleep(for: .seconds(3600)) }
+        }
+    }
 }
 
 /// Covers the share-map slot machine — the region the second whole-branch review called
@@ -138,7 +152,7 @@ final class SharePipelineSlotTests: XCTestCase {
     /// isolation, while an unstructured `Task` inherits the main actor.
     private func begin(
         _ slot: SharePipelineSlot<String>, key: String, work: @escaping @MainActor () async -> String?
-    ) -> Task<String?, Never> {
+    ) -> Task<SlotOutcome<String>, Never> {
         Task { await slot.run(key: key, work: work) }
     }
 
@@ -155,7 +169,8 @@ final class SharePipelineSlotTests: XCTestCase {
         gate.open()
 
         let results = await [first.value, second.value]
-        XCTAssertEqual(results, ["raster-a", "raster-a"], "the joiner gets the owner's result")
+        XCTAssertEqual(results, [.finished("raster-a"), .finished("raster-a")],
+                       "the joiner gets the owner's result")
         XCTAssertEqual(log.started, 1, "two same-key requests must run exactly one pipeline")
     }
 
@@ -174,7 +189,7 @@ final class SharePipelineSlotTests: XCTestCase {
         gateB.open()
 
         let results = await [first.value, second.value]
-        XCTAssertEqual(results, ["a", "b"])
+        XCTAssertEqual(results, [.finished("a"), .finished("b")])
         XCTAssertEqual(log.peakLive, 1, "at most one pipeline alive at a time")
     }
 
@@ -190,7 +205,7 @@ final class SharePipelineSlotTests: XCTestCase {
         let gateA = Gate(), gateB = Gate(), log = WorkLog()
 
         let first = await slot.run(key: "a", work: blockingWork(key: "a", gate: gateA, log: log, value: "a"))
-        XCTAssertNil(first, "the ceiling hands its caller nil")
+        XCTAssertEqual(first, .stoppedWaiting, "the ceiling stops its caller waiting")
         XCTAssertTrue(slot.isRunning, "the abandoned pipeline still owns the slot")
 
         // A successor arrives while pipeline A is still alive.
@@ -242,36 +257,82 @@ final class SharePipelineSlotTests: XCTestCase {
         await settle()
         let waiter = await slot.run(key: "b", work: blockingWork(key: "b", gate: .opened(), log: log, value: "b"))
 
-        XCTAssertNil(waiter, "the waiter's ceiling hands it nil rather than looping")
+        XCTAssertEqual(waiter, .stoppedWaiting, "the waiter's ceiling stops it waiting rather than looping")
         XCTAssertTrue(slot.isRunning, "and leaves the owner's slot alone")
         XCTAssertEqual(log.cancelledKeys, [], "and does not cancel a pipeline it does not own")
         XCTAssertEqual(log.started, 1, "and never starts a pipeline of its own")
 
         gateA.open()
         let ownerResult = await owner.value
-        XCTAssertEqual(ownerResult, "a", "the owner's pipeline completed normally")
+        XCTAssertEqual(ownerResult, .finished("a"), "the owner's pipeline completed normally")
         XCTAssertEqual(log.started, 1)
     }
 
-    /// Documents what a retry triggered BY the ceiling gets, which the architecture
-    /// reviewer reproduced: the successor joins the dying pipeline on the same key and
-    /// inherits its nil rather than running. Bounded by how long the cancelled pipeline
-    /// takes to unwind, and the alternative — letting it start a second pipeline for a key
-    /// one is already running — is the defect this type exists to prevent.
-    func testSameKeyRetryDuringUnwindJoinsTheDyingPipeline() async {
-        let slot = SharePipelineSlot<String>(ceilingTimer: Ceiling.firesAtOnce())
+    /// A retry arriving while the cancelled pipeline is still unwinding must not start a
+    /// second pipeline for a key one is already running — the defect this type exists to
+    /// prevent.
+    ///
+    /// What it gets back here is `.stoppedWaiting`, and the reason is worth stating because
+    /// the old name for this test claimed otherwise. `Ceiling.firesAtOnce()` fires for every
+    /// arm, the retry's included, so the retry trips its OWN waiter ceiling and returns
+    /// before the dying pipeline has produced anything — nothing opens that pipeline's gate
+    /// until after the assertions. Not reasoning: the `onCeiling` sequence is asserted
+    /// below, and it is an owner's ceiling followed by a waiter's. So this test does not
+    /// demonstrate a retry inheriting the dying pipeline's nil; that shape needs a ceiling
+    /// that spares the waiter, and it is covered by
+    /// `testSameKeyRetryInheritsTheDyingPipelinesNil`.
+    func testSameKeyRetryDuringUnwindStartsNoSecondPipeline() async {
+        let ceilings = OSAllocatedUnfairLock(initialState: [String]())
+        let slot = SharePipelineSlot<String>(
+            ceilingTimer: Ceiling.firesAtOnce(),
+            onCeiling: { key, isOwner in ceilings.withLock { $0.append("\(key):\(isOwner)") } })
         let gate = Gate(), log = WorkLog()
 
         _ = await slot.run(key: "a", work: blockingWork(key: "a", gate: gate, log: log, value: "a"))
         XCTAssertTrue(slot.isRunning)
 
         let retry = await slot.run(key: "a", work: blockingWork(key: "a", gate: .opened(), log: log, value: "retry"))
-        XCTAssertNil(retry, "the retry inherits the cancelled pipeline's nil")
+        XCTAssertEqual(retry, .stoppedWaiting, "the retry's own ceiling stops it waiting")
         XCTAssertEqual(log.started, 1, "and does not run a second pipeline for a live key")
+        // Asserted rather than claimed in prose: the docs above say the retry trips its own
+        // waiter ceiling, and an unchecked comment saying exactly that is what got this test
+        // miscited three times.
+        XCTAssertEqual(ceilings.withLock { $0 }, ["a:true", "a:false"],
+                       "an owner's ceiling, then the retry's OWN waiter ceiling")
 
         gate.open()
         await settle()
         XCTAssertFalse(slot.isRunning)
+    }
+
+    /// The same-key waiter path, which is the one the ROH-161 retry gate rests on: a joiner
+    /// reports the owner's TASK's result, not the owner's own outcome. Here the owner's
+    /// ceiling fired and cancelled it, so that task produces nil and the waiter reads
+    /// `.finished(nil)` — a pipeline that is over — while the owner itself got
+    /// `.stoppedWaiting`. Those are different answers to the same pipeline and the
+    /// distinction is the whole point of `SlotOutcome`.
+    ///
+    /// Needs a ceiling that fires for the owner and spares the waiter, hence
+    /// `firesOnlyForTheFirstArm`; with `firesAtOnce` the waiter trips its own ceiling first
+    /// and never observes the pipeline, which is what the test above covers.
+    func testSameKeyRetryInheritsTheDyingPipelinesNil() async {
+        let slot = SharePipelineSlot<String>(ceilingTimer: Ceiling.firesOnlyForTheFirstArm())
+        let gate = Gate(), log = WorkLog()
+
+        let owner = await slot.run(key: "a", work: blockingWork(key: "a", gate: gate, log: log, value: "a"))
+        XCTAssertEqual(owner, .stoppedWaiting)
+        XCTAssertTrue(slot.isRunning)
+
+        let retry = begin(slot, key: "a", work: blockingWork(key: "a", gate: .opened(), log: log, value: "retry"))
+        await settle()
+        XCTAssertEqual(log.started, 1, "no second pipeline for a live key")
+
+        gate.open()
+        let outcome = await retry.value
+        XCTAssertEqual(outcome, .finished(nil),
+                       "the joiner inherits the owner's cancelled nil — not .stoppedWaiting")
+        XCTAssertEqual(log.started, 1, "and never ran its own work")
+        XCTAssertEqual(log.cancelledKeys, ["a"])
     }
 
     func testCeilingIsReportedForDiagnosis() async {
@@ -295,12 +356,12 @@ final class SharePipelineSlotTests: XCTestCase {
         let slot = SharePipelineSlot<String>(ceilingTimer: Ceiling.neverFires())
 
         let rejected = await slot.run(key: "a") { nil }
-        XCTAssertNil(rejected)
+        XCTAssertEqual(rejected, .finished(nil))
         XCTAssertFalse(slot.isRunning, "a rejecting pipeline must release the slot, not wedge it")
 
         // There is deliberately no negative cache: the same key runs again in full.
         let retried = await slot.run(key: "a") { "a" }
-        XCTAssertEqual(retried, "a")
+        XCTAssertEqual(retried, .finished("a"))
         XCTAssertFalse(slot.isRunning)
     }
 

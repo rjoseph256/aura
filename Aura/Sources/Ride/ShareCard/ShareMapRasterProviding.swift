@@ -14,9 +14,36 @@ import AuraKit
 /// nothing — a `@MainActor` type is implicitly Sendable already.
 @MainActor
 protocol ShareMapRasterProviding: Sendable {
-    /// The accepted, composited card map — raster plus route ink — or `nil`, which means
-    /// exactly: no acceptable map; the card keeps the polyline fallback.
-    func raster(for request: ShareMapRequest) async -> UIImage?
+    /// The accepted, composited card map — raster plus route ink — or which flavour of "no map"
+    /// this was. See `ShareMapOutcome`.
+    func raster(for request: ShareMapRequest) async -> ShareMapOutcome
+}
+
+/// What one share-map request produced.
+///
+/// Replaces a bare `UIImage?`, which collapsed three situations into one `nil`. ROH-161 needs
+/// them apart, because a design that offers the rider a retry has to know whether that retry is a
+/// real second attempt: `SharePipelineSlot` deliberately stops a *caller* waiting without
+/// stopping the *pipeline* (`SlotOutcome`), and at ride end the summary is specifically the
+/// waiter — the HUD prefetch claims the slot at +0.7 s.
+enum ShareMapOutcome: Equatable {
+    /// An accepted, composited card map.
+    case map(UIImage)
+    /// The pipeline ran and produced nothing. There is no negative cache, so a retry re-runs it
+    /// in full.
+    case rejected
+    /// A ceiling fired. The pipeline may still be alive and holding the slot, so a retry may
+    /// warm-hit a cache it fills later, or re-join it, rather than starting fresh.
+    case stoppedWaiting
+}
+
+extension ShareMapOutcome {
+    /// For callers that only want the image and treat every "no map" the same — the ride-end
+    /// prefetch, and the summary until ROH-161's phase wiring lands.
+    var image: UIImage? {
+        if case .map(let image) = self { return image }
+        return nil
+    }
 }
 
 /// Environment carrier for the app's one provider instance. Environment injection over
