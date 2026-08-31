@@ -307,8 +307,15 @@ struct NavigateHUDView: View {
 
                     // Group-ride peer dots. On the solo path `frame.dots` is empty, so this is a
                     // no-op and the map is visually unchanged.
-                    PeerAnnotations(frame: peerModel.frame(now: context.date,
-                                                           project: { project($0, proxy) }))
+                    // Camera bearing comes through the proxy, not `cameraBox`: reading the
+                    // @Observable box here would subscribe this body to a property that
+                    // `.onCameraChanged` writes every camera frame — the re-render feedback the
+                    // box exists to avoid. The proxy read is plain state, refreshed by the same
+                    // 30fps timeline that already drives the dots.
+                    PeerAnnotations(frame: peerModel.frame(
+                        now: context.date,
+                        cameraBearing: proxy.map?.cameraState.bearing ?? 0,
+                        project: { project($0, proxy) }))
                 }
                 .mapStyle(settings.mapStyle.mapboxStyle)
                 // Mirror the live camera into the zoom box. Must stay in the Map modifier chain

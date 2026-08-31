@@ -73,6 +73,16 @@ private func settle() async {
     for _ in 0..<12 { await Task.yield() }
 }
 
+/// Yield until the condition holds, up to a generous budget. Use before asserting on state a
+/// fired timer must produce: a bare `settle()` there is a bet that the timer-continuation →
+/// presenter → MainActor resume chain finishes within 12 yields, which the Swift 6.3 canary
+/// scheduler lost (ROH-217). A real behavior break still fails — the budget exhausts and the
+/// following assertion fires exactly as before.
+@MainActor
+private func eventually(_ condition: () -> Bool) async {
+    for _ in 0..<10_000 where !condition() { await Task.yield() }
+}
+
 @MainActor
 final class ShareUpgradePresenterTests: XCTestCase {
 
@@ -408,7 +418,8 @@ final class ShareUpgradeAnnouncementTests: XCTestCase {
 
         let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
         await settle()
-        deadline.fire(); await settle()
+        deadline.fire()
+        await eventually { presenter.phase == .unavailable(.mayRejoin) }
         XCTAssertEqual(presenter.phase, .unavailable(.mayRejoin))
         XCTAssertEqual(presenter.announcements, 1)
 

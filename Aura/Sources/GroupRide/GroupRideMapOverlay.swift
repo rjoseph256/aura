@@ -16,7 +16,9 @@ struct PeerDotView: View {
     /// Contrast-correct monogram ink for `identityColor` (light on dark hues, dark on light).
     let identityInk: Color
     let isSelf: Bool
-    /// Degrees clockwise from north; nil retracts the pointer to a plain disc.
+    /// Degrees clockwise from screen-up — the caller has already subtracted the map camera's
+    /// bearing (ROH-213), because this view is a screen-aligned annotation that does not rotate
+    /// with the map. nil retracts the pointer to a plain disc.
     let bearing: Double?
     /// 0…1 pulse phase; 0 means no pulse (driver passes 0 under Reduce Motion / when not riding).
     let pulsePhase: Double
