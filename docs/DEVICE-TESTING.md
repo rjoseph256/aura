@@ -5,6 +5,11 @@ simulator and CI could not prove, collected from the ROADMAP device-verify lists
 rides, iCloud sync, and the earlier waves. Work top to bottom: Sign in with Apple and
 provisioning come first because later items depend on them.
 
+This is the full manual regression script for release-shaped passes. *Which* changes owe a
+device pass at all — versus simulator verification Claude does itself — is governed by
+[VERIFICATION.md](VERIFICATION.md); per-change device checks are queued as
+`Verification`-labeled Linear issues so one ride can clear the backlog.
+
 ## One-time setup
 
 **Signing and capabilities.** Open the project (run `cd Aura && xcodegen generate` first), pick

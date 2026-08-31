@@ -71,10 +71,16 @@ shape and concurrency rules move faster than any model's memory of them. Delegat
 tests to the `apple-platform-build-tools` builder subagent, which absorbs xcodebuild output
 instead of filling the session with it.
 
-**UI work is verified on a device, not asserted.** A clean build does not prove a feature
-does anything. The Terrain-RGB elevation bug compiled fine and returned flat everywhere. Run
-the app and look, and prefer a real device over the simulator for anything involving GPS,
-haptics, background recording, widgets, Live Activities, or a locked screen.
+**UI work is verified by running it, at the tier [docs/VERIFICATION.md](docs/VERIFICATION.md)
+assigns — never asserted from a clean build.** The Terrain-RGB elevation bug compiled fine
+and returned flat everywhere. Most visual and interactive changes are Tier 1: Claude drives
+the simulator itself (screenshots, location playback) and calls it, merging on CI green.
+The device-only list — GPS/heading/camera behavior, two-phone group rides, haptics, voice,
+background/lifecycle/locked screen, widgets, Live Activities, HealthKit/iCloud/push,
+ride-feel, structural NavigationStack changes — is Tier 2: merge on CI green with a
+`Verification` issue queuing the device check for the next ride, and hold the merge only
+when the change is plausibly *wrong* in a way only hardware will reveal (say so in the PR).
+Every PR states its tier and evidence.
 
 **Do not run `humanizer` on anything in this repo.** Specs, plans, design docs, PR bodies,
 issue descriptions, board comments, READMEs: none of it takes that pass. The skill exists for
