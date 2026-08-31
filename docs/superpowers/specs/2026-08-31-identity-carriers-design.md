@@ -109,9 +109,11 @@ inconsistency.
 
 - **Native casing, not a second polyline** *(v2)*: `lineBorderColor` (=
   `routeCasingUIColor`) + `lineBorderWidth` (~2pt) at the annotation/group level — one
-  layer, z-correct by construction. Declaration-order stacking is not an SDK contract
-  and is not used anywhere in this design; where two line layers must stack (the dim
-  under-layer below), order is set explicitly via layer position, never implied.
+  layer, z-correct by construction. Where two line layers must stack (navigate's dim
+  under-layer), the plan review traced the SwiftUI content tree's layer ordering and
+  found it deterministic and re-asserted every pass — the stack is declared in content
+  order, with an explicit acceptance check (and a slot-based fallback) for the one
+  relationship outside that chain: the puck must draw above the route line.
 - **Round caps/joins** at the group level (`lineCap(.round)` / `lineJoin(.round)` —
   both verified group-level in the resolved SDK).
 - Honest framing (gate finding): on the dark default styles the near-black casing adds
@@ -142,20 +144,25 @@ timeline cadence is real main-actor cost). Replacement:
 - **Progress source:** `GuidanceUpdate` gains `fractionTraveled: Double?`, fed from the
   SDK's `RouteProgress.fractionTraveled` — dimensionless, computed by the engine against
   the same route it navigates, already `.safeValue()`-guarded. A small pure mapper in
-  AuraKit clamps to [0, 1] with non-finite values → nil (tested; `max(0, .nan)` traps
-  from the gate noted).
-- **Rendering:** two full-length line layers over one static geometry. Below: the dim
-  trace (mint at `AuraPalette.routeDimOpacity`, a new token, starting value settled at
-  the gate; width 6, no casing). Above: the full cased mint line with
-  `lineTrimOffset(start: 0, end: fractionTraveled)` — the trimmed span turns
-  transparent and reveals the dim layer beneath. Paint-property update only; the
-  geometry source never rebuilds mid-ride. Trim updates are quantized (~0.5% steps) so
-  paint writes are rare.
-- **Reroute honesty:** while `guidance.isRerouting` is true, trim renders 0 (full
-  bright line) — a brief un-dim alongside the existing "Rerouting" chip, never a wrong
-  dim. Trim resumes when the first post-reroute fraction arrives. (The v1 spec leaned
-  on a nil that never comes; `isRerouting` already exists and is already consumed at
-  `NavigateHUDView.swift:162`.)
+  AuraCore (`RouteTrim`, beside `GuidanceUpdate`) clamps to [0, 1] with non-finite
+  values → nil (tested; `max(0, .nan)` traps from the gate noted).
+- **Rendering (v2.1, from the plan review):** style primitives, NOT annotation groups —
+  a `GeoJSONSource` with **`lineMetrics = true`** under two `LineLayer`s (dim below,
+  cased bright above with `lineTrimOffset`). `PolylineAnnotationGroup` cannot set
+  `lineMetrics`, and without it line-trim fails with a shader error that erases the
+  bright line entirely (mapbox-maps-ios#1927) — Mapbox's own vanishing route line uses
+  exactly this raw-layer pattern. Dim = mint at `AuraPalette.routeDimOpacity` (new
+  token, gate-tunable inside a WCAG-tested band). Paint-property update only; the
+  geometry source rebuilds only on reroute. Trim quantized (~0.5% steps).
+- **Reroute honesty (v2.1):** while `guidance.isRerouting` is true, trim renders 0
+  (full bright line), never a wrong dim. The plan review found this was
+  unimplementable as inherited: `GuidanceViewModel.applyProgress` cleared
+  `isRerouting` on EVERY progress tick (Mapbox keeps publishing old-route progress
+  throughout a reroute fetch), and the stale fraction survived the geometry swap. The
+  slice therefore fixes the view model (its own TDD task): `isRerouting` survives
+  progress ticks and clears only on `.rerouted` (or a terminal event), and `.rerouted`
+  nils the stale `fractionTraveled` so no frame pairs an old-route fraction with new
+  geometry. Trim resumes on the first post-reroute fraction.
 - **Drawn-route ≠ guided-route fix** (gate blocker): `MapboxGuidanceSession`'s registry
   fallbacks (`selectingAlternativeRoute` nil; registry miss re-fetch,
   `MapboxGuidanceSession.swift:138-160`) can navigate a route other than the one the
@@ -187,11 +194,15 @@ Map-floating *text chips* use one shared component.
 `AuraTheme.mapScrim(...)`, stroke defaulting to `AuraTheme.hairline(contrast)` with a
 `.none` case, reading both environment values itself.
 
-**Migrates** (unconditional chip surfaces only): `DetourOverlay.swift:84,101,114,127`;
-`HomeMapCanvas.swift:45`; `ThenChip.swift:28`; `NavigateHUDView+GroupCrew.swift:45,77,104`
-(navigate-HUD chrome, not Crew-flow work); `GroupRideMapOverlay.swift:120` (with
-`stroke: .none` — no new outline on peer name tags). Opacity converges on
-`AuraPalette.mapScrimOpacity` (0.85, WCAG-gated).
+**Migrates** (unconditional chip surfaces only): `DetourOverlay.swift:84,101,114,127`
+(note :101 is a RoundedRectangle, not a Capsule); `HomeMapCanvas.swift:45`;
+`ThenChip.swift:28`; the hand-rolled Rerouting chip at `NavigateHUDView.swift:168`
+(already scrim+hairline by hand — converging it leaves the DESIGN.md rule without
+hand-rolled exceptions); `NavigateHUDView+GroupCrew.swift:45,77,104` (navigate-HUD
+chrome, not Crew-flow work — their manual border overlays are deleted, or the modifier
+double-strokes them); `GroupRideMapOverlay.swift:120` (with `stroke: .none` — no new
+outline on peer name tags). Opacity converges on `AuraPalette.mapScrimOpacity` (0.85,
+WCAG-gated).
 
 **Explicitly does NOT migrate** *(v2)*:
 - `TurnCardView.swift:87` — conditional (expanded = accent fill, no stroke); keeps its
@@ -207,10 +218,13 @@ Map-floating *text chips* use one shared component.
 
 **Enforcement:** SwiftLint custom regex rule banning `ultraThinMaterial` with
 `match_kinds` limited to identifiers (the gate's probe showed it firing on comments),
-excluding `Aura/Sources/Theme/`, `HomeGlass.swift`, the group lobby/roster files (each
-carries a justifying comment), and `Aura/Widgets/` (materials are idiomatic on widget
-surfaces, and `Aura/Widgets` is inside `.swiftlint.yml`'s `included:`). Known limit,
-stated: the rule enforces *location*, not the contrast-branch invariant.
+excluding `Aura/Sources/Theme/`, the group lobby/roster files (each carries a
+justifying comment), and `Aura/Widgets/` (pre-emptive: materials are idiomatic on
+widget surfaces, and `Aura/Widgets` is inside `.swiftlint.yml`'s `included:`). The v2
+`HomeGlass` exclusion was dropped at plan review — the file contains no bare material,
+so the exclusion was inert; its fallback *fill* still migrates to the scrim resolver
+(accent stroke kept). Known limit, stated: the rule enforces *location*, not the
+contrast-branch invariant.
 
 **Gate** *(v2)*: workstream C now carries a PO gate — before/after screenshots of the
 navigate HUD (chips + turn card + controls in one frame) and the detour chrome.
@@ -231,9 +245,11 @@ navigate HUD (chips + turn card + controls in one frame) and the detour chrome.
    remain visible on every surface. (Structurally safe: both default `.visible` and the
    ornament API defaults omitted fields; the pre-existing bottom-leading placement
    behind the cockpit is a separate concern, out of scope, noted for the board.)
-4. **Search overlay bleed:** the **entire header** (greeting + wordmark + controls) is
-   removed from the hierarchy while `searchExpanded` — the v1 gear-only fix would have
-   left the wordmark ghosting at 40% through the scrim (`SearchOverlay.swift:16`).
+4. **Search overlay bleed:** the **entire header** (greeting + wordmark + controls)
+   AND the location hint are removed from the hierarchy while `searchExpanded` — the
+   v1 gear-only fix would have left the wordmark ghosting at 40% through the scrim
+   (`SearchOverlay.swift:16`), and the hint is the same top-anchored chrome under the
+   same scrim (v2.1 widening, reconciled at plan review).
 5. **Gem pin vs peek card:** *(v2)* **dropped.** The gate showed the hide-the-pin fix
    contradicted the card's own documented rationale ("the pin remains the durable
    object; this card is a shortcut", and its a11y announcement pattern depends on the
@@ -278,7 +294,10 @@ merge if it waited. A gate failing means the element iterates at that surface.
 
 ## 9. Prerequisite and out of scope
 
-**Prerequisite task (P0):** pin `mapbox-maps-ios` to an exact version. Today
+**Prerequisite task (P0, v2.1 strategy):** pin **`MapboxNavigation` exactly** (each
+release exact-pins its `mapbox-maps-ios` version, so maps lands on exactly 11.28.0
+transitively — pinning maps independently risks an unresolvable graph) and align
+`MapboxSearch`'s exact pin (its `mapbox-common` exact pin must match maps'). Today
 `project.yml` floats on `majorVersion: 11.0.0`, no app `Package.resolved` is tracked,
 and CI regenerates the project — so CI builds whatever 11.x is newest, while the code
 comments claim a pin (11.27.0; the resolved checkout is 11.28.0+). Every SDK behavior
@@ -307,8 +326,11 @@ animation or gradient; copy fixes ("Start RIDE") — Tier C hygiene slice.
 5. Every migrated chip honors Increase Contrast and Reduce Transparency in a sim pass;
    the turn card keeps 0.92 and its expanded accent state; the lint rule is green with
    its stated exemptions.
-6. Scale bar never overlaps a control while following; compass absent on HUDs; logo and
-   attribution visible everywhere; no header ghosting behind search.
+6. Scale bar never overlaps a control in ANY state — following or panned-off (the
+   panned state needs its own margin; plan-review finding); compass absent on HUDs
+   only; logo and attribution remain visible wherever they are visible today (their
+   pre-existing placement behind the cockpit is unchanged and out of scope); no
+   header or hint ghosting behind search.
 7. Package tests: `PuckMetrics` invariants (wedge/core/ratio rules), the
    `fractionTraveled` mapper (clamp, non-finite → nil), existing WCAG suite plus the new
    `routeDimOpacity` token composited over the dark and bright basemaps.
