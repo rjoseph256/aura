@@ -435,7 +435,9 @@ public struct BrowsePuckMetrics {
 
     public static let standard = BrowsePuckMetrics(
         coreDiameter: 18, inkOutlineWidth: 1.5, mintRingWidth: 2,
-        wedgeTipRadius: 13.5, canvasSide: 28)
+        wedgeTipRadius: 16, canvasSide: 34)
+    // wedgeTipRadius 16 (not the invariant-minimum ~11.5): the gate-1a mockup showed a
+    // barely-clearing wedge is illegible at map size — the tip needs real protrusion.
 }
 
 public struct RidingPuckMetrics {
