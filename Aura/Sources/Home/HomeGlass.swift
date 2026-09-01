@@ -69,7 +69,7 @@ struct HomeChip: View {
                 .foregroundStyle(AuraTheme.accent)
                 .padding(.horizontal, AuraTheme.Spacing.md)
                 .padding(.vertical, AuraTheme.Spacing.sm + 2)
-                .background(AuraTheme.surface.opacity(0.9), in: .capsule)
+                .background(AuraTheme.mapScrim(reduceTransparency: reduceTransparency, contrast), in: .capsule)
                 .overlay(Capsule().strokeBorder(AuraTheme.accent.opacity(0.45), lineWidth: 1))
             }
             .buttonStyle(.plain)

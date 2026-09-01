@@ -145,11 +145,13 @@ struct HomeView: View {
                           flyTo: $flyToTarget, focusedPlace: focusedPlace, bottomInset: peekHeight)
 
             VStack(spacing: 0) {
-                header.padding(.top, AuraTheme.Spacing.lg)
-                if location.authorization != .authorized {
-                    HomeLocationHint()
-                        .padding(.horizontal, AuraTheme.Spacing.xxl)
-                        .padding(.top, AuraTheme.Spacing.sm)
+                if !searchExpanded {
+                    header.padding(.top, AuraTheme.Spacing.lg)
+                    if location.authorization != .authorized {
+                        HomeLocationHint()
+                            .padding(.horizontal, AuraTheme.Spacing.xxl)
+                            .padding(.top, AuraTheme.Spacing.sm)
+                    }
                 }
                 Spacer(minLength: 0)
                 if !searchExpanded { launchSlot }

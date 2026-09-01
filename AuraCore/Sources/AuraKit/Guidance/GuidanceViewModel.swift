@@ -94,6 +94,15 @@ public final class GuidanceViewModel: RidePauseObserving {
     func run(route: Route) async {
         let stream = await session.start(route: route)
         var sawProgress = false
+        // Mapbox keeps publishing progress against the OLD route throughout a reroute
+        // fetch, so a progress tick can no longer be what clears `isRerouting` (that made
+        // the pill flicker off mid-reroute). `.rerouted` is the only *positive* clear left,
+        // but the loop can also exit without ever seeing one — arrival, an empty/failed
+        // stream, or a reroute that never resolves before the session ends. However this
+        // function exits, a stuck "recalculating" pill outliving the guidance it describes
+        // would be a real (if quieter) version of the same lie, so this covers every exit
+        // uniformly rather than duplicating a clear at each one.
+        defer { isRerouting = false }
 
         for await event in stream {
             switch event {
@@ -106,16 +115,21 @@ public final class GuidanceViewModel: RidePauseObserving {
                 if !isPaused { onSpeak(text) }
             case .rerouting:
                 isRerouting = true
-            case .rerouted(let geometry):
-                routeGeometry = geometry
+            case .reroutingAborted:
+                // Clear the cue and NOTHING else. The asymmetry with `applyReroute` is
+                // deliberate: an aborted reroute leaves the rider on the OLD route, which is
+                // still the geometry on screen, so `lastUpdate.fractionTraveled` still measures
+                // the line being drawn. Nil-ing it here would discard a correct value and blank
+                // the traveled-dim for no reason. Only a real geometry swap invalidates it.
                 isRerouting = false
+            case .rerouted(let geometry):
+                applyReroute(geometry)
             case .arrivedAtDestination:
                 // Suppressed, not deferred: a rider who paused at the destination and then
                 // resumed has decided to keep riding, so firing the held arrival at them would
                 // end the ride under exactly the person who said otherwise (spec D7).
                 if isPaused { continue }
-                let cue = hapticEngine.onArrival()
-                if hapticsEnabled, let cue { haptics?.play(cue) }
+                play(hapticEngine.onArrival())
                 // `onArrive` is caller-defined: navigate's HUD ends the ride (tearing down
                 // this very session), while the detour's `onArrive` detaches and lets the
                 // ride continue. Either way, stop consuming by returning rather than
@@ -138,10 +152,30 @@ public final class GuidanceViewModel: RidePauseObserving {
     /// Set by `RideSessionCoordinator` at the moment of the tap.
     public func rideDidSetPaused(_ paused: Bool) { isPaused = paused }
 
+    /// Plays one haptic cue if the rider has turn haptics on and the engine produced one.
+    /// Shared by the progress and arrival paths so the settings gate is written once.
+    private func play(_ cue: RideHapticCue?) {
+        guard hapticsEnabled, let cue else { return }
+        haptics?.play(cue)
+    }
+
+    /// The geometry swap for one `.rerouted` event. Split out of `run` for the same reason as
+    /// `applyProgress`: the unwrap that clears the stale fraction pushes that loop one past the
+    /// cyclomatic budget.
+    private func applyReroute(_ geometry: [Coordinate]) {
+        routeGeometry = geometry
+        isRerouting = false
+        // The last fraction measured the OLD route; nil it so no frame pairs it with the new
+        // geometry (trim renders full-bright until fresh progress arrives).
+        if var update = lastUpdate {
+            update.fractionTraveled = nil
+            lastUpdate = update
+        }
+    }
+
     /// The turn card, the raw update and the once-per-maneuver haptic for one progress event.
     /// Split out of `run` to keep that loop within the cyclomatic budget.
     private func applyProgress(_ update: GuidanceUpdate) {
-        isRerouting = false
         lastUpdate = update
         turn = TurnCardPresenter.state(for: update, units: units)
         // Same gate as `.spokenInstruction`: a rider who does not need to be told about the
@@ -155,6 +189,6 @@ public final class GuidanceViewModel: RidePauseObserving {
         let cue = hapticEngine.onProgress(
             distanceToManeuverMeters: update.distanceToManeuverMeters,
             maneuverKey: update.instruction)
-        if hapticsEnabled, let cue { haptics?.play(cue) }
+        play(cue)
     }
 }

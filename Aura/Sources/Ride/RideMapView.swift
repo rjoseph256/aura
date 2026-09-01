@@ -37,8 +37,24 @@ struct RideMapView: View {
         detourRoute.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
     }
 
+    /// Scale bar shows only when panned off the puck, and BELOW the top control row —
+    /// at Mapbox's default topLeading(8,8) it would collide with the back/GPS controls
+    /// in exactly the panned state that shows it (plan-review finding). Compass never:
+    /// the recenter cluster owns orientation on a course-up HUD (spec §6.1-2).
+    private var hudOrnaments: OrnamentOptions {
+        var options = OrnamentOptions()
+        options.scaleBar.visibility = viewport.followPuck != nil ? .hidden : .adaptive
+        options.scaleBar.margins = CGPoint(x: 8, y: MapOrnamentMetrics.belowTopControlMargin)
+        options.compass.visibility = .hidden
+        return options
+    }
+
     var body: some View {
         Map(viewport: $viewport) {
+            // Stock puck until the ROH-220 device heading check. The Aura riding puck is built
+            // and sim-verified (`AuraPuck.ridingBearing`), but a hand-rasterized `bearingImage`
+            // can be mirrored or 90 degrees off in a way only real `CLHeading` reveals, and the
+            // simulator supplies none. Restoring it is a one-commit revert — see ROH-220.
             Puck2D(bearing: .heading)
             routeRibbon
             detourPolyline
@@ -55,6 +71,9 @@ struct RideMapView: View {
             cameraBox.bearing = ctx.cameraState.bearing
             cameraBox.pitch = ctx.cameraState.pitch
         }
+        // `.ornamentOptions(_:)` also returns `Map`, so it must stay in this chain too — same
+        // reasoning as `.onCameraChanged` above.
+        .ornamentOptions(hudOrnaments)
         .ignoresSafeArea()
     }
 
@@ -101,7 +120,8 @@ struct RideMapView: View {
     /// Grey rather than a second hue on purpose: mint against `textSecondary` grey differs in
     /// **lightness**, so the paused run stays distinguishable to a rider who cannot separate the
     /// two by colour. `lineDasharray` would have read even better, but it does not exist on
-    /// `PolylineAnnotation` in the pinned MapboxMaps 11.27.0 — it is a layer-level property on
+    /// `PolylineAnnotation` in the pinned MapboxMaps 11.28.0 (via the MapboxNavigation 3.28.0
+    /// exact pin — see project.yml) — it is a layer-level property on
     /// `PolylineAnnotationGroup`, which would dash every piece and defeat the point.
     private func strokeColor(for piece: TrackRibbon.Piece) -> UIColor {
         if piece.style == .paused {
@@ -117,10 +137,30 @@ struct RideMapView: View {
     @MapContentBuilder
     private var detourPolyline: some MapContent {
         if detourRoute.count > 1 {
+            // Casing is the annotation's own `lineBorder*` — one layer, z-correct by
+            // construction, so it cannot land above the dimmed track ribbon the way a
+            // second polyline in its own annotation manager could. The dim in
+            // `strokeColor(for:)` is untouched: the detour still wins on brightness.
             PolylineAnnotationGroup {
                 PolylineAnnotation(lineCoordinates: detourRouteCoordinates)
                     .lineColor(StyleColor(AuraTheme.routeUIColor))
-                    .lineWidth(6)
+                    // 9 − 2×1.5 = 6pt of mint, the detour's pre-casing width. The border
+                    // is INSET, not additive; the arithmetic is in RoutePreviewView.
+                    .lineWidth(9)
+                    .lineBorderColor(StyleColor(AuraTheme.routeCasingUIColor))
+                    .lineBorderWidth(1.5)
+            }
+            // Caps/joins are layer-level in MapboxMaps 11, so they live on the group.
+            .lineCap(.round)
+            .lineJoin(.round)
+
+            // The gem the detour leads to, flagged. `.allowOverlapWithPuck(true)` because
+            // the default would hide it exactly on final approach.
+            if let destination = detourRouteCoordinates.last {
+                MapViewAnnotation(coordinate: destination) {
+                    DestinationMarkerView()
+                }
+                .allowOverlapWithPuck(true)
             }
         }
     }
