@@ -14,8 +14,10 @@ public struct GuidanceUpdate: Equatable, Sendable {
     public var durationRemainingSeconds: Double?
     /// How far along the guided route the rider is, 0...1, from the engine's own
     /// progress (dimensionless — immune to cross-geometry subtraction). nil until
-    /// known; `ScriptedGuidanceSession` stays nil forever, so the golden ride never
-    /// exercises the trim path.
+    /// known. `ScriptedGuidanceSession` forwards whatever its script carries, this
+    /// field included — what keeps the golden ride off the trim path is the FIXTURE:
+    /// `NavigateHUDView` builds that session with an EMPTY script, so no `.progress`
+    /// is ever emitted and the trim stays 0 for the whole E2E run.
     public var fractionTraveled: Double?
     /// The road the rider is currently on, e.g. "Penn Ave". nil when the engine has no
     /// name for the current step.

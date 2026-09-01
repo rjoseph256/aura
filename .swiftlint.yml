@@ -61,8 +61,8 @@ custom_rules:
       - identifier
     excluded:
       - "Aura/Sources/Theme/.*"
-      - "Aura/Sources/GroupRide/GroupLobbyView\\.swift"   # lobby card, manual a11y branch — Crew slice
-      - "Aura/Sources/GroupRide/GroupRosterSheet\\.swift"  # sheet card, manual a11y branch — Crew slice
+      - "Aura/Sources/GroupRide/GroupLobbyView\\.swift"   # lobby card — manual a11y branch; deliberate, the one sanctioned frosted card outside Theme (DESIGN.md)
+      - "Aura/Sources/GroupRide/GroupRosterSheet\\.swift"  # roster card — same treatment, same rationale; settled, not pending any later slice
       - "Aura/Widgets/.*"                                   # pre-emptive: widget surfaces legitimately use system materials
     message: "Map-floating chips use .mapChip (ROH-222); frosted material is reserved for Theme controls, the lobby/roster cards, and widget surfaces."
     severity: error
