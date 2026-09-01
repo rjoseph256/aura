@@ -22,7 +22,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var onEndLeaveEntered: (@Sendable () -> Void)?    // test spy: fired when end/leave is entered
         var endLeaveCallCount = 0                          // test spy: how many times end/leave ran
         var rosterCallCount = 0   // test spy: how many times roster() ran
-        var joinCallCount = 0   // test spy: how many times joinRide ran
+        var joinCallCount = 0   // test spy: how many times joinRide was entered
 
         // Auth-state seam (added Task 2). The signed-in id and its observers live
         // here (not on the actor) so `cachedUserID` can be `nonisolated` while
@@ -80,9 +80,9 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         return ride
     }
     public func joinRide(code: JoinCode) async throws -> JoinedRide {
+        store.joinCallCount += 1
         if store.hangJoin { try await Task.sleep(for: .seconds(1000)) }
         if let forced = store.forceJoinError { throw forced }
-        store.joinCallCount += 1
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
         guard let rideID = store.codes[code.rawValue],
               let ride = store.rides[rideID] else { throw GroupRideError.joinFailed }
