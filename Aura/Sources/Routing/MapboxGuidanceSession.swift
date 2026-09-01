@@ -39,12 +39,17 @@ public final class MapboxGuidanceSession: GuidanceSession {
         let (stream, continuation) = AsyncStream<GuidanceEvent>.makeStream()
         self.continuation = continuation
 
-        guard let navRoutes = await resolveRoutes(for: route) else {
+        guard let resolved = await resolveRoutes(for: route) else {
             // Couldn't establish a route — finish immediately; the VM degrades the
             // turn card to its "unavailable" prompt while recording + map still work.
             continuation.finish()
             return stream
         }
+        let navRoutes = resolved.routes
+        // True only on the two registry-fallback paths (see `resolveRoutes`): the engine is
+        // guiding a different line from the one the HUD drew, so the first route-id assignment
+        // below is not "the initial route" — it is the correction the HUD needs.
+        let divergedFromSelection = resolved.divergedFromSelection
 
         let nav = AuraNavigation.provider.mapboxNavigation
 
@@ -73,11 +78,13 @@ public final class MapboxGuidanceSession: GuidanceSession {
                 guard let progress = state?.routeProgress else { return }
                 continuation.yield(.progress(Self.guidanceUpdate(from: progress)))
                 // Emit the new polyline shape when the active route changes (post-reroute).
-                // Skip the very first routeId assignment (that's the initial route, not a swap).
+                // Skip the very first routeId assignment (that's the initial route, not a swap) —
+                // UNLESS that initial route already differs from the selection the HUD drew, in
+                // which case the first assignment IS the swap the screen is waiting for.
                 if lastRouteId != progress.routeId {
                     let isFirst = (lastRouteId == nil)
                     lastRouteId = progress.routeId
-                    if !isFirst, let coords = progress.route.shape?.coordinates {
+                    if !isFirst || divergedFromSelection, let coords = progress.route.shape?.coordinates {
                         continuation.yield(.rerouted(coords.map {
                             Coordinate(latitude: $0.latitude, longitude: $0.longitude)
                         }))
@@ -146,12 +153,28 @@ public final class MapboxGuidanceSession: GuidanceSession {
     /// we navigate the EXACT alternative the rider selected (Flattest / Most paths / …)
     /// instead of Mapbox's default main route. Falls back to a re-fetch on a registry
     /// miss (e.g. relaunch mid-flow), returning nil if even that fails.
-    private func resolveRoutes(for route: AuraCore.Route) async -> NavigationRoutes? {
+    ///
+    /// `divergedFromSelection` reports that what we're about to navigate is NOT the geometry
+    /// the rider picked — which is the geometry the HUD has already drawn. The caller uses it
+    /// to emit `.rerouted` immediately so the line on screen becomes the line being guided.
+    /// It matters more than it looks: the traveled-dim measures the engine's `fractionTraveled`
+    /// against the drawn line, and a fraction taken on route A painted onto route B is wrong
+    /// by kilometres.
+    private func resolveRoutes(
+        for route: AuraCore.Route
+    ) async -> (routes: NavigationRoutes, divergedFromSelection: Bool)? {
         if let entry = NavigationRouteRegistry.shared.entry(for: route.id) {
+            // Index 0 IS the rider's selection — `entry.routes` navigates it unmodified.
             if entry.mbRouteIndex == 0 {
-                return entry.routes
+                return (entry.routes, divergedFromSelection: false)
             }
-            return await entry.routes.selectingAlternativeRoute(at: entry.mbRouteIndex - 1) ?? entry.routes
+            if let selected = await entry.routes.selectingAlternativeRoute(at: entry.mbRouteIndex - 1) {
+                return (selected, divergedFromSelection: false)
+            }
+            // The alternative wouldn't promote, so we navigate the main route: a different
+            // line from the one preview drew.
+            Self.log.debug("Guidance alternative \(entry.mbRouteIndex, privacy: .public) unavailable; navigating the main route")
+            return (entry.routes, divergedFromSelection: true)
         }
 
         let originCoord = CLLocationCoordinate2D(latitude: route.origin.latitude,
@@ -167,10 +190,14 @@ public final class MapboxGuidanceSession: GuidanceSession {
         )
         options.includesAlternativeRoutes = false
         do {
-            return try await AuraNavigation.provider.mapboxNavigation
+            let fetched = try await AuraNavigation.provider.mapboxNavigation
                 .routingProvider()
                 .calculateRoutes(options: options)
                 .value
+            // A registry miss means preview's routes are gone (relaunch mid-flow), so this is a
+            // fresh main-route fetch — a different route from the rider's pick by construction.
+            Self.log.debug("Guidance route registry miss; navigating a re-fetched main route")
+            return (fetched, divergedFromSelection: true)
         } catch {
             // Degrade to the "unavailable" turn card, but leave a breadcrumb — this is
             // the only signal that guidance (not just the registry lookup) failed.
