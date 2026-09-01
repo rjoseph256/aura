@@ -87,7 +87,9 @@ pasting the shared `aura://join?code=…` link produces charset-filtered garbage
   card and roster empty state (the join screen's per-character boxes stay per-box —
   §10 no longer claims "one voice" beyond that).
 
-**For the PO (the plan waits on these; recommendations first):**
+**PO decisions — ANSWERED 2026-09-01: 1a, 2a, 3a (all recommendations).** The lobby
+fills by roster poll; the Join button stays explicit with the caption; the roster
+keeps status colors. Recorded here; the options below stay for the rationale record.
 1. **Lobby fill mechanism** — (a) *recommended:* client-only roster poll while
    `phase == .lobby` (every ~4s; no migration, no new server surface, Tier-2
    verifiable on the existing two-phone queue), or (b) a `member_joined`
