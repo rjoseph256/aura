@@ -94,6 +94,15 @@ public final class GuidanceViewModel: RidePauseObserving {
     func run(route: Route) async {
         let stream = await session.start(route: route)
         var sawProgress = false
+        // Mapbox keeps publishing progress against the OLD route throughout a reroute
+        // fetch, so a progress tick can no longer be what clears `isRerouting` (that made
+        // the pill flicker off mid-reroute). `.rerouted` is the only *positive* clear left,
+        // but the loop can also exit without ever seeing one — arrival, an empty/failed
+        // stream, or a reroute that never resolves before the session ends. However this
+        // function exits, a stuck "recalculating" pill outliving the guidance it describes
+        // would be a real (if quieter) version of the same lie, so this covers every exit
+        // uniformly rather than duplicating a clear at each one.
+        defer { isRerouting = false }
 
         for await event in stream {
             switch event {
@@ -107,8 +116,7 @@ public final class GuidanceViewModel: RidePauseObserving {
             case .rerouting:
                 isRerouting = true
             case .rerouted(let geometry):
-                routeGeometry = geometry
-                isRerouting = false
+                applyReroute(geometry)
             case .arrivedAtDestination:
                 // Suppressed, not deferred: a rider who paused at the destination and then
                 // resumed has decided to keep riding, so firing the held arrival at them would
@@ -138,10 +146,23 @@ public final class GuidanceViewModel: RidePauseObserving {
     /// Set by `RideSessionCoordinator` at the moment of the tap.
     public func rideDidSetPaused(_ paused: Bool) { isPaused = paused }
 
+    /// The geometry swap for one `.rerouted` event. Split out of `run` for the same reason as
+    /// `applyProgress`: the unwrap that clears the stale fraction pushes that loop one past the
+    /// cyclomatic budget.
+    private func applyReroute(_ geometry: [Coordinate]) {
+        routeGeometry = geometry
+        isRerouting = false
+        // The last fraction measured the OLD route; nil it so no frame pairs it with the new
+        // geometry (trim renders full-bright until fresh progress arrives).
+        if var update = lastUpdate {
+            update.fractionTraveled = nil
+            lastUpdate = update
+        }
+    }
+
     /// The turn card, the raw update and the once-per-maneuver haptic for one progress event.
     /// Split out of `run` to keep that loop within the cyclomatic budget.
     private func applyProgress(_ update: GuidanceUpdate) {
-        isRerouting = false
         lastUpdate = update
         turn = TurnCardPresenter.state(for: update, units: units)
         // Same gate as `.spokenInstruction`: a rider who does not need to be told about the

@@ -14,6 +14,18 @@ final class GuidanceViewModelTests: XCTestCase {
                      estimatedDurationSeconds: 600, elevationGainMeters: 20)
     }
 
+    /// Yields the actor until `condition` holds, so a test can observe a view model whose
+    /// `run` loop is still consuming an open stream. Condition-driven rather than a sleep,
+    /// and bounded so a condition that never holds fails on the following assertion instead
+    /// of hanging the suite.
+    private func waitUntil(_ condition: () -> Bool, spins: Int = 1000) async {
+        var remaining = spins
+        while !condition() && remaining > 0 {
+            await Task.yield()
+            remaining -= 1
+        }
+    }
+
     func test_progressEvents_driveTurnCard() async {
         let session = ScriptedGuidanceSession(script: [
             .progress(.init(distanceToManeuverMeters: 400, instruction: "Continue on Forbes Ave")),
@@ -116,13 +128,88 @@ final class GuidanceViewModelTests: XCTestCase {
         XCTAssertFalse(vm.isRerouting)
     }
 
+    // Renamed + flipped from `test_rerouting_withoutRerouted_leavesFlagSet`, which pinned the
+    // pre-fix behavior: a reroute that never resolves into `.rerouted` left `isRerouting` true
+    // forever, because nothing but `.rerouted` ever cleared it. That is itself a stuck-pill bug
+    // (ROH-221 terminal-event decision) — once the event stream is done for good, a "still
+    // recalculating" pill that can never clear is wrong regardless of *why* the stream ended.
+    // `run`'s `defer` now clears `isRerouting` on every path out of the loop, so an incomplete
+    // reroute is honestly abandoned rather than left showing forever.
     @MainActor
-    func test_rerouting_withoutRerouted_leavesFlagSet() async {
+    func test_rerouting_streamEndsWithoutRerouted_clearsFlag() async {
         let session = ScriptedGuidanceSession(script: [.rerouting])
         let vm = GuidanceViewModel(session: session)
         await vm.run(route: makeRoute())
-        XCTAssertTrue(vm.isRerouting)
+        XCTAssertFalse(vm.isRerouting)
         XCTAssertNil(vm.routeGeometry)
+    }
+
+    // Production interleaving: Mapbox keeps publishing progress against the OLD route while
+    // it re-fetches after going off-route. The rerouting state must survive those ticks — only
+    // `.rerouted` may clear it mid-ride, never a progress tick.
+    //
+    // This one needs `OpenGuidanceSession`, not the scripted double. `run` clears `isRerouting`
+    // on the way out (a pill nothing can ever resolve is its own lie), and a script always
+    // finishes before `run` returns — so a scripted version of this test would observe the
+    // *exit* clear and could never distinguish it from the progress-tick clear it exists to
+    // forbid. Asserting mid-ride, with the stream still open, is the only placement that
+    // actually pins the invariant.
+    @MainActor
+    func test_progressDuringRerouteDoesNotClearIsRerouting() async {
+        let session = OpenGuidanceSession()
+        let vm = GuidanceViewModel(session: session)
+        let running = Task { @MainActor in await vm.run(route: makeRoute()) }
+
+        session.emit(.progress(GuidanceUpdate(distanceToManeuverMeters: 200, instruction: "Continue")))
+        session.emit(.rerouting)
+        session.emit(.progress(GuidanceUpdate(distanceToManeuverMeters: 150, instruction: "Continue")))
+        session.emit(.progress(GuidanceUpdate(distanceToManeuverMeters: 100, instruction: "Continue")))
+
+        // Events are consumed in order on this actor, so the third update landing means
+        // `.rerouting` and both later progress ticks have all been applied.
+        await waitUntil { vm.lastUpdate?.distanceToManeuverMeters == 100 }
+        XCTAssertEqual(vm.lastUpdate?.distanceToManeuverMeters, 100, "VM never consumed the scripted ticks")
+
+        XCTAssertTrue(vm.isRerouting)
+
+        session.finish()
+        await running.value
+    }
+
+    // `.rerouted` must clear both the pill AND the stale fraction: the 0.4 in the progress
+    // tick before `.rerouting` measured the OLD route's geometry, and pairing it with the NEW
+    // geometry after the swap is exactly the wrong-dim the spec forbids.
+    @MainActor
+    func test_reroutedClearsIsReroutingAndStaleFraction() async {
+        let a = GuidanceUpdate(distanceToManeuverMeters: 200, instruction: "Continue",
+                               fractionTraveled: 0.4)
+        let geo = [Coordinate(latitude: 40.1, longitude: -80.0),
+                   Coordinate(latitude: 40.2, longitude: -80.1)]
+        let session = ScriptedGuidanceSession(script: [
+            .progress(a), .rerouting, .rerouted(geo)
+        ])
+        let vm = GuidanceViewModel(session: session)
+        await vm.run(route: makeRoute())
+        XCTAssertFalse(vm.isRerouting)
+        XCTAssertNotNil(vm.lastUpdate)
+        XCTAssertNil(vm.lastUpdate?.fractionTraveled)
+    }
+
+    // Once fresh progress arrives against the new geometry, the fraction comes back.
+    @MainActor
+    func test_nextProgressAfterRerouteRestoresFraction() async {
+        let a = GuidanceUpdate(distanceToManeuverMeters: 200, instruction: "Continue",
+                               fractionTraveled: 0.4)
+        let d = GuidanceUpdate(distanceToManeuverMeters: 300, instruction: "Continue",
+                               fractionTraveled: 0.05)
+        let geo = [Coordinate(latitude: 40.1, longitude: -80.0),
+                   Coordinate(latitude: 40.2, longitude: -80.1)]
+        let session = ScriptedGuidanceSession(script: [
+            .progress(a), .rerouting, .rerouted(geo), .progress(d)
+        ])
+        let vm = GuidanceViewModel(session: session)
+        await vm.run(route: makeRoute())
+        XCTAssertEqual(vm.lastUpdate?.fractionTraveled, 0.05)
     }
 
     @MainActor
@@ -147,5 +234,45 @@ final class GuidanceViewModelTests: XCTestCase {
         let vm = GuidanceViewModel(session: ScriptedGuidanceSession(script: [.progress(update)]))
         await vm.run(route: makeRoute())
         XCTAssertEqual(vm.turn.maneuver?.modifier, .right)
+    }
+
+    // The other way out of `run`'s loop: `.arrivedAtDestination` returns early. A rider who
+    // goes off-route and then rolls into the destination before the re-fetch resolves must not
+    // be left with "Recalculating…" over a finished ride.
+    @MainActor
+    func test_rerouting_thenArrival_clearsFlag() async {
+        let session = ScriptedGuidanceSession(script: [.rerouting, .arrivedAtDestination])
+        let vm = GuidanceViewModel(session: session)
+        var arrived = false
+        vm.onArrive = { arrived = true }
+        await vm.run(route: makeRoute())
+        XCTAssertTrue(arrived)
+        XCTAssertFalse(vm.isRerouting)
+    }
+}
+
+/// A guidance double whose stream stays **open** until the test finishes it, so state can be
+/// observed mid-ride. `ScriptedGuidanceSession` cannot do this: it yields its whole script and
+/// finishes, so `run` has always returned — and run's exit clears `isRerouting` — by the time a
+/// test gets to look. Buffering is unbounded and the continuation exists from `init`, so events
+/// emitted before `run` starts consuming are still delivered in order.
+@MainActor
+private final class OpenGuidanceSession: GuidanceSession {
+    private let stream: AsyncStream<GuidanceEvent>
+    private let continuation: AsyncStream<GuidanceEvent>.Continuation
+    private(set) var didStop = false
+
+    init() {
+        let made = AsyncStream<GuidanceEvent>.makeStream()
+        stream = made.stream
+        continuation = made.continuation
+    }
+
+    func start(route: Route) async -> AsyncStream<GuidanceEvent> { stream }
+    func emit(_ event: GuidanceEvent) { continuation.yield(event) }
+    func finish() { continuation.finish() }
+    func stop() {
+        didStop = true
+        continuation.finish()
     }
 }
