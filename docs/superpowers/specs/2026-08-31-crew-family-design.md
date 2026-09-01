@@ -1,247 +1,271 @@
 # Crew Family — group-ride surface pass (design)
 
-**Date:** 2026-08-31
-**Epic:** Interface & Feel — third sub-pass of [ROH-45](https://linear.app/rohun/issue/ROH-45), following identity carriers.
-**Status:** drafted from the 2026-08-31 premium audit under the PO's standing directions; awaiting adversarial spec review, then PO review + mockup gate.
-**Verification:** Tier 1 throughout (static UI, preview-drivable); one queued Tier-2 two-device check (§8).
+**Date:** 2026-08-31 (v2, reconciled after the 3-reviewer adversarial spec gate)
+**Epic:** Interface & Feel — third sub-pass of [ROH-45](https://linear.app/rohun/issue/ROH-45); umbrella issue ROH-225.
+**Status:** reconciled; awaiting PO review + three PO decisions (§2) + the identity-board mockup gate.
+**Verification:** Tier 1 for the visual work; **Tier 2 (two-phone, queued)** for the lobby-fill fix and per-device hue coherence — the v1 "Tier 1 throughout" claim was wrong (VERIFICATION.md's Tier-2 list names the join/lifecycle family).
 
-## 1. Context
+## 1. Context — what the gate changed
 
-The 2026-08-31 audit ranked the Crew/group-ride family as the app's second-weakest
-flow — and it is the PO's stated signature surface ("flagship-beautiful"). Findings,
-verified against code this session:
+v1 was written from the audit; the gate (skeptic / product / architecture, all three
+landing blockers) rewrote its foundations:
 
-1. **Three monogram implementations, none using the rider palette built for this.**
-   `LobbyRosterRowView` (always accent fill, `GroupLobbyView.swift:313-320`),
-   `RosterRowView` (status-colored fill, `GroupRosterSheet.swift:297-312`), and the
-   map's `PeerDotView` — and only the map consumes `AuraTheme.riderPalette` /
-   `riderInk`. The same rider is mint in the lobby and cyan on the map.
-2. **The join code renders in three voices:** lobby `metricCockpit(40)` + tracking 4
-   (`GroupLobbyView.swift:127-132`); join boxes `metricCockpit(20)`; roster empty
-   state `.monospaced` title3 + kerning 2 (`GroupRosterSheet.swift:206-208`).
-3. **"JOIN CODE"** is an uppercase tracked eyebrow (`GroupLobbyView.swift:122-125`) —
-   the slop gate the codebase itself documents forbids these (`HomeView.swift:311`).
-4. **The join screen is half void** with a "muddy" disabled Join — `ctaPrimary` at
-   `opacity(0.4)` (`CTAButtonStyle.swift:18`), i.e. ghost mint, reading half-pressed
-   rather than inert. The keyboard cannot be dismissed once up — a documented known
-   gap whose fix (a scroll view) the file's own header already prescribes
-   (`GroupRideJoinView.swift:15-20`).
-5. **The code reveal is a hard swap** ("········" → code,
-   `GroupLobbyView.swift:146`) on a screen whose entire purpose is waiting; the only
-   lobby animation is `rows.count`.
-6. **The "Waiting for your crew…" empty state is written twice**
-   (`GroupLobbyView.swift:188-200`, `GroupRosterSheet.swift:196-221`).
-7. **The flow's entry loading is a bare unlabeled `ProgressView`**
-   (`GroupRideFlowView.swift:71-74`) in a codebase that designed a labeled skeleton
-   for route preview; **all join failures collapse to one generic message** — the
-   session maps every thrown error to `.joinFailed`
-   (`GroupRideSession.swift:178-180`), though the roadmap notes the server
-   distinguishes full / ended / bad code; **`needsDisplayName` drops the rider into a
-   bare `DisplayNameEditor`** with no framing of why they're being asked
-   (`GroupRideFlowView.swift:76-85`).
+1. **The lobby's core function is broken, and v1 was about to decorate it.** A host's
+   roster does not fill when friends join: `refreshRoster()` runs only from
+   `beginLiveSession()` and on an incoming `.position` from an unknown peer
+   (`GroupRideSession.swift:271,308`), no `member_joined` event exists in the
+   transport (`SupabaseRideSessionTransport.swift:156-161`), and positions don't flow
+   until riding. The preview host only "fills" by hand-injecting positions the lobby
+   never produces. Fixing this is now Workstream A0 — the slice's most important item.
+2. **"Hue = identity" via `PeerPalette.assign` was mathematically false.** The
+   collision-avoiding assignment is input-set-sensitive: reviewers measured existing
+   riders' hues reshuffling on ~39% of membership changes and map-vs-roster
+   disagreement growing from 9% (2-rider crew) to 76% (6). The already-approved
+   ROH-114 spec (§D3.3, "One colour authority") settled the right design and v1
+   missed it: **`RiderColorLatch`** — peers-minus-self input, first-assignment
+   **latched** so a rider's hue never changes mid-ride, palette widened to 8. This
+   slice implements that spec rather than inventing a competitor. Cross-DEVICE hue
+   agreement is explicitly not promised (different join orders latch differently);
+   the promise is per-device stability + cross-surface consistency on one device.
+3. **Distinct join-failure copy cannot ship and v1 cited the evidence backwards.**
+   The server's single generic `'join failed'` is a deliberate anti-enumeration
+   oracle, documented in three places (`0003_join_ride.sql`, `0014`, `0021:78`;
+   `COLLABORATOR-TASKS.md:39` — "the single generic error is deliberate"); ended vs
+   nonexistent code are structurally indistinguishable even server-side. The item is
+   cut; the oracle question is filed as its own security decision (ROH-226). What IS
+   client-detectable and more common: **network failure vs server rejection** —
+   `SupabaseGroupRideBackend.joinRide` currently collapses both
+   (`SupabaseGroupRideBackend.swift:56`), so a rider with one bar is told to
+   double-check their code. That split ships instead.
+4. **The failed join is a dead end and the exit, not the copy, is the fix:**
+   `.joinFailed`'s only control pops to Home; the typed code is gone
+   (`GroupRideFlowView.swift:112-116,200-202`). Recovery paths are now Workstream D's
+   center.
+5. **The v1 code-reveal motion animated a state production can't reach** —
+   `joinCode` is always set before the phase becomes `.lobby`
+   (`GroupRideSession.swift:155-163,199-211`); the "········" placeholder is a
+   preview-race artifact. Cut. This slice adds **no new motion**.
+6. **The Theme-wide disabled-CTA restyle is cut.** The inventory was wrong (5 sites,
+   not 2; the named evidence site is an unfilled variant the rule didn't cover) and
+   most sites are *transient/progress* states where "inert grey" is the wrong
+   message. The join screen fixes its disabled Join with layout + an explanatory
+   caption instead (GemDetailSheet's "Waiting for GPS…" precedent).
+7. **`.mapCard` is cut** (hygiene not rider value; the name lied for the non-map
+   lobby; moving the material into Theme would widen the drift surface the lint rule
+   guards). The identity-carriers lint exemptions stand as settled; that session has
+   been told. **This dissolves the hard dependency on the identity-carriers branch**
+   — remaining coordination is file-level only (§8).
 
-Deliberately good things this slice must not break: the roster's **attention
-semantics** (badge tint = warning only on a dropped rider — adversarially gated in
-ROH-214; stopped/awaiting stay calm), the ROH-81 single-structural-branch phase
-handling in `GroupRideFlowView`, the single-path `replaceTopWithGroupRide` navigation
-(device-caught NavigationStack double-mutation), and the roster empty state's
-join-code presence (a prior review-gate finding).
+Still true from the audit and in scope: three join-code voices, the "JOIN CODE"
+eyebrow, the half-void join screen with a trapped keyboard, duplicated empty states,
+the bare entry spinner, the unframed name prompt — plus gate discoveries: the roster's
+self row renders "**You YOU**" (`GroupRosterSheet.swift:255-263`), the lobby's crew
+count includes yourself ("Crew · 1 joined" = me, `GroupLobbyView.swift:166-170`), and
+pasting the shared `aura://join?code=…` link produces charset-filtered garbage
+(`GroupRideJoinView.swift:38-40` vs `GroupLobbyView.swift:40`).
 
-## 2. Design decisions
+## 2. Decisions — settled here, plus three for the PO
 
-- **Hue = identity, everywhere; status is never a hue.** One `CrewMonogram` component
-  renders every crew avatar from the SAME assignment the map dots use —
-  `PeerPalette.assign(userIDs:paletteCount:)` for the hue index,
-  `RiderMonogram.assign(names:)` for the label, `AuraTheme.riderColor/riderInk` for
-  paint. **Self is white with ink text** — the same "white = me" grammar the
-  identity-carriers puck and the map's self-precedent use. Status moves entirely to
-  non-chromatic channels: the existing status pill text, plus a dimmed avatar
-  (opacity, not hue) for dropped/awaiting. The crew button's three-state badge tint
-  and `CrewButtonSummary` logic are untouched.
-- **One assignment, one source.** Hue/label maps are derived ONCE per session from
-  one userID set (all current members, self included) and handed to every surface.
-  `PeerPalette.assign` is collision-avoiding over its input set, so two surfaces
-  passing different sets can disagree — the invariant is single-derivation, and it
-  gets a test.
-- **One join-code voice.** A `JoinCodeText` component (Saira cockpit face, one
-  tracking value, size parameterized) replaces the lobby card text and the roster
-  empty-state's monospaced rendering. The join screen's per-character boxes already
-  use the cockpit face and stay per-box.
-- **Sentence case.** "JOIN CODE" becomes "Join code". No tracked uppercase eyebrows.
-- **A designed disabled state for CTAs, Theme-wide.** `CTAButtonStyle` disabled
-  filled variants render `surface` fill + `textSecondary` label + hairline border
-  instead of 40%-opacity accent — clearly inert, never "muddy". This changes every
-  disabled CTA in the app (Join here; the summary's disabled Share is the other
-  shipped site) — both appear in the gate evidence.
-- **The lobby's waiting moment gets its one sanctioned motion:** the code reveal
-  animates (a ~200ms state-conveying transition — content replace/fade, Reduce
-  Motion branch renders the swap), and roster rows keep their existing 0.22s ease.
-  Nothing ambient, per charter.
-- **Card treatment goes shared.** A `.mapCard(shape:)` Theme modifier captures the
-  lobby/roster stacked treatment (surface 0.9 over `.ultraThinMaterial`, with the
-  `prefersOpaqueSurface` branch) that both files currently hand-roll. With the
-  material usage moved into `Theme/`, the two per-file lint exemptions identity
-  carriers added are **deleted** — the drift-guard rule goes back to
-  Theme-plus-widgets only. Per the executing session's caveat: the lint rule only
-  permits location; the Increase Contrast / Reduce Transparency correctness of these
-  cards is this slice's to test in the sim pass.
-- **Per-element PO approval** (standing direction): the identity board — monogram
-  system across lobby/roster/map, `JoinCodeText`, the rebuilt join-screen layout, and
-  the disabled-CTA treatment — is mocked up and PO-approved before implementation
-  rolls out (§7).
+**Settled (gate-driven):**
+- **Adopt `RiderColorLatch` per ROH-114 §D3.3** (peers-minus-self, latched, 8-hue
+  palette per that spec) as the one color authority; migrate the map's assignment to
+  it (fixing today's live mid-ride reshuffle) and use it for lobby monograms.
+  Monogram labels derive from `nameMap`/`peer.displayName` — never the roster's
+  literal "You" label (self contributes no monogram; self is excluded from the set).
+- **The roster keeps its status grammar.** The product lens made the argument v1
+  skipped: on the map there are no names, so hue must do identity work; in the
+  roster the names are present and the host's question is "who's in trouble" — the
+  mint/amber status avatars answer it instantly and survive. Identity hues therefore
+  ship on the **map and lobby**; the roster changes only its bugs ("You YOU", and
+  no dimming of `.awaiting` — that re-litigated ROH-214's "healthy ride starts
+  amber" finding through a channel with no words behind it). *(PO can override —
+  decision 3 below.)*
+- **No Theme CTA change; no new motion; no `.mapCard`;** join-failure reasons are
+  network-vs-rejected only, never server-guessed; generic rejection copy becomes
+  cause-agnostic.
+- **Sentence case everywhere** ("Join code"); one `JoinCodeText` voice for the lobby
+  card and roster empty state (the join screen's per-character boxes stay per-box —
+  §10 no longer claims "one voice" beyond that).
 
-## 3. Workstream A — crew identity system
+**For the PO (the plan waits on these; recommendations first):**
+1. **Lobby fill mechanism** — (a) *recommended:* client-only roster poll while
+   `phase == .lobby` (every ~4s; no migration, no new server surface, Tier-2
+   verifiable on the existing two-phone queue), or (b) a `member_joined`
+   Broadcast-from-Database (real-time, but a migration + transport bridge on the
+   security-reviewed join path).
+2. **Join action** — (a) *recommended:* keep the explicit Join button, pinned above
+   the keyboard, with a caption explaining the disabled state, or (b) auto-join on
+   the 8th valid character (dissolves the disabled state entirely; some riders want
+   a confirm step).
+3. **Roster avatars** — (a) *recommended:* keep status colors (per-surface grammar
+   above), or (b) identity hues everywhere with status moved to pills (requires
+   inventing an `.awaiting` pill and re-opens the ROH-214 ground).
 
-- New `CrewMonogram` view: hued disc + monogram label, sizes for lobby/roster rows
-  (32pt today) parameterized; self = white disc, ink label; dropped/awaiting render
-  at reduced opacity (status pill still carries the words).
-- A single identity derivation — a small pure helper in AuraKit (testable) that maps
-  the session's member set to `{userID: (hueIndex, monogram)}` via the existing
-  AuraCore seams, consumed by lobby rows, roster rows, and (after the
-  identity-carriers branch merges — file overlap) the map's `PeerDotView`/name-tag
-  path if its inputs differ from this derivation.
-- Lobby rows adopt `CrewMonogram` and gain the roster's "YOU" marker plus a "Host"
-  marker (a guest currently cannot tell which lobby row is the host they are
-  waiting on).
-- Roster rows keep every current behavior (status pill, distance label, a11y labels,
-  self-first semantics) — only the avatar's fill logic changes from status-colored to
-  identity-colored + dim.
+## 3. Workstream A0 — make the lobby fill (the headline)
 
-**A11y:** identity hues are the CVD-safe `riderHues` with contrast-picked ink
-(`AuraTheme.riderInk`, WCAG-gated); status remains fully non-chromatic (text pill).
-VoiceOver labels unchanged.
+Assuming decision 1a: while `phase == .lobby`, the session polls `refreshRoster()`
+on an injected-clock interval (~4s), stopping on any phase exit; the existing
+`.position`-triggered refresh stays. Joiner rows appear under the lobby's existing
+0.22s row animation — the *real* waiting-moment payoff v1 misspent on the fake code
+reveal. Pure-logic cadence lives in AuraKit with tests (injected clock, per the
+end/leave timeout precedent at `GroupRideSession.swift:133`); the poll must be
+idempotent with `beginLiveSession()`'s seed.
 
-## 4. Workstream B — join screen rebuild (`GroupRideJoinView`)
+**Verification: Tier 2, two-phone, queued** — host lobby fills within one poll
+interval of a second phone joining. This is the slice's merge-worthiness bar: if A0
+doesn't land, the rest is paint on a broken room.
 
-- **Structure:** content moves into a `ScrollView` +
-  `.scrollDismissesKeyboard(.interactively)` — the file's own documented fix for the
-  trapped keyboard; the background tap-to-focus stays on the scroll content
-  (unchanged semantics: tap focuses, drag dismisses).
-- **Layout:** the dead middle goes. The entry cluster (code boxes → paste → Join)
-  sits together under the header/start/divider column; Join is adjacent to what
-  enables it instead of anchored across a void. Exact spacing settles at the mockup
-  gate.
-- **Code boxes:** type bumps to `metricCockpit(24)`; a filled box's border brightens
-  one step so progress reads at a glance; the existing next-box accent focus ring
-  stays.
-- **Disabled CTA:** the Theme-wide change from §2 lands here (and is screenshotted on
-  the summary's Share button too).
-- Copy/casing already consistent on this screen ("Start a ride"); no copy changes.
+## 4. Workstream A — one color authority (`RiderColorLatch`, ROH-114 §D3.3)
 
-## 5. Workstream C — lobby and waiting moments (`GroupLobbyView`, `GroupRosterSheet`)
+- Implement `RiderColorLatch` in AuraKit exactly as the approved ROH-114 spec
+  defines it: peers-minus-self input, latch-on-first-assignment (a rider's hue never
+  changes for the session's lifetime), 8-hue palette (the widening is ROH-114's own
+  decision; `AuraPalette` gains the three hues under the same CVD/WCAG test regime
+  as the existing five — `riderInk` already picks ink by measured contrast).
+- Session-owned: the latch lives on/with `GroupRideSession`; surfaces **look up**,
+  never recompute (the gate showed a shared *function* with three input sets is the
+  disease). The map's `PeerAnnotationDriver` migrates from `PeerPalette.assign` to
+  the latch — fixing the shipped mid-ride reshuffle. `PeerPalette.assign` remains
+  for any non-session use; nothing new calls it.
+- **Lobby rows** adopt identity: `CrewMonogram` (hued disc + `RiderMonogram` label,
+  ink via `riderInk`) replaces the always-accent initial; self row shows the real
+  name + a "You" marker and a white disc ("white = me", the puck grammar); the host
+  row gains a "Host" marker (a guest currently can't tell who they're waiting on).
+- **Roster**: avatars unchanged (decision 3a); fix "You YOU" (the name column shows
+  the real display name, the marker stays); sort order untouched
+  (progress-descending — v1's "self-first" claim was wrong).
+- Latch tests in the package: stability across membership change (the exact case
+  `PeerPaletteTests` misses), peers-minus-self input, lookup-miss fallback.
+- Out of promise: cross-device hue agreement (stated, not hidden); open-ride crew
+  layer (no roster/dots exist on `RideHUDView` — that is ROH-114 Plan 2, deferred
+  there, and §10's coherence criterion is scoped to route rides accordingly).
 
-- `JoinCodeText` replaces both non-box code renderings; "Join code" sentence-case
-  label; code reveal transition per §2.
-- One `CrewEmptyState(joinCode:)` component replaces the two duplicated
-  "Waiting for your crew…" blocks — the roster variant keeps its join-code line and
-  its share hint (review-gated behavior), the lobby variant omits them (the code
-  card is directly above).
-- `.mapCard` migration for the lobby code card and the roster expanded card; delete
-  both lint exemptions; sim passes for Increase Contrast + Reduce Transparency on
-  both cards (our correctness, not the rule's).
-- The guest waiting row and host retry row are untouched except tokens they already
-  use.
+## 5. Workstream B — join screen (`GroupRideJoinView`)
 
-## 6. Workstream D — flow states (`GroupRideFlowView`, session seam)
+- **Keyboard:** a `.keyboard` toolbar "Done" item — reliable regardless of content
+  height (the gate showed `scrollDismissesKeyboard` is a no-op when content fits,
+  which the tightened layout makes *more* likely) — plus `.submitLabel(.join)`.
+  No ScrollView; the full-screen tap-to-focus target and background stay as built.
+- **Layout:** the entry cluster (boxes → paste → Join) sits together; Join pins via
+  `.safeAreaInset(edge: .bottom)` so it remains visible keyboard-UP on an SE — the
+  gate showed v1's layout put the button under the keyboard at the exact moment it
+  enabled, and that a keyboard-down mockup can't catch it. **Gate evidence must
+  include the keyboard-up SE state.**
+- **Disabled Join:** keeps the standard style; gains a caption underneath while
+  incomplete — "Enter the 8-character code from your host." — cleared when valid
+  (decision 2a; if the PO picks auto-join, the caption and the disabled state both
+  vanish).
+- **Paste:** parse an entire shared link — if the pasteboard contains
+  `aura://join?code=XXXXXXXX` (the exact string the lobby's Share writes), extract
+  the code; otherwise sanitize as today. Small pure helper, package-tested.
+- **Dynamic Type:** the code boxes keep `metricCockpit(20, relativeTo: .title3)`
+  (v1's bump to 24 is dropped — no clipping guard existed) and the screen gains the
+  roster's `dynamicTypeSize(...accessibility1)` cap. v1's filled-box-brightening cue
+  is dropped (the glyph appearing IS the progress; the extra border spent accent on
+  decoration).
 
-- **Entry loading:** the bare spinner becomes a labeled state (glyph + "Setting up
-  your crew ride…" + spinner) on the standard background — same shape as the app's
-  other designed waits.
-- **Distinct join failures:** `backend.joinRide` gains a typed error
-  (`GroupRideJoinError`: `rideFull`, `rideEnded`, `invalidCode`, `other`), the
-  session carries the reason alongside `.joinFailed`, and the flow maps it to copy:
-  full → "This ride is full." / ended → "This ride already ended." / invalid →
-  "That code didn't match a ride — double-check it with your host." / other → the
-  current generic line. **Honesty gate:** the plan verifies the Supabase function
-  actually distinguishes these server-side; any case it cannot distinguish falls to
-  `.other` and the copy stays generic — no guessed reasons, ever (the join screen's
-  doc comment already promises "this view never guesses at that outcome"). This also
-  closes the roadmap's "distinct join-failure messages" Group-Rides-Tail item.
-- **Name-prompt framing:** `DisplayNameEditor` gains an optional context line, and
-  the flow's `needsDisplayName` phase passes one ("Pick a crew name — it's how your
-  ride sees you."). Settings' use of the editor is unchanged.
-- The ended/createFailed/routeUnavailable surfaces keep their structure; each gains
-  a one-line secondary explanation where it has none.
+## 6. Workstream C — code voice and waiting states
 
-**Structural cautions (from the code's own scars, binding on the plan):** the
-`content` `if` in `GroupRideFlowView` (riding/ended sharing one structural branch,
-ROH-81) is not refactored; navigation stays on `replaceTopWithGroupRide`; nothing
-introduces a nested `NavigationStack`.
+- `JoinCodeText` (Saira cockpit, one tracking token, size parameterized): lobby card
+  + roster empty state. "JOIN CODE" → "Join code", sentence case.
+- `CrewEmptyState` with the **three** real variants (lobby; roster-with-code +
+  share hint; roster-without-code guest line) — v1 enumerated two and would have
+  silently dropped the guest copy the earlier review gate added.
+- **Lobby predicate + count fixes:** empty-state trigger becomes `rows.count <= 1`
+  (matching the roster — today's `rows.isEmpty` is unreachable because the seed
+  roster includes the host, so a waiting host sees their own name as "Crew · 1
+  joined"); the count label excludes self ("Crew" until a friend arrives, then
+  "Crew · N joined" where N counts the others).
+- No new motion anywhere in this workstream.
 
-## 7. PO approval gates
+## 7. Workstream D — flow states (`GroupRideFlowView` + session seam)
 
-1. **Crew identity board (mockup, before implementation of A/B visuals):** the
-   monogram system shown across lobby row / roster row / map dot for the same fake
-   crew (hue coherence visible), `JoinCodeText`, the rebuilt join-screen layout, and
-   the disabled-CTA before/after. Same mockup-first process as the puck gate.
-2. **Whole-slice before/after set:** lobby (empty + filling + guest), roster
-   (collapsed/expanded, statuses), join screen (empty/partial/valid/disabled →
-   enabled), flow states (loading, three failure copies, ended, name prompt) — the
-   in-memory preview hosts drive most of these without a network.
+- **Loading:** entry-aware copy — create → "Setting up your crew ride…", join →
+  "Joining your crew…" — with glyph + spinner; **bounded** by the session's
+  existing injected-clock timeout pattern (end/leave precedent): a hung create/join
+  resolves to the connection-failure surface rather than an eternal spinner.
+- **Failure taxonomy (client-only):** `SupabaseGroupRideBackend.joinRide` and
+  `create` distinguish transport-reachability failures (URLError et al →
+  `.connectionFailed`) from server rejection (`.rejected`). No server change; no
+  guessed reasons. Session carries the reason in a property **alongside** the
+  payload-free phase (an associated value would break `phase ==` and the ROH-81
+  single-branch `if`), cleared at the top of every attempt and written adjacent to
+  the phase with no suspension between (the gate's split-state rules).
+- **Copy:** rejected → "Couldn't join that ride. Check the code with your host and
+  try again." (cause-agnostic — full/ended/typo all land here honestly);
+  connection → "Couldn't reach the ride — check your connection and try again."
+- **Exits, not dead ends:** the join-failure surface offers **Try again** —
+  returning to the join screen with the typed code preserved (the screen's `seed:`
+  init already exists for previews) — plus Back; `.createFailed` gains Try again
+  (re-invokes the entry) plus Back. Route stays on `replaceTopWithGroupRide`
+  mechanics; no new NavigationStack; the ROH-81 structural branch is untouched.
+- **Name prompt framing:** `DisplayNameEditor` gains a defaulted `contextLine`
+  parameter placed after `onSaved` (trailing-closure call sites must keep
+  resolving; Settings stays byte-identical), and the flow passes "Pick a crew name —
+  it's how your crew sees you."
+- The corrupt-payload branch shares the routeUnavailable copy today and gains the
+  same secondary line — five `dismissMessage` call sites, not three.
 
-Wait protocol as before: blocked status + Linear comment while a gate waits; rebase
-before merge if main moved.
+## 8. Dependencies, coordination, verification
 
-## 8. Dependencies and verification
-
-- **Branch-level dependency (per the executing session, 2026-08-31):** identity
-  carriers executes as ONE branch; ROH-222 does not merge separately. Crew
-  **implementation** starts after that branch merges to main; spec, plan, and
-  mockups proceed now. The `.mapChip`/`MapChipStroke` signature and the two lint
-  exemptions are reviewed-stable on that branch and are what this spec builds
-  against. If the PO chooses to split ROH-222 out early, the dependency shrinks to
-  that merge — their call, not assumed.
-- **Tier 1 (sim + previews):** everything in this slice is static UI; the in-memory
-  backend preview hosts (`GroupLobbyPreviewHost` et al.) already simulate a filling
-  crew and a guest lobby. Accessibility sim passes per §5. **Toggle recipe (from the
-  identity-carriers session, learned the hard way):** `xcrun simctl ui <udid>`
-  exposes only `increase_contrast` — Reduce Transparency must be toggled through
-  Settings.app (Accessibility → Display & Text Size) or by writing
-  `EnhancedBackgroundContrastEnabled` in the `com.apple.Accessibility` domain; the
-  guessed `ReduceTransparencyEnabled` key silently does nothing, which renders
-  exactly like "the modifier ignores the setting." Confirm the toggle actually
-  flipped on a known-translucent surface before concluding anything about the cards.
-- **Tier 2 (queued, no hold):** one two-device check — monogram/hue coherence
-  between two live phones' lobbies, rosters, and maps for the same crew — appended
-  to the existing two-phone verification session (ROH-122 family), not a new
-  standing session.
+- **No hard dependency on the identity-carriers branch remains** (§1.7). File-level
+  coordination only: that branch has one in-flight line in
+  `GroupRideMapOverlay.swift` (which this slice no longer touches) and this slice's
+  map-latch migration touches `PeerAnnotations.swift` (which that branch does not).
+  Sequencing courtesy: don't land the `PeerAnnotations` change while their branch is
+  un-merged without a rebase check.
+- **Tier 1 (sim):** join screen states (incl. keyboard-up SE), lobby/roster
+  statics via previews **with frozen UUIDs** (the gate showed fresh-`UUID()`
+  previews make hue evidence non-reproducible), rejection copy by typing a wrong
+  code against the live backend, connection copy via network-off sim.
+- **Tier 2 (two-phone, queued):** A0 lobby fill; per-device hue stability across a
+  mid-ride join; appended to the existing two-phone session queue.
+- **Accessibility:** new-hue ink pairs ride the existing `RiderPaletteTests` regime;
+  Increase Contrast / Reduce Transparency passes on touched surfaces (toggle recipe
+  in §8 of v1 retained: `simctl ui` has only `increase_contrast`; RT via Settings or
+  `EnhancedBackgroundContrastEnabled` in `com.apple.Accessibility`; verify the
+  toggle flipped before judging code).
 
 ## 9. Out of scope
 
-QR-code join (PO-deferred), group-aware Live Activity, peer-focus (tap a rider to
-frame them), host transfer, richer membership toasts, transport/heartbeat changes,
-`GroupNavigateContainer`/HUD crew chrome (identity-carriers territory), Settings'
-`DisplayNameEditor` presentation, and any `GroupRideSession` change beyond the typed
-join error + the single identity derivation.
+The join-oracle security decision (filed as its own issue — ROH-226); any server
+migration (unless PO decision 1b); the open-ride crew layer (ROH-114 Plan 2, stays
+deferred); QR join; group Live Activity; peer-focus; host transfer; membership
+toasts; `.mapCard`/lint hygiene (cut); Theme CTA changes (cut); roster visual
+redesign beyond the named fixes; `GroupNavigateContainer`/HUD chrome; the latent
+`selfUserID ?? UUID()` random-identity default in `NavigateHUDView+GroupCrew.swift:28`
+(noted for the identity-carriers file boundary; a one-line follow-up once that
+branch lands).
 
 ## 10. Success criteria
 
-1. One monogram implementation; a given rider renders the same hue and monogram in
-   the lobby, the roster, and on the map — pinned by a test on the single
-   derivation, and eyeballed in the Tier-2 two-device check.
-2. Self renders white-with-ink in every crew surface ("white = me", matching the
-   puck).
-3. The join code has one typographic voice; no uppercase tracked eyebrows remain in
-   the group module.
-4. Disabled CTAs read inert (surface + secondary + hairline) everywhere; both
-   shipped disabled sites screenshotted.
-5. The join screen's keyboard dismisses by drag; the entry cluster reads as one
-   group; no half-screen void.
-6. The code reveal animates (with a Reduce Motion branch); no other new motion.
-7. One `CrewEmptyState`; the roster variant still shows the join code and share
-   hint.
-8. `.mapCard` exists in Theme; the lobby/roster lint exemptions are deleted; both
-   cards pass Increase Contrast and Reduce Transparency sim checks.
-9. Entry loading is labeled; join failures show distinct copy exactly where the
-   server distinguishes them, generic otherwise; the name prompt is framed.
-10. Attention semantics unchanged: badge tint warns only on a dropped rider; all
-    existing roster/lobby VoiceOver labels and the ROH-81/nav invariants survive.
-11. New pure logic (identity derivation, join-error mapping) is package-tested; the
-    full suite and `swiftlint --strict` stay green.
+1. Two-phone: a host's lobby shows a joining friend within one refresh interval,
+   with the arrival row animating in (A0 — the merge-worthiness bar).
+2. On one device, in a route ride, a given peer renders the same hue and monogram
+   on the map and in the lobby, and that hue never changes mid-session — pinned by
+   latch tests (stability across membership change) and eyeballed on the two-phone
+   pass. Cross-device agreement is explicitly not claimed.
+3. The map's mid-ride hue reshuffle is gone (latch replaces `PeerPalette.assign`
+   in the driver).
+4. Lobby rows: identity hues + real names + You/Host markers; roster: status
+   grammar intact, "You YOU" fixed, `.awaiting` presentation unchanged.
+5. Join screen: Join visible keyboard-up on an SE; keyboard dismissible via Done;
+   disabled Join carries its caption (or doesn't exist, per decision 2); pasting
+   the shared link fills the code correctly; Dynamic Type capped like the roster.
+6. One `JoinCodeText` voice at both non-box sites; no uppercase tracked eyebrows in
+   the group module; three-variant `CrewEmptyState`; lobby count excludes self and
+   its empty state is reachable.
+7. Loading is entry-aware and bounded; rejection and connection failures show
+   distinct, honest copy; both failure surfaces offer Try again (code preserved on
+   the join path); the name prompt is framed; Settings' editor is unchanged.
+8. No new motion; no Theme-wide style changes; `swiftlint --strict` + both package
+   test totals green; every new pure seam (poll cadence, latch, paste parser,
+   failure mapping) is package-tested.
 
 ## 11. Board mechanics
 
-One child issue under ROH-45 per workstream (A–D) plus the Tier-2 verification
-item, created before implementation; statuses driven per the board flow. Suggested
-order: D (flow states, no visual gate) → C → A → B, with A/B behind the §7 mockup
-gate; the plan stage owns sequencing and the dependency timing from §8.
+Child issues under ROH-225 per workstream (A0, A, B, C, D) once the PO approves
+this spec and answers §2's three decisions; the oracle question files as ROH-226
+(Backlog, security decision, not this slice). Suggested order: A0 → D → B → C → A
+(the fill fix first — everything else is worth less until the room works); the plan
+stage owns final sequencing.
