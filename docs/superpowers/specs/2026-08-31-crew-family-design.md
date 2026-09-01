@@ -193,7 +193,14 @@ before merge if main moved.
   that merge — their call, not assumed.
 - **Tier 1 (sim + previews):** everything in this slice is static UI; the in-memory
   backend preview hosts (`GroupLobbyPreviewHost` et al.) already simulate a filling
-  crew and a guest lobby. Accessibility sim passes per §5.
+  crew and a guest lobby. Accessibility sim passes per §5. **Toggle recipe (from the
+  identity-carriers session, learned the hard way):** `xcrun simctl ui <udid>`
+  exposes only `increase_contrast` — Reduce Transparency must be toggled through
+  Settings.app (Accessibility → Display & Text Size) or by writing
+  `EnhancedBackgroundContrastEnabled` in the `com.apple.Accessibility` domain; the
+  guessed `ReduceTransparencyEnabled` key silently does nothing, which renders
+  exactly like "the modifier ignores the setting." Confirm the toggle actually
+  flipped on a known-translucent surface before concluding anything about the cards.
 - **Tier 2 (queued, no hold):** one two-device check — monogram/hue coherence
   between two live phones' lobbies, rosters, and maps for the same crew — appended
   to the existing two-phone verification session (ROH-122 family), not a new
