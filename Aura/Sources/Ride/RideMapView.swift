@@ -37,6 +37,18 @@ struct RideMapView: View {
         detourRoute.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
     }
 
+    /// Scale bar shows only when panned off the puck, and BELOW the top control row —
+    /// at Mapbox's default topLeading(8,8) it would collide with the back/GPS controls
+    /// in exactly the panned state that shows it (plan-review finding). Compass never:
+    /// the recenter cluster owns orientation on a course-up HUD (spec §6.1-2).
+    private var hudOrnaments: OrnamentOptions {
+        var options = OrnamentOptions()
+        options.scaleBar.visibility = viewport.followPuck != nil ? .hidden : .adaptive
+        options.scaleBar.margins = CGPoint(x: 8, y: MapOrnamentMetrics.belowTopControlMargin)
+        options.compass.visibility = .hidden
+        return options
+    }
+
     var body: some View {
         Map(viewport: $viewport) {
             Puck2D(bearing: .heading)
@@ -55,6 +67,9 @@ struct RideMapView: View {
             cameraBox.bearing = ctx.cameraState.bearing
             cameraBox.pitch = ctx.cameraState.pitch
         }
+        // `.ornamentOptions(_:)` also returns `Map`, so it must stay in this chain too — same
+        // reasoning as `.onCameraChanged` above.
+        .ornamentOptions(hudOrnaments)
         .ignoresSafeArea()
     }
 

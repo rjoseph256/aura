@@ -78,6 +78,18 @@ struct NavigateHUDView: View {
     /// empty (a no-op) whenever `groupSession` is nil.
     @State private var peerModel = PeerAnnotationDriver()
 
+    /// Scale bar shows only when panned off the puck, and BELOW the top control row —
+    /// at Mapbox's default topLeading(8,8) it would collide with the back/GPS controls
+    /// in exactly the panned state that shows it (plan-review finding). Compass never:
+    /// the recenter cluster owns orientation on a course-up HUD (spec §6.1-2).
+    private var hudOrnaments: OrnamentOptions {
+        var options = OrnamentOptions()
+        options.scaleBar.visibility = viewport.followPuck != nil ? .hidden : .adaptive
+        options.scaleBar.margins = CGPoint(x: 8, y: MapOrnamentMetrics.belowTopControlMargin)
+        options.compass.visibility = .hidden
+        return options
+    }
+
     init(route: AuraCore.Route, destination: Place? = nil, groupSession: GroupRideSession? = nil) {
         self.route = route
         self.destination = destination
@@ -326,6 +338,9 @@ struct NavigateHUDView: View {
                     cameraBox.bearing = ctx.cameraState.bearing
                     cameraBox.pitch = ctx.cameraState.pitch
                 }
+                // `.ornamentOptions(_:)` also returns `Map`, so it must stay in this chain too —
+                // same reasoning as `.onCameraChanged` above.
+                .ornamentOptions(hudOrnaments)
             }
         }
         .onAppear { syncPeers() }

@@ -324,6 +324,14 @@ struct RoutePreviewView: View {
 // MARK: - Map pane (extension keeps the main type body under the length limit)
 
 private extension RoutePreviewView {
+    /// Scale bar below the floating back control. Margins are safe-area-relative (SDK
+    /// contract), so no GeometryReader and no device-dependent term.
+    var previewOrnaments: OrnamentOptions {
+        var options = OrnamentOptions()
+        options.scaleBar.margins = CGPoint(x: 8, y: MapOrnamentMetrics.belowTopControlMargin)
+        return options
+    }
+
     var mapPane: some View {
         ZStack(alignment: .topLeading) {
             Map(viewport: $viewport) {
@@ -349,6 +357,9 @@ private extension RoutePreviewView {
                 cameraBox.bearing = ctx.cameraState.bearing
                 cameraBox.pitch = ctx.cameraState.pitch
             }
+            // `.ornamentOptions(_:)` also returns `Map`, so it must precede `.ignoresSafeArea()`
+            // too — same reasoning as `.onCameraChanged` above.
+            .ornamentOptions(previewOrnaments)
             .ignoresSafeArea()
 
             // Back chevron — HUDControlButton carries the 44pt hit area and the
