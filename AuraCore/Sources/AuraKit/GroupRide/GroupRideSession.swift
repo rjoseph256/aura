@@ -140,104 +140,6 @@ public final class GroupRideSession {
         self.sleep = sleep ?? { try await Task.sleep(for: $0) }
     }
 
-    /// Creates a ride. `inputRoute` is nil for a destination-free ride (ROH-114); the backend
-    /// then stores a genuine absence, so a joining guest gets nil rather than bytes.
-    public func create(route inputRoute: Route?) async {
-        guard DisplayName.normalized(displayNameProvider()) != nil else {
-            phase = .needsDisplayName
-            return
-        }
-        do {
-            let resolvedSelfUserID = try await backend.currentUserID()
-            let routeData = try inputRoute.map { try JSONEncoder().encode($0) }
-            let ride = try await backend.createRide(route: routeData)
-            rideID = ride.id
-            joinCode = ride.joinCode
-            route = inputRoute
-            rideKind = ride.kind
-            hostID = ride.hostID
-            selfUserID = resolvedSelfUserID
-            isHost = (ride.hostID == resolvedSelfUserID)
-            rideSession = RideSession(rideID: ride.id, selfUserID: resolvedSelfUserID,
-                                      transport: transport, cadence: cadence)
-            phase = .lobby
-        } catch {
-            phase = .createFailed
-        }
-    }
-
-    public func join(code: JoinCode) async {
-        guard DisplayName.normalized(displayNameProvider()) != nil else {
-            phase = .needsDisplayName
-            return
-        }
-        let resolvedSelfUserID: UUID
-        let joined: JoinedRide
-        do {
-            resolvedSelfUserID = try await backend.currentUserID()
-            joined = try await backend.joinRide(code: code)
-        } catch {
-            phase = .joinFailed
-            return
-        }
-        // Three-way, and the two failure-looking cases must NOT be collapsed (ROH-114).
-        // nil route = an open ride, by design → proceed with `route` nil.
-        // Bytes that will not decode = a corrupt payload → error out AND leave the ride.
-        // Reading absence as corruption bounces every guest out of an open ride and removes
-        // them server-side; reading corruption as absence turns a lost route into a silent
-        // destination-free ride, which is data loss wearing a feature's clothes.
-        var decodedRoute: Route?
-        if let routeBytes = joined.route {
-            guard let decoded = try? JSONDecoder().decode(Route.self, from: routeBytes) else {
-                phase = .routeUnavailable
-                try? await backend.leaveRide(rideID: joined.ride.id)
-                return
-            }
-            decodedRoute = decoded
-        }
-        rideID = joined.ride.id
-        joinCode = joined.ride.joinCode
-        route = decodedRoute
-        rideKind = joined.ride.kind
-        hostID = joined.ride.hostID
-        selfUserID = resolvedSelfUserID
-        isHost = (joined.ride.hostID == resolvedSelfUserID)
-        rideSession = RideSession(rideID: joined.ride.id, selfUserID: resolvedSelfUserID,
-                                  transport: transport, cadence: cadence)
-        let status = RideLifecycleStatus(hostID: joined.ride.hostID,
-                                         startedAt: joined.ride.startedAt, endedAt: joined.ride.endedAt)
-        switch authoritativePhase(status, current: .lobby) {
-        case .riding: phase = .riding
-        default:      phase = .lobby
-        }
-    }
-
-    /// Host-only: asks the backend to mark the ride started (stamps `started_at` durably),
-    /// then advances to `.riding` only once the server confirms. On failure sets
-    /// `startFailed` and stays in `.lobby` — the lobby view's Retry re-invokes this.
-    public func startRiding() async { await attemptStart() }
-
-    private func attemptStart() async {
-        guard let rideID else { return }
-        startFailed = false
-        do {
-            try await backend.startRide(rideID: rideID)
-            phase = .riding
-            pendingStart = false
-        } catch {
-            startFailed = true
-            pendingStart = true
-        }
-    }
-
-    /// Re-attempts a pending `startRiding()`. Bound to the lobby's Retry affordance (and, in
-    /// production, an auto-backoff Task — see the TODO above).
-    public func retryStartIfNeeded() async {
-        guard pendingStart else { return }
-        pendingStart = false
-        await attemptStart()
-    }
-
     /// Called by the production call sites (the lobby `.task` and the `.riding` `.task`)
     /// once a session exists: subscribes to the live transport and OWNS the event loop so
     /// this session's `ingest` (names/toasts/host-end dissolve) runs on the live stream —
@@ -394,6 +296,111 @@ public final class GroupRideSession {
         tickerTask?.cancel()
         tickerTask = nil
         didBeginLive = false
+    }
+}
+
+// MARK: - Entry & start (create / join / startRiding)
+//
+// Same-file extension purely for SwiftLint's `type_body_length` ceiling (the main body
+// measured 232/250 before this slice), following the End / Leave extension's precedent
+// below. Private stored-state access is unaffected; behavior is identical.
+extension GroupRideSession {
+    /// Creates a ride. `inputRoute` is nil for a destination-free ride (ROH-114); the backend
+    /// then stores a genuine absence, so a joining guest gets nil rather than bytes.
+    public func create(route inputRoute: Route?) async {
+        guard DisplayName.normalized(displayNameProvider()) != nil else {
+            phase = .needsDisplayName
+            return
+        }
+        do {
+            let resolvedSelfUserID = try await backend.currentUserID()
+            let routeData = try inputRoute.map { try JSONEncoder().encode($0) }
+            let ride = try await backend.createRide(route: routeData)
+            rideID = ride.id
+            joinCode = ride.joinCode
+            route = inputRoute
+            rideKind = ride.kind
+            hostID = ride.hostID
+            selfUserID = resolvedSelfUserID
+            isHost = (ride.hostID == resolvedSelfUserID)
+            rideSession = RideSession(rideID: ride.id, selfUserID: resolvedSelfUserID,
+                                      transport: transport, cadence: cadence)
+            phase = .lobby
+        } catch {
+            phase = .createFailed
+        }
+    }
+
+    public func join(code: JoinCode) async {
+        guard DisplayName.normalized(displayNameProvider()) != nil else {
+            phase = .needsDisplayName
+            return
+        }
+        let resolvedSelfUserID: UUID
+        let joined: JoinedRide
+        do {
+            resolvedSelfUserID = try await backend.currentUserID()
+            joined = try await backend.joinRide(code: code)
+        } catch {
+            phase = .joinFailed
+            return
+        }
+        // Three-way, and the two failure-looking cases must NOT be collapsed (ROH-114).
+        // nil route = an open ride, by design → proceed with `route` nil.
+        // Bytes that will not decode = a corrupt payload → error out AND leave the ride.
+        // Reading absence as corruption bounces every guest out of an open ride and removes
+        // them server-side; reading corruption as absence turns a lost route into a silent
+        // destination-free ride, which is data loss wearing a feature's clothes.
+        var decodedRoute: Route?
+        if let routeBytes = joined.route {
+            guard let decoded = try? JSONDecoder().decode(Route.self, from: routeBytes) else {
+                phase = .routeUnavailable
+                try? await backend.leaveRide(rideID: joined.ride.id)
+                return
+            }
+            decodedRoute = decoded
+        }
+        rideID = joined.ride.id
+        joinCode = joined.ride.joinCode
+        route = decodedRoute
+        rideKind = joined.ride.kind
+        hostID = joined.ride.hostID
+        selfUserID = resolvedSelfUserID
+        isHost = (joined.ride.hostID == resolvedSelfUserID)
+        rideSession = RideSession(rideID: joined.ride.id, selfUserID: resolvedSelfUserID,
+                                  transport: transport, cadence: cadence)
+        let status = RideLifecycleStatus(hostID: joined.ride.hostID,
+                                         startedAt: joined.ride.startedAt, endedAt: joined.ride.endedAt)
+        switch authoritativePhase(status, current: .lobby) {
+        case .riding: phase = .riding
+        default:      phase = .lobby
+        }
+    }
+
+    /// Host-only: asks the backend to mark the ride started (stamps `started_at` durably),
+    /// then advances to `.riding` only once the server confirms. On failure sets
+    /// `startFailed` and stays in `.lobby` — the lobby view's Retry re-invokes this.
+    public func startRiding() async { await attemptStart() }
+
+    private func attemptStart() async {
+        guard let rideID else { return }
+        startFailed = false
+        do {
+            try await backend.startRide(rideID: rideID)
+            phase = .riding
+            pendingStart = false
+        } catch {
+            startFailed = true
+            pendingStart = true
+        }
+    }
+
+    /// Re-attempts a pending `startRiding()`. Bound to the lobby's Retry affordance (and, in
+    /// production, an auto-backoff Task — see the TODO above).
+    public func retryStartIfNeeded() async {
+        guard pendingStart else { return }
+        pendingStart = false
+        await attemptStart()
     }
 }
 
