@@ -2,35 +2,49 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Version:** v2, reconciled 2026-09-01 after the 2-reviewer adversarial plan gate (skeptic + architecture lenses). v1 is dead — do not resurrect its mechanisms. The reconciliation log at the bottom records every adjudication.
+
 **Goal:** Make the group-ride lobby actually fill, give riders stable identity hues on map + lobby, and turn the join/waiting/failure flows into honest, recoverable surfaces.
 
-**Architecture:** Pure seams in AuraCore/AuraKit (roster merge, lobby poll cadence, failure classifier, color latch, paste parser, count label) drive thin SwiftUI adoption in the app target. The session (`GroupRideSession`) stays the single owner of live state; surfaces look up, never recompute.
+**Architecture:** Pure seams in AuraCore/AuraKit (roster merge, lobby poll cadence, failure classifier, color latch, the `CrewIdentity` bundle, paste parser, count label) drive thin SwiftUI adoption in the app target. `GroupRideSession` is the single owner of live state — one `snapshotPeers` writer keeps `peers`, the latch, and `CrewIdentity` atomic; surfaces look up, never recompute.
 
-**Tech Stack:** Swift 6 / SwiftUI, Swift Testing (`@Test`/`#expect`), SwiftPM package `AuraCore` (two targets: AuraCore pure, AuraKit session layer), xcodegen-generated app project, Supabase backend (NO server changes in this slice).
+**Tech Stack:** Swift 6 / SwiftUI, Swift Testing (`@Test`/`#expect`), SwiftPM package `AuraCore` (AuraCore pure + AuraKit session layer), xcodegen app project, Supabase backend (NO server changes).
 
-**Spec:** `docs/superpowers/specs/2026-08-31-crew-family-design.md` (v2, PO-approved 2026-09-01 with decisions 1a/2a/3a). Visual reference: `docs/superpowers/specs/2026-08-31-crew-identity-board.svg` (approved gate-1 identity board — the implementation reference for CrewMonogram, JoinCodeText, You/Host markers, and the join-screen layout).
+**Spec:** `docs/superpowers/specs/2026-08-31-crew-family-design.md` (v2, PO-approved with decisions 1a/2a/3a). Visual reference: `docs/superpowers/specs/2026-08-31-crew-identity-board.svg`.
 
-**Board:** ROH-227 (A0, Tasks 1–2) · ROH-231 (D, Tasks 3–8) · ROH-229 (B, Tasks 9–10) · ROH-230 (C, Tasks 11–12) · ROH-228 (A, Tasks 13–19) · Task 20 closes the slice. Move each issue Todo → In Progress → In Review → Done as its tasks run; watch for Linear auto-completing issues from PR references and revert if wrong.
+**Board:** ROH-227 (A0, Tasks 1–2) · ROH-231 (D, Tasks 3–8) · ROH-229 (B, Tasks 9–10) · ROH-230 (C, Tasks 11–12) · ROH-228 (A, Tasks 13–19) · Task 20 closes the slice. Move each issue Todo → In Progress → In Review → Done as its tasks run; revert any Linear auto-completion that fires early.
 
 ## Global Constraints
 
-- **No new motion anywhere.** The only animation that may fire is the lobby's existing `.easeOut(duration: 0.22)` on `rows.count` (`GroupLobbyView.swift:81`).
-- **No Theme-wide changes**: no CTAButtonStyle edits, no `.mapCard`, no gradients, no pulsing (charter).
-- **Sentence case** for all new/changed copy; no uppercase tracked eyebrows in the group module. Exception: the roster's existing "YOU" marker style stays (it is a marker, not an eyebrow — spec §4).
-- **`GroupRideSession.Phase` stays payload-free.** Failure reason is a property *alongside* phase, cleared at the top of every attempt, written adjacent to the phase with no suspension between (spec §7).
+- **Baseline is the post-merge tree.** The identity-carriers branch merged to main as PR #140 (`5b29f6f`) and main is merged into this branch (`f4c5768`). There is NO cross-branch coordination left — v1's file-boundary language is void. Line numbers cite `f4c5768`; locate by symbol if drifted. Task 0 verifies the baseline is green before anything else.
+- **SwiftLint budgets, measured** (`.swiftlint.yml`: `--strict` fails on warnings; `file_length` warning 500; `type_body_length` default 250; `function_parameter_count` default 5):
+  - `GroupRideSession.swift` = 465 lines, main class body 232/250. Task 2 relocates the entry/start methods into a same-file extension FIRST (the file's own End/Leave extension is the precedent) so Tasks 2/4/16 have body headroom. If the file passes 500 lines, add the documented `// swiftlint:disable file_length` header Task 2 specifies — the repo's targeted-disable-with-justification precedent (`MapboxGuidanceSession.swift:259` et al.).
+  - `NavigateHUDView.swift` = 498/500. Task 17's call-site edit must be **net-zero lines** (the `CrewIdentity` param replaces `nameMap`, same line count).
+  - `PeerAnnotationDriver.updateSet` stays at **5 parameters** (the `CrewIdentity` bundle replaces `nameMap`, absorbing colors + monograms).
+- **No new motion.** The only animation is the lobby's existing `.easeOut(duration: 0.22)` on `rows.count` (`GroupLobbyView.swift:81`).
+- **No Theme-wide changes**: no CTAButtonStyle edits, no `.mapCard`, no gradients, no pulsing.
+- **Sentence case** for all new/changed copy; no uppercase tracked eyebrows in the group module. The roster's existing "YOU" marker style stays (a marker, not an eyebrow — spec §4).
+- **`GroupRideSession.Phase` stays payload-free**; failure reason is a property alongside phase, cleared at the top of every attempt, written adjacent to the phase with no suspension between.
 - **The ROH-81 single structural branch in `GroupRideFlowView.content` is untouched.**
-- **Navigation is single-write**: `replaceTop`-style path mutations only; no `dismiss()` + push; no new NavigationStack.
-- **No server changes.** The join oracle stays generic (ROH-226); failure split is client-only.
-- **Async closures are NEVER default arguments** (ROH-110); nil-default + init-body construction, as `GroupRideSession.sleep` documents.
-- Previews used as PO/gate evidence use **frozen UUIDs** (`UUID(uuidString:)!`), never fresh `UUID()`.
-- **SwiftLint runs from the repo root** (`swiftlint --strict`); `swift test` runs in `AuraCore/` and prints **two totals — both must be green**.
-- **`cd Aura && xcodegen`** after every app-target file add/remove (the `.xcodeproj` is gitignored).
-- Delegate app builds to the `apple-platform-build-tools` builder agent; implementers write app-target SwiftUI directly (no write-capable agent type lacks the Agent tool — grandchild risk).
-- **Verification tiers:** Tier 1 (sim, this plan's steps) for all visuals; **Tier 2 two-phone, queued** for A0 lobby fill + per-device hue stability (Task 20 files the Verification issue). A0 is the slice's merge-worthiness bar.
-- **File boundary:** the identity-carriers branch edits `NavigateHUDView.swift` and holds `GroupRideMapOverlay.swift`. Tasks 17–19 run a rebase check first (Task 17 step 1). This slice owns `PeerAnnotations.swift` and the five Crew files.
-- **PO gate:** whole-slice before/after set before merge (Task 20). The identity-board gate already passed; do not re-open settled design decisions (white = me; roster keeps status colors; explicit Join + caption; roster poll).
+- **Navigation is single-write** (`replaceTop`-style); no `dismiss()` + push; no new NavigationStack.
+- **No server changes.** The join oracle stays generic (ROH-226).
+- **Async closures are NEVER default arguments** (ROH-110): nil-default + init-body construction. `GroupRideSession`'s init parameter order is pinned once: `(backend, transport, displayNameProvider, cadence, endTimeout, entryTimeout, lobbyPollInterval, sleep, pollSleep)`.
+- **Two clocks, two seams**: `sleep` feeds `withTimeout` (timeout semantics — cancelled timers are awaited); `pollSleep` feeds the lobby poll (cadence semantics). Tests gate `pollSleep` only. Never route both through one closure — a cancelled `withTimeout` timer would broadcast-wake the poll (gate finding).
+- Previews used as evidence use **frozen UUIDs** and valid 8-character codes from `JoinCode.charset`.
+- **`swiftlint --strict` from the repo root; `swift test` in `AuraCore/` prints two totals — both green. `cd Aura && xcodegen` after every app-target file add/remove.** Builds via the `apple-platform-build-tools` builder; implementers write app-target SwiftUI directly.
+- **Verification tiers:** Tier 1 sim per task; **Tier 2 two-phone, queued** (A0 fill, per-device hue stability). A0 is the merge-worthiness bar.
+- **PO gate:** whole-slice before/after set before merge (Task 20). Settled decisions stay settled (white = me; roster status colors; explicit Join + caption; roster poll).
 
-Line numbers cite HEAD at plan time (`d5228d4` + docs commits) — locate by symbol if drifted.
+---
+
+### Task 0: Verify the merged baseline
+
+The reconciliation session already merged `origin/main` (`f4c5768`). Before Task 1:
+
+- [ ] **Step 1:** `cd AuraCore && swift test` — both totals green.
+- [ ] **Step 2:** `swiftlint --strict` from the repo root — clean.
+- [ ] **Step 3:** Builder: app scheme builds for simulator.
+- [ ] **Step 4:** Nothing to commit if green (the merge commit exists). If anything is red, STOP and fix the merge before any slice work — do not interleave.
 
 ---
 
@@ -42,8 +56,7 @@ Line numbers cite HEAD at plan time (`d5228d4` + docs commits) — locate by sym
 - Test: `AuraCore/Tests/AuraCoreTests/GroupRide/LivePresenceStateTests.swift` (extend)
 
 **Interfaces:**
-- Consumes: existing `LivePresenceState.apply/remove/peers`, `RidePeer`.
-- Produces: `LivePresenceState.merge(roster: [RidePeer])` (mutating, idempotent, never touches known peers) and `RideSession.mergeRoster(_ members: [RidePeer])` — Task 2's poll calls the latter.
+- Produces: `LivePresenceState.merge(roster: [RidePeer])` (mutating, idempotent, never touches known peers) and `RideSession.mergeRoster(_ members: [RidePeer])` — Task 2's poll consumes the latter. A merged peer has `lastUpdate == nil`, so `PeerStatusReducer` keeps it `.awaiting` under the staleness ticker (verified at the gate).
 
 - [ ] **Step 1: Write the failing tests** (append to `LivePresenceStateTests.swift`)
 
@@ -77,7 +90,7 @@ Line numbers cite HEAD at plan time (`d5228d4` + docs commits) — locate by sym
 }
 ```
 
-- [ ] **Step 2: Run to verify they fail** — `cd AuraCore && swift test --filter LivePresenceStateTests` → FAIL: `merge` not defined.
+- [ ] **Step 2:** `cd AuraCore && swift test --filter LivePresenceStateTests` → FAIL: `merge` not defined.
 
 - [ ] **Step 3: Implement.** In `LivePresenceState` (after `remove(userID:)`):
 
@@ -102,9 +115,8 @@ public func mergeRoster(_ members: [RidePeer]) {
 }
 ```
 
-- [ ] **Step 4: Run to verify pass** — `swift test --filter LivePresenceStateTests`; then the full suite (`swift test`, both totals green).
-
-- [ ] **Step 5: Commit** — `git add -A && git commit -m "feat(roh-227): roster merge seam — presence learns joined members without a position"`
+- [ ] **Step 4:** Filter run green, then the full suite (both totals).
+- [ ] **Step 5:** `git add -A && git commit -m "feat(roh-227): roster merge seam — presence learns joined members without a position"`
 
 ---
 
@@ -112,18 +124,37 @@ public func mergeRoster(_ members: [RidePeer]) {
 
 **Files:**
 - Modify: `AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift`
-- Modify: `AuraCore/Sources/AuraKit/GroupRide/InMemoryGroupRideBackend.swift` (add `rosterCallCount` spy)
+- Modify: `AuraCore/Sources/AuraKit/GroupRide/InMemoryGroupRideBackend.swift` (spies)
 - Create: `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideLobbyPollTests.swift`
 
 **Interfaces:**
-- Consumes: Task 1's `RideSession.mergeRoster(_:)`; the injected `sleep` closure (the session's existing clock seam); `refreshRoster()`.
-- Produces: while `phase == .lobby`, `peers` gains joined members within one `lobbyPollInterval` (default 4 s) without any `.position`. New init param `lobbyPollInterval: Duration = .seconds(4)` (defaulted — no call-site changes).
+- Consumes: Task 1's `mergeRoster`; a NEW dedicated `pollSleep` clock seam (nil-defaulted, ROH-110 pattern).
+- Produces: while `phase == .lobby`, `peers` gains joined members within one `lobbyPollInterval` (default 4 s). The poll **restarts on every entry to `.lobby`** — including an authoritative reconcile that corrects a phantom start (`RideLifecycle.swift:36-42` moves riders backward; `GroupRideSessionLifecycleSyncTests` walks that path) — and is NOT coupled to `beginLiveSession`'s one-shot `didBeginLive` latch. New init params: `lobbyPollInterval: Duration = .seconds(4)`, `pollSleep: (@Sendable (Duration) async throws -> Void)? = nil` (pinned order: after `sleep`).
 
-Mechanism: `beginLiveSession()` starts a poll task when the phase is `.lobby`. The loop sleeps on the injected `sleep`, re-checks the phase, calls the existing coalesced `refreshRoster()`, and merges the members into presence. It self-terminates on any phase exit and is cancelled in `teardownLive`. Idempotent with `beginLiveSession()`'s seed because `merge` skips known IDs. The existing `.position`-triggered refresh stays.
+- [ ] **Step 1: Lint-budget prep (separate commit).** Move `create(route:)`, `join(code:)`, `startRiding()`, `attemptStart()`, and `retryStartIfNeeded()` verbatim into a new same-file extension:
 
-- [ ] **Step 1: Add the spy.** In `InMemoryGroupRideBackend`'s `Store` (next to `endLeaveCallCount`): `var rosterCallCount = 0   // test spy: how many times roster() ran`. In `roster(rideID:)`, increment it first. Tests read it as `backend.store.rosterCallCount` (the file's existing spy idiom — see `GroupRideEndTimeoutTests`).
+```swift
+// MARK: - Entry & start (create / join / startRiding)
+//
+// Same-file extension purely for SwiftLint's `type_body_length` ceiling (the main body
+// measured 232/250 before this slice), following the End / Leave extension's precedent
+// below. Private stored-state access is unaffected; behavior is identical.
+extension GroupRideSession {
+```
 
-- [ ] **Step 2: Write the failing tests** (new file):
+Run both totals + `swiftlint --strict` (must be clean — a pure move). Commit: `git commit -am "refactor(roh-227): relocate entry/start methods to a same-file extension (lint budget)"`. If `wc -l` on the file ever exceeds 500 during Tasks 2/4/16, add at the very top:
+
+```swift
+// swiftlint:disable file_length
+// The doc comments in this file are load-bearing incident history (ROH-110 frame sizing,
+// ROH-167 begin-live latching, ROH-81 teardown semantics). Trimming them to fit the
+// file ceiling would delete the reasons the code is shaped this way; the type- and
+// function-body ceilings still apply in full.
+```
+
+- [ ] **Step 2: Add the spies.** In `InMemoryGroupRideBackend.Store` (existing spy block, same comment style): `var rosterCallCount = 0   // test spy: how many times roster() ran` and `var joinCallCount = 0   // test spy: how many times joinRide ran`. Increment each at the top of `roster(rideID:)` / `joinRide(code:)`. Tests read them as `backend.store.<spy>` (house idiom).
+
+- [ ] **Step 3: Write the failing tests** (new file):
 
 ```swift
 import Testing
@@ -131,21 +162,21 @@ import Foundation
 import AuraCore
 @testable import AuraKit
 
-/// Releases the session's injected `sleep` one interval at a time, so the lobby poll's
-/// cadence is test-driven rather than wall-clock (the end/leave timeout precedent).
-///
-/// CANCELLATION-AWARE ON PURPOSE: the same injected `sleep` also feeds `withTimeout`'s
-/// timer leg (end/leave today, the entry timeout after Task 4). `withTimeout` awaits its
-/// cancelled timer child on the way out, so a gate that ignored cancellation would
-/// deadlock every `create`/`join`/`end` in these tests once Task 4 lands.
+/// Releases the session's injected `pollSleep` one interval at a time, so the poll cadence
+/// is test-driven rather than wall-clock. LEVEL-TRIGGERED: a release with nobody parked is
+/// banked as a permit, so a release racing task startup is never lost (gate finding — the
+/// edge-triggered version lost the wakeup 200/200 when release beat the task's first park).
+/// Cancellation-aware: a cancelled sleeper resumes immediately so `teardownLive` can unwind.
 actor SleepGate {
+    private var permits = 0
     private var waiters: [Int: CheckedContinuation<Void, Never>] = [:]
     private var nextID = 0
 
     func wait() async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                if Task.isCancelled {
+                if Task.isCancelled || permits > 0 {
+                    if permits > 0 { permits -= 1 }
                     continuation.resume()
                 } else {
                     nextID += 1
@@ -153,11 +184,19 @@ actor SleepGate {
                 }
             }
         } onCancel: {
-            Task { await self.release() }
+            Task { await self.drain() }
         }
     }
 
     func release() {
+        if let first = waiters.keys.sorted().first, let continuation = waiters.removeValue(forKey: first) {
+            continuation.resume()
+        } else {
+            permits += 1
+        }
+    }
+
+    private func drain() {
         let parked = waiters
         waiters = [:]
         for continuation in parked.values { continuation.resume() }
@@ -177,19 +216,25 @@ struct GroupRideLobbyPollTests {
         let session = GroupRideSession(
             backend: backend, transport: InMemoryRideSessionTransport(),
             displayNameProvider: { "Jamie" },
-            sleep: { _ in await gate.wait() })
+            pollSleep: { _ in await gate.wait() })
         await session.create(route: nil)
         return (session, backend)
+    }
+
+    @discardableResult
+    func joinGuest(named name: String, sharing backend: InMemoryGroupRideBackend,
+                   code: JoinCode) async throws -> InMemoryGroupRideBackend {
+        let guest = InMemoryGroupRideBackend(sharing: backend)
+        try await guest.signIn(idToken: "guest-\(name)", nonce: "n", displayName: name)
+        _ = try await guest.joinRide(code: code)
+        return guest
     }
 
     @Test func aJoinerAppearsAfterOnePollIntervalWithNoPosition() async throws {
         let gate = SleepGate()
         let (session, backend) = await makeHost(gate: gate)
         await session.beginLiveSession()
-        // A second identity joins AFTER the seed — the exact case the lobby never surfaced.
-        let guest = InMemoryGroupRideBackend(sharing: backend)
-        try await guest.signIn(idToken: "guest", nonce: "n", displayName: "Priya")
-        _ = try await guest.joinRide(code: session.joinCode!)
+        try await joinGuest(named: "Priya", sharing: backend, code: session.joinCode!)
         #expect(session.peers.count == 1, "not yet — no interval has elapsed")
         await gate.release()
         await settle { session.peers.count == 2 }
@@ -200,93 +245,125 @@ struct GroupRideLobbyPollTests {
     @Test func thePollIsIdempotentWithTheSeedRoster() async throws {
         let gate = SleepGate()
         let (session, backend) = await makeHost(gate: gate)
-        let guest = InMemoryGroupRideBackend(sharing: backend)
-        try await guest.signIn(idToken: "guest", nonce: "n", displayName: "Priya")
-        _ = try await guest.joinRide(code: session.joinCode!)
-        await session.beginLiveSession()   // seed already contains Priya
+        try await joinGuest(named: "Priya", sharing: backend, code: session.joinCode!)
+        await session.beginLiveSession()          // seed already contains Priya
         let seeded = session.peers.count
+        let calls = backend.store.rosterCallCount
         await gate.release()
-        await settle { false }             // give the poll a full settle window
+        // POSITIVE CONTROL first (gate finding: without it this test passes vacuously
+        // whenever the poll simply never ran).
+        await settle { backend.store.rosterCallCount > calls }
+        #expect(backend.store.rosterCallCount > calls, "the poll actually re-fetched")
         #expect(session.peers.count == seeded, "re-polling the same roster adds nothing")
     }
 
-    @Test func thePollStopsWhenTheLobbyIsLeft() async throws {
+    @Test func thePollStopsWhenTheRideEnds() async throws {
         let gate = SleepGate()
         let (session, backend) = await makeHost(gate: gate)
         await session.beginLiveSession()
-        await session.end()                // teardownLive cancels the poll
+        await session.end()                       // teardownLive cancels the poll
+        await settle { session.phase == .ended }
         let calls = backend.store.rosterCallCount
-        await gate.release()               // wakes any straggler — its phase guard must hold
+        await gate.release()                      // banked or wakes a straggler — guard must hold
         await settle { false }
         #expect(backend.store.rosterCallCount == calls, "no roster fetch after teardown")
+    }
+
+    /// The gate's headline A0 finding: an optimistic `.rideStarted` followed by an
+    /// authoritative reconcile back to `.lobby` (the phantom-start correction that
+    /// `GroupRideSessionLifecycleSyncTests` already exercises) must NOT kill the poll —
+    /// v1 coupled the poll to `beginLiveSession`'s one-shot latch and died here silently.
+    @Test func thePollSurvivesAPhantomStartRoundTrip() async throws {
+        let gate = SleepGate()
+        let (session, backend) = await makeHost(gate: gate)
+        await session.beginLiveSession()
+        await session.ingest(.rideStarted)
+        #expect(session.phase == .riding)
+        await session.reconcileFromStatus()       // server never stamped started_at
+        #expect(session.phase == .lobby)
+        try await joinGuest(named: "Priya", sharing: backend, code: session.joinCode!)
+        await gate.release()
+        await settle { session.peers.count == 2 }
+        #expect(session.peers.count == 2, "the poll is alive after the round trip")
     }
 }
 ```
 
-(`end()` itself runs a `withTimeout` whose timer parks on the gate and is released by cancellation — that is the SleepGate's cancellation-awareness earning its keep.)
+- [ ] **Step 4:** Run `swift test --filter GroupRideLobbyPollTests` → FAIL (no `pollSleep` parameter; no poll).
 
-- [ ] **Step 3: Run to verify fail** — `swift test --filter GroupRideLobbyPollTests` → FAIL (no poll exists; first test's count stays 1).
-
-- [ ] **Step 4: Implement.** In `GroupRideSession`:
-
-Stored state + init (all defaulted; keep `sleep` last, nil-defaulted per ROH-110):
+- [ ] **Step 5: Implement.** Main class body gains only stored state (the methods go in a new extension):
 
 ```swift
 /// How often the lobby re-reads the roster so joiners appear pre-ride (ROH-227, decision 1a).
 private let lobbyPollInterval: Duration
+/// The poll's cadence clock — SEPARATE from `sleep` on purpose: `sleep` feeds `withTimeout`,
+/// whose cancelled timers are awaited, and a shared gate would broadcast those cancellations
+/// into the poll (plan-gate finding). nil-defaulted per ROH-110; see `sleep`'s note.
+private let pollSleep: @Sendable (Duration) async throws -> Void
 private var lobbyPollTask: Task<Void, Never>?
 ```
+
+Init (pinned order; both defaulted, no call-site changes):
 
 ```swift
 public init(backend: any GroupRideBackend, transport: any RideSessionTransport,
             displayNameProvider: @escaping @Sendable () -> String, cadence: LiveShareCadence = .init(),
             endTimeout: Duration = .seconds(4),
+            entryTimeout: Duration = .seconds(10),
             lobbyPollInterval: Duration = .seconds(4),
-            sleep: (@Sendable (Duration) async throws -> Void)? = nil) {
+            sleep: (@Sendable (Duration) async throws -> Void)? = nil,
+            pollSleep: (@Sendable (Duration) async throws -> Void)? = nil) {
     // …existing assignments…
-    self.lobbyPollInterval = lobbyPollInterval
+    self.entryTimeout = entryTimeout            // stored property lands in Task 4; add both
+    self.lobbyPollInterval = lobbyPollInterval  // params NOW so the init is edited once
+    self.sleep = sleep ?? { try await Task.sleep(for: $0) }
+    self.pollSleep = pollSleep ?? { try await Task.sleep(for: $0) }
+}
 ```
 
-At the end of `beginLiveSession()` (after `peers = session.peers`):
+(Add `private let entryTimeout: Duration` now too — Task 4 uses it; one init edit, not two.)
+
+New same-file extension:
 
 ```swift
-if phase == .lobby { startLobbyPoll() }
-```
-
-New members (private, near `startTicker`):
-
-```swift
-/// Re-reads the roster on a cadence while the rider waits in the lobby, so a joining friend
-/// appears without a `.position` (which never flows pre-ride — ROH-227). Self-terminating on
-/// any phase exit; cancelled in `teardownLive`; idempotent with `beginLiveSession()`'s seed
-/// because `mergeRoster` skips known members.
-private func startLobbyPoll() {
-    lobbyPollTask?.cancel()
-    lobbyPollTask = Task { [weak self] in
-        while !Task.isCancelled {
-            guard let self, self.phase == .lobby else { return }
-            try? await self.sleep(self.lobbyPollInterval)
-            guard !Task.isCancelled, self.phase == .lobby else { return }
-            let members = await self.refreshRoster()
-            self.mergeLobbyRoster(members)
+// MARK: - Lobby roster poll (ROH-227)
+extension GroupRideSession {
+    /// Re-reads the roster on a cadence while the rider waits in the lobby, so a joining
+    /// friend appears without a `.position` (which never flows pre-ride). Restarted on
+    /// EVERY entry to `.lobby` — including an authoritative reconcile that corrects a
+    /// phantom start — so it is deliberately not latched by `didBeginLive`. Self-terminates
+    /// on any phase exit; cancelled in `teardownLive`; idempotent with the seed because
+    /// `mergeRoster` skips known members.
+    func startLobbyPoll() {
+        lobbyPollTask?.cancel()
+        lobbyPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.phase == .lobby else { return }
+                try? await self.pollSleep(self.lobbyPollInterval)
+                guard !Task.isCancelled, self.phase == .lobby else { return }
+                let members = await self.refreshRoster()
+                self.mergeLobbyRoster(members)
+            }
         }
     }
-}
 
-private func mergeLobbyRoster(_ members: [RosterMember]) {
-    guard phase == .lobby, let session = rideSession, !members.isEmpty else { return }
-    session.mergeRoster(members.map {
-        RidePeer(userID: $0.userID, displayName: $0.displayName, status: .awaiting)
-    })
-    peers = session.peers
+    private func mergeLobbyRoster(_ members: [RosterMember]) {
+        guard phase == .lobby, let session = rideSession, !members.isEmpty else { return }
+        session.mergeRoster(members.map {
+            RidePeer(userID: $0.userID, displayName: $0.displayName, status: .awaiting)
+        })
+        peers = session.peers
+    }
 }
 ```
 
-In `teardownLive(_:)` (with the other cancellations): `lobbyPollTask?.cancel(); lobbyPollTask = nil`.
+Wiring — the poll starts on every `.lobby` edge:
+- End of `beginLiveSession()` (after `peers = session.peers`): `if phase == .lobby { startLobbyPoll() }`
+- In `applyLifecyclePhase`, the `.lobby` case becomes `phase = .lobby; startLobbyPoll()` (restart is idempotent — `startLobbyPoll` cancels any prior task first).
+- In `teardownLive(_:)`: `lobbyPollTask?.cancel(); lobbyPollTask = nil`.
 
-- [ ] **Step 5: Run to verify pass** — the three new tests, then the full suite (both totals). If `aJoinerAppears…` flakes, the bug is real ordering, not the test: `refreshRoster`'s coalescing guard returns `[]` to a second concurrent caller — make sure the poll's merge uses the *returned* members, not `nameMap`.
-
-- [ ] **Step 6: Commit** — `git commit -am "feat(roh-227): lobby roster poll — the room fills without a position"`
+- [ ] **Step 6:** All four new tests green, then the full suite (both totals) and `swiftlint --strict`.
+- [ ] **Step 7:** `git commit -am "feat(roh-227): lobby roster poll — the room fills, and survives a phantom-start round trip"`
 
 ---
 
@@ -299,9 +376,9 @@ In `teardownLive(_:)` (with the other cancellations): `lobbyPollTask?.cancel(); 
 - Create: `AuraCore/Tests/AuraKitTests/GroupRide/EntryFailureTests.swift`
 
 **Interfaces:**
-- Produces: `GroupRideError.connectionFailed`; `EntryFailureReason { connectionFailed, rejected }`; `EntryFailure.isConnectionFailure(_:) -> Bool`; InMemory spies `forceJoinError: GroupRideError?`, `hangJoin: Bool`, `hangCreate: Bool` (parking until cancelled, mirroring `hangEndLeave`). Tasks 4–5 consume all of these.
+- Produces: `GroupRideError.connectionFailed`; `EntryFailureReason { connectionFailed, rejected }`; `EntryFailure.isConnectionFailure(_:)` (walks one level of `NSUnderlyingErrorKey` — Supabase auth errors can wrap the transport error); spies `forceJoinError: GroupRideError?`, `hangJoin`, `hangCreate` (a bare `try await Task.sleep(for: .seconds(1000))` before the normal logic — the exact `hangEndLeave` mechanism at `InMemoryGroupRideBackend.swift:108`, whose `CancellationError` is what `withTimeout` converts to `TimeoutError`).
 
-- [ ] **Step 1: Write the failing tests:**
+- [ ] **Step 1: Failing tests:**
 
 ```swift
 import Testing
@@ -320,8 +397,18 @@ struct EntryFailureTests {
     @Test func urlErrorReadsAsConnectionFailure() {
         #expect(EntryFailure.isConnectionFailure(URLError(.notConnectedToInternet)))
     }
+    @Test func aWrappedURLErrorIsUnwrappedOneLevel() {
+        let wrapped = NSError(domain: "auth", code: 1,
+                              userInfo: [NSUnderlyingErrorKey: URLError(.timedOut)])
+        #expect(EntryFailure.isConnectionFailure(wrapped))
+    }
     @Test func aServerRejectionIsNotAConnectionFailure() {
         #expect(!EntryFailure.isConnectionFailure(GroupRideError.joinFailed))
+    }
+    @Test func cancellationIsNotAConnectionFailure() {
+        // withTimeout owns the CancellationError → TimeoutError conversion; the classifier
+        // must not pre-empt it (and Task 5's backend rethrows cancellation for the same reason).
+        #expect(!EntryFailure.isConnectionFailure(CancellationError()))
     }
     @Test func anUnknownErrorDefaultsToRejected() {
         #expect(!EntryFailure.isConnectionFailure(SomeError()))
@@ -329,9 +416,7 @@ struct EntryFailureTests {
 }
 ```
 
-- [ ] **Step 2: Verify fail** (type not defined), then implement.
-
-`GroupRideError` gains one case with the comment pattern the enum already uses:
+- [ ] **Step 2: Verify fail, implement.** `GroupRideError` gains:
 
 ```swift
 case connectionFailed // transport reachability: the server was never reached (ROH-231)
@@ -353,36 +438,44 @@ public enum EntryFailureReason: Equatable, Sendable {
 
 public enum EntryFailure {
     /// True when the error means the server was never reached (or never answered in time),
-    /// as opposed to answering and saying no.
+    /// as opposed to answering and saying no. `CancellationError` is deliberately NOT a
+    /// connection failure — `withTimeout` owns that conversion (a genuine timeout surfaces
+    /// here as `TimeoutError`). Walks one level of underlying error because SDK auth
+    /// wrappers can carry the transport error inside.
     public static func isConnectionFailure(_ error: any Error) -> Bool {
         if error is TimeoutError { return true }
         if (error as? GroupRideError) == .connectionFailed { return true }
         if error is URLError { return true }
         let ns = error as NSError
-        return ns.domain == NSURLErrorDomain || ns.domain == NSPOSIXErrorDomain
+        if ns.domain == NSURLErrorDomain || ns.domain == NSPOSIXErrorDomain { return true }
+        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return underlying.domain == NSURLErrorDomain || underlying.domain == NSPOSIXErrorDomain
+        }
+        return false
     }
 }
 ```
 
-InMemory spies (Store, same comment style as the existing block): `var forceJoinError: GroupRideError?   // test spy`, `var hangJoin = false   // test spy: park joinRide until cancelled`, `var hangCreate = false   // test spy: park createRide until cancelled`. In `joinRide`, before the normal logic: `if store.hangJoin { try await Task.sleep(for: .seconds(1000)) }` then `if let forced = store.forceJoinError { throw forced }` — the exact `hangEndLeave` mechanism (`InMemoryGroupRideBackend.swift:108`): `Task.sleep` throws `CancellationError` when `withTimeout` cancels the parked operation, which the timeout maps to `TimeoutError`, which the classifier reads as a connection failure. Same `hangCreate` line at the top of `createRide`. Tests drive them via `backend.store.<spy> = …` directly.
+Spies in `Store` (existing block, same comment style): `var forceJoinError: GroupRideError?   // test spy`, `var hangJoin = false   // test spy: park joinRide until cancelled`, `var hangCreate = false   // test spy: park createRide until cancelled`. In `joinRide`, before the normal logic: `if store.hangJoin { try await Task.sleep(for: .seconds(1000)) }` then `if let forced = store.forceJoinError { throw forced }`. Same `hangCreate` line at the top of `createRide`.
 
-- [ ] **Step 3: Run the new tests to green, then the full suite** (the new enum case may break exhaustive switches — fix any the compiler flags; `swift build` in AuraCore first is the fastest signal).
-
-- [ ] **Step 4: Commit** — `git commit -am "feat(roh-231): entry-failure taxonomy — connection vs rejection, classifier + spies"`
+- [ ] **Step 3:** New tests green; `swift build` then the full suite — the new enum case may break exhaustive switches; fix any the compiler flags.
+- [ ] **Step 4:** `git commit -am "feat(roh-231): entry-failure taxonomy — connection vs rejection, classifier + spies"`
 
 ---
 
-### Task 4: Session carries the reason; attempts are bounded and re-enterable
+### Task 4: Session carries the reason; attempts are bounded, re-enterable, and re-entrancy-guarded
 
 **Files:**
 - Modify: `AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift`
 - Create: `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideEntryFailureTests.swift`
 
 **Interfaces:**
-- Consumes: Task 3's `EntryFailureReason`/`EntryFailure`, `withTimeout(_:sleep:operation:)`, InMemory spies.
-- Produces: `public private(set) var entryFailureReason: EntryFailureReason?`; `create`/`join` reset `entryFailureReason = nil` and `phase = .idle` at the top of every attempt (after the name guard), wrap their backend calls in `withTimeout(entryTimeout, sleep:)`, and on failure write reason then phase adjacently with no suspension between. New init param `entryTimeout: Duration = .seconds(10)` (defaulted, placed after `endTimeout`).
+- Consumes: Task 3's types; `withTimeout(_:sleep:operation:)`; the `entryTimeout` stored property Task 2 already added to the init.
+- Produces: `public private(set) var entryFailureReason: EntryFailureReason?`; `create`/`join` (now in the Task-2 extension) reset `entryFailureReason = nil` + `phase = .idle` at attempt top (after the name guard) so a retry re-enters the loading surface; both wrapped in `withTimeout(entryTimeout, sleep:)`; a `finishRide`-style re-entrancy latch `isEntering` (gate finding: a double-tapped Try-again would otherwise create two server-side rides and bind the live layer to the orphan).
 
-- [ ] **Step 1: Write the failing tests:**
+**Known residual, stated on purpose (gate finding):** a join that times out CLIENT-side after the server committed the membership leaves a ghost `.awaiting` member in the host's lobby (the RPC ran; only the response was slow), holding one of the 8 cap slots until the ride ends. `join_ride` is idempotent, so the approved Try-again path (re-join with the preserved code) self-heals it; the residual is a rider who times out and then abandons. No client-side fix exists without the rideID the timed-out call would have returned. Task 20 states this in the PR and the Tier-2 issue.
+
+- [ ] **Step 1: Failing tests:**
 
 ```swift
 import Testing
@@ -398,18 +491,21 @@ struct GroupRideEntryFailureTests {
                          displayNameProvider: { "Jamie" }, sleep: sleep)
     }
 
-    @Test func anUnknownCodeIsARejection() async {
+    func makeBackend() async -> InMemoryGroupRideBackend {
         let backend = InMemoryGroupRideBackend()
         try? await backend.signIn(idToken: "t", nonce: "n", displayName: "Jamie")
-        let session = makeSession(backend: backend)
+        return backend
+    }
+
+    @Test func anUnknownCodeIsARejection() async {
+        let session = makeSession(backend: await makeBackend())
         await session.join(code: JoinCode(rawValue: "AAAA2222")!)
         #expect(session.phase == .joinFailed)
         #expect(session.entryFailureReason == .rejected)
     }
 
     @Test func aTransportFailureIsAConnectionFailure() async {
-        let backend = InMemoryGroupRideBackend()
-        try? await backend.signIn(idToken: "t", nonce: "n", displayName: "Jamie")
+        let backend = await makeBackend()
         backend.store.forceJoinError = .connectionFailed
         let session = makeSession(backend: backend)
         await session.join(code: JoinCode(rawValue: "AAAA2222")!)
@@ -418,19 +514,16 @@ struct GroupRideEntryFailureTests {
     }
 
     @Test func aHungJoinResolvesToAConnectionFailureNotAnEternalSpinner() async {
-        let backend = InMemoryGroupRideBackend()
-        try? await backend.signIn(idToken: "t", nonce: "n", displayName: "Jamie")
+        let backend = await makeBackend()
         backend.store.hangJoin = true
-        // Instant sleep: the entry timeout elapses immediately; the parked join is cancelled.
-        let session = makeSession(backend: backend, sleep: { _ in })
+        let session = makeSession(backend: backend, sleep: { _ in })   // instant entry timeout
         await session.join(code: JoinCode(rawValue: "AAAA2222")!)
         #expect(session.phase == .joinFailed)
         #expect(session.entryFailureReason == .connectionFailed)
     }
 
     @Test func aHungCreateResolvesToAConnectionFailure() async {
-        let backend = InMemoryGroupRideBackend()
-        try? await backend.signIn(idToken: "t", nonce: "n", displayName: "Jamie")
+        let backend = await makeBackend()
         backend.store.hangCreate = true
         let session = makeSession(backend: backend, sleep: { _ in })
         await session.create(route: nil)
@@ -438,32 +531,59 @@ struct GroupRideEntryFailureTests {
         #expect(session.entryFailureReason == .connectionFailed)
     }
 
-    @Test func aRetryClearsTheReasonAndReEntersLoading() async {
-        let backend = InMemoryGroupRideBackend()
-        try? await backend.signIn(idToken: "t", nonce: "n", displayName: "Jamie")
-        let session = makeSession(backend: backend)
+    @Test func aRetryClearsTheReasonAndSucceeds() async {
+        let session = makeSession(backend: await makeBackend())
         await session.join(code: JoinCode(rawValue: "AAAA2222")!)   // fails: no such ride
         #expect(session.entryFailureReason == .rejected)
-        await session.create(route: nil)                            // a fresh attempt succeeds
+        await session.create(route: nil)                            // fresh attempt succeeds
         #expect(session.entryFailureReason == nil, "cleared at the top of the attempt")
         #expect(session.phase == .lobby)
+    }
+
+    /// The retry surface shows loading again because the attempt resets phase to `.idle` —
+    /// observable mid-flight against a parked backend (gate finding: v1 asserted this nowhere).
+    @Test func aRetryReEntersTheLoadingPhaseWhileInFlight() async {
+        let backend = await makeBackend()
+        let session = makeSession(backend: backend)
+        await session.join(code: JoinCode(rawValue: "AAAA2222")!)
+        #expect(session.phase == .joinFailed)
+        backend.store.hangJoin = true
+        let attempt = Task { await session.join(code: JoinCode(rawValue: "AAAA2222")!) }
+        for _ in 0..<500 where session.phase != .idle { await Task.yield() }
+        #expect(session.phase == .idle, "the second attempt re-entered loading")
+        attempt.cancel()
+        _ = await attempt.value
+    }
+
+    /// Two taps on Try-again must not create two rides (gate finding: create/join had no
+    /// re-entrancy guard where finishRide has isEnding).
+    @Test func concurrentJoinAttemptsCollapseToOne() async {
+        let backend = await makeBackend()
+        backend.store.hangJoin = true
+        let session = makeSession(backend: backend)
+        let first = Task { await session.join(code: JoinCode(rawValue: "AAAA2222")!) }
+        for _ in 0..<500 where backend.store.joinCallCount == 0 { await Task.yield() }
+        await session.join(code: JoinCode(rawValue: "AAAA2222")!)   // second tap: rejected by the latch
+        #expect(backend.store.joinCallCount == 1, "one server-side attempt")
+        first.cancel()
+        _ = await first.value
     }
 }
 ```
 
-(The hang tests only terminate because `withTimeout` cancels the parked operation and the spy's continuation resumes on cancellation — that is why Task 3 copies `hangEndLeave`'s mechanism exactly.)
-
-- [ ] **Step 2: Verify fail**, then implement. Init gains (after `endTimeout`): `entryTimeout: Duration = .seconds(10),` and stores `private let entryTimeout: Duration`. Stored property near `startFailed`:
+- [ ] **Step 2: Verify fail, implement.** Stored state in the MAIN body (near `startFailed`; keep it terse — body budget):
 
 ```swift
 /// Why the most recent create/join attempt failed — ALONGSIDE the payload-free phase
 /// (see `EntryFailureReason`). Cleared at the top of every attempt; written immediately
-/// before the failure phase with no suspension between, so no observer can see a fresh
-/// failure phase with a stale reason.
+/// before the failure phase with no suspension between.
 public private(set) var entryFailureReason: EntryFailureReason?
+/// Re-entrancy latch for create/join — the `isEnding` shape (a double-tapped Try-again
+/// must not create two server-side rides).
+private var isEntering = false
 ```
 
-`create(route:)` becomes:
+In the Task-2 entry extension, `create(route:)` becomes:
 
 ```swift
 public func create(route inputRoute: Route?) async {
@@ -471,6 +591,9 @@ public func create(route inputRoute: Route?) async {
         phase = .needsDisplayName
         return
     }
+    guard !isEntering else { return }
+    isEntering = true
+    defer { isEntering = false }
     entryFailureReason = nil
     phase = .idle   // a retry re-enters the loading surface
     do {
@@ -489,9 +612,12 @@ public func create(route inputRoute: Route?) async {
 }
 ```
 
-`join(code:)`'s failure block becomes (success body unchanged):
+`join(code:)`'s entry/failure section becomes (success body + three-way route decode unchanged):
 
 ```swift
+    guard !isEntering else { return }
+    isEntering = true
+    defer { isEntering = false }
     entryFailureReason = nil
     phase = .idle
     let resolvedSelfUserID: UUID
@@ -509,9 +635,10 @@ public func create(route inputRoute: Route?) async {
     }
 ```
 
-- [ ] **Step 3: Run the new tests, then the FULL suite.** Existing lifecycle tests assert phase sequences around create/join — if any observed the transient `.idle`, read the failure before "fixing" either side; the reset-at-top is spec-mandated.
+(`phase = .idle` is safe against the scenePhase reconcile: `lifecyclePhase` returns nil for `.idle`, so `reconcileFromStatus` guards out — verified at the gate.)
 
-- [ ] **Step 4: Commit** — `git commit -am "feat(roh-231): session entry attempts — reason alongside phase, bounded by the injected clock"`
+- [ ] **Step 3:** New tests green, then the FULL suite. If an existing lifecycle test observed a phase sequence this changes, read the failure before adjusting either side.
+- [ ] **Step 4:** `swiftlint --strict` (body budget check), then `git commit -am "feat(roh-231): session entry attempts — reason alongside phase, bounded, re-entrancy-latched"`
 
 ---
 
@@ -521,34 +648,34 @@ public func create(route inputRoute: Route?) async {
 - Modify: `Aura/Sources/Sync/SupabaseGroupRideBackend.swift`
 
 **Interfaces:**
-- Consumes: Task 3's `EntryFailure.isConnectionFailure`, `GroupRideError.connectionFailed`.
-- Produces: `joinRide` and `createRide` throw `.connectionFailed` for reachability errors instead of collapsing them; server answers still collapse to `.joinFailed` (join) or propagate (create).
+- Consumes: Task 3's classifier + `GroupRideError.connectionFailed`.
+- Produces: `joinRide`/`createRide` distinguish reachability from rejection, and — gate blocker — **rethrow cancellation untouched**, because `withTimeout`'s `CancellationError → TimeoutError` conversion is the only thing standing between "the entry timed out" and the lie "your code is wrong". This mapping is app-target (no test bundle); Task 3's classifier tests + this review-pinned ordering are the coverage — say so in the PR.
 
-- [ ] **Step 1: Edit `joinRide`'s catch** (`SupabaseGroupRideBackend.swift:56`) from `catch { throw GroupRideError.joinFailed }` to:
+- [ ] **Step 1: `joinRide`'s catch chain** (`SupabaseGroupRideBackend.swift:56`) becomes, in this order:
 
 ```swift
+        } catch is CancellationError {
+            // withTimeout cancelled us (entry timeout) or the caller unwound. Rethrow
+            // untouched: swallowing this into .joinFailed would defeat the timeout's
+            // CancellationError → TimeoutError conversion and misreport a timeout as a
+            // rejection ("check your code" over a dead network — ROH-231 gate finding).
+            throw CancellationError()
         } catch let error where EntryFailure.isConnectionFailure(error) {
-            // One bar of signal is not a wrong code: reachability failures surface as
-            // connection trouble, everything the server actually answered stays the
-            // deliberately generic rejection (ROH-226).
             throw GroupRideError.connectionFailed
         } catch { throw GroupRideError.joinFailed }
 ```
 
-- [ ] **Step 2: Edit `createRide`** — after the existing `routeTooLarge` catch, add:
+- [ ] **Step 2: `createRide`** — after the existing `routeTooLarge` catch (keep it first and untouched), add:
 
 ```swift
-        } catch let error as PostgrestError { throw error
         } catch let error where EntryFailure.isConnectionFailure(error) {
             throw GroupRideError.connectionFailed
         }
 ```
 
-Keep the `routeTooLarge` mapping first and untouched. (The `PostgrestError` re-throw keeps server answers classified as `.rejected` by the session even if their NSError bridging carries a URL domain — the classifier must only see genuine transport errors here.)
+(`createRide` has no catch-all, so cancellation and server errors already propagate raw — the session classifies them.)
 
-- [ ] **Step 3: Verify it compiles** — dispatch the builder agent: build the Aura app scheme for simulator. The classification logic itself is covered by Task 3's package tests (this target has no test bundle — cite that in the PR).
-
-- [ ] **Step 4: Commit** — `git commit -am "feat(roh-231): live backend distinguishes reachability from rejection"`
+- [ ] **Step 3:** Builder: app builds. Commit — `git commit -am "feat(roh-231): live backend distinguishes reachability from rejection, rethrows cancellation"`
 
 ---
 
@@ -557,13 +684,13 @@ Keep the `routeTooLarge` mapping first and untouched. (The `PostgrestError` re-t
 **Files:**
 - Modify: `AuraCore/Sources/AuraCore/Navigation/AppRoute.swift`
 - Modify: `Aura/Sources/App/AppRouter.swift`
-- Modify: `Aura/Sources/AuraApp.swift:115` (destination), `Aura/Sources/Home/HomeView.swift:352` (call site)
-- Test: `AuraCore/Tests/AuraCoreTests/AppRouteTests.swift` (extend/fix)
+- Modify: `Aura/Sources/AuraApp.swift` (destination switch), `Aura/Sources/Home/HomeView.swift:352` (call site)
+- Modify: `AuraCore/Tests/AuraCoreTests/AppRouteTests.swift` — **line 78 uses bare `AppRoute.joinRide` and stops compiling** (gate catch); update it alongside the new test.
 
 **Interfaces:**
-- Produces: `case joinRide(seed: String)` (seed participates in `==`/`hash`); `AppRouter.replaceTop(with: AppRoute)` — a single-write top replacement with no auth gate (the join screen needs none). Task 7's Try-again consumes both.
+- Produces: `case joinRide(seed: String)` (seed participates in `==`/`hash`); `AppRouter.replaceTop(with: AppRoute)` — single-write, no auth gate (the join screen needs none).
 
-- [ ] **Step 1: Write the failing test** (append to `AppRouteTests.swift`):
+- [ ] **Step 1: Failing test** (append to `AppRouteTests.swift`):
 
 ```swift
 @Test func joinRideSeedParticipatesInIdentity() {
@@ -572,7 +699,7 @@ Keep the `routeTooLarge` mapping first and untouched. (The `PostgrestError` re-t
 }
 ```
 
-- [ ] **Step 2: Verify it fails to compile**, then implement. In `AppRoute`:
+- [ ] **Step 2: Implement.** In `AppRoute`:
 
 ```swift
 /// The group-ride join-code entry screen, pushed on the nav stack (not a sheet) so it
@@ -581,7 +708,7 @@ Keep the `routeTooLarge` mapping first and untouched. (The `PostgrestError` re-t
 case joinRide(seed: String)
 ```
 
-`==`: `case let (.joinRide(a), .joinRide(b)): return a == b`. `hash`: `case let .joinRide(seed): hasher.combine(4); hasher.combine(seed)`. Fix every other `.joinRide` reference the compiler flags: `HomeView.swift:352` → `leaveHome(pushing: .joinRide(seed: ""))`; `AuraApp.swift:115` → `case let .joinRide(seed): GroupRideJoinView(seed: seed)` (keep the existing `.navigationBarBackButtonHidden(true)` and comment). Grep for stragglers: `grep -rn "\.joinRide" Aura/ AuraCore/ --include="*.swift"`.
+`==`: `case let (.joinRide(a), .joinRide(b)): return a == b`. `hash`: `case let .joinRide(seed): hasher.combine(4); hasher.combine(seed)`. Fix every reference the compiler flags: `AppRouteTests.swift:78`; `HomeView.swift:352` → `.joinRide(seed: "")`; `AuraApp.swift`'s destination → `case let .joinRide(seed): GroupRideJoinView(seed: seed)` (keep `.navigationBarBackButtonHidden(true)` + comment). Then `grep -rn "\.joinRide" Aura/ AuraCore/ --include="*.swift"` for stragglers.
 
 In `AppRouter` (below `replaceTopWithGroupRide`):
 
@@ -593,9 +720,8 @@ func replaceTop(with route: AppRoute) {
 }
 ```
 
-- [ ] **Step 3: Run** `swift test --filter AppRouteTests`, then both totals; builder-build the app.
-
-- [ ] **Step 4: Commit** — `git commit -am "feat(roh-231): joinRide carries a seed; router gains a plain replaceTop"`
+- [ ] **Step 3:** `swift test --filter AppRouteTests`, both totals, builder-build.
+- [ ] **Step 4:** `git commit -am "feat(roh-231): joinRide carries a seed; router gains a plain replaceTop"`
 
 ---
 
@@ -606,7 +732,7 @@ func replaceTop(with route: AppRoute) {
 
 **Interfaces:**
 - Consumes: `session.entryFailureReason` (Task 4), `router.replaceTop(with:)` + `.joinRide(seed:)` (Task 6), `invokeEntry()` (existing).
-- Produces: the five `dismissMessage` sites gain `detail:`/retry support; `.idle` becomes an entry-aware loading surface. Copy is exact — do not paraphrase.
+- Produces: five `dismissMessage` sites with detail/retry; `.idle` becomes entry-aware loading. Copy note (gate): the spec's approved one-liners are deliberately split into title + detail (em dash → full stop, capitalized detail) — a presentation split of the approved strings, not new copy.
 
 - [ ] **Step 1: Extend `dismissMessage`:**
 
@@ -647,9 +773,7 @@ private func dismissMessage(title: String, detail: String? = nil, systemImage: S
 }
 ```
 
-(Title steps up to `textPrimary`+semibold now that a detail line exists beneath it; a retry-less surface keeps Back primary so `endedLobbySurface` is visually unchanged in structure.)
-
-- [ ] **Step 2: Replace `.idle`** with an entry-aware loading surface:
+- [ ] **Step 2: `.idle` → entry-aware loading:**
 
 ```swift
 case .idle:
@@ -679,7 +803,7 @@ private var entryIsJoin: Bool {
 }
 ```
 
-- [ ] **Step 3: Rewrite the failure cases** in `otherPhaseContent`:
+- [ ] **Step 3: Failure cases** in `otherPhaseContent` (with `private var connectionFailed: Bool { session.entryFailureReason == .connectionFailed }`):
 
 ```swift
 case .createFailed:
@@ -706,20 +830,19 @@ case .joinFailed:
         systemImage: connectionFailed ? "wifi.exclamationmark" : "person.crop.circle.badge.xmark",
         retryTitle: "Try again",
         retry: {
+            // .joinFailed is only written by join(code:), so the entry is always .join
+            // (gate: v1's else-branch here was dead code).
             if case let .join(code) = entry {
                 router.replaceTop(with: .joinRide(seed: code.rawValue))
-            } else {
-                Task { await invokeEntry() }
             }
         }
     )
 ```
 
-with `private var connectionFailed: Bool { session.entryFailureReason == .connectionFailed }`. The corrupt-payload branch in `ridingContainer` gains the same `detail: "Ask your host to check the ride, then try joining again."`. `endedLobbySurface` is untouched (that ride is over; Back is the only honest exit). That is all five `dismissMessage` sites accounted for: createFailed, routeUnavailable, joinFailed, corrupt-payload, endedLobby.
+The corrupt-payload branch in `ridingContainer` gains the same `detail:` line as `routeUnavailable`. `endedLobbySurface` is untouched. That accounts for all five `dismissMessage` sites.
 
-- [ ] **Step 4: Builder-build; sim-verify Tier 1.** On the booted sim (`D221B3C5-13DE-482F-B0FD-017B305EC31B`): (a) type a wrong-but-well-formed code against the live backend → rejected surface, exact copy, Try again returns to the join screen with the code still in the boxes; (b) toggle sim network off (Settings → Wi‑Fi in the sim, or macOS network off) and join → connection surface; (c) create → loading shows "Setting up your crew ride…". Screenshot each.
-
-- [ ] **Step 5: Commit** — `git commit -am "feat(roh-231): flow surfaces — entry-aware loading, honest failure copy, Try again exits"`
+- [ ] **Step 4: Builder-build; sim-verify Tier 1** on `D221B3C5-13DE-482F-B0FD-017B305EC31B`: (a) wrong-but-well-formed code vs the live backend → rejected surface, Try again returns to the join screen with the code in the boxes; (b) network-off sim → connection surface; (c) create → "Setting up your crew ride…". Screenshots. Note for the PR (gate finding, accepted): Try-again is uncapped against the server's 10-joins/min rate limiter, whose generic raise lands as the (cause-agnostic) rejected copy — stated for the PO gate, no counter shipped.
+- [ ] **Step 5:** `git commit -am "feat(roh-231): flow surfaces — entry-aware loading, honest failure copy, Try again exits"`
 
 ---
 
@@ -730,18 +853,18 @@ with `private var connectionFailed: Bool { session.entryFailureReason == .connec
 - Modify: `Aura/Sources/GroupRide/GroupRideFlowView.swift` (call site)
 
 **Interfaces:**
-- Produces: `var contextLine: String? = nil` declared **immediately after `onSaved`** (so the flow's trailing-closure call keeps binding `onSaved` — SE-0286 backward scan — and Settings' `DisplayNameEditor(store:dismissesOnSave:)` stays byte-identical).
+- Produces: `var contextLine: String? = nil` declared **immediately BEFORE `onSaved`** (gate blocker: v1 said "after" with an inverted SE-0286 rationale and did not compile — a trailing closure cannot bind a parameter that precedes an explicitly-passed label; with `store, contextLine, onSaved, dismissesOnSave`, the call `DisplayNameEditor(store:contextLine:) { … }` binds the closure to `onSaved` because everything after it is defaulted, and Settings' `DisplayNameEditor(store:dismissesOnSave:)` skips both defaulted middles).
 
-- [ ] **Step 1: Add the property** after `onSaved` in `DisplayNameEditor`:
+- [ ] **Step 1:** In `DisplayNameEditor`, between `store` and `onSaved`:
 
 ```swift
     /// One quiet line above the field saying WHY a name is being asked for. The group-ride
-    /// gate passes it; Settings (which is already titled "Crew name") leaves it nil.
-    /// Declared after `onSaved` so trailing-closure call sites keep resolving.
+    /// gate passes it; Settings (already titled "Crew name") leaves it nil. Declared BEFORE
+    /// `onSaved` so trailing-closure call sites keep resolving.
     var contextLine: String? = nil
 ```
 
-Render it at the top of the body's `VStack`, before `fieldCard`:
+Render at the top of the body's `VStack`, before `fieldCard`:
 
 ```swift
             if let contextLine {
@@ -751,7 +874,7 @@ Render it at the top of the body's `VStack`, before `fieldCard`:
             }
 ```
 
-- [ ] **Step 2: Update the flow call site** (`GroupRideFlowView.swift:83`):
+- [ ] **Step 2: Flow call site** (`GroupRideFlowView`, the `.needsDisplayName` case):
 
 ```swift
             DisplayNameEditor(store: displayNameStore,
@@ -760,9 +883,8 @@ Render it at the top of the body's `VStack`, before `fieldCard`:
             }
 ```
 
-- [ ] **Step 3: Prove Settings unchanged** — `git diff --stat Aura/Sources/Settings/` must be empty; builder-build; sim: sign out of a crew name (or fresh install) → Start a ride → the framed prompt shows. Screenshot.
-
-- [ ] **Step 4: Add a preview** to `DisplayNameEditor.swift` (`#Preview("Group gate — framed")` passing the contextLine) and commit — `git commit -am "feat(roh-231): the name prompt says why it's asking"`
+- [ ] **Step 3:** Builder-build (this is the proof Settings' call still resolves — a diff-stat of the Settings folder proves nothing and was cut). Sim: fresh crew name → Start a ride → framed prompt. Screenshot. Add `#Preview("Group gate — framed")` passing the contextLine.
+- [ ] **Step 4:** `git commit -am "feat(roh-231): the name prompt says why it's asking"`
 
 ---
 
@@ -772,9 +894,7 @@ Render it at the top of the body's `VStack`, before `fieldCard`:
 - Create: `AuraCore/Sources/AuraCore/GroupRide/JoinCodePaste.swift`
 - Create: `AuraCore/Tests/AuraCoreTests/GroupRide/JoinCodePasteTests.swift`
 
-**Interfaces:**
-- Consumes: `DeepLink.parse` (the production link grammar — one parser, not a second regex).
-- Produces: `JoinCodePaste.extract(_ pasted: String) -> String`; Task 10's paste button consumes it.
+(Both reviewers compiled this task's six tests against the real `DeepLink.parse` grammar and passed them — unchanged from v1.)
 
 - [ ] **Step 1: Failing tests:**
 
@@ -805,7 +925,7 @@ struct JoinCodePasteTests {
 }
 ```
 
-- [ ] **Step 2: Verify fail, implement:**
+- [ ] **Step 2: Implement:**
 
 ```swift
 import Foundation
@@ -825,9 +945,7 @@ public enum JoinCodePaste {
 }
 ```
 
-(If `DeepLink.parse`'s signature differs — check `AuraCore/Sources/AuraCore/Navigation/` — adapt the call, not the grammar. An invalid-length code in a link fails `JoinCode` init inside the parser and correctly falls through to passthrough.)
-
-- [ ] **Step 3: Run to green (both totals), commit** — `git commit -am "feat(roh-229): pasting the shared link fills the code"`
+- [ ] **Step 3:** Green (both totals). `git commit -am "feat(roh-229): pasting the shared link fills the code"`
 
 ---
 
@@ -837,10 +955,10 @@ public enum JoinCodePaste {
 - Modify: `Aura/Sources/GroupRide/GroupRideJoinView.swift`
 
 **Interfaces:**
-- Consumes: `JoinCodePaste.extract` (Task 9). The `init(seed:)` already exists and Task 6 wired production to it.
-- Produces: keyboard-dismissible, Join pinned above the keyboard, caption on disabled state, Dynamic Type capped. Decision 2a: the explicit Join button stays.
+- Consumes: `JoinCodePaste.extract` (Task 9); `init(seed:)` (already wired to production by Task 6).
+- Produces: keyboard-dismissible, Join pinned above the keyboard, caption on disabled state, Dynamic Type capped. Decision 2a: explicit Join stays.
 
-- [ ] **Step 1: Keyboard.** On the hidden `TextField` (after `.autocorrectionDisabled()`): `.submitLabel(.join)`. In the `.toolbar` block, add:
+- [ ] **Step 1: Keyboard.** On the hidden `TextField` (after `.autocorrectionDisabled()`): `.submitLabel(.join)`. In `.toolbar`:
 
 ```swift
             ToolbarItemGroup(placement: .keyboard) {
@@ -849,9 +967,11 @@ public enum JoinCodePaste {
             }
 ```
 
-- [ ] **Step 2: Pin Join.** Delete the `Spacer(minLength:)` + `joinButton` block from the main `VStack` (lines 65–69 region) and attach to the outer view (after `.background(...)`, before the tap gesture):
+- [ ] **Step 2: Pin Join.** Delete the `Spacer(minLength:)` + `joinButton` block from the main `VStack` and add `Spacer(minLength: 0)` at its end. Attach the inset **AFTER** `.contentShape(Rectangle()).onTapGesture { … }` (gate finding: attached before, the caption strip joins the tap-to-focus target and re-raises the keyboard):
 
 ```swift
+        .contentShape(Rectangle())
+        .onTapGesture { isFocused = true }
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: AuraTheme.Spacing.sm) {
                 joinButton
@@ -868,15 +988,14 @@ public enum JoinCodePaste {
         }
 ```
 
-Add `Spacer(minLength: 0)` at the end of the main VStack so the entry cluster stays top-anchored. NO ScrollView (spec §5 — `scrollDismissesKeyboard` is a no-op when content fits; the toolbar Done is the dismissal).
+NO ScrollView (spec §5).
 
-- [ ] **Step 3: Paste + cap.** Paste button body: `rawInput = JoinCodePaste.extract(clipboardString)`. On the outer view: `.dynamicTypeSize(...DynamicTypeSize.accessibility1)` (the roster's cap). Code boxes stay `metricCockpit(20, relativeTo: .title3)` — do NOT bump to 24.
+- [ ] **Step 3: Paste + cap.** Paste button: `rawInput = JoinCodePaste.extract(clipboardString)`. Outer view: `.dynamicTypeSize(...DynamicTypeSize.accessibility1)`. Boxes stay `metricCockpit(20, relativeTo: .title3)`.
 
-- [ ] **Step 4: Update the type's doc comment** — delete the "**Known gap, deferred:** once the keyboard is up it still cannot be dismissed…" paragraph and note the toolbar-Done fix (keyboard toolbar + submit label; background tap still focuses, never dismisses).
+- [ ] **Step 4: Doc comment** — delete the "**Known gap, deferred:**" paragraph; note the toolbar-Done fix (background tap still focuses, never dismisses).
 
-- [ ] **Step 5: Sim-verify (Tier 1, evidence REQUIRED keyboard-UP on an SE-class screen).** `xcrun simctl list devices | grep -i SE` — if no iPhone SE exists, create one: `xcrun simctl create "Aura SE" "iPhone SE (3rd generation)"` (pair with the installed runtime; if the runtime lacks SE, use the smallest available device type and say so in the PR). Boot, install the builder's build, open Crew → tap the boxes → keyboard up → screenshot: Join button AND caption must both be visible above the keyboard. Also on iPhone 17: empty/partial/valid states, Done dismisses, paste of a full share link fills the boxes. Screenshot each.
-
-- [ ] **Step 6: Commit** — `git commit -am "feat(roh-229): join screen — pinned Join, keyboard Done, caption, link-aware paste"`
+- [ ] **Step 5: Sim-verify (evidence REQUIRED keyboard-UP on an SE-class screen).** `xcrun simctl list devices | grep -i SE`; if absent, `xcrun simctl create "Aura SE" "iPhone SE (3rd generation)"` (fall back to the smallest available device type and say so in the PR). Keyboard-up: Join AND caption visible above the keyboard. On iPhone 17: empty/partial/valid, Done dismisses, link paste fills. Screenshots.
+- [ ] **Step 6:** `git commit -am "feat(roh-229): join screen — pinned Join, keyboard Done, caption, link-aware paste"`
 
 ---
 
@@ -885,9 +1004,6 @@ Add `Spacer(minLength: 0)` at the end of the main VStack so the entry cluster st
 **Files:**
 - Create: `AuraCore/Sources/AuraCore/GroupRide/LobbyCrewLabel.swift`
 - Create: `AuraCore/Tests/AuraCoreTests/GroupRide/LobbyCrewLabelTests.swift`
-
-**Interfaces:**
-- Produces: `LobbyCrewLabel.isWaiting(totalRows:) -> Bool` and `LobbyCrewLabel.text(totalRows:) -> String`. Task 12's lobby consumes both.
 
 - [ ] **Step 1: Failing tests:**
 
@@ -911,7 +1027,7 @@ struct LobbyCrewLabelTests {
 }
 ```
 
-- [ ] **Step 2: Verify fail, implement:**
+- [ ] **Step 2: Implement:**
 
 ```swift
 import Foundation
@@ -927,21 +1043,22 @@ public enum LobbyCrewLabel {
 }
 ```
 
-- [ ] **Step 3: Green (both totals), commit** — `git commit -am "feat(roh-230): lobby crew label — the count excludes self, waiting is reachable"`
+- [ ] **Step 3:** Green (both totals). `git commit -am "feat(roh-230): lobby crew label — the count excludes self, waiting is reachable"`
 
 ---
 
-### Task 12: One code voice + three-variant empty state (components + adoption)
+### Task 12: One code voice + role-aware empty state (components + adoption)
 
 **Files:**
 - Create: `Aura/Sources/GroupRide/JoinCodeText.swift`
 - Create: `Aura/Sources/GroupRide/CrewEmptyState.swift`
 - Modify: `Aura/Sources/GroupRide/GroupLobbyView.swift`
 - Modify: `Aura/Sources/GroupRide/GroupRosterSheet.swift`
+- Modify: `Aura/Sources/Ride/NavigateHUDView+Cockpit.swift:84` (call site gains `isHost:`)
 
 **Interfaces:**
-- Consumes: `LobbyCrewLabel` (Task 11), `AuraTheme.Typography.metricCockpit`.
-- Produces: `JoinCodeText(code:size:textStyle:color:)` (Saira cockpit + the ONE tracking token) and `CrewEmptyState(variant:)` with `.lobby` / `.rosterHost(code:)` / `.rosterGuest`. Task 18 renders lobby rows around them.
+- Produces: `JoinCodeText(code:size:textStyle:color:)`; `CrewEmptyState(variant:)` with `.lobby` / `.rosterHost(code:)` / `.rosterGuest`; `GroupRosterSheet.init` gains `isHost: Bool = true`.
+- **Reconciliation decision (gate finding):** v1 selected the roster variant by `joinCode` presence, but `joinCode` is non-nil for EVERY group rider (set on both create and join paths), so `.rosterGuest` was production-dead — as is today's equivalent branch. The selector is now **role**: the host variant carries the code + share hint; a guest sees the guest line. This realizes spec §6's three-variant intent with a reachable third variant.
 
 - [ ] **Step 1: `JoinCodeText.swift`:**
 
@@ -958,7 +1075,7 @@ struct JoinCodeText: View {
     var textStyle: Font.TextStyle = .largeTitle
     var color: Color = AuraTheme.textPrimary
 
-    /// The one tracking token — do not introduce a second `.tracking`/`.kerning` on a code.
+    /// The one tracking token — never a second `.tracking`/`.kerning` on a code.
     static let tracking: CGFloat = 4
 
     var body: some View {
@@ -972,15 +1089,15 @@ struct JoinCodeText: View {
 }
 ```
 
-- [ ] **Step 2: `CrewEmptyState.swift`:**
+- [ ] **Step 2: `CrewEmptyState.swift`.** ALL of the component's own spacing lives here; adopters add background/card chrome only (gate finding: v1 double-stacked the vertical padding):
 
 ```swift
 import SwiftUI
 import AuraCore
 
-/// The shared crew waiting state (ROH-230) — three real variants, one voice. The lobby
-/// variant shows no code (the code card sits directly above it); the mid-ride roster is the
-/// only crew surface left once the lobby is gone, so the host variant carries the code.
+/// The shared crew waiting state (ROH-230) — three variants, one voice, selected by ROLE
+/// at the roster (every group rider has a code, so code-presence selects nothing). The
+/// lobby variant shows no code (the code card sits directly above it).
 struct CrewEmptyState: View {
     enum Variant: Equatable {
         case lobby
@@ -1028,13 +1145,27 @@ struct CrewEmptyState: View {
 }
 ```
 
-- [ ] **Step 3: Adopt in the lobby.** In `GroupLobbyView`: eyebrow `Text("JOIN CODE")…tracking(1.2)` → `Text("Join code").font(.caption.weight(.semibold)).foregroundStyle(AuraTheme.textSecondary)` (sentence case, NO tracking); the code `Text(codeText)…tracking(4)` block → `JoinCodeText(code: codeText)`; `rosterSection`'s header → `Text(LobbyCrewLabel.text(totalRows: rows.count))`; the branch → `if LobbyCrewLabel.isWaiting(totalRows: rows.count) { emptyRosterState } else { …rows… }`; `emptyRosterState`'s VStack content → `CrewEmptyState(variant: .lobby)` (keep the surrounding surface-card background exactly as it is — move the background onto the CrewEmptyState call).
+- [ ] **Step 3: Lobby adoption.** Eyebrow → `Text("Join code").font(.caption.weight(.semibold)).foregroundStyle(AuraTheme.textSecondary)` (sentence case, NO tracking); code text → `JoinCodeText(code: codeText)`; roster header → `Text(LobbyCrewLabel.text(totalRows: rows.count))`; branch → `if LobbyCrewLabel.isWaiting(totalRows: rows.count)`. `emptyRosterState` becomes ONLY the card chrome around the component (its old frame/padding pair is now inside the component — do not keep both):
 
-- [ ] **Step 4: Adopt in the roster.** `GroupRosterSheet.emptyState` body → `CrewEmptyState(variant: joinCode.map { .rosterHost(code: $0) } ?? .rosterGuest)`. Delete the now-dead monospaced/kerned code rendering (that was the third typeface).
+```swift
+    private var emptyRosterState: some View {
+        CrewEmptyState(variant: .lobby)
+            .background(AuraTheme.surface, in: RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous))
+    }
+```
 
-- [ ] **Step 5: `cd Aura && xcodegen`; builder-build; sim-verify:** host lobby with nobody joined → "Join code" card + "Crew" header + reachable empty state (the previously-unreachable state — this is the visible proof of ROH-230); grep gate: `grep -rn "JOIN CODE\|kerning" Aura/Sources/GroupRide/` returns nothing. Screenshots.
+- [ ] **Step 4: Roster adoption.** `GroupRosterSheet.init` gains `isHost: Bool = true` (stored `let`); `emptyState` becomes:
 
-- [ ] **Step 6: Commit** — `git commit -am "feat(roh-230): one join-code voice, three-variant empty state, reachable lobby waiting"`
+```swift
+    private var emptyState: some View {
+        CrewEmptyState(variant: (isHost && joinCode != nil) ? .rosterHost(code: joinCode!) : .rosterGuest)
+    }
+```
+
+Delete the dead monospaced/kerned code rendering. Call site `NavigateHUDView+Cockpit.swift:84` passes `isHost: groupSession.isHost`. Fix the preview helper's `joinCode: "MX4T7Q"` → `"MX4T7Q2A"` (8 chars, valid charset — gate catch) and add one guest preview (`isHost: false`) so the third variant has evidence.
+
+- [ ] **Step 5:** `cd Aura && xcodegen`; builder-build; sim: host lobby with nobody joined → "Join code" card + "Crew" header + reachable empty state. Grep gate: `grep -rn "JOIN CODE\|kerning" Aura/Sources/GroupRide/` → nothing. Screenshots.
+- [ ] **Step 6:** `git commit -am "feat(roh-230): one join-code voice, role-aware empty state, reachable lobby waiting"`
 
 ---
 
@@ -1044,17 +1175,16 @@ struct CrewEmptyState: View {
 - Modify: `AuraCore/Sources/AuraCore/Theme/AuraPalette.swift`
 - Modify: `AuraCore/Tests/AuraCoreTests/RiderPaletteTests.swift`
 
-**Interfaces:**
-- Produces: `AuraPalette.riderHues.count == 8`, every hue passing every existing gate plus a new pink-clearance gate. `AuraTheme.riderColor/riderInk` need no change (they map whatever the array holds).
+**Gate measurements that reshaped this task:** both reviewers independently ran the suite's ΔE math. v1's salmon `#E0876B` **hard-fails** deuteranopia vs gold (ΔE 4.3, floor 12) — a third warm hue cannot clear the collapsed red-green axis, which is why the extra hues must be cool/neutral. Periwinkle `#8E9BE0` and sage `#A3C7A3` pass every gate against the shipped five (tightest: periwinkle–violet 25.5/20.2; sage–violet deuter 13.6; sage–mint 33.3). The pink-clearance gate passes for the existing five (min 48.1).
 
-- [ ] **Step 1: Tighten the tests.** Add to `RiderPaletteTests`:
+- [ ] **Step 1: Tighten the tests:**
 
 ```swift
 @Test func eightRiderHues() {
     #expect(AuraPalette.riderHues.count == 8)   // ROH-114 §D3.3's widening decision
 }
 
-/// New warm hues approach pink space; pink is the destructive token, so identity must
+/// New hues approach reserved-token space; pink is the destructive token, so identity must
 /// stay perceptually clear of it exactly as it does of mint (route) and amber (warning).
 @Test func riderHuesStayPerceptuallyClearOfPink() {
     for h in AuraPalette.riderHues {
@@ -1063,19 +1193,19 @@ struct CrewEmptyState: View {
 }
 ```
 
-- [ ] **Step 2: Run — `eightRiderHues` fails (count 5).** Confirm the pink gate passes for the existing five before adding anything (if it doesn't, STOP and surface it — that would be a pre-existing conflict, not this task's to silently absorb).
+- [ ] **Step 2:** Run — `eightRiderHues` fails (count 5); the pink gate must pass for the existing five (it measures ≥ 48 — if it doesn't, STOP and surface it).
 
-- [ ] **Step 3: Add three hues** to `riderHues`, starting candidates:
+- [ ] **Step 3: Add three hues** — two measured-passing candidates plus one cool/neutral third:
 
 ```swift
-        RGBColor(red: 0.878, green: 0.529, blue: 0.420),  // salmon  #E0876B  (warm, mid-light)
         RGBColor(red: 0.557, green: 0.608, blue: 0.878),  // periwinkle #8E9BE0 (cool, mid)
-        RGBColor(red: 0.640, green: 0.780, blue: 0.640)   // sage    #A3C7A3  (green-grey, light)
+        RGBColor(red: 0.640, green: 0.780, blue: 0.640),  // sage    #A3C7A3  (green-grey, light)
+        RGBColor(red: 0.722, green: 0.659, blue: 0.847)   // lavender #B8A8D8 (cool-neutral, light) — CANDIDATE
 ```
 
-These are CANDIDATES: run `swift test --filter RiderPaletteTests` and iterate the constants until every gate is green (ΔE ≥ 20 mutual normal / ≥ 12 deuteranopia / ≥ 15 vs mint, amber, pink / contrast ≥ 3.0 on nearBlack / an AA monogram ink exists). Sage is the riskiest (mint proximity) — if it can't clear ΔE 15 from mint while staying distinct from cyan under deuteranopia, replace it with a light neutral-lavender (`#B8A8D8`-region) rather than fighting the gate. The tests are the design authority here (ROH-114 found ~48 mutually-passing hues, so a solution exists). Update the array's doc comment to note the count is now 8 and why (one hue per warm/cool × lightness cell).
+The lavender is the one open slot: it must clear **violet** (`#B07AD0`) at ΔE ≥ 20 normal / ≥ 12 deuteranopia and periwinkle likewise — tune it (or swap to a light blue-grey in the `#9FB8C9` region) within at most **four** iterations of `swift test --filter RiderPaletteTests`. Never re-tune periwinkle or sage against the shipped five (they pass), and never add a third warm hue (the deuteranopia axis is why). If four iterations don't produce a green 8-hue set, STOP and surface to the PO — do not silently ship 7 (spec §4 pins 8 per ROH-114). Update the array's doc comment: count is 8; the additions are all cool/neutral because deuteranopia collapses the warm axis, which already carries its two distinguishable lightness slots (rust, gold).
 
-- [ ] **Step 4: Full suite (both totals) — `PeerPaletteTests` must still pass** (assign is count-agnostic). Commit — `git commit -am "feat(roh-228): rider palette widens to eight under the full CVD/WCAG regime"`
+- [ ] **Step 4:** Full suite (both totals). `git commit -am "feat(roh-228): rider palette widens to eight under the full CVD/WCAG regime"`
 
 ---
 
@@ -1084,9 +1214,6 @@ These are CANDIDATES: run `swift test --filter RiderPaletteTests` and iterate th
 **Files:**
 - Modify: `AuraCore/Sources/AuraCore/GroupRide/PeerPalette.swift`
 - Modify: `AuraCore/Tests/AuraCoreTests/GroupRide/PeerPaletteTests.swift`
-
-**Interfaces:**
-- Produces: `assign(userIDs:paletteCount:reserved: Set<Int> = [])` — newcomers de-collide against indices the latch has already issued (ROH-114 §D3.3: `taken` starting empty is why `assign` alone could reissue a live hue). Default `[]` keeps every existing call site and test byte-compatible.
 
 - [ ] **Step 1: Failing tests** (append):
 
@@ -1105,9 +1232,9 @@ These are CANDIDATES: run `swift test --filter RiderPaletteTests` and iterate th
 }
 ```
 
-- [ ] **Step 2: Verify fail, implement** — signature gains `reserved: Set<Int> = []`; the body's `var taken = Set<Int>()` becomes `var taken = reserved`. Extend the type's doc comment: the widening to 8 (Task 13) changed `stableHash % paletteCount`, so "a rider keeps their colour across rides" **broke once** at that update; and note `reserved:` exists for `RiderColorLatch` — the latch is the session authority, `assign` is its first-assignment step only.
+- [ ] **Step 2: Implement** — signature gains `reserved: Set<Int> = []`; `var taken = Set<Int>()` becomes `var taken = reserved`. Extend the doc comment: the widening to 8 changed `stableHash % paletteCount`, so "a rider keeps their colour across rides" **broke once** at that update; `reserved:` exists for `RiderColorLatch` — the latch is the session authority, `assign` is its first-assignment step only.
 
-- [ ] **Step 3: Green (both totals), commit** — `git commit -am "feat(roh-228): assign de-collides against latched indices"`
+- [ ] **Step 3:** Green (both totals). `git commit -am "feat(roh-228): assign de-collides against latched indices"`
 
 ---
 
@@ -1117,9 +1244,7 @@ These are CANDIDATES: run `swift test --filter RiderPaletteTests` and iterate th
 - Create: `AuraCore/Sources/AuraCore/GroupRide/RiderColorLatch.swift`
 - Create: `AuraCore/Tests/AuraCoreTests/GroupRide/RiderColorLatchTests.swift`
 
-**Interfaces:**
-- Consumes: Task 14's `assign(…reserved:)`.
-- Produces: `RiderColorLatch(paletteCount:)` with `latch(peerIDs:)` / `release(_:)` / `colorIndex(for:)` / `assignments`. Task 16 owns an instance on the session.
+**Placement note (stated divergence):** spec §4 says "in AuraKit"; the latch lives in **AuraCore** because it consumes `PeerPalette` (AuraCore) and is pure value logic — the session-ownership requirement the spec actually cares about is Task 16's.
 
 - [ ] **Step 1: Failing tests:**
 
@@ -1158,9 +1283,7 @@ struct RiderColorLatchTests {
         latch.latch(peerIDs: [a, b])          // palette full
         latch.release(a)
         latch.latch(peerIDs: [b, c])
-        let bHue = latch.colorIndex(for: b)!
-        let cHue = latch.colorIndex(for: c)!
-        #expect(bHue != cHue, "the released slot is reusable")
+        #expect(latch.colorIndex(for: b) != latch.colorIndex(for: c), "the released slot is reusable")
     }
 
     @Test func lookupMissReturnsNil() {
@@ -1170,18 +1293,20 @@ struct RiderColorLatchTests {
 }
 ```
 
-- [ ] **Step 2: Verify fail, implement:**
+- [ ] **Step 2: Implement:**
 
 ```swift
 import Foundation
 
 /// The one colour authority for a session's riders (ROH-114 §D3.3, adopted by ROH-228).
-/// First assignment LATCHES: a rider's hue never changes for the session's lifetime — the
-/// input-set-sensitive `PeerPalette.assign` alone reshuffles ~39% of existing riders per
+/// First assignment LATCHES: a rider's hue never changes while they remain in the session —
+/// the input-set-sensitive `PeerPalette.assign` alone reshuffles ~39% of existing riders per
 /// membership change, which is the shipped map bug this replaces. Input is peers-minus-self
 /// (self consumes no hue: white = me). A peer missing from an update keeps their hue
 /// (staleness is not departure); `release` fires only on explicit `.memberLeft`, so a
-/// force-quit rider never releases — bounded, and stated rather than hidden.
+/// force-quit rider never releases — bounded, and stated rather than hidden. The one stated
+/// exception to "never changes": a rider who explicitly leaves and is later resurrected by a
+/// stale `.position` re-latches a fresh hue — `.memberLeft` is authoritative departure.
 public struct RiderColorLatch: Equatable, Sendable {
     public private(set) var assignments: [UUID: Int] = [:]
     private let paletteCount: Int
@@ -1202,21 +1327,99 @@ public struct RiderColorLatch: Equatable, Sendable {
 }
 ```
 
-- [ ] **Step 3: Green (both totals), commit** — `git commit -am "feat(roh-228): RiderColorLatch — hues latch on first assignment"`
+- [ ] **Step 3:** Green (both totals). `git commit -am "feat(roh-228): RiderColorLatch — hues latch on first assignment"`
 
 ---
 
-### Task 16: The session owns the latch
+### Task 16: `CrewIdentity` + the session's single snapshot writer
 
 **Files:**
+- Create: `AuraCore/Sources/AuraCore/GroupRide/CrewIdentity.swift`
+- Create: `AuraCore/Tests/AuraCoreTests/GroupRide/CrewIdentityTests.swift`
 - Modify: `AuraCore/Sources/AuraKit/GroupRide/GroupRideSession.swift`
 - Create: `AuraCore/Tests/AuraKitTests/GroupRide/GroupRideRiderColorTests.swift`
 
 **Interfaces:**
-- Consumes: Task 15's latch.
-- Produces: `public private(set) var riderColors: [UUID: Int]` — refreshed alongside every `peers` snapshot; released on `.memberLeft`. Tasks 17–18 look it up; nothing recomputes.
+- Produces: `CrewIdentity { names, colors, monograms }` + pure `CrewIdentity.derive(peers:selfUserID:nameMap:colors:)` — ONE derivation for every surface (gate finding: v1 fixed the hue divergence but left the lobby and map computing monograms over DIFFERENT input sets, re-creating for labels the exact disease spec §1.2 diagnosed for colour). `GroupRideSession` gains `public private(set) var crewIdentity: CrewIdentity` and a single private `snapshotPeers(from:)` through which EVERY `peers` write flows (gate finding: a grep instruction is not an invariant — one writer is).
 
-- [ ] **Step 1: Failing tests:**
+- [ ] **Step 1: Failing tests** (`CrewIdentityTests.swift`):
+
+```swift
+import Testing
+import Foundation
+@testable import AuraCore
+
+struct CrewIdentityTests {
+    let selfID = UUID(uuidString: "FFFFFFFF-0000-0000-0000-000000000001")!
+    let maraID = UUID(uuidString: "FFFFFFFF-0000-0000-0000-00000000000A")!
+    let miraID = UUID(uuidString: "FFFFFFFF-0000-0000-0000-00000000000B")!
+
+    @Test func selfContributesNothing() {
+        let identity = CrewIdentity.derive(
+            peers: [RidePeer(userID: selfID, displayName: "Jamie"),
+                    RidePeer(userID: maraID, displayName: "Mara")],
+            selfUserID: selfID, nameMap: [:], colors: [maraID: 3])
+        #expect(identity.names[selfID] == nil)
+        #expect(identity.monograms[selfID] == nil)
+        #expect(identity.names[maraID] == "Mara")
+    }
+
+    /// Monograms widen over the FULL peers-minus-self set — including a coordinate-less
+    /// `.awaiting` member — so the map and the lobby can never disagree on a label
+    /// (the map previously widened over only the visible set).
+    @Test func monogramsWidenOverTheFullPeerSetNotTheVisibleOne() {
+        let identity = CrewIdentity.derive(
+            peers: [RidePeer(userID: maraID, displayName: "Mara", coordinate: Coordinate(latitude: 1, longitude: 2)),
+                    RidePeer(userID: miraID, displayName: "Mira")],   // no coordinate: awaiting
+            selfUserID: selfID, nameMap: [:], colors: [:])
+        #expect(identity.monograms[maraID] == "MA")
+        #expect(identity.monograms[miraID] == "MI")
+    }
+
+    @Test func nameMapOverridesThePeerCarriedName() {
+        let identity = CrewIdentity.derive(
+            peers: [RidePeer(userID: maraID, displayName: "")],
+            selfUserID: selfID, nameMap: [maraID: "Mara Chen"], colors: [:])
+        #expect(identity.names[maraID] == "Mara Chen")
+    }
+}
+```
+
+- [ ] **Step 2: Implement `CrewIdentity`:**
+
+```swift
+import Foundation
+
+/// The single derivation of rider identity for every surface (ROH-228): resolved display
+/// names, latched hue indices, and collision-widened monograms — all over peers-minus-self.
+/// The lobby and the map LOOK THIS UP; neither may call `RiderMonogram.assign` or
+/// `PeerPalette.assign` itself (a shared function with different input sets is the disease
+/// this bundle cures, spec §1.2 — first for hue, and at the plan gate for labels too).
+public struct CrewIdentity: Equatable, Sendable {
+    public var names: [UUID: String]
+    public var colors: [UUID: Int]
+    public var monograms: [UUID: String]
+
+    public static let empty = CrewIdentity(names: [:], colors: [:], monograms: [:])
+
+    public init(names: [UUID: String], colors: [UUID: Int], monograms: [UUID: String]) {
+        self.names = names
+        self.colors = colors
+        self.monograms = monograms
+    }
+
+    public static func derive(peers: [RidePeer], selfUserID: UUID?,
+                              nameMap: [UUID: String], colors: [UUID: Int]) -> CrewIdentity {
+        let others = peers.filter { $0.userID != selfUserID }
+        let names = Dictionary(uniqueKeysWithValues: others.map {
+            ($0.userID, DisplayName.forDisplay(nameMap[$0.userID] ?? $0.displayName))
+        })
+        return CrewIdentity(names: names, colors: colors, monograms: RiderMonogram.assign(names: names))
+    }
+}
+```
+
+- [ ] **Step 3: Session tests** (`GroupRideRiderColorTests.swift`):
 
 ```swift
 import Testing
@@ -1247,81 +1450,100 @@ struct GroupRideRiderColorTests {
     @Test func peersGetLatchedHuesAndSelfGetsNone() async {
         let session = await makeLiveSession()
         await session.ingest(position(peerA))
-        #expect(session.riderColors[peerA] != nil)
-        #expect(session.riderColors[session.selfUserID!] == nil, "white = me: self holds no hue")
+        #expect(session.crewIdentity.colors[peerA] != nil)
+        #expect(session.crewIdentity.colors[session.selfUserID!] == nil, "white = me: self holds no hue")
     }
 
     @Test func aHueSurvivesMembershipChange() async {
         let session = await makeLiveSession()
         await session.ingest(position(peerA))
-        let hue = session.riderColors[peerA]
+        let hue = session.crewIdentity.colors[peerA]
         await session.ingest(position(peerB))
-        #expect(session.riderColors[peerA] == hue)
+        #expect(session.crewIdentity.colors[peerA] == hue)
     }
 
     @Test func memberLeftReleasesTheHue() async {
         let session = await makeLiveSession()
         await session.ingest(position(peerA))
         await session.ingest(.memberLeft(peerA))
-        #expect(session.riderColors[peerA] == nil)
+        #expect(session.crewIdentity.colors[peerA] == nil)
+    }
+
+    @Test func identityCoversEveryNonSelfPeerInTheSnapshot() async {
+        let session = await makeLiveSession()
+        await session.ingest(position(peerA))
+        await session.ingest(position(peerB))
+        for peer in session.peers where peer.userID != session.selfUserID {
+            #expect(session.crewIdentity.colors[peer.userID] != nil,
+                    "one writer: no peer can appear without a latched hue")
+        }
     }
 }
 ```
 
-- [ ] **Step 2: Verify fail, implement.** Stored state (near `peers`):
+- [ ] **Step 4: Implement on the session.** Stored (main body, terse):
 
 ```swift
-/// Latched identity hues, peers-minus-self (ROH-228 / ROH-114 §D3.3). Surfaces LOOK UP —
-/// the lobby, the roster empty state, and the map driver all read this one dictionary;
-/// none may call `PeerPalette.assign` themselves.
-public private(set) var riderColors: [UUID: Int] = [:]
+/// Latched hues + resolved names + monograms, peers-minus-self (ROH-228). Surfaces LOOK
+/// UP; the single writer is `snapshotPeers(from:)`, so no peer can be visible without
+/// identity. `.memberLeft` releases the hue (see `RiderColorLatch`'s doc for the one
+/// stated exception).
+public private(set) var crewIdentity: CrewIdentity = .empty
 private var colorLatch = RiderColorLatch(paletteCount: AuraPalette.riderHues.count)
 ```
 
-Private helper:
+New method (in the lobby-poll extension, renamed `// MARK: - Lobby roster poll & crew snapshot`):
 
 ```swift
-private func refreshRiderColors() {
-    colorLatch.latch(peerIDs: peers.map(\.userID).filter { $0 != selfUserID })
-    riderColors = colorLatch.assignments
-}
+    /// THE one writer for `peers` — keeps the latch and `crewIdentity` atomic with the
+    /// snapshot (a fifth ad-hoc `peers =` write was the failure mode the plan gate flagged).
+    func snapshotPeers(from session: RideSession) {
+        peers = session.peers
+        colorLatch.latch(peerIDs: peers.map(\.userID).filter { $0 != selfUserID })
+        crewIdentity = CrewIdentity.derive(peers: peers, selfUserID: selfUserID,
+                                           nameMap: nameMap, colors: colorLatch.assignments)
+    }
 ```
 
-Call `refreshRiderColors()` immediately after **every** `peers = session.peers` assignment (`beginLiveSession`, `tick`, `ingest`, and Task 2's `mergeLobbyRoster`) — grep `peers = session.peers` to find all four. In `ingest`'s `.memberLeft` case, add `colorLatch.release(id)` before the toast append. The latch itself is NOT reset in `teardownLive` (an ended session's surfaces may still render a last frame; a fresh session object starts fresh anyway — `GroupRideFlowView` constructs a new `GroupRideSession` per entry).
+Replace **all four** `peers = session.peers` assignments (`beginLiveSession`, `tick`, `ingest`, `mergeLobbyRoster`) with `snapshotPeers(from: session)`. In `ingest`'s `.memberLeft` case add `colorLatch.release(id)` before the toast append (the subsequent `session.ingest` removes the peer, then the snapshot refreshes). The latch is NOT reset in `teardownLive` (a fresh `GroupRideSession` per entry starts fresh anyway).
 
-- [ ] **Step 3: Green (new + both totals), commit** — `git commit -am "feat(roh-228): the session owns the colour authority"`
+- [ ] **Step 5:** All new tests green, full suite (both totals), `swiftlint --strict` (body/file budgets — apply the Task 2 disable header if the file crossed 500).
+- [ ] **Step 6:** `git commit -am "feat(roh-228): CrewIdentity — one derivation, one snapshot writer"`
 
 ---
 
-### Task 17: Map driver reads the latch (REBASE CHECK FIRST)
+### Task 17: Map driver reads `CrewIdentity`
 
 **Files:**
 - Modify: `Aura/Sources/GroupRide/PeerAnnotations.swift`
-- Modify: `Aura/Sources/Ride/NavigateHUDView.swift:386-391` (`syncPeers` — two `updateSet` calls)
+- Modify: `Aura/Sources/Ride/NavigateHUDView.swift:415-423` (`syncPeers` — two `updateSet` calls, **net-zero lines**: the file is at 498/500)
 
 **Interfaces:**
-- Consumes: `session.riderColors` (Task 16).
-- Produces: `updateSet(peers:selfUserID:nameMap:riderColors:reduceMotion:now:)` — `PeerPalette.assign` leaves the driver; the shipped mid-ride reshuffle dies here.
+- Consumes: `session.crewIdentity` (Task 16).
+- Produces: `updateSet(peers:selfUserID:identity:reduceMotion:now:)` — 5 parameters (the bundle replaces `nameMap`, keeping `function_parameter_count` ≤ 5, gate blocker), and the driver's own `PeerPalette.assign` + `RiderMonogram.assign` calls are DELETED (the shipped mid-ride reshuffle dies here, and map monograms now agree with the lobby's by construction).
 
-- [ ] **Step 1: REBASE CHECK.** `git fetch origin && git log --oneline origin/main -5`. If the identity-carriers branch has merged to main since this branch was cut, merge main into this branch NOW and resolve `NavigateHUDView.swift` before touching it (their Tasks 3/9/12/13 all edit that file). If their branch is still unmerged, proceed — but keep this task's `NavigateHUDView` diff to exactly the two `updateSet` call lines, and note the coordination in the commit message.
-
-- [ ] **Step 2: Change the driver.** In `PeerAnnotationDriver.updateSet`, add the parameter `riderColors: [UUID: Int]` (after `nameMap:`) and replace the `colorIndex = PeerPalette.assign(…)` line with:
+- [ ] **Step 1: Driver.** `updateSet` signature: replace `nameMap: [UUID: String]` with `identity: CrewIdentity`. Body: replace the three derivation lines with:
 
 ```swift
-        // Latched lookup (ROH-228): the session is the one colour authority. A lookup miss
-        // (a peer visible before the session's snapshot refreshed) falls back to the same
-        // stable hash the latch would start from — transient, and never reshuffles neighbours.
-        let paletteCount = max(1, AuraTheme.riderPalette.count)
-        colorIndex = Dictionary(uniqueKeysWithValues: ids.map { id in
-            (id, riderColors[id] ?? PeerPalette.assign(userIDs: [id], paletteCount: paletteCount)[id] ?? 0)
-        })
+        displayNames = Dictionary(uniqueKeysWithValues:
+            visible.map { ($0.userID, identity.names[$0.userID] ?? $0.displayName) })
+        // Snapshot-atomic lookups (ROH-228): the session's one writer guarantees every
+        // non-self peer has an entry, so these defaults are compile-time appeasement,
+        // not a second derivation path — never re-introduce assign() here.
+        colorIndex = Dictionary(uniqueKeysWithValues:
+            visible.map { ($0.userID, identity.colors[$0.userID] ?? 0) })
+        monograms = Dictionary(uniqueKeysWithValues:
+            visible.map { ($0.userID, identity.monograms[$0.userID] ?? "?") })
 ```
 
-- [ ] **Step 3: Update the two call sites** in `NavigateHUDView.syncPeers()`: the nil-session branch passes `riderColors: [:]`; the live branch passes `riderColors: groupSession.riderColors`.
+Remove the now-unused `PeerPalette`/`RiderMonogram` references from this file.
 
-- [ ] **Step 4: Update the `PeerAnnotations` preview** — it calls `updateSet` twice; give it a frozen assignment consistent with the latch (`riderColors: [maraID: 0, miraID: 1, devonID: 2, samID: 3]`) and change its `UUID()` ids to frozen `UUID(uuidString:)!` literals (evidence rule).
+- [ ] **Step 2: Call sites** (`syncPeers`, net-zero): nil branch passes `identity: .empty`; live branch passes `identity: groupSession.crewIdentity` (each replaces the old `nameMap:` argument in place).
 
-- [ ] **Step 5: Builder-build; sim-verify Tier 1:** the preview renders four distinctly-hued dots (screenshot via Xcode preview or the sim harness). The real reshuffle fix is Tier 2 (two-phone, Task 20's issue). Commit — `git commit -am "fix(roh-228): map peer hues come from the latch — no more mid-ride reshuffle"`
+- [ ] **Step 3: Preview.** Give the file's `#Preview` frozen `UUID(uuidString:)!` ids and a frozen `CrewIdentity` (names for all four, `colors: [mara: 0, mira: 1, devon: 2, sam: 3]`, monograms from those names) in place of the old `nameMap: [:]` arguments.
+
+- [ ] **Step 4:** Builder-build; `wc -l Aura/Sources/Ride/NavigateHUDView.swift` ≤ 500; preview screenshot (four distinctly-hued dots). The reshuffle fix itself is Tier 2 (Task 20's issue).
+- [ ] **Step 5:** `git commit -am "fix(roh-228): map peer identity comes from the session bundle — no more mid-ride reshuffle"`
 
 ---
 
@@ -1332,8 +1554,8 @@ Call `refreshRiderColors()` immediately after **every** `peers = session.peers` 
 - Modify: `Aura/Sources/GroupRide/GroupLobbyView.swift` (rows + row view)
 
 **Interfaces:**
-- Consumes: `session.riderColors` (Task 16), `RiderMonogram.assign`, `session.hostID`, board reference `2026-08-31-crew-identity-board.svg`.
-- Produces: lobby rows with identity discs; self = white disc + real name + "You" marker; host row + "Host" marker.
+- Consumes: `session.crewIdentity`, `session.hostID`, board reference `2026-08-31-crew-identity-board.svg`.
+- Produces: identity rows; self = white disc + real name + "You" marker; host marker. `CrewMonogram` takes an EXPLICIT `isSelf` (gate finding: v1 encoded self as `colorIndex == nil`, so an identity-lookup miss would have rendered a peer as "me").
 
 - [ ] **Step 1: `CrewMonogram.swift`:**
 
@@ -1343,28 +1565,28 @@ import AuraCore
 
 /// A rider's identity disc (ROH-228, gate-1 board): latched hue + monogram for a peer;
 /// WHITE for self — "white = me" is the puck grammar, and the rider marker is never
-/// accent-mint. Colour is looked up, never computed here.
+/// accent-mint. `isSelf` is explicit so a lookup miss can never masquerade as self.
 struct CrewMonogram: View {
-    /// nil = self: white disc, label inked in the background colour.
-    let colorIndex: Int?
+    let isSelf: Bool
+    let colorIndex: Int
     let label: String
     var size: CGFloat = 32
 
     var body: some View {
         ZStack {
             Circle()
-                .fill(colorIndex.map { AuraTheme.riderColor($0) } ?? AuraTheme.textPrimary)
+                .fill(isSelf ? AuraTheme.textPrimary : AuraTheme.riderColor(colorIndex))
                 .frame(width: size, height: size)
             Text(label)
                 .font(.system(size: 13, weight: .bold, design: .rounded))
-                .foregroundStyle(colorIndex.map { AuraTheme.riderInk($0) } ?? AuraTheme.background)
+                .foregroundStyle(isSelf ? AuraTheme.background : AuraTheme.riderInk(colorIndex))
         }
         .accessibilityHidden(true)   // the row's combined label carries the name
     }
 }
 ```
 
-- [ ] **Step 2: Rebuild the lobby rows.** `LobbyRosterRow` becomes:
+- [ ] **Step 2: Rebuild the lobby rows.** (Gate blocker folded in: `DisplayName.forDisplay` NEVER returns "" — it falls back to "Rider" — so the resolved-check is `DisplayName.normalized(raw) == nil`, and the marker is driven by a real `showsSelfMarker` flag, not a string compare.)
 
 ```swift
 private struct LobbyRosterRow: Identifiable, Equatable {
@@ -1372,44 +1594,42 @@ private struct LobbyRosterRow: Identifiable, Equatable {
     let name: String
     let isSelf: Bool
     let isHost: Bool
-    let colorIndex: Int?   // nil for self (white disc)
+    let colorIndex: Int
     let monogram: String
+    let showsSelfMarker: Bool
 }
 ```
 
-`GroupLobbyView.rows` becomes:
-
 ```swift
     private var rows: [LobbyRosterRow] {
-        let peerNames: [UUID: String] = Dictionary(uniqueKeysWithValues:
-            session.peers.filter { $0.userID != session.selfUserID }
-                .map { ($0.userID, DisplayName.forDisplay(session.nameMap[$0.userID] ?? $0.displayName)) })
-        let monograms = RiderMonogram.assign(names: peerNames)   // self contributes no monogram
+        let identity = session.crewIdentity
         return session.peers.map { peer in
             let isSelf = peer.userID == session.selfUserID
-            let resolved = DisplayName.forDisplay(session.nameMap[peer.userID] ?? peer.displayName)
-            let name = (isSelf && resolved.isEmpty) ? "You" : resolved
+            let raw = session.nameMap[peer.userID] ?? peer.displayName
+            let unresolved = DisplayName.normalized(raw) == nil
+            let name = (isSelf && unresolved) ? "You" : DisplayName.forDisplay(raw)
             return LobbyRosterRow(
                 id: peer.userID, name: name, isSelf: isSelf,
                 isHost: peer.userID == session.hostID,
-                colorIndex: isSelf ? nil : session.riderColors[peer.userID],
+                colorIndex: identity.colors[peer.userID] ?? 0,
                 monogram: isSelf ? String(name.prefix(1)).uppercased()
-                                 : (monograms[peer.userID] ?? "?"))
+                                 : (identity.monograms[peer.userID] ?? "?"),
+                showsSelfMarker: isSelf && !unresolved)
         }
     }
 ```
 
-`LobbyRosterRowView` body becomes (markers per the board — quiet capsules, sentence case):
+`LobbyRosterRowView` body:
 
 ```swift
     var body: some View {
         HStack(spacing: AuraTheme.Spacing.md) {
-            CrewMonogram(colorIndex: row.colorIndex, label: row.monogram)
+            CrewMonogram(isSelf: row.isSelf, colorIndex: row.colorIndex, label: row.monogram)
             Text(row.name)
                 .font(.system(.body, design: .rounded).weight(.semibold))
                 .foregroundStyle(AuraTheme.textPrimary)
                 .lineLimit(1)
-            if row.isSelf && row.name != "You" { marker("You") }
+            if row.showsSelfMarker { marker("You") }
             if row.isHost { marker("Host") }
             Spacer(minLength: 0)
         }
@@ -1434,11 +1654,10 @@ private struct LobbyRosterRow: Identifiable, Equatable {
     }
 ```
 
-(The old always-accent `Circle().fill(AuraTheme.accent)` disc dies here — that was the third monogram implementation ignoring the rider palette.)
+(The old always-accent disc dies here — the third monogram implementation ignoring the rider palette.)
 
-- [ ] **Step 3: `cd Aura && xcodegen`; builder-build.** The existing lobby previews drive real sessions — they now show hued discs and markers with no preview changes. Sim-verify Tier 1: host lobby (self = white disc + Host marker once a friend joins and rows render), screenshot against the board SVG side-by-side.
-
-- [ ] **Step 4: Commit** — `git commit -am "feat(roh-228): lobby identity rows — latched hues, white = me, You/Host markers"`
+- [ ] **Step 3:** `cd Aura && xcodegen`; builder-build. The lobby previews drive real sessions and now show hued discs + markers. Sim-verify against the board SVG side-by-side. Screenshots.
+- [ ] **Step 4:** `git commit -am "feat(roh-228): lobby identity rows — latched hues, white = me, You/Host markers"`
 
 ---
 
@@ -1447,12 +1666,12 @@ private struct LobbyRosterRow: Identifiable, Equatable {
 **Files:**
 - Modify: `AuraCore/Sources/AuraCore/GroupRide/GroupRosterViewData.swift`
 - Modify: `AuraCore/Tests/AuraCoreTests/GroupRide/GroupRosterViewDataTests.swift`
-- Modify: `Aura/Sources/GroupRide/GroupRosterSheet.swift` (marker guard, one line)
+- Modify: `Aura/Sources/GroupRide/GroupRosterSheet.swift` (marker guard + previews)
 
 **Interfaces:**
-- Produces: the self row's name column shows the real display name (marker stays); `GroupRosterViewData.selfLabel` becomes `public` so the view's guard and the tests share the constant. Roster avatars/status grammar/sort UNTOUCHED (decision 3a).
+- Produces: the self row shows the real display name when resolved; `RosterRow` gains `nameResolved: Bool = true` (defaulted — the ~10 existing preview/test inits keep compiling); the view's marker guard uses it. Gate blockers folded in: `forDisplay` falls back to "Rider" (the existing `nameMapOverridesBlank_elseRider` test pins it), so the predicate is `normalized == nil`, and without the flag the fallback would render "Rider YOU".
 
-- [ ] **Step 1: Failing tests** (append to the existing suite, matching its fixture style):
+- [ ] **Step 1: Failing tests** (append):
 
 ```swift
 @Test func theSelfRowShowsTheRealNameWhenTheRosterResolvesIt() {
@@ -1461,50 +1680,65 @@ private struct LobbyRosterRow: Identifiable, Equatable {
                                         selfUserID: selfID, selfProgress: 0, isImperial: true)
     #expect(rows[0].name == "Jamie Rivera")
     #expect(rows[0].isSelf)
+    #expect(rows[0].nameResolved)
 }
 
-@Test func anUnresolvedSelfNameFallsBackToYou() {
+@Test func anUnresolvedSelfNameFallsBackToYouWithNoMarker() {
     let selfID = UUID(uuidString: "EEEEEEEE-0000-0000-0000-000000000002")!
     let rows = GroupRosterViewData.rows(peers: [], nameMap: [:],
                                         selfUserID: selfID, selfProgress: 0, isImperial: true)
-    #expect(rows[0].name == GroupRosterViewData.selfLabel)
+    #expect(rows[0].name == "You")
+    #expect(!rows[0].nameResolved, "the view suppresses the marker so it can't read You YOU")
 }
 ```
 
-- [ ] **Step 2: Verify fail, implement.** `private static let selfLabel` → `public static let selfLabel = "You"`. In `rows`, the name line becomes:
+- [ ] **Step 2: Implement.** `RosterRow` gains `public let nameResolved: Bool` with `nameResolved: Bool = true` appended to the init. In `rows`, the name lines become:
 
 ```swift
-            let resolved = DisplayName.forDisplay(nameMap[peer.userID] ?? peer.displayName)
-            let name = (isSelf && resolved.isEmpty) ? Self.selfLabel : resolved
+            let raw = nameMap[peer.userID] ?? peer.displayName
+            let resolved = DisplayName.normalized(raw) != nil
+            let name = (isSelf && !resolved) ? Self.selfLabel : DisplayName.forDisplay(raw)
 ```
 
-(The fabricated self `RidePeer` carries `displayName: ""`, and `roster()` includes self, so `nameMap` resolves it in production.) In `RosterRowView`, guard the marker so an unresolved fallback can't read "You YOU" again:
+(make `selfLabel` `public static`), and the constructed row passes `nameResolved: !isSelf || resolved`. In `RosterRowView`, the marker becomes:
 
 ```swift
-            if row.isSelf && row.name != GroupRosterViewData.selfLabel {
+            if row.isSelf && row.nameResolved {
                 Text("YOU") // existing style, unchanged
 ```
 
-- [ ] **Step 3: Green (both totals; existing roster tests asserting "You" for self may need the resolved-name update — that assertion WAS the bug), builder-build, sim screenshot of the mid-ride roster.** Commit — `git commit -am "fix(roh-228): the roster's self row is a name, not You YOU"`
+- [ ] **Step 3: Previews** (gate finding: all six used `name: "You"` and would demo the fallback, not the fix). Change every self row to `RosterRow(id: …, name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil)` and add ONE fallback preview row (`name: "You", …, nameResolved: false`) so both states have evidence.
+
+- [ ] **Step 4:** Green (both totals — the existing `nameMapOverridesBlank_elseRider` must still pass untouched), builder-build, sim screenshot of the mid-ride roster.
+- [ ] **Step 5:** `git commit -am "fix(roh-228): the roster's self row is a name, not You YOU"`
 
 ---
 
 ### Task 20: Slice close — gates, evidence, PR, review, board
 
-**Files:** none new (evidence + process).
-
-- [ ] **Step 1: Full local gate.** Repo root: `swiftlint --strict` clean; `cd AuraCore && swift test` — BOTH totals green; builder: clean app build.
-- [ ] **Step 2: Whole-slice before/after evidence set** (Tier 1, for the PO gate): join screen (empty / partial / valid / keyboard-up SE / caption), lobby (waiting / filled with hued rows + markers), roster (self-named row, empty-state voices), flow (both loading copies, rejected surface, connection surface, framed name prompt), map preview (hued dots). Pair each with its "before" from the audit set where one exists.
-- [ ] **Step 3: Push + PR** to `main` from `claude/premium-ui-design-audit-8f663d`, body stating: Tier 1 evidence inline; **Tier 2 queued** (A0 two-phone fill, per-device hue stability across a mid-ride join) with the golden-ride/E2E caveat that no CI path exercises the poll against a real second device; the five child issues; the spec/plan/board paths.
-- [ ] **Step 4: Whole-branch review** on the most capable model (Agent-tool-less reviewer), findings adjudicated before merge.
-- [ ] **Step 5: PO gate — STOP AND WAIT.** Post the before/after set; do not merge until the PO signs off (their standing mandate: nothing visual ships in one sweep).
-- [ ] **Step 6: Board.** Create the Tier-2 Verification issue (two-phone: host lobby fills within one poll interval; a mid-ride joiner's hue is stable and map-vs-lobby consistent on one device) appended to the existing two-phone queue; move ROH-227/228/229/230/231 through In Review → Done as the PR merges (revert any Linear auto-completion that fires early — ROH-224-style); ROH-225 stays open until the Tier-2 pass lands or is explicitly waived.
+- [ ] **Step 1: Full local gate.** Repo root `swiftlint --strict`; `cd AuraCore && swift test` (both totals); builder clean app build.
+- [ ] **Step 2: Whole-slice before/after evidence set** (PO gate): join screen (empty / partial / valid / keyboard-up SE / caption), lobby (waiting / filled with hued rows + markers), roster (named self row, host + guest empty states), flow (both loading copies, rejected, connection, framed name prompt), map preview (hued dots). Pair with audit "befores" where they exist.
+- [ ] **Step 3: Push + PR** to `main`, body stating: Tier 1 evidence inline; **Tier 2 queued** (A0 two-phone fill; per-device hue stability across a mid-ride join); no CI path exercises the poll against a real second device; **stated residuals** — (a) a client-side entry timeout after a server-side commit leaves a ghost `.awaiting` member holding a cap slot until the ride ends (Try-again's idempotent re-join self-heals the common path), (b) Try-again is uncapped against the 10-joins/min limiter, whose generic raise lands as the cause-agnostic rejected copy.
+- [ ] **Step 4: Whole-branch review** on the most capable model (Agent-tool-less reviewer); adjudicate before merge.
+- [ ] **Step 5: PO gate — STOP AND WAIT** for sign-off on the before/after set before merging.
+- [ ] **Step 6: Board.** Create the Tier-2 Verification issue (two-phone: lobby fills within one poll interval; mid-ride joiner's hue stable + map/lobby consistent on one device; ghost-member check after a forced entry timeout) appended to the two-phone queue; walk ROH-227/228/229/230/231 through In Review → Done as the PR merges (revert premature Linear auto-completion); ROH-225 stays open until the Tier-2 pass lands or is explicitly waived.
 
 ---
 
-## Self-review notes (v1)
+## Reconciliation log (v2, 2026-09-01)
 
-- Spec coverage walked §3→A0 (Tasks 1–2), §4→A (13–19), §5→B (9–10), §6→C (11–12), §7→D (3–8), §8 verification (per-task steps + Task 20), §10 criteria each traceable to a task.
-- The spec's §10.6 "no uppercase tracked eyebrows in the group module": Task 12's grep gate covers "JOIN CODE"; the join screen's `or join with a code` divider is lowercase already; the roster "YOU" marker is exempted by spec §4 (marker stays).
-- Type consistency: `riderColors: [UUID: Int]` (Tasks 16→17→18), `EntryFailureReason` (3→4→7), `LobbyCrewLabel` (11→12), `JoinCodePaste.extract` (9→10), `mergeRoster` (1→2), `assign(…reserved:)` (14→15).
-- Deliberately NOT here: server migrations, `.mapCard`, Theme CTA changes, code-reveal motion, QR join, open-ride crew layer (ROH-114 Plan 2), the `selfUserID ?? UUID()` latent default in `NavigateHUDView+GroupCrew.swift:28` (identity-carriers file boundary; follow-up once their branch lands).
+Two independent reviewers (skeptic, architecture — refuting mandates, no shared context) reviewed v1; every finding was adjudicated. v1 is dead. The load-bearing adjudications:
+
+1. **Stale-base blocker (arch):** identity-carriers had already merged to main (PR #140); v1's file-boundary premise and Task-17 rebase check were void, and Task 13 would have hit an `AuraPalette` conflict four tasks before the check. → main merged during reconciliation (`f4c5768`), Task 0 verifies the baseline, all coordination language deleted.
+2. **Lint ceilings, measured (both):** `GroupRideSession` body 232/250 — v1's Tasks 2/4/16 blew `type_body_length` at Task 2 and `file_length` (500) by the end. → Task 2 Step 1 relocates the entry/start methods to a same-file extension first (End/Leave precedent), new methods live in extensions, and a documented `file_length` disable header is specified if needed. `updateSet` at 6 params blew `function_parameter_count` → the `CrewIdentity` bundle keeps it at 5.
+3. **`forDisplay` never returns "" (both, independently):** v1's `resolved.isEmpty` guard was unreachable; the "You YOU" fix would have shipped "Rider YOU" and its own test could not pass. → predicate is `DisplayName.normalized(raw) == nil`; `RosterRow.nameResolved` (defaulted) drives the marker; the six previews that demoed the fallback now demo the fix.
+4. **Cancellation-eating catch-all (arch):** v1's Task 5 rewrote `CancellationError` to `.joinFailed`, defeating `withTimeout`'s TimeoutError conversion — a timed-out join would say "check your code". → `catch is CancellationError` rethrow first; classifier walks one `NSUnderlyingErrorKey` level for wrapped auth/transport errors; a classifier test pins cancellation ≠ connection.
+5. **Poll permadeath (both, independently):** v1 started the poll only from `beginLiveSession` (one-shot latch); the phantom-start round trip an existing lifecycle test already walks (`.rideStarted` → authoritative reconcile back to `.lobby`) killed A0 silently. → the poll restarts on every `.lobby` edge (`applyLifecyclePhase`), with a dedicated regression test.
+6. **One clock per meaning (both):** sharing the injected `sleep` between `withTimeout` timers and the poll made `end()`'s timer-cancellation broadcast-wake the poll and race the spy read; the edge-triggered gate also lost a release racing task startup 200/200. → separate `pollSleep` seam; level-triggered, cancellation-aware `SleepGate`; positive-control assertions (rosterCallCount) so the idempotence and stop tests cannot pass vacuously.
+7. **Salmon fails deuteranopia by 3× (both, measured):** ΔE 4.3 vs gold against a floor of 12 — a third warm hue cannot exist under the CVD gates; v1's escape hatch pointed at sage, which passes everything. → candidates are periwinkle + sage (measured passing) + one cool/neutral slot with a four-iteration budget and a stop-and-ask-PO rule; never ship 7 silently.
+8. **Two-write invariant → one writer (arch):** "call refreshRiderColors after every `peers =`" was a grep instruction, and the driver's hash fallback could visibly flip a dot's hue when the latch later disagreed. → `snapshotPeers(from:)` is the single `peers` writer keeping latch + `CrewIdentity` atomic; the driver's defaults are unreachable appeasement, with `assign()` deleted from it (also resolving v1's self-contradiction with "nothing new calls assign").
+9. **Monogram divergence (skeptic):** the map widened monograms over the visible (coordinate-holding) set, the lobby over all peers — §10.2's "same monogram on map and lobby" was not delivered for labels. → `CrewIdentity.derive` is the one derivation over peers-minus-self; the driver consumes it.
+10. **Dead guest variant (skeptic):** `joinCode` is non-nil for every group rider, so code-presence selected `.rosterGuest` never (today's equivalent branch is equally dead). → role-based selector (`isHost:` on `GroupRosterSheet`), realizing the spec's three-variant intent with a reachable third variant.
+11. **`contextLine` placement (skeptic, compiled):** v1's "after `onSaved`" did not compile — the SE-0286 rationale was inverted. → declared before `onSaved`; the diff-stat "proof" of Settings safety was theater and is cut (the build is the proof).
+12. **Re-entrancy + ghosts (arch):** create/join had no latch where `finishRide` has `isEnding` — a double-tapped Try-again could create two rides and bind the live layer to the orphan; and a timeout-after-commit join leaves a visible ghost `.awaiting` member (visible precisely because A0 now works). → `isEntering` latch with tests (`joinCallCount` spy); the ghost residual is documented in Task 4, the PR, and the Tier-2 issue (Try-again's idempotent re-join self-heals; no client-side fix exists without the rideID).
+13. **Smaller fixes:** `AppRouteTests:78` named; the dead `.joinFailed` else-branch removed with a comment; `safeAreaInset` after the tap gesture (caption strip must not re-focus); `CrewEmptyState` owns its padding (no double-stack); preview join code fixed to 8 valid chars; the phase-reset-to-`.idle` gained an observable in-flight test; the title/detail copy split is declared as a deliberate re-punctuation of approved strings; `RiderColorLatch`'s AuraCore placement is a stated divergence from spec §4's "AuraKit" wording; the leave-then-stale-position re-latch exception is documented on the latch.
