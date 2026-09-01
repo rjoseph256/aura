@@ -11,8 +11,9 @@ public enum AppRoute: Sendable {
     case navigate(route: Route, destination: Place?)
     case groupRide(GroupRideEntry)
     /// The group-ride join-code entry screen, pushed on the nav stack (not a sheet) so it
-    /// never conflicts with Home's always-present dashboard sheet.
-    case joinRide
+    /// never conflicts with Home's always-present dashboard sheet. `seed` pre-fills the code
+    /// boxes — "" for a fresh entry, the typed code for a Try-again return (ROH-231).
+    case joinRide(seed: String)
     /// Ride history, pushed on the nav stack. Reached from the Home control cluster (there
     /// is no tab bar); pushing it empties Home's dashboard sheet so it shows full-screen.
     case history
@@ -99,8 +100,8 @@ extension AppRoute: Hashable {
             return ra.id == rb.id && da?.id == db?.id
         case let (.groupRide(a), .groupRide(b)):
             return a == b
-        case (.joinRide, .joinRide):
-            return true
+        case let (.joinRide(a), .joinRide(b)):
+            return a == b
         case (.history, .history):
             return true
         case (.settings, .settings):
@@ -127,8 +128,9 @@ extension AppRoute: Hashable {
         case let .groupRide(entry):
             hasher.combine(3)
             hasher.combine(entry)
-        case .joinRide:
+        case let .joinRide(seed):
             hasher.combine(4)
+            hasher.combine(seed)
         case .history:
             hasher.combine(5)
         case .settings:

@@ -92,6 +92,12 @@ final class AppRouter {
         }
     }
 
+    /// Single-write top replacement for transient screens with no auth gate (the join screen).
+    /// Same rationale as `replaceTopWithGroupRide`: never dismiss() + push in one tick.
+    func replaceTop(with route: AppRoute) {
+        if path.isEmpty { path = [route] } else { path[path.count - 1] = route }
+    }
+
     /// Most-recent-first, de-duped by name+coord, cap ~8. Persisted across launches.
     private(set) var recents: [Place] = []
 
