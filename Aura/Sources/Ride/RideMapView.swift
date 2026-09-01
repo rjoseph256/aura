@@ -51,10 +51,11 @@ struct RideMapView: View {
 
     var body: some View {
         Map(viewport: $viewport) {
+            // Stock puck until the ROH-220 device heading check. The Aura riding puck is built
+            // and sim-verified (`AuraPuck.ridingBearing`), but a hand-rasterized `bearingImage`
+            // can be mirrored or 90 degrees off in a way only real `CLHeading` reveals, and the
+            // simulator supplies none. Restoring it is a one-commit revert — see ROH-220.
             Puck2D(bearing: .heading)
-                .topImage(AuraPuck.clearTop)
-                .bearingImage(AuraPuck.ridingBearing)
-                .shadowImage(nil)
             routeRibbon
             detourPolyline
             gemAnnotations
