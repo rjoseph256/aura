@@ -50,6 +50,13 @@ public final class GroupRideSession {
     public private(set) var nameMap: [UUID: String] = [:]
     /// Append-only membership notifications; the UI drains this.
     public private(set) var toasts: [GroupToastEvent] = []
+    /// Why the most recent create/join attempt failed — ALONGSIDE the payload-free phase
+    /// (see `EntryFailureReason`). Cleared at the top of every attempt; written immediately
+    /// before the failure phase with no suspension between.
+    public private(set) var entryFailureReason: EntryFailureReason?
+    /// Re-entrancy latch for create/join — the `isEnding` shape (a double-tapped Try-again
+    /// must not create two server-side rides).
+    private var isEntering = false
     /// Set when the most recent `startRiding()` call failed server-side; cleared at the
     /// start of the next attempt. The lobby view surfaces this as a retry affordance.
     public private(set) var startFailed = false
@@ -377,10 +384,19 @@ extension GroupRideSession {
             phase = .needsDisplayName
             return
         }
+        guard !isEntering else { return }
+        isEntering = true
+        defer { isEntering = false }
+        entryFailureReason = nil
+        phase = .idle   // a retry re-enters the loading surface
         do {
-            let resolvedSelfUserID = try await backend.currentUserID()
+            let resolvedSelfUserID = try await withTimeout(entryTimeout, sleep: sleep) { [backend] in
+                try await backend.currentUserID()
+            }
             let routeData = try inputRoute.map { try JSONEncoder().encode($0) }
-            let ride = try await backend.createRide(route: routeData)
+            let ride = try await withTimeout(entryTimeout, sleep: sleep) { [backend] in
+                try await backend.createRide(route: routeData)
+            }
             rideID = ride.id
             joinCode = ride.joinCode
             route = inputRoute
@@ -392,6 +408,7 @@ extension GroupRideSession {
                                       transport: transport, cadence: cadence)
             phase = .lobby
         } catch {
+            entryFailureReason = EntryFailure.isConnectionFailure(error) ? .connectionFailed : .rejected
             phase = .createFailed
         }
     }
@@ -401,12 +418,21 @@ extension GroupRideSession {
             phase = .needsDisplayName
             return
         }
+        guard !isEntering else { return }
+        isEntering = true
+        defer { isEntering = false }
+        entryFailureReason = nil
+        phase = .idle
         let resolvedSelfUserID: UUID
         let joined: JoinedRide
         do {
-            resolvedSelfUserID = try await backend.currentUserID()
-            joined = try await backend.joinRide(code: code)
+            (resolvedSelfUserID, joined) = try await withTimeout(entryTimeout, sleep: sleep) { [backend] in
+                let uid = try await backend.currentUserID()
+                let ride = try await backend.joinRide(code: code)
+                return (uid, ride)
+            }
         } catch {
+            entryFailureReason = EntryFailure.isConnectionFailure(error) ? .connectionFailed : .rejected
             phase = .joinFailed
             return
         }
