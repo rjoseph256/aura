@@ -161,14 +161,30 @@ sites — route preview, ride summary (`StaticRouteMap`), detour, and navigate.
 
 ### Ornaments
 
-Scale bar: on both HUDs it is hidden while following and `.adaptive` when panned
-off-follow; on route preview it stays visible. All three carry the same
-`MapOrnamentMetrics.belowTopControlMargin` top margin (safe-area-relative, composed
-from `HUDControlMetrics` — not a device-tuned literal) so the bar clears the top
-control row. Compass hidden on the HUDs only; the recenter
-cluster owns orientation on a course-up map. Mapbox logo and attribution are never
-touched and stay visible everywhere. `ornamentOptions` returns `Map`, so it must
-precede `.ignoresSafeArea()` — the same constraint the codebase documents for
+Three map surfaces, three different scale-bar rules. This is not one rule with
+exceptions — each surface's top-left is owned by something different, so each gets
+the treatment that space allows.
+
+- **Navigate HUD** — scale bar **always hidden**, no margin. The turn card owns the
+  top-left in every state and its height varies (collapsed vs expanded, one vs two
+  instruction lines), so no fixed margin can reliably clear it: panned off the puck,
+  the card still covers most of the bar. This is the same argument that hides the
+  compass here — another element already owns that space.
+- **Explore HUD** (`RideMapView`) — hidden while following, `.adaptive` when panned
+  off-follow, with the `MapOrnamentMetrics.belowTopControlMargin` top margin. This
+  HUD's top-left really is free once the rider pans off, and the bar reads cleanly
+  there below the back control.
+- **Route preview** — margin only. The bar is never conditionally hidden, and the
+  compass here is deliberately untouched.
+
+`MapOrnamentMetrics.belowTopControlMargin` is safe-area-relative (SDK contract) and
+composed from `HUDControlMetrics` — `topControlPadding + size + controlClearance` —
+not a device-tuned literal, so it holds on an SE as well as on the tuning device.
+
+Compass hidden on the two HUDs only; the recenter cluster owns orientation on a
+course-up map. Mapbox logo and attribution are never touched and stay visible
+everywhere. `ornamentOptions` returns `Map`, so it must precede
+`.ignoresSafeArea()` — the same constraint the codebase documents for
 `.onCameraChanged`.
 
 ## Motion

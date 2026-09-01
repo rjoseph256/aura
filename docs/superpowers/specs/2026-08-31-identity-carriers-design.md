@@ -2,15 +2,17 @@
 
 **Date:** 2026-08-31 (v2, reconciled after the 3-reviewer adversarial spec gate)
 **Epic:** Interface & Feel — revives [ROH-45](https://linear.app/rohun/issue/ROH-45) (Chunk 3 — Systematic polish pass) as its second sub-pass.
-**Status:** implemented on `claude/identity-carriers-handoff-b8341f` (commits
-`dade599..58524f3`). PO gates 1a, 1b, 2 and 3 passed; gate 4 (whole-slice set) and the
-whole-branch review are the controller's. §10 sweep: **6 met, 2 partly met, 0 not met.**
-Partly met: §10.3 — the traveled-dim behavior and its CI non-coverage are both verified, but
-its "and its PR says so" clause is outstanding because no PR is open yet; §10.6 — the navigate
-HUD's panned-off scale bar is correct by construction and photographed on the identical Explore
-HUD, but has no navigate-HUD frame of its own. The riding puck keeps its Tier-2 merge hold on
-the device heading check (§8); traveled-dim feel and accuracy-ring behavior under real GPS stay
-queued as ROH-224.
+**Status:** implemented on `claude/identity-carriers-handoff-b8341f`, swept through
+`dade599..5336eb9` (this status commit follows). PO gates 1a, 1b, 2 and 3 passed; gate 4 and
+the whole-branch review are the controller's. §10 sweep: **7 met, 1 partly met, 0 not met.**
+The one partial is §10.3 — the traveled-dim behavior and its CI non-coverage are both
+verified, but its "and its PR says so" clause needs a PR to live in, which closes at branch
+finish. §10.6 is fully met as of `c30d18c`: the scale bar cannot overlap anything on the
+navigate HUD because it no longer renders there, while the Explore HUD's panned state and
+route preview's clearance are evidenced by `gate3-explore-panned.png` and `gate3-preview.png`,
+and `gate4-navigate-panned-scalebar-hidden-AFTER.png` shows the navigate surface after the
+change. The riding puck keeps its Tier-2 merge hold on the device heading check (§8);
+traveled-dim feel and accuracy-ring behavior under real GPS stay queued as ROH-224.
 **Verification:** mixed — Tier 2 with a merge hold for the riding puck, Tier 2 queued for
 traveled-dim feel, Tier 1 for everything else (see §8).
 
