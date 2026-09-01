@@ -92,6 +92,13 @@ public final class MapboxGuidanceSession: GuidanceSession {
             .sink { status in
                 if status.event is ReroutingStatus.Events.FetchingRoute {
                     continuation.yield(.rerouting)
+                } else if status.event is ReroutingStatus.Events.Interrupted
+                            || status.event is ReroutingStatus.Events.Failed {
+                    // The fetch is over and produced nothing, so the routeId never changes and
+                    // the `.rerouted` above never fires. Without this the cue would stay up for
+                    // the rest of the ride. `.Fetched` needs no case: the progress sink yields
+                    // `.rerouted` off the route-id change that follows it.
+                    continuation.yield(.reroutingAborted)
                 }
             }
             .store(in: &cancellables)

@@ -179,20 +179,96 @@ final class GuidanceViewModelTests: XCTestCase {
     // `.rerouted` must clear both the pill AND the stale fraction: the 0.4 in the progress
     // tick before `.rerouting` measured the OLD route's geometry, and pairing it with the NEW
     // geometry after the swap is exactly the wrong-dim the spec forbids.
+    //
+    // Asserted mid-stream for the flag, on the open double: after `run` returns, `defer` has
+    // cleared `isRerouting` anyway, so a post-return `XCTAssertFalse` would pass whether or not
+    // `applyReroute` cleared anything. Only this placement pins the clear to `.rerouted`.
     @MainActor
     func test_reroutedClearsIsReroutingAndStaleFraction() async {
-        let a = GuidanceUpdate(distanceToManeuverMeters: 200, instruction: "Continue",
-                               fractionTraveled: 0.4)
+        let session = OpenGuidanceSession()
+        let vm = GuidanceViewModel(session: session)
+        let running = Task { @MainActor in await vm.run(route: makeRoute()) }
         let geo = [Coordinate(latitude: 40.1, longitude: -80.0),
                    Coordinate(latitude: 40.2, longitude: -80.1)]
-        let session = ScriptedGuidanceSession(script: [
-            .progress(a), .rerouting, .rerouted(geo)
-        ])
-        let vm = GuidanceViewModel(session: session)
-        await vm.run(route: makeRoute())
+
+        session.emit(.progress(GuidanceUpdate(distanceToManeuverMeters: 200, instruction: "Continue",
+                                              fractionTraveled: 0.4)))
+        session.emit(.rerouting)
+        session.emit(.rerouted(geo))
+
+        await waitUntil { vm.routeGeometry != nil }
+        XCTAssertEqual(vm.routeGeometry, geo, "VM never consumed the scripted events")
+
         XCTAssertFalse(vm.isRerouting)
         XCTAssertNotNil(vm.lastUpdate)
         XCTAssertNil(vm.lastUpdate?.fractionTraveled)
+
+        session.finish()
+        await running.value
+    }
+
+    // An aborted reroute — Mapbox's `Interrupted` or `Failed` — is the one way the recalculating
+    // cue can dead-end. `.rerouted` is yielded only on a route-id change, which a fetch that
+    // produces no route never causes, so before `.reroutingAborted` existed the flag survived
+    // until the ride ended. That matters beyond the pill: the traveled-dim is gated on
+    // `isRerouting`, so a stuck flag holds the route line full-bright for the rest of the ride.
+    @MainActor
+    func test_reroutingAbortedClearsFlagButKeepsFraction() async {
+        let session = OpenGuidanceSession()
+        let vm = GuidanceViewModel(session: session)
+        let running = Task { @MainActor in await vm.run(route: makeRoute()) }
+
+        session.emit(.progress(GuidanceUpdate(distanceToManeuverMeters: 200, instruction: "Continue",
+                                              fractionTraveled: 0.4)))
+        session.emit(.rerouting)
+        session.emit(.reroutingAborted)
+        // A later tick proves the loop is still live and the flag stays down.
+        session.emit(.progress(GuidanceUpdate(distanceToManeuverMeters: 150, instruction: "Continue",
+                                              fractionTraveled: 0.45)))
+
+        await waitUntil { vm.lastUpdate?.distanceToManeuverMeters == 150 }
+        XCTAssertEqual(vm.lastUpdate?.distanceToManeuverMeters, 150, "VM never consumed the events")
+
+        XCTAssertFalse(vm.isRerouting)
+        // The rider never left the old route, so the geometry on screen is unchanged.
+        XCTAssertNil(vm.routeGeometry)
+        // Progress keeps landing normally after the abort. This does NOT pin the "abort must
+        // not nil the fraction" rule — the tick above would refill it either way; the sibling
+        // `preservesTheFractionItInherits` (no later tick) is what catches that over-reach.
+        XCTAssertEqual(vm.lastUpdate?.fractionTraveled, 0.45)
+
+        session.finish()
+        await running.value
+    }
+
+    // The abort must not discard the fraction it inherits, either — pinned with no later tick,
+    // so nothing can refill `lastUpdate` between the abort and the assertion.
+    //
+    // Emitted in two stages, waiting for each to land. A single batch would not work: the run
+    // loop consumes roughly one event per yield, so a condition like "lastUpdate is set and the
+    // flag is down" is momentarily true after the FIRST event, before `.rerouting` is even seen,
+    // and the wait would exit against a half-applied script. Staging makes each wait uniquely
+    // satisfiable by the event it is waiting on.
+    @MainActor
+    func test_reroutingAborted_preservesTheFractionItInherits() async {
+        let session = OpenGuidanceSession()
+        let vm = GuidanceViewModel(session: session)
+        let running = Task { @MainActor in await vm.run(route: makeRoute()) }
+
+        session.emit(.progress(GuidanceUpdate(distanceToManeuverMeters: 200, instruction: "Continue",
+                                              fractionTraveled: 0.4)))
+        session.emit(.rerouting)
+        await waitUntil { vm.isRerouting }
+        XCTAssertTrue(vm.isRerouting, "VM never consumed .rerouting")
+
+        session.emit(.reroutingAborted)
+        await waitUntil { !vm.isRerouting }
+        XCTAssertFalse(vm.isRerouting, "VM never consumed the abort")
+
+        XCTAssertEqual(vm.lastUpdate?.fractionTraveled, 0.4)
+
+        session.finish()
+        await running.value
     }
 
     // Once fresh progress arrives against the new geometry, the fraction comes back.

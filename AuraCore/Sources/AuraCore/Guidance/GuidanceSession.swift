@@ -57,6 +57,14 @@ public enum GuidanceEvent: Equatable, Sendable {
     case arrivedAtDestination
     /// The engine started recalculating after the rider went off-route → show a cue.
     case rerouting
+    /// The recalculation ended without producing a route, so `.rerouted` will never arrive.
+    /// Stands for both of Mapbox's non-success outcomes: `ReroutingStatus.Events.Failed` (the
+    /// fetch errored) and `.Interrupted` (the recalculation was cancelled — typically because
+    /// the rider steered back onto the original route themselves). Different causes, identical
+    /// consequence for the HUD: the rider is on the route already drawn, and the recalculating
+    /// cue must come down. Without this the cue has no way to clear (`.rerouted` is yielded only
+    /// on a route-id change, which an aborted fetch never produces).
+    case reroutingAborted
     /// A new route is available after a reroute → swap the drawn polyline.
     case rerouted([Coordinate])
 }

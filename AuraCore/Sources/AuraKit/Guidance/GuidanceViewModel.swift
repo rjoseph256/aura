@@ -115,6 +115,13 @@ public final class GuidanceViewModel: RidePauseObserving {
                 if !isPaused { onSpeak(text) }
             case .rerouting:
                 isRerouting = true
+            case .reroutingAborted:
+                // Clear the cue and NOTHING else. The asymmetry with `applyReroute` is
+                // deliberate: an aborted reroute leaves the rider on the OLD route, which is
+                // still the geometry on screen, so `lastUpdate.fractionTraveled` still measures
+                // the line being drawn. Nil-ing it here would discard a correct value and blank
+                // the traveled-dim for no reason. Only a real geometry swap invalidates it.
+                isRerouting = false
             case .rerouted(let geometry):
                 applyReroute(geometry)
             case .arrivedAtDestination:
@@ -122,8 +129,7 @@ public final class GuidanceViewModel: RidePauseObserving {
                 // resumed has decided to keep riding, so firing the held arrival at them would
                 // end the ride under exactly the person who said otherwise (spec D7).
                 if isPaused { continue }
-                let cue = hapticEngine.onArrival()
-                if hapticsEnabled, let cue { haptics?.play(cue) }
+                play(hapticEngine.onArrival())
                 // `onArrive` is caller-defined: navigate's HUD ends the ride (tearing down
                 // this very session), while the detour's `onArrive` detaches and lets the
                 // ride continue. Either way, stop consuming by returning rather than
@@ -145,6 +151,13 @@ public final class GuidanceViewModel: RidePauseObserving {
 
     /// Set by `RideSessionCoordinator` at the moment of the tap.
     public func rideDidSetPaused(_ paused: Bool) { isPaused = paused }
+
+    /// Plays one haptic cue if the rider has turn haptics on and the engine produced one.
+    /// Shared by the progress and arrival paths so the settings gate is written once.
+    private func play(_ cue: RideHapticCue?) {
+        guard hapticsEnabled, let cue else { return }
+        haptics?.play(cue)
+    }
 
     /// The geometry swap for one `.rerouted` event. Split out of `run` for the same reason as
     /// `applyProgress`: the unwrap that clears the stale fraction pushes that loop one past the
@@ -176,6 +189,6 @@ public final class GuidanceViewModel: RidePauseObserving {
         let cue = hapticEngine.onProgress(
             distanceToManeuverMeters: update.distanceToManeuverMeters,
             maneuverKey: update.instruction)
-        if hapticsEnabled, let cue { haptics?.play(cue) }
+        play(cue)
     }
 }
