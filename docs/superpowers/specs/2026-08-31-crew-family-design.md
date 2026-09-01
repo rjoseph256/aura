@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-31 (v2, reconciled after the 3-reviewer adversarial spec gate)
 **Epic:** Interface & Feel — third sub-pass of [ROH-45](https://linear.app/rohun/issue/ROH-45); umbrella issue ROH-225.
-**Status:** reconciled; awaiting PO review + three PO decisions (§2) + the identity-board mockup gate.
+**Status:** PO-APPROVED 2026-09-01 (spec + gate-1 identity board + §2 decisions 1a/2a/3a). Next: child issues under ROH-225, then writing-plans + adversarial plan review. Implementation may start once the plan clears its gate; A0 (lobby fill) first.
 **Verification:** Tier 1 for the visual work; **Tier 2 (two-phone, queued)** for the lobby-fill fix and per-device hue coherence — the v1 "Tier 1 throughout" claim was wrong (VERIFICATION.md's Tier-2 list names the join/lifecycle family).
 
 ## 1. Context — what the gate changed
