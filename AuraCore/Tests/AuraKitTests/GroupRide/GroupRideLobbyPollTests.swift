@@ -13,6 +13,10 @@ actor SleepGate {
     private var waiters: [Int: CheckedContinuation<Void, Never>] = [:]
     private var nextID = 0
 
+    /// How many sleepers are currently parked. Used to pin that a cancellation actually
+    /// drained the waiter (rather than merely relying on the poll's own phase guard).
+    var waiterCount: Int { waiters.count }
+
     func wait() async {
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -104,6 +108,14 @@ struct GroupRideLobbyPollTests {
         await session.beginLiveSession()
         await session.end()                       // teardownLive cancels the poll
         await settle { session.phase == .ended }
+        // Pin the cancel itself (not just the phase guard downstream): the parked sleeper
+        // must actually be drained by teardown's `lobbyPollTask?.cancel()`.
+        var drained = false
+        for _ in 0..<500 {
+            if await gate.waiterCount == 0 { drained = true; break }
+            await Task.yield()
+        }
+        #expect(drained, "teardown cancelled the parked sleeper")
         let calls = backend.store.rosterCallCount
         await gate.release()                      // banked or wakes a straggler — guard must hold
         await settle { false }
@@ -120,11 +132,57 @@ struct GroupRideLobbyPollTests {
         await session.beginLiveSession()
         await session.ingest(.rideStarted)
         #expect(session.phase == .riding)
+        // Make the death explicit rather than scheduler-dependent: release the parked
+        // sleeper so the poll actually observes `.riding` and exits, and pin that it did
+        // before moving on — otherwise the poll might simply sleep through the whole
+        // round trip and this test would pass without ever exercising the revival path.
+        await gate.release()
+        var died = false
+        for _ in 0..<500 {
+            if !session.isLobbyPolling { died = true; break }
+            await Task.yield()
+        }
+        #expect(died, "the poll observed .riding and died")
         await session.reconcileFromStatus()       // server never stamped started_at
         #expect(session.phase == .lobby)
         try await joinGuest(named: "Priya", sharing: backend, code: session.joinCode!)
         await gate.release()
         await settle { session.peers.count == 2 }
         #expect(session.peers.count == 2, "the poll is alive after the round trip")
+    }
+
+    /// Pins Fix 1's idempotency: an authoritative reconcile that re-confirms `.lobby` while
+    /// a poll is already parked mid-interval must NOT restart it — restarting would reset
+    /// the interval on every reconcile and, under a flapping transport, starve the poll of
+    /// ever completing one (the defect this replaces the cancel-and-recreate design for).
+    @Test func aReconcileWhileParkedDoesNotRestartThePoll() async throws {
+        actor Calls {
+            var n = 0
+            func bump() { n += 1 }
+        }
+        let calls = Calls()
+        let gate = SleepGate()
+        let backend = InMemoryGroupRideBackend()
+        try? await backend.signIn(idToken: "host", nonce: "n", displayName: "Jamie")
+        let session = GroupRideSession(
+            backend: backend, transport: InMemoryRideSessionTransport(),
+            displayNameProvider: { "Jamie" },
+            pollSleep: { _ in await calls.bump(); await gate.wait() })
+        await session.create(route: nil)
+        await session.beginLiveSession()
+
+        var sawFirstInterval = false
+        for _ in 0..<500 {
+            if await calls.n == 1 { sawFirstInterval = true; break }
+            await Task.yield()
+        }
+        #expect(sawFirstInterval, "the poll entered its first interval")
+
+        await session.reconcileFromStatus()   // authoritative re-read, still .lobby
+
+        for _ in 0..<50 { await Task.yield() }   // bounded — give a restart a chance to happen
+        #expect(await calls.n == 1, "an already-running poll keeps its interval")
+
+        await gate.release()   // let the parked poll unwind cleanly
     }
 }

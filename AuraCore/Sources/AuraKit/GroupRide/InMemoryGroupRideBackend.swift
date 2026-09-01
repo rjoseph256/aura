@@ -29,7 +29,15 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var authContinuations: [UUID: AsyncStream<AuthChange>.Continuation] = [:]
     }
     // nonisolated so `init(sharing:)` can read it synchronously across actors;
-    // `Store` is @unchecked Sendable, and tests drive it via serial awaits.
+    // `Store` is @unchecked Sendable. The `currentUserID`/`authContinuations` pair is the
+    // only state actually covered by `lock` — everything else, including the plain `var`
+    // call-count spies (`rosterCallCount`, `joinCallCount`, `endLeaveCallCount`), is written
+    // on this actor's isolation and read unsynchronized from MainActor test code. That is a
+    // real data race by Swift's rules, not one `Store` structurally prevents; it is only
+    // safe in practice because tests read a counter after a settle loop has already observed
+    // its effect (the roster/peer count it gates), which happens-after the actor's write on
+    // the same async sequencing. Treat these counters as best-effort test spies meant to be
+    // read after quiescence, never under real concurrent access.
     nonisolated let store: Store
 
     public init() { self.store = Store() }

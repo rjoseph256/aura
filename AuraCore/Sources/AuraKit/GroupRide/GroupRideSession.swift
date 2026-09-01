@@ -104,6 +104,11 @@ public final class GroupRideSession {
     /// into the poll (plan-gate finding). nil-defaulted per ROH-110; see `sleep`'s note.
     private let pollSleep: @Sendable (Duration) async throws -> Void
     private var lobbyPollTask: Task<Void, Never>?
+    /// True while a poll task is live. startLobbyPoll is idempotent on it: a running poll is
+    /// never restarted (an interval reset on every reconcile starves the poll under flapping
+    /// transport — review finding). Cleared in the same MainActor slice as loop exit; a
+    /// CANCELLED exit leaves it to teardownLive, which already cleared it.
+    private(set) var isLobbyPolling = false
     private var rideSession: RideSession?
     private var currentLifecycle: RideLifecycle = .foreground
     private var tickerTask: Task<Void, Never>?
@@ -319,6 +324,7 @@ public final class GroupRideSession {
         tickerTask = nil
         lobbyPollTask?.cancel()
         lobbyPollTask = nil
+        isLobbyPolling = false
         didBeginLive = false
     }
 }
@@ -326,21 +332,26 @@ public final class GroupRideSession {
 // MARK: - Lobby roster poll (ROH-227)
 extension GroupRideSession {
     /// Re-reads the roster on a cadence while the rider waits in the lobby, so a joining
-    /// friend appears without a `.position` (which never flows pre-ride). Restarted on
-    /// EVERY entry to `.lobby` — including an authoritative reconcile that corrects a
-    /// phantom start — so it is deliberately not latched by `didBeginLive`. Self-terminates
-    /// on any phase exit; cancelled in `teardownLive`; idempotent with the seed because
-    /// `mergeRoster` skips known members.
-    func startLobbyPoll() {
-        lobbyPollTask?.cancel()
+    /// friend appears without a `.position` (which never flows pre-ride). Called on EVERY
+    /// entry to `.lobby` — including an authoritative reconcile that corrects a phantom
+    /// start — so it is deliberately not latched by `didBeginLive`; it IS idempotent on
+    /// `isLobbyPolling`, so a call while a poll is already running is a no-op rather than
+    /// a restart (a flapping transport that reconciles repeatedly must not keep resetting
+    /// the interval — review finding: that starved the poll of ever completing one).
+    /// Self-terminates on any phase exit; cancelled in `teardownLive`; idempotent with the
+    /// seed because `mergeRoster` skips known members.
+    private func startLobbyPoll() {
+        guard !isLobbyPolling else { return }
+        isLobbyPolling = true
         lobbyPollTask = Task { [weak self] in
             while !Task.isCancelled {
-                guard let self, self.phase == .lobby else { return }
+                guard let self, self.phase == .lobby else { break }
                 try? await self.pollSleep(self.lobbyPollInterval)
-                guard !Task.isCancelled, self.phase == .lobby else { return }
+                guard !Task.isCancelled, self.phase == .lobby else { break }
                 let members = await self.refreshRoster()
                 self.mergeLobbyRoster(members)
             }
+            if !Task.isCancelled { self?.isLobbyPolling = false }
         }
     }
 
