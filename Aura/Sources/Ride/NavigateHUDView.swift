@@ -32,8 +32,6 @@ struct NavigateHUDView: View {
     @Environment(ShareMapProviderBox.self) private var shareMapBox
     /// Not `private`: the cockpit row in `NavigateHUDView+Cockpit` animates off it too.
     @Environment(\.accessibilityReduceMotion) var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorSchemeContrast) private var contrast
 
     // MARK: Ride lifecycle
 
@@ -177,8 +175,7 @@ struct NavigateHUDView: View {
                     .foregroundStyle(AuraTheme.textPrimary)
                     .padding(.horizontal, AuraTheme.Spacing.md)
                     .padding(.vertical, AuraTheme.Spacing.sm)
-                    .background(AuraTheme.mapScrim(reduceTransparency: reduceTransparency, contrast), in: Capsule())
-                    .overlay(Capsule().strokeBorder(AuraTheme.hairline(contrast)))
+                    .mapChip(Capsule())
                     .padding(.top, 96)
                     .transition(.opacity)
                     .accessibilityLabel("Rerouting")

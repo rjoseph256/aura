@@ -117,7 +117,7 @@ struct PeerDotView: View {
             .foregroundStyle(AuraTheme.textPrimary)
             .padding(.horizontal, AuraTheme.Spacing.xs)
             .padding(.vertical, 2)
-            .background(AuraTheme.surface.opacity(0.85), in: Capsule())
+            .mapChip(Capsule(), stroke: .none)
     }
 
     private var statusAccessibilityLabel: String {

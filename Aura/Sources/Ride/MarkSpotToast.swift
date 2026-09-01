@@ -10,6 +10,7 @@ struct MarkSpotToast: View {
     let onDismiss: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var contrast
 
     private let autoDismissDelay: Duration = .seconds(4)
 
@@ -33,7 +34,7 @@ struct MarkSpotToast: View {
         .padding(.vertical, 12)
         .background(RoundedRectangle(cornerRadius: 12).fill(AuraTheme.surface))
         .overlay(RoundedRectangle(cornerRadius: 12)
-            .stroke(AuraTheme.hairline(.standard), lineWidth: 0.5))
+            .stroke(AuraTheme.hairline(contrast), lineWidth: 0.5))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text(message))
         .accessibilityHint(Text("Double-tap Undo to remove."))

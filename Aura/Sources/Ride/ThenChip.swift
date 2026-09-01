@@ -25,8 +25,7 @@ struct ThenChip: View {
         }
         .padding(.horizontal, AuraTheme.Spacing.md)
         .padding(.vertical, AuraTheme.Spacing.xs)
-        .background(AuraTheme.surface.opacity(0.85), in: Capsule())
-        .overlay(Capsule().strokeBorder(AuraTheme.border))
+        .mapChip(Capsule())
         .accessibilityHidden(true)
     }
 }
