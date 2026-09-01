@@ -15,7 +15,10 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var forceStartError: GroupRideError?     // test spy
         var forceRosterError: GroupRideError?    // test spy
         var forceEndError: GroupRideError?       // test spy, one-shot: cleared on throw so a retry succeeds
+        var forceJoinError: GroupRideError?   // test spy
         var hangEndLeave = false                          // test spy: park endRide/leaveRide until cancelled
+        var hangJoin = false   // test spy: park joinRide until cancelled
+        var hangCreate = false   // test spy: park createRide until cancelled
         var onEndLeaveEntered: (@Sendable () -> Void)?    // test spy: fired when end/leave is entered
         var endLeaveCallCount = 0                          // test spy: how many times end/leave ran
         var rosterCallCount = 0   // test spy: how many times roster() ran
@@ -59,6 +62,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         return uid
     }
     public func createRide(route: Data?) async throws -> GroupRide {
+        if store.hangCreate { try await Task.sleep(for: .seconds(1000)) }
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
         if let forced = store.forceCreateError { throw forced }
         let code = JoinCode(rawValue: "ABCDEFGH")!   // fixed valid code for the fake (one ride per store)
@@ -76,6 +80,8 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         return ride
     }
     public func joinRide(code: JoinCode) async throws -> JoinedRide {
+        if store.hangJoin { try await Task.sleep(for: .seconds(1000)) }
+        if let forced = store.forceJoinError { throw forced }
         store.joinCallCount += 1
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
         guard let rideID = store.codes[code.rawValue],
