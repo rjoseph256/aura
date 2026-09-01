@@ -191,6 +191,7 @@ public final class MapboxGuidanceSession: GuidanceSession {
             instruction: instruction,
             distanceRemainingMeters: progress.distanceRemaining,
             durationRemainingSeconds: progress.durationRemaining,
+            fractionTraveled: RouteTrim.sanitized(progress.fractionTraveled),
             currentStreetName: leg.currentStep.names?.first,
             maneuver: mapManeuver(upcoming),
             // The then-chip only renders when this label is non-empty (TurnCardPresenter

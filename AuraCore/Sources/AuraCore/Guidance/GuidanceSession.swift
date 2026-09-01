@@ -12,6 +12,11 @@ public struct GuidanceUpdate: Equatable, Sendable {
     public var distanceRemainingMeters: Double?
     /// Whole-route time remaining to the destination, in seconds. ETA = now + this.
     public var durationRemainingSeconds: Double?
+    /// How far along the guided route the rider is, 0...1, from the engine's own
+    /// progress (dimensionless — immune to cross-geometry subtraction). nil until
+    /// known; `ScriptedGuidanceSession` stays nil forever, so the golden ride never
+    /// exercises the trim path.
+    public var fractionTraveled: Double?
     /// The road the rider is currently on, e.g. "Penn Ave". nil when the engine has no
     /// name for the current step.
     public var currentStreetName: String?
@@ -25,6 +30,7 @@ public struct GuidanceUpdate: Equatable, Sendable {
                 instruction: String,
                 distanceRemainingMeters: Double? = nil,
                 durationRemainingSeconds: Double? = nil,
+                fractionTraveled: Double? = nil,
                 currentStreetName: String? = nil,
                 maneuver: Maneuver? = nil,
                 nextManeuver: Maneuver? = nil) {
@@ -32,6 +38,7 @@ public struct GuidanceUpdate: Equatable, Sendable {
         self.instruction = instruction
         self.distanceRemainingMeters = distanceRemainingMeters
         self.durationRemainingSeconds = durationRemainingSeconds
+        self.fractionTraveled = fractionTraveled
         self.currentStreetName = currentStreetName
         self.maneuver = maneuver
         self.nextManeuver = nextManeuver
