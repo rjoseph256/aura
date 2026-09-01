@@ -56,10 +56,13 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
                 .single().execute().value
             return JoinedRide(ride: try row.toDomain(), route: try row.routeData())
         } catch is CancellationError {
-            // withTimeout cancelled us (entry timeout) or the caller unwound. Rethrow
-            // untouched: swallowing this into .joinFailed would defeat the timeout's
-            // CancellationError → TimeoutError conversion and misreport a timeout as a
-            // rejection ("check your code" over a dead network — ROH-231 gate finding).
+            // Rethrow cancellation untouched so the catch-all can never misreport it as a
+            // rejection. Scope honestly: URLSession surfaces MID-FLIGHT cancellation as
+            // URLError(.cancelled) — which the reachability catch below maps to
+            // .connectionFailed — so this clause guards the narrower raw-CancellationError
+            // paths (PostgREST's pre-dispatch Task.checkCancellation, auth internals),
+            // where withTimeout's CancellationError → TimeoutError conversion still applies
+            // (ROH-231 review trace).
             throw CancellationError()
         } catch let error where EntryFailure.isConnectionFailure(error) {
             throw GroupRideError.connectionFailed
