@@ -64,6 +64,7 @@ struct HomeLiveMap: View {
             Puck2D(bearing: .heading)
                 .topImage(AuraPuck.browseTop)
                 .bearingImage(AuraPuck.browseBearing)
+                .shadowImage(nil)
                 .showsAccuracyRing(true)
                 .accuracyRingColor(AuraTheme.routeUIColor.withAlphaComponent(0.12))
                 .accuracyRingBorderColor(AuraTheme.routeUIColor.withAlphaComponent(0.35))

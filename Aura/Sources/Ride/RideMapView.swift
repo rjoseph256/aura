@@ -54,6 +54,7 @@ struct RideMapView: View {
             Puck2D(bearing: .heading)
                 .topImage(AuraPuck.clearTop)
                 .bearingImage(AuraPuck.ridingBearing)
+                .shadowImage(nil)
             routeRibbon
             detourPolyline
             gemAnnotations

@@ -300,6 +300,7 @@ struct NavigateHUDView: View {
                     Puck2D(bearing: .heading)
                         .topImage(AuraPuck.clearTop)
                         .bearingImage(AuraPuck.ridingBearing)
+                        .shadowImage(nil)
 
                     // Live route polyline: switches to the post-reroute geometry when available.
                     // guidance.routeGeometry is updated by GuidanceViewModel on each reroute event.
