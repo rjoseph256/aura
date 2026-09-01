@@ -47,7 +47,8 @@ Radius: xs 4, sm 8, md 12, lg 16, xl 20.
 **Frosted material is for CONTROLS. Map-floating TEXT CHIPS use `.mapChip`.**
 
 - **Controls — frosted.** `HUDControlButton` and `MapZoomControl` are the only
-  sanctioned `.ultraThinMaterial` surfaces in the app outside the widget targets.
+  sanctioned `.ultraThinMaterial` *control* surfaces in the app outside the widget
+  targets (the lobby/roster cards below are the sanctioned non-control exception).
   Both resolve through `AuraTheme.prefersOpaqueSurface(reduceTransparency:_:)` and
   fall back to solid `surface` under Increase Contrast or Reduce Transparency.
 - **Text chips — flat scrim.** `.mapChip(_ shape:stroke:)`

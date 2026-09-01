@@ -14,11 +14,14 @@ struct RouteTrimTests {
         #expect(RouteTrim.sanitized(nil) == nil)
     }
 
-    // Tolerance, not ==: quantized values are computed Doubles and some steps
-    // produce representation error (0.3 → 0.30000000000000004).
+    // Tolerance, not ==: quantized values are computed Doubles and many inputs
+    // produce representation error (0.0724 → 0.07200000000000001).
+    //
+    // Expectations track the 0.001 default (0.005 left the dim boundary ~150 m
+    // behind the puck on a 30 km route — see `RouteTrim.quantized`).
     @Test func quantizedSnapsDown() {
-        #expect(abs(RouteTrim.quantized(0.4239) - 0.42) < 1e-9)
-        #expect(abs(RouteTrim.quantized(0.9999) - 0.995) < 1e-9)
+        #expect(abs(RouteTrim.quantized(0.4239) - 0.423) < 1e-9)
+        #expect(abs(RouteTrim.quantized(0.9999) - 0.999) < 1e-9)
         #expect(abs(RouteTrim.quantized(1.0) - 1.0) < 1e-9)
     }
 }

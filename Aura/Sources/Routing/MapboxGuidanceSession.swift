@@ -83,11 +83,31 @@ public final class MapboxGuidanceSession: GuidanceSession {
                 // which case the first assignment IS the swap the screen is waiting for.
                 if lastRouteId != progress.routeId {
                     let isFirst = (lastRouteId == nil)
-                    lastRouteId = progress.routeId
-                    if !isFirst || divergedFromSelection, let coords = progress.route.shape?.coordinates {
-                        continuation.yield(.rerouted(coords.map {
-                            Coordinate(latitude: $0.latitude, longitude: $0.longitude)
-                        }))
+                    if !isFirst || divergedFromSelection {
+                        // Only a swap we can actually PAINT consumes the id. Assigning first and
+                        // unwrapping after (the original shape of this block) let a nil shape
+                        // swallow the swap: `.rerouted` never fires for that id, and nothing else
+                        // clears `isRerouting` on this path — the recalculating cue and the frozen
+                        // traveled-dim would then outlive the reroute by the whole ride.
+                        //
+                        // Leaving the id stale instead means the next tick re-enters and retries,
+                        // so a shape that shows up late is still honored. The alternative —
+                        // consume the id and yield `.reroutingAborted` — clears the cue but LIES:
+                        // that event means "the rider is still on the route already drawn", and
+                        // `GuidanceViewModel` acts on it by keeping the stale `fractionTraveled`.
+                        // Here the engine HAS swapped, so it would re-arm the trim against a
+                        // fraction measured on a line that is not the one on screen, and give up
+                        // on the geometry permanently. Holding the cue up is the honest state:
+                        // we do not know where the rider is on the line we are drawing.
+                        if let coords = progress.route.shape?.coordinates {
+                            lastRouteId = progress.routeId
+                            continuation.yield(.rerouted(coords.map {
+                                Coordinate(latitude: $0.latitude, longitude: $0.longitude)
+                            }))
+                        }
+                    } else {
+                        // The initial route: record it, so the NEXT id change reads as a swap.
+                        lastRouteId = progress.routeId
                     }
                 }
             }

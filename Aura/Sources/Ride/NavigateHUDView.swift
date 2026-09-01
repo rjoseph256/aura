@@ -312,25 +312,27 @@ struct NavigateHUDView: View {
                         routeSource
                         routeLayer(id: "aura-nav-route-dim").lineOpacity(AuraPalette.routeDimOpacity)
                         routeLayer(id: "aura-nav-route-bright").lineTrimOffset(start: 0, end: trimEnd)
-                    }
 
-                    // Destination flag at the drawn geometry's end — it follows a reroute,
-                    // because `guidance.routeGeometry` is what is actually stroked above.
-                    //
-                    // This sits inside the 30 Hz `TimelineView`, so: identity is structural
-                    // (a fixed position in the content tree, so `tryUpdate` reuses the same
-                    // hosting controller frame after frame) and the coordinate is derived
-                    // from an array's `last` — O(1), no per-frame geometry walk, and the
-                    // content closure builds a field-less view. `.allowOverlapWithPuck(true)`
-                    // because the default would hide the flag exactly on final approach.
-                    if let destination = (guidance.routeGeometry ?? route.geometry).last {
-                        MapViewAnnotation(
-                            coordinate: CLLocationCoordinate2D(latitude: destination.latitude,
-                                                               longitude: destination.longitude)
-                        ) {
-                            DestinationMarkerView()
+                        // Destination flag at the drawn geometry's end — it follows a reroute,
+                        // because `guidance.routeGeometry` is what is stroked above. Inside the
+                        // line's own guard, as in `RoutePreviewView` and `RideMapView`: no line,
+                        // no flag.
+                        //
+                        // This sits inside the 30 Hz `TimelineView`, so: identity is structural
+                        // (a fixed position in the content tree, so `tryUpdate` reuses the same
+                        // hosting controller frame after frame) and the coordinate is derived
+                        // from an array's `last` — O(1), no per-frame geometry walk, and the
+                        // content closure builds a field-less view. `.allowOverlapWithPuck(true)`
+                        // because the default would hide the flag exactly on final approach.
+                        if let destination = (guidance.routeGeometry ?? route.geometry).last {
+                            MapViewAnnotation(
+                                coordinate: CLLocationCoordinate2D(latitude: destination.latitude,
+                                                                   longitude: destination.longitude)
+                            ) {
+                                DestinationMarkerView()
+                            }
+                            .allowOverlapWithPuck(true)
                         }
-                        .allowOverlapWithPuck(true)
                     }
 
                     // Group-ride peer dots. On the solo path `frame.dots` is empty, so this is a
