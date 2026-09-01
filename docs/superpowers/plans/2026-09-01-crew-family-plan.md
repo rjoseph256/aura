@@ -41,10 +41,10 @@
 
 The reconciliation session already merged `origin/main` (`f4c5768`). Before Task 1:
 
-- [ ] **Step 1:** `cd AuraCore && swift test` — both totals green.
-- [ ] **Step 2:** `swiftlint --strict` from the repo root — clean.
-- [ ] **Step 3:** Builder: app scheme builds for simulator.
-- [ ] **Step 4:** Nothing to commit if green (the merge commit exists). If anything is red, STOP and fix the merge before any slice work — do not interleave.
+- [x] **Step 1:** `cd AuraCore && swift test` — both totals green. *(Verified 2026-09-01: 325 XCTest + 937 swift-testing, 0 failures.)*
+- [x] **Step 2:** `swiftlint --strict` from the repo root — clean. *(0 violations in 520 files.)*
+- [x] **Step 3:** Builder: app scheme builds for simulator. *(BUILD SUCCEEDED, iPhone 17 sim.)*
+- [x] **Step 4:** Nothing to commit if green (the merge commit exists). If anything is red, STOP and fix the merge before any slice work — do not interleave. *(Green — baseline is `f4c5768`.)*
 
 ---
 
