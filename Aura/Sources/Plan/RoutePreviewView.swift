@@ -339,6 +339,18 @@ private extension RoutePreviewView {
                     // Casing is the annotation's own `lineBorder*` (one layer, z-correct by
                     // construction) — NOT a second polyline underneath, which Mapbox is free
                     // to order either way within one annotation manager.
+                    //
+                    // READ BEFORE CHANGING THESE TWO NUMBERS. Mapbox's line border is drawn
+                    // *inset*: it eats into `lineWidth` rather than adding to it, so the
+                    // visible mint core is `lineWidth - 2 * lineBorderWidth`. This is not in
+                    // Mapbox's documentation and cannot be read out of the SDK source (the
+                    // rendering is in the compiled MapboxCoreMaps.xcframework) — it was
+                    // measured off rendered frames: 5/2 collapsed the mint run to a fifth of
+                    // its former width, matching the inset prediction exactly.
+                    //
+                    // So the width carries twice the border on top of the core we want.
+                    // 8 − 2×1.5 = 5pt of mint, which is both the pre-casing width here and
+                    // share-card parity (`ShareCardLayout` strokes mint 5 under casing 8).
                     PolylineAnnotationGroup {
                         PolylineAnnotation(
                             lineCoordinates: route.geometry.map {
@@ -347,9 +359,9 @@ private extension RoutePreviewView {
                             }
                         )
                         .lineColor(StyleColor(AuraTheme.routeUIColor))
-                        .lineWidth(5)
+                        .lineWidth(8)
                         .lineBorderColor(StyleColor(AuraTheme.routeCasingUIColor))
-                        .lineBorderWidth(2)
+                        .lineBorderWidth(1.5)
                     }
                     // Caps/joins are layer-level in MapboxMaps 11, so they live on the group.
                     .lineCap(.round)

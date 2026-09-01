@@ -143,9 +143,11 @@ struct RideMapView: View {
             PolylineAnnotationGroup {
                 PolylineAnnotation(lineCoordinates: detourRouteCoordinates)
                     .lineColor(StyleColor(AuraTheme.routeUIColor))
-                    .lineWidth(6)
+                    // 9 − 2×1.5 = 6pt of mint, the detour's pre-casing width. The border
+                    // is INSET, not additive; the arithmetic is in RoutePreviewView.
+                    .lineWidth(9)
                     .lineBorderColor(StyleColor(AuraTheme.routeCasingUIColor))
-                    .lineBorderWidth(2)
+                    .lineBorderWidth(1.5)
             }
             // Caps/joins are layer-level in MapboxMaps 11, so they live on the group.
             .lineCap(.round)
