@@ -16,6 +16,10 @@ import AuraKit
 ///   -auraDemoCreateHang      createRide parks the same way (create loading → connection)
 ///   -auraDemoCrew            after create, three riders join in-process a beat apart, so
 ///                            the lobby poll (ROH-227) fills the room live on the sim
+///
+/// Caveat: the shared backend signs in asynchronously at first touch; a create/join within
+/// the first beat of process launch can race it and surface as a rejection — the sim driver
+/// should wait a moment after launch before the first tap.
 @MainActor
 enum GroupRideDemoMode {
     static var isActive: Bool {
@@ -47,10 +51,18 @@ enum GroupRideDemoMode {
         return backend
     }()
 
+    /// Guards `startDemoCrewIfRequested` to fire once per process. `.lobby` can be re-entered
+    /// (a phantom-start round trip lands back in `.lobby`), and without this latch a second
+    /// entry would replay Mara/Priya/Devon through `signIn`, which mints a fresh UUID per
+    /// call — duplicate-named riders in the roster instead of a no-op.
+    private static var crewKicked = false
+
     /// Joins three riders through the real joinRide path, one per beat, so the lobby fills
     /// through the actual roster poll rather than a seeded fixture.
     static func startDemoCrewIfRequested(code: JoinCode) {
         guard ProcessInfo.processInfo.arguments.contains("-auraDemoCrew") else { return }
+        guard !crewKicked else { return }
+        crewKicked = true
         Task {
             for (index, name) in ["Mara", "Priya", "Devon"].enumerated() {
                 try? await Task.sleep(for: .seconds(2 + index * 3))

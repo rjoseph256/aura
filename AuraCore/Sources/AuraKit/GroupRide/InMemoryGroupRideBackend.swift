@@ -2,7 +2,11 @@ import Foundation
 import AuraCore
 
 public final actor InMemoryGroupRideBackend: GroupRideBackend {
-    final class Store: @unchecked Sendable {
+    /// Public so the app target's DEBUG demo mode (`GroupRideDemoMode`) can set spies;
+    /// tests keep using `@testable import AuraKit`. Only the specific spies the demo
+    /// mode touches (`forceJoinError`, `hangJoin`, `hangCreate`) are `public` — everything
+    /// else on `Store` stays `internal`, visible to tests only.
+    public final class Store: @unchecked Sendable {
         var rides: [UUID: GroupRide] = [:]
         var members: [UUID: [UUID]] = [:]   // rideID -> [userID]
         var codes: [String: UUID] = [:]     // joinCode -> rideID
@@ -15,10 +19,10 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var forceStartError: GroupRideError?     // test spy
         var forceRosterError: GroupRideError?    // test spy
         var forceEndError: GroupRideError?       // test spy, one-shot: cleared on throw so a retry succeeds
-        var forceJoinError: GroupRideError?   // test spy
+        public var forceJoinError: GroupRideError?   // test spy; public — see type doc
         var hangEndLeave = false                          // test spy: park endRide/leaveRide until cancelled
-        var hangJoin = false   // test spy: park joinRide until cancelled
-        var hangCreate = false   // test spy: park createRide until cancelled
+        public var hangJoin = false   // test spy: park joinRide until cancelled; public — see type doc
+        public var hangCreate = false   // test spy: park createRide until cancelled; public — see type doc
         var onEndLeaveEntered: (@Sendable () -> Void)?    // test spy: fired when end/leave is entered
         var endLeaveCallCount = 0                          // test spy: how many times end/leave ran
         var rosterCallCount = 0   // test spy: how many times roster() ran
@@ -41,7 +45,9 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
     // its effect (the roster/peer count it gates), which happens-after the actor's write on
     // the same async sequencing. Treat these counters as best-effort test spies meant to be
     // read after quiescence, never under real concurrent access.
-    nonisolated let store: Store
+    //
+    // Also `public`, for the same DEBUG-demo-mode reason as `Store` itself (see its doc).
+    public nonisolated let store: Store
 
     public init() { self.store = Store() }
     public init(sharing other: InMemoryGroupRideBackend) { self.store = other.store }
