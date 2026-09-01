@@ -1,3 +1,8 @@
+// swiftlint:disable file_length
+// The doc comments in this file are load-bearing incident history (ROH-110 frame sizing,
+// ROH-167 begin-live latching, ROH-81 teardown semantics). Trimming them to fit the
+// file ceiling would delete the reasons the code is shaped this way; the type- and
+// function-body ceilings still apply in full.
 import Foundation
 import AuraCore
 
@@ -91,6 +96,14 @@ public final class GroupRideSession {
     ///
     /// Building the closure in the initializer body emits it exactly once, in one module.
     private let sleep: @Sendable (Duration) async throws -> Void
+    private let entryTimeout: Duration
+    /// How often the lobby re-reads the roster so joiners appear pre-ride (ROH-227, decision 1a).
+    private let lobbyPollInterval: Duration
+    /// The poll's cadence clock — SEPARATE from `sleep` on purpose: `sleep` feeds `withTimeout`,
+    /// whose cancelled timers are awaited, and a shared gate would broadcast those cancellations
+    /// into the poll (plan-gate finding). nil-defaulted per ROH-110; see `sleep`'s note.
+    private let pollSleep: @Sendable (Duration) async throws -> Void
+    private var lobbyPollTask: Task<Void, Never>?
     private var rideSession: RideSession?
     private var currentLifecycle: RideLifecycle = .foreground
     private var tickerTask: Task<Void, Never>?
@@ -131,13 +144,19 @@ public final class GroupRideSession {
     public init(backend: any GroupRideBackend, transport: any RideSessionTransport,
                 displayNameProvider: @escaping @Sendable () -> String, cadence: LiveShareCadence = .init(),
                 endTimeout: Duration = .seconds(4),
-                sleep: (@Sendable (Duration) async throws -> Void)? = nil) {
+                entryTimeout: Duration = .seconds(10),
+                lobbyPollInterval: Duration = .seconds(4),
+                sleep: (@Sendable (Duration) async throws -> Void)? = nil,
+                pollSleep: (@Sendable (Duration) async throws -> Void)? = nil) {
         self.backend = backend
         self.transport = transport
         self.displayNameProvider = displayNameProvider
         self.cadence = cadence
         self.endTimeout = endTimeout
+        self.entryTimeout = entryTimeout            // stored property lands in Task 4; add both
+        self.lobbyPollInterval = lobbyPollInterval  // params NOW so the init is edited once
         self.sleep = sleep ?? { try await Task.sleep(for: $0) }
+        self.pollSleep = pollSleep ?? { try await Task.sleep(for: $0) }
     }
 
     /// Called by the production call sites (the lobby `.task` and the `.riding` `.task`)
@@ -183,6 +202,7 @@ public final class GroupRideSession {
         }
         startTicker()
         peers = session.peers
+        if phase == .lobby { startLobbyPoll() }
     }
 
     /// The sole time entry point. Publishes buffered own-points when due, ages silent
@@ -244,7 +264,9 @@ public final class GroupRideSession {
 
     private func applyLifecyclePhase(_ next: RideLifecyclePhase) {
         switch next {
-        case .lobby:  phase = .lobby
+        case .lobby:
+            phase = .lobby
+            startLobbyPoll()
         case .riding: phase = .riding
         case .ended:
             phase = .ended
@@ -295,7 +317,39 @@ public final class GroupRideSession {
         eventLoopTask = nil
         tickerTask?.cancel()
         tickerTask = nil
+        lobbyPollTask?.cancel()
+        lobbyPollTask = nil
         didBeginLive = false
+    }
+}
+
+// MARK: - Lobby roster poll (ROH-227)
+extension GroupRideSession {
+    /// Re-reads the roster on a cadence while the rider waits in the lobby, so a joining
+    /// friend appears without a `.position` (which never flows pre-ride). Restarted on
+    /// EVERY entry to `.lobby` — including an authoritative reconcile that corrects a
+    /// phantom start — so it is deliberately not latched by `didBeginLive`. Self-terminates
+    /// on any phase exit; cancelled in `teardownLive`; idempotent with the seed because
+    /// `mergeRoster` skips known members.
+    func startLobbyPoll() {
+        lobbyPollTask?.cancel()
+        lobbyPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.phase == .lobby else { return }
+                try? await self.pollSleep(self.lobbyPollInterval)
+                guard !Task.isCancelled, self.phase == .lobby else { return }
+                let members = await self.refreshRoster()
+                self.mergeLobbyRoster(members)
+            }
+        }
+    }
+
+    private func mergeLobbyRoster(_ members: [RosterMember]) {
+        guard phase == .lobby, let session = rideSession, !members.isEmpty else { return }
+        session.mergeRoster(members.map {
+            RidePeer(userID: $0.userID, displayName: $0.displayName, status: .awaiting)
+        })
+        peers = session.peers
     }
 }
 
