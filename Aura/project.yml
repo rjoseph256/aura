@@ -11,10 +11,14 @@ packages:
     majorVersion: 11.0.0
   MapboxNavigation:
     url: https://github.com/mapbox/mapbox-navigation-ios.git
-    majorVersion: 3.0.0
+    exactVersion: 3.28.0   # transitively exact-pins mapbox-maps-ios 11.28.0 — the
+                           # version the identity-carriers spec's API checks used.
+                           # lineTrimColor is @_spi(Experimental) there; the route
+                           # design avoids it on purpose (dim under-layer, no SPI).
   MapboxSearch:
     url: https://github.com/mapbox/search-ios.git
-    majorVersion: 2.0.0
+    exactVersion: 2.28.0   # its exact mapbox-common pin must match maps 11.28.0's
+                           # (both 24.28.0); a floating search can break resolution.
   Supabase:
     url: https://github.com/supabase/supabase-swift.git
     majorVersion: 2.0.0

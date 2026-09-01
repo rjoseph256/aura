@@ -101,7 +101,8 @@ struct RideMapView: View {
     /// Grey rather than a second hue on purpose: mint against `textSecondary` grey differs in
     /// **lightness**, so the paused run stays distinguishable to a rider who cannot separate the
     /// two by colour. `lineDasharray` would have read even better, but it does not exist on
-    /// `PolylineAnnotation` in the pinned MapboxMaps 11.27.0 — it is a layer-level property on
+    /// `PolylineAnnotation` in the pinned MapboxMaps 11.28.0 (via the MapboxNavigation 3.28.0
+    /// exact pin — see project.yml) — it is a layer-level property on
     /// `PolylineAnnotationGroup`, which would dash every piece and defeat the point.
     private func strokeColor(for piece: TrackRibbon.Piece) -> UIColor {
         if piece.style == .paused {
