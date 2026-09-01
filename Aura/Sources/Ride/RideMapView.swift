@@ -52,6 +52,8 @@ struct RideMapView: View {
     var body: some View {
         Map(viewport: $viewport) {
             Puck2D(bearing: .heading)
+                .topImage(AuraPuck.clearTop)
+                .bearingImage(AuraPuck.ridingBearing)
             routeRibbon
             detourPolyline
             gemAnnotations
