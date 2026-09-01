@@ -302,25 +302,21 @@ struct NavigateHUDView: View {
                         .bearingImage(AuraPuck.ridingBearing)
                         .shadowImage(nil)
 
-                    // Live route polyline: switches to the post-reroute geometry when available.
-                    // guidance.routeGeometry is updated by GuidanceViewModel on each reroute event.
+                    // Live route line: ONE lineMetrics source under two layers that differ only
+                    // in the property on their last line. The bright layer trims itself away
+                    // behind the rider, uncovering the dim one — that IS the traveled-dim, and
+                    // it is why the dim is declared first: the content tree re-asserts
+                    // declaration-order layer positions every pass, so this ordering is the
+                    // z-order. Keep the emptiness guard — an empty source/layer pair still
+                    // mounts style objects per map mount (see `RideMapView.routeRibbon`).
                     if (guidance.routeGeometry ?? route.geometry).count > 1 {
-                        PolylineAnnotationGroup {
-                            PolylineAnnotation(
-                                lineCoordinates: (guidance.routeGeometry ?? route.geometry).map {
-                                    CLLocationCoordinate2D(latitude: $0.latitude,
-                                                           longitude: $0.longitude)
-                                }
-                            )
-                            .lineColor(StyleColor(AuraTheme.routeUIColor))
-                            .lineWidth(6)
-                        }
+                        routeSource
+                        routeLayer(id: "aura-nav-route-dim").lineOpacity(AuraPalette.routeDimOpacity)
+                        routeLayer(id: "aura-nav-route-bright").lineTrimOffset(start: 0, end: trimEnd)
                     }
 
                     // Destination flag at the drawn geometry's end — it follows a reroute,
                     // because `guidance.routeGeometry` is what is actually stroked above.
-                    // No casing on the navigate line here on purpose: ROH-221's next task
-                    // rebuilds this rendering as style layers and would delete it.
                     //
                     // This sits inside the 30 Hz `TimelineView`, so: identity is structural
                     // (a fixed position in the content tree, so `tryUpdate` reuses the same
@@ -445,5 +441,59 @@ private extension NavigateHUDView {
             ?? AVSpeechSynthesisVoice(language: "en-US")
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
         speechSynthesizer.speak(utterance)
+    }
+}
+
+/// The navigate traveled-dim (ROH-221): one `lineMetrics` source under two `LineLayer`s, the
+/// bright one trimming itself away behind the rider to uncover the dim one. An extension rather
+/// than the struct body only to stay under SwiftLint's `type_body_length`.
+extension NavigateHUDView {
+    static var routeSourceID: String { "aura-nav-route" }
+
+    /// The single source under both layers, carrying the post-reroute geometry once guidance
+    /// has one and the planned route's until then (`GuidanceViewModel` updates it on every
+    /// reroute). `lineMetrics` is REQUIRED by `lineTrimOffset` and its absence is not a no-op —
+    /// the line vanishes with a Metal shader error (mapbox-maps-ios#1927); that is also why
+    /// this is a style source rather than a `PolylineAnnotationGroup`, whose manager hardcodes
+    /// a source without metrics. Rebuilt as a *value* per content pass (this sits in a 30 Hz
+    /// `TimelineView` on group rides) but never re-uploaded: the SDK pushes GeoJSON only when
+    /// `data` differs, so a progress tick moves the trim and touches nothing here.
+    var routeSource: GeoJSONSource {
+        let coordinates = (guidance.routeGeometry ?? route.geometry).map {
+            CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+        }
+        var source = GeoJSONSource(id: Self.routeSourceID)
+        source.data = .feature(Feature(geometry: LineString(coordinates)))
+        source.lineMetrics = true
+        return source
+    }
+
+    /// The stroke BOTH layers share — the dim one adds only `lineOpacity`, the bright one only
+    /// `lineTrimOffset`, so the ridden span keeps the exact footprint of the road ahead. Were it
+    /// narrower or uncased, the trim boundary would be a moving step in the line's *shape*
+    /// rather than a change in its weight. 9 − 2×1.5 = 6pt of visible mint: Mapbox draws
+    /// `lineBorderWidth` INSIDE `lineWidth`, not outside it, so this is the same core the
+    /// navigate line drew before the dim (the arithmetic is in `RoutePreviewView`).
+    func routeLayer(id: String) -> LineLayer {
+        LineLayer(id: id, source: Self.routeSourceID)
+            .lineColor(StyleColor(AuraTheme.routeUIColor))
+            .lineWidth(9)
+            .lineBorderColor(StyleColor(AuraTheme.routeCasingUIColor))
+            .lineBorderWidth(1.5)
+            .lineCap(.round)
+            .lineJoin(.round)
+    }
+
+    /// Paint-only traveled trim. While rerouting — which spans the WHOLE fetch window — and
+    /// until a fresh post-reroute fraction arrives (`.rerouted` nils the stale one), this is 0:
+    /// a full bright line, never a wrong dim. Both guards are load-bearing and neither subsumes
+    /// the other. A Mapbox route *refresh* can change `routeId` with no preceding
+    /// `FetchingRoute`, so `.rerouted` lands with `isRerouting` already false — the nil-fraction
+    /// check covers that. And a session can yield `.progress` before `.rerouted` inside one sink
+    /// call, pairing a NEW fraction with OLD geometry — `isRerouting` covers that.
+    var trimEnd: Double {
+        guard !guidance.isRerouting,
+              let fraction = guidance.lastUpdate?.fractionTraveled else { return 0 }
+        return RouteTrim.quantized(fraction)
     }
 }

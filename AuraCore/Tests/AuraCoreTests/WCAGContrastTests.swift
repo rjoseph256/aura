@@ -106,6 +106,33 @@ struct AuraPaletteContrastTests {
         }
     }
 
+    @Test func dimmedRouteIsVisibleButSubordinateOnBothBasemaps() {
+        // ROH-221. The traveled portion of the navigate route is the SAME mint line at
+        // `routeDimOpacity`, composited over whatever the basemap paints under it. A sanity
+        // band, not a pin: the PO tunes the exact value at the visual gate, so move the token
+        // inside the band rather than moving these thresholds.
+        let dimOnDark = WCAGContrast.composite(AuraPalette.mint,
+                                               over: AuraPalette.nearBlack,
+                                               alpha: AuraPalette.routeDimOpacity)
+        #expect(WCAGContrast.ratio(dimOnDark, AuraPalette.nearBlack) >= 2.0)   // visible
+        #expect(WCAGContrast.ratio(AuraPalette.mint, dimOnDark) >= 3.0)        // subordinate
+
+        // .standard map style: the dim trace must still separate from a bright basemap.
+        // Stated as a dim-vs-basemap relation, because that is what "still readable on a
+        // sunlit map" actually means. A mint-vs-dim threshold cannot express it: that
+        // expression's ceiling over a bright basemap is 1.2996 (reached at alpha 0, where
+        // the composite IS the basemap) and it falls monotonically as alpha rises, so any
+        // threshold above ~1.3 is unsatisfiable and any threshold below it rewards a
+        // more invisible dim.
+        let bright = WCAGContrast.white(0.75)
+        let dimOnBright = WCAGContrast.composite(AuraPalette.mint, over: bright,
+                                                 alpha: AuraPalette.routeDimOpacity)
+        // The dim trace still separates from a bright basemap...
+        #expect(WCAGContrast.ratio(dimOnBright, bright) >= 1.05)
+        // ...and is strictly more subordinate to it than the full-bright line is.
+        #expect(WCAGContrast.ratio(dimOnBright, bright) < WCAGContrast.ratio(AuraPalette.mint, bright))
+    }
+
     @Test func inkOnAmberClearsBodyContrast() {
         // Dark ink on an amber pill must clear body text 4.5:1.
         #expect(WCAGContrast.ratio(AuraPalette.inkOnAmber, AuraPalette.amber) >= 4.5)
