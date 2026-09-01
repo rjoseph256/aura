@@ -27,8 +27,10 @@ struct GroupRideJoinView: View {
 
     private static let codeLength = 8
 
-    /// `seed` lets previews show a partial/complete code without driving a keyboard;
-    /// production call sites always use the default empty start.
+    /// `seed` lets previews show a partial/complete code without driving a keyboard. In
+    /// production it defaults to an empty start, except the joinFailed Try-again path
+    /// (`GroupRideFlowView`), which re-enters this screen seeded with the code the rider
+    /// already typed (ROH-231).
     init(seed: String = "") {
         _rawInput = State(initialValue: seed)
     }
