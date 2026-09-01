@@ -25,7 +25,7 @@ struct GroupRideFlowView: View {
     }
 
     @State private var session: GroupRideSession
-    @State private var displayNameStore = DisplayNameStore(backend: SupabaseGroupRideBackend())
+    @State private var displayNameStore = DisplayNameStore(backend: Self.liveBackend())
     /// Distinguishes a guest/host who actually entered the riding container (rode, then the
     /// ride ended — keep the solo HUD running) from one who never got past the lobby/join
     /// before the ride ended (show a dedicated ended surface instead of a blank/wrong screen).
@@ -45,6 +45,13 @@ struct GroupRideFlowView: View {
                     Task { await session.reconcileFromStatus() }
                 }
             }
+            #if DEBUG
+            .onChange(of: session.phase) { _, phase in
+                if phase == .lobby, let code = session.joinCode {
+                    GroupRideDemoMode.startDemoCrewIfRequested(code: code)
+                }
+            }
+            #endif
     }
 
     /// A rider who actually entered `.riding` and whose ride later ends (host-end, D9) must
@@ -270,11 +277,31 @@ struct GroupRideFlowView: View {
     @MainActor
     private static func makeSession() -> GroupRideSession {
         GroupRideSession(
-            backend: SupabaseGroupRideBackend(),
-            transport: SupabaseRideSessionTransport(),
+            backend: Self.liveBackend(),
+            transport: Self.liveTransport(),
             displayNameProvider: {
                 UserDefaults.standard.string(forKey: DisplayNameStore.crewDisplayNameKey) ?? ""
             }
         )
+    }
+
+    /// Real backend, except under the DEBUG demo launch argument (ROH-225), which routes
+    /// every group surface to the shared in-memory fake so Claude can drive them on a
+    /// simulator with no Apple Account. Release builds compile only the `return` line.
+    @MainActor
+    private static func liveBackend() -> any GroupRideBackend {
+        #if DEBUG
+        if GroupRideDemoMode.isActive { return GroupRideDemoMode.backend }
+        #endif
+        return SupabaseGroupRideBackend()
+    }
+
+    /// Real transport, except under the DEBUG demo launch argument — see `liveBackend()`.
+    @MainActor
+    private static func liveTransport() -> any RideSessionTransport {
+        #if DEBUG
+        if GroupRideDemoMode.isActive { return InMemoryRideSessionTransport() }
+        #endif
+        return SupabaseRideSessionTransport()
     }
 }

@@ -26,6 +26,9 @@ struct AuraApp: App {
         let authStore = AuthStore(backend: SupabaseGroupRideBackend(), apple: AppleSignInController())
         let appRouter = AppRouter()
         appRouter.checkSignedIn = { [weak authStore] in authStore?.isSignedIn ?? false }
+        #if DEBUG
+        if GroupRideDemoMode.isActive { appRouter.checkSignedIn = { true } }
+        #endif
         _auth = State(initialValue: authStore)
         _router = State(initialValue: appRouter)
     }
