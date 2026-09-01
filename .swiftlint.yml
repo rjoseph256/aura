@@ -54,3 +54,15 @@ custom_rules:
     regex: 'async(\s+throws)?\s*->\s*[^=,)]+=\s*\{'
     message: "An async closure default argument is emitted in the caller's module and mis-sized there (ROH-110). Default it to nil and build the closure inside this module."
     severity: error
+  map_material_outside_theme:
+    name: "Bare material outside the Theme layer"
+    regex: 'ultraThinMaterial'
+    match_kinds:
+      - identifier
+    excluded:
+      - "Aura/Sources/Theme/.*"
+      - "Aura/Sources/GroupRide/GroupLobbyView\\.swift"   # lobby card — manual a11y branch; deliberate, the one sanctioned frosted card outside Theme (DESIGN.md)
+      - "Aura/Sources/GroupRide/GroupRosterSheet\\.swift"  # roster card — same treatment, same rationale; settled, not pending any later slice
+      - "Aura/Widgets/.*"                                   # pre-emptive: widget surfaces legitimately use system materials
+    message: "Map-floating chips use .mapChip (ROH-222); frosted material is reserved for Theme controls, the lobby/roster cards, and widget surfaces."
+    severity: error

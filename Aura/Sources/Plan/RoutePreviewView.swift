@@ -324,10 +324,33 @@ struct RoutePreviewView: View {
 // MARK: - Map pane (extension keeps the main type body under the length limit)
 
 private extension RoutePreviewView {
+    /// Scale bar below the floating back control. Margins are safe-area-relative (SDK
+    /// contract), so no GeometryReader and no device-dependent term.
+    var previewOrnaments: OrnamentOptions {
+        var options = OrnamentOptions()
+        options.scaleBar.margins = CGPoint(x: 8, y: MapOrnamentMetrics.belowTopControlMargin)
+        return options
+    }
+
     var mapPane: some View {
         ZStack(alignment: .topLeading) {
             Map(viewport: $viewport) {
                 if let route = selected, route.geometry.count > 1 {
+                    // Casing is the annotation's own `lineBorder*` (one layer, z-correct by
+                    // construction) — NOT a second polyline underneath, which Mapbox is free
+                    // to order either way within one annotation manager.
+                    //
+                    // READ BEFORE CHANGING THESE TWO NUMBERS. Mapbox's line border is drawn
+                    // *inset*: it eats into `lineWidth` rather than adding to it, so the
+                    // visible mint core is `lineWidth - 2 * lineBorderWidth`. This is not in
+                    // Mapbox's documentation and cannot be read out of the SDK source (the
+                    // rendering is in the compiled MapboxCoreMaps.xcframework) — it was
+                    // measured off rendered frames: 5/2 collapsed the mint run to a fifth of
+                    // its former width, matching the inset prediction exactly.
+                    //
+                    // So the width carries twice the border on top of the core we want.
+                    // 8 − 2×1.5 = 5pt of mint, which is both the pre-casing width here and
+                    // share-card parity (`ShareCardLayout` strokes mint 5 under casing 8).
                     PolylineAnnotationGroup {
                         PolylineAnnotation(
                             lineCoordinates: route.geometry.map {
@@ -336,7 +359,34 @@ private extension RoutePreviewView {
                             }
                         )
                         .lineColor(StyleColor(AuraTheme.routeUIColor))
-                        .lineWidth(5)
+                        .lineWidth(8)
+                        .lineBorderColor(StyleColor(AuraTheme.routeCasingUIColor))
+                        .lineBorderWidth(1.5)
+                    }
+                    // Caps/joins are layer-level in MapboxMaps 11, so they live on the group.
+                    .lineCap(.round)
+                    .lineJoin(.round)
+
+                    // Endpoint markers. The origin gets a *ring*, not a puck-alike: on a
+                    // denied-permission preview `geometry.first` is the fallback coordinate,
+                    // and a dot there would falsely assert "you are here" (spec §4).
+                    if let origin = route.geometry.first {
+                        MapViewAnnotation(
+                            coordinate: CLLocationCoordinate2D(latitude: origin.latitude,
+                                                               longitude: origin.longitude)
+                        ) {
+                            OriginRingView()
+                        }
+                        .allowOverlapWithPuck(true)
+                    }
+                    if let destination = route.geometry.last {
+                        MapViewAnnotation(
+                            coordinate: CLLocationCoordinate2D(latitude: destination.latitude,
+                                                               longitude: destination.longitude)
+                        ) {
+                            DestinationMarkerView()
+                        }
+                        .allowOverlapWithPuck(true)
                     }
                 }
             }
@@ -349,6 +399,9 @@ private extension RoutePreviewView {
                 cameraBox.bearing = ctx.cameraState.bearing
                 cameraBox.pitch = ctx.cameraState.pitch
             }
+            // `.ornamentOptions(_:)` also returns `Map`, so it must precede `.ignoresSafeArea()`
+            // too — same reasoning as `.onCameraChanged` above.
+            .ornamentOptions(previewOrnaments)
             .ignoresSafeArea()
 
             // Back chevron — HUDControlButton carries the 44pt hit area and the

@@ -26,6 +26,13 @@ public enum AuraPalette {
     // Cockpit scrim over the map: surface opacity in the non-opaque branch.
     public static let mapScrimOpacity = 0.85
 
+    /// Opacity of the ridden portion of the navigate route line (ROH-221). The traveled span is
+    /// the SAME mint line at the SAME width and casing as the road ahead — only this opacity
+    /// separates them, so the trim boundary reads as a change in weight, not a change in shape.
+    /// Gate-2-tunable within the band `WCAGContrastTests` guards (roughly 0.29...0.55): below it
+    /// the traveled trace stops reading on the dark basemap, above it stops being subordinate.
+    public static let routeDimOpacity = 0.35
+
     /// Capsule fill behind the no-end-recorded marker (ROH-107): secondary text at low alpha.
     /// Deliberately NOT `amber` — amber already carries peer-stopped and `AuraTheme.warning`
     /// (weak/lost GPS), so a paused ride under a railway bridge would light two amber elements

@@ -42,7 +42,7 @@ struct HomeMapCanvas: View {
             Label("Tap to explore the map", systemImage: "hand.tap")
                 .font(.footnote.weight(.medium))
                 .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: Capsule())
+                .mapChip(Capsule())
                 .foregroundStyle(AuraTheme.textSecondary)
         }
         .buttonStyle(.plain)

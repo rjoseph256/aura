@@ -62,6 +62,12 @@ struct HomeLiveMap: View {
     var body: some View {
         Map(viewport: $viewport) {
             Puck2D(bearing: .heading)
+                .topImage(AuraPuck.browseTop)
+                .bearingImage(AuraPuck.browseBearing)
+                .shadowImage(nil)
+                .showsAccuracyRing(true)
+                .accuracyRingColor(AuraTheme.routeUIColor.withAlphaComponent(0.12))
+                .accuracyRingBorderColor(AuraTheme.routeUIColor.withAlphaComponent(0.35))
             ForEvery(savedPlaces, id: \.id) { saved in
                 MapViewAnnotation(coordinate: CLLocationCoordinate2D(
                     latitude: saved.place.coordinate.latitude, longitude: saved.place.coordinate.longitude)) {

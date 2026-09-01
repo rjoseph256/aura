@@ -42,8 +42,7 @@ extension NavigateHUDView {
         }
         .padding(.horizontal, AuraTheme.Spacing.md)
         .padding(.vertical, AuraTheme.Spacing.sm)
-        .background(AuraTheme.surface.opacity(0.9), in: Capsule())
-        .overlay(Capsule().strokeBorder(AuraTheme.border))
+        .mapChip(Capsule())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Ending the group ride")
     }
@@ -74,8 +73,7 @@ extension NavigateHUDView {
             .foregroundStyle(AuraTheme.textPrimary)
             .padding(.horizontal, AuraTheme.Spacing.md)
             .padding(.vertical, AuraTheme.Spacing.sm)
-            .background(AuraTheme.surface.opacity(0.9), in: Capsule())
-            .overlay(Capsule().strokeBorder(AuraTheme.border))
+            .mapChip(Capsule())
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Reconnecting to the group ride")
     }
@@ -101,8 +99,7 @@ extension NavigateHUDView {
         }
         .padding(.horizontal, AuraTheme.Spacing.md)
         .padding(.vertical, AuraTheme.Spacing.sm)
-        .background(AuraTheme.surface.opacity(0.9), in: Capsule())
-        .overlay(Capsule().strokeBorder(AuraTheme.border))
+        .mapChip(Capsule())
         .accessibilityElement(children: .contain)
     }
 

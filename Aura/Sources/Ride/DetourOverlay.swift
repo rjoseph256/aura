@@ -81,7 +81,7 @@ struct DetourOverlay: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: Capsule())
+        .mapChip(Capsule())
         .accessibilityElement(children: .combine)
     }
 
@@ -98,7 +98,7 @@ struct DetourOverlay: View {
                 .foregroundStyle(AuraTheme.textSecondary)
         }
         .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .mapChip(RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous))
         .accessibilityElement(children: .combine)
     }
 
@@ -111,7 +111,7 @@ struct DetourOverlay: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: Capsule())
+        .mapChip(Capsule())
         .accessibilityElement(children: .combine)
     }
 
@@ -124,7 +124,7 @@ struct DetourOverlay: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: Capsule())
+        .mapChip(Capsule())
         .accessibilityElement(children: .combine)
         .transition(reduceMotion ? .identity : .opacity)
     }

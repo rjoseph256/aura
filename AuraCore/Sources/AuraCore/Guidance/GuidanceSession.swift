@@ -12,6 +12,13 @@ public struct GuidanceUpdate: Equatable, Sendable {
     public var distanceRemainingMeters: Double?
     /// Whole-route time remaining to the destination, in seconds. ETA = now + this.
     public var durationRemainingSeconds: Double?
+    /// How far along the guided route the rider is, 0...1, from the engine's own
+    /// progress (dimensionless — immune to cross-geometry subtraction). nil until
+    /// known. `ScriptedGuidanceSession` forwards whatever its script carries, this
+    /// field included — what keeps the golden ride off the trim path is the FIXTURE:
+    /// `NavigateHUDView` builds that session with an EMPTY script, so no `.progress`
+    /// is ever emitted and the trim stays 0 for the whole E2E run.
+    public var fractionTraveled: Double?
     /// The road the rider is currently on, e.g. "Penn Ave". nil when the engine has no
     /// name for the current step.
     public var currentStreetName: String?
@@ -25,6 +32,7 @@ public struct GuidanceUpdate: Equatable, Sendable {
                 instruction: String,
                 distanceRemainingMeters: Double? = nil,
                 durationRemainingSeconds: Double? = nil,
+                fractionTraveled: Double? = nil,
                 currentStreetName: String? = nil,
                 maneuver: Maneuver? = nil,
                 nextManeuver: Maneuver? = nil) {
@@ -32,6 +40,7 @@ public struct GuidanceUpdate: Equatable, Sendable {
         self.instruction = instruction
         self.distanceRemainingMeters = distanceRemainingMeters
         self.durationRemainingSeconds = durationRemainingSeconds
+        self.fractionTraveled = fractionTraveled
         self.currentStreetName = currentStreetName
         self.maneuver = maneuver
         self.nextManeuver = nextManeuver
@@ -50,6 +59,14 @@ public enum GuidanceEvent: Equatable, Sendable {
     case arrivedAtDestination
     /// The engine started recalculating after the rider went off-route → show a cue.
     case rerouting
+    /// The recalculation ended without producing a route, so `.rerouted` will never arrive.
+    /// Stands for both of Mapbox's non-success outcomes: `ReroutingStatus.Events.Failed` (the
+    /// fetch errored) and `.Interrupted` (the recalculation was cancelled — typically because
+    /// the rider steered back onto the original route themselves). Different causes, identical
+    /// consequence for the HUD: the rider is on the route already drawn, and the recalculating
+    /// cue must come down. Without this the cue has no way to clear (`.rerouted` is yielded only
+    /// on a route-id change, which an aborted fetch never produces).
+    case reroutingAborted
     /// A new route is available after a reroute → swap the drawn polyline.
     case rerouted([Coordinate])
 }
