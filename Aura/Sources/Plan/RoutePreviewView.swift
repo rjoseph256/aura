@@ -336,6 +336,9 @@ private extension RoutePreviewView {
         ZStack(alignment: .topLeading) {
             Map(viewport: $viewport) {
                 if let route = selected, route.geometry.count > 1 {
+                    // Casing is the annotation's own `lineBorder*` (one layer, z-correct by
+                    // construction) — NOT a second polyline underneath, which Mapbox is free
+                    // to order either way within one annotation manager.
                     PolylineAnnotationGroup {
                         PolylineAnnotation(
                             lineCoordinates: route.geometry.map {
@@ -345,6 +348,33 @@ private extension RoutePreviewView {
                         )
                         .lineColor(StyleColor(AuraTheme.routeUIColor))
                         .lineWidth(5)
+                        .lineBorderColor(StyleColor(AuraTheme.routeCasingUIColor))
+                        .lineBorderWidth(2)
+                    }
+                    // Caps/joins are layer-level in MapboxMaps 11, so they live on the group.
+                    .lineCap(.round)
+                    .lineJoin(.round)
+
+                    // Endpoint markers. The origin gets a *ring*, not a puck-alike: on a
+                    // denied-permission preview `geometry.first` is the fallback coordinate,
+                    // and a dot there would falsely assert "you are here" (spec §4).
+                    if let origin = route.geometry.first {
+                        MapViewAnnotation(
+                            coordinate: CLLocationCoordinate2D(latitude: origin.latitude,
+                                                               longitude: origin.longitude)
+                        ) {
+                            OriginRingView()
+                        }
+                        .allowOverlapWithPuck(true)
+                    }
+                    if let destination = route.geometry.last {
+                        MapViewAnnotation(
+                            coordinate: CLLocationCoordinate2D(latitude: destination.latitude,
+                                                               longitude: destination.longitude)
+                        ) {
+                            DestinationMarkerView()
+                        }
+                        .allowOverlapWithPuck(true)
                     }
                 }
             }

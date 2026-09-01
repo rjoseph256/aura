@@ -27,11 +27,21 @@ struct StaticRouteMap: View {
 
     var body: some View {
         Map(viewport: $viewport) {
+            // Every segment piece is cased, so a pause split does not read as a change of
+            // line. Casing is the annotation's own `lineBorder*` (one layer, z-correct by
+            // construction) — not a second polyline underneath. Matches the share card,
+            // which already draws the same ride cased.
             PolylineAnnotationGroup(Array(clSegments.enumerated()), id: \.offset) { item in
                 PolylineAnnotation(lineCoordinates: item.element)
                     .lineColor(StyleColor(AuraTheme.routeUIColor))
                     .lineWidth(5)
+                    .lineBorderColor(StyleColor(AuraTheme.routeCasingUIColor))
+                    .lineBorderWidth(2)
             }
+            // Caps/joins are layer-level in MapboxMaps 11, so they live on the group. Round
+            // caps also blunt the two ends a pause split exposes.
+            .lineCap(.round)
+            .lineJoin(.round)
         }
         .mapStyle(settings.mapStyle.mapboxStyle)
         .allowsHitTesting(false)

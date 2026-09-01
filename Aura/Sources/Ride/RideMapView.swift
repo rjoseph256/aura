@@ -136,10 +136,28 @@ struct RideMapView: View {
     @MapContentBuilder
     private var detourPolyline: some MapContent {
         if detourRoute.count > 1 {
+            // Casing is the annotation's own `lineBorder*` — one layer, z-correct by
+            // construction, so it cannot land above the dimmed track ribbon the way a
+            // second polyline in its own annotation manager could. The dim in
+            // `strokeColor(for:)` is untouched: the detour still wins on brightness.
             PolylineAnnotationGroup {
                 PolylineAnnotation(lineCoordinates: detourRouteCoordinates)
                     .lineColor(StyleColor(AuraTheme.routeUIColor))
                     .lineWidth(6)
+                    .lineBorderColor(StyleColor(AuraTheme.routeCasingUIColor))
+                    .lineBorderWidth(2)
+            }
+            // Caps/joins are layer-level in MapboxMaps 11, so they live on the group.
+            .lineCap(.round)
+            .lineJoin(.round)
+
+            // The gem the detour leads to, flagged. `.allowOverlapWithPuck(true)` because
+            // the default would hide it exactly on final approach.
+            if let destination = detourRouteCoordinates.last {
+                MapViewAnnotation(coordinate: destination) {
+                    DestinationMarkerView()
+                }
+                .allowOverlapWithPuck(true)
             }
         }
     }
