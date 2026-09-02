@@ -994,7 +994,7 @@ NO ScrollView (spec §5).
 
 - [ ] **Step 4: Doc comment** — delete the "**Known gap, deferred:**" paragraph; note the toolbar-Done fix (background tap still focuses, never dismisses).
 
-- [ ] **Step 5: Sim-verify (evidence REQUIRED keyboard-UP on an SE-class screen).** `xcrun simctl list devices | grep -i SE`; if absent, `xcrun simctl create "Aura SE" "iPhone SE (3rd generation)"` (fall back to the smallest available device type and say so in the PR). Keyboard-up: Join AND caption visible above the keyboard. On iPhone 17: empty/partial/valid, Done dismisses, link paste fills. Screenshots.
+- [ ] **Step 5: Sim-verify, keyboard-UP.** **PO ruling 2026-09-02: iPhone SE is NOT a target device** ("none of my friends have one"), so the SE-class requirement is downgraded from REQUIRED to optional — SE-specific *fit* is explicitly not a blocker. The keyboard-up check itself still runs, on iPhone 17: Join AND caption fully visible above the keyboard (note iOS floats the `.keyboard` toolbar's Done as a **pill over app content** — the caption must clear its trailing zone), plus empty/partial/valid, Done dismisses, background tap re-focuses, link paste fills. Screenshots. Launch group surfaces with `-auraDemoGroupRides -auraInMemoryRideStore` (the persistent store's CloudKit mirroring SIGTRAPs on an unsigned sim build).
 - [ ] **Step 6:** `git commit -am "feat(roh-229): join screen — pinned Join, keyboard Done, caption, link-aware paste"`
 
 ---
@@ -1717,7 +1717,7 @@ private struct LobbyRosterRow: Identifiable, Equatable {
 ### Task 20: Slice close — gates, evidence, PR, review, board
 
 - [ ] **Step 1: Full local gate.** Repo root `swiftlint --strict`; `cd AuraCore && swift test` (both totals); builder clean app build.
-- [ ] **Step 2: Whole-slice before/after evidence set** (PO gate): join screen (empty / partial / valid / keyboard-up SE / caption), lobby (waiting / filled with hued rows + markers), roster (named self row, host + guest empty states), flow (both loading copies, rejected, connection, framed name prompt), map preview (hued dots). Pair with audit "befores" where they exist.
+- [ ] **Step 2: Whole-slice before/after evidence set** (PO gate): join screen (empty / partial / valid / keyboard-up on iPhone 17 / caption — SE dropped per the PO ruling in Task 10 Step 5), lobby (waiting / filled with hued rows + markers), roster (named self row, host + guest empty states), flow (both loading copies, rejected, connection, framed name prompt), map preview (hued dots). Pair with audit "befores" where they exist.
 - [ ] **Step 3: Push + PR** to `main`, body stating: Tier 1 evidence inline; **Tier 2 queued** (A0 two-phone fill; per-device hue stability across a mid-ride join); no CI path exercises the poll against a real second device; **stated residuals** — (a) a client-side entry timeout after a server-side commit leaves a ghost `.awaiting` member holding a cap slot until the ride ends (Try-again's idempotent re-join self-heals the common path), (b) Try-again is uncapped against the 10-joins/min limiter, whose generic raise lands as the cause-agnostic rejected copy.
 - [ ] **Step 4: Whole-branch review** on the most capable model (Agent-tool-less reviewer); adjudicate before merge.
 - [ ] **Step 5: PO gate — STOP AND WAIT** for sign-off on the before/after set before merging.
