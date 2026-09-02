@@ -85,7 +85,8 @@ struct GroupRideFlowView: View {
             // (NavigationColumnState.boundPathChange) throw swift_unexpectedError and
             // crash the app. DisplayNameEditor only needs *a* navigation context for its
             // `.navigationTitle`, which the root stack already provides.
-            DisplayNameEditor(store: displayNameStore) {
+            DisplayNameEditor(store: displayNameStore,
+                              contextLine: "Pick a crew name — it's how your crew sees you.") {
                 Task { await invokeEntry() }
             }
 

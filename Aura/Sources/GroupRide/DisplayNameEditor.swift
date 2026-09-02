@@ -8,6 +8,10 @@ import AuraKit
 /// affordance so the 40-character cap never feels like a surprise truncation.
 struct DisplayNameEditor: View {
     @Bindable var store: DisplayNameStore
+    /// One quiet line above the field saying WHY a name is being asked for. The group-ride
+    /// gate passes it; Settings (already titled "Crew name") leaves it nil. Declared BEFORE
+    /// `onSaved` so trailing-closure call sites keep resolving.
+    var contextLine: String?
     /// Called after a successful save. Defaults to a no-op so the Settings call site
     /// (which just wants persistence) is unaffected; the group-ride "needs a name"
     /// gate (Task 16) uses this to re-invoke the create/join it deferred.
@@ -36,6 +40,12 @@ struct DisplayNameEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AuraTheme.Spacing.md) {
+            if let contextLine {
+                Text(contextLine)
+                    .font(.subheadline)
+                    .foregroundStyle(AuraTheme.textSecondary)
+            }
+
             fieldCard
 
             HStack {
@@ -146,6 +156,17 @@ struct DisplayNameEditor: View {
         DisplayNameEditor(store: DisplayNameStore(defaults: UserDefaults(suiteName: "preview.default")!,
                                                    backend: InMemoryGroupRideBackend(),
                                                    seedingFrom: "Jamie Rivera"))
+    }
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Group gate — framed") {
+    NavigationStack {
+        DisplayNameEditor(store: DisplayNameStore(defaults: UserDefaults(suiteName: "preview.framed")!,
+                                                   backend: InMemoryGroupRideBackend(),
+                                                   seedingFrom: ""),
+                          contextLine: "Pick a crew name — it's how your crew sees you.") {
+        }
     }
     .preferredColorScheme(.dark)
 }
