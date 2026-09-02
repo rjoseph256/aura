@@ -67,7 +67,6 @@ struct GroupRideJoinView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AuraTheme.background.ignoresSafeArea())
-        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         // Tap anywhere to focus the code field. NOT inverted to dismiss — see the type's doc
         // comment: the real TextField is a ~22 pt strip, so dismiss-on-background-tap would make
         // a near-miss unfocus rather than focus.
@@ -97,6 +96,7 @@ struct GroupRideJoinView: View {
                 Button("Done") { isFocused = false }
             }
         }
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
     }
 
     // MARK: - Header
