@@ -12,12 +12,11 @@ import AuraCore
 /// It does not autofocus. A host arriving to *start* a ride used to be met by a keyboard, eight
 /// code boxes and a disabled Join, which read as "you are in the wrong place" (D2.1).
 ///
-/// **Known gap, deferred:** once the keyboard is up it still cannot be dismissed. The background
-/// tap gesture re-focuses, and there is no scroll view for `scrollDismissesKeyboard`. Inverting
-/// that gesture is not the fix — the real `TextField` is `.opacity(0.02)` with no height behind
-/// boxes that are `.allowsHitTesting(false)`, so dismissing on background tap would shrink the
-/// entry target to a ~22 pt strip and make a near-miss actively unfocus. It needs the scroll
-/// view; that is D2.1's third fix and belongs with plan 3's copy pass.
+/// The background tap gesture still only focuses, never dismisses — the real `TextField` is
+/// `.opacity(0.02)` with no height behind boxes that are `.allowsHitTesting(false)`, so
+/// dismissing on background tap would shrink the entry target to a ~22 pt strip and make a
+/// near-miss actively unfocus. Keyboard dismissal instead comes from a `.keyboard`-placed
+/// toolbar "Done" button (ROH-229), which sits above the keyboard regardless of that strip.
 struct GroupRideJoinView: View {
     @Environment(AppRouter.self) private var router
     @Environment(\.dismiss) private var dismiss
@@ -64,23 +63,38 @@ struct GroupRideJoinView: View {
             pasteButton
                 .padding(.top, AuraTheme.Spacing.lg)
 
-            Spacer(minLength: AuraTheme.Spacing.lg)
-
-            joinButton
-                .padding(.horizontal, AuraTheme.Spacing.xxl)
-                .padding(.bottom, AuraTheme.Spacing.xxl)
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AuraTheme.background.ignoresSafeArea())
+        .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         // Tap anywhere to focus the code field. NOT inverted to dismiss — see the type's doc
         // comment: the real TextField is a ~22 pt strip, so dismiss-on-background-tap would make
         // a near-miss unfocus rather than focus.
         .contentShape(Rectangle())
         .onTapGesture { isFocused = true }
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: AuraTheme.Spacing.sm) {
+                joinButton
+                if !isValid {
+                    Text("Enter the 8-character code from your host.")
+                        .font(.footnote)
+                        .foregroundStyle(AuraTheme.textSecondary)
+                }
+            }
+            .padding(.horizontal, AuraTheme.Spacing.xxl)
+            .padding(.top, AuraTheme.Spacing.sm)
+            .padding(.bottom, AuraTheme.Spacing.lg)
+            .background(AuraTheme.background)
+        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
                     .foregroundStyle(AuraTheme.textSecondary)
+            }
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { isFocused = false }
             }
         }
     }
@@ -140,6 +154,7 @@ struct GroupRideJoinView: View {
                 .keyboardType(.asciiCapable)
                 .textInputAutocapitalization(.characters)
                 .autocorrectionDisabled()
+                .submitLabel(.join)
                 .focused($isFocused)
                 .opacity(0.02) // present for input/focus/paste; invisible to the eye
                 .onChange(of: rawInput) { _, _ in rawInput = sanitizedInput }
@@ -184,7 +199,7 @@ struct GroupRideJoinView: View {
     private var pasteButton: some View {
         Button {
             if let clipboardString = UIPasteboard.general.string {
-                rawInput = clipboardString
+                rawInput = JoinCodePaste.extract(clipboardString)
             }
         } label: {
             Label("Paste code", systemImage: "doc.on.clipboard")
