@@ -25,8 +25,8 @@ struct RiderPaletteTests {
                  blue: 0.300 * c.green + 0.700 * c.blue)
     }
 
-    @Test func atLeastFourRiderHues() {
-        #expect(AuraPalette.riderHues.count >= 4)
+    @Test func eightRiderHues() {
+        #expect(AuraPalette.riderHues.count == 8)   // ROH-114 §D3.3's widening decision
     }
 
     @Test func riderHuesExcludeReservedTokens() {
@@ -42,6 +42,14 @@ struct RiderPaletteTests {
         for h in AuraPalette.riderHues {
             #expect(deltaE(h, AuraPalette.mint) >= 15)   // route/accent
             #expect(deltaE(h, AuraPalette.amber) >= 15)  // warning/stopped
+        }
+    }
+
+    /// New hues approach reserved-token space; pink is the destructive token, so identity must
+    /// stay perceptually clear of it exactly as it does of mint (route) and amber (warning).
+    @Test func riderHuesStayPerceptuallyClearOfPink() {
+        for h in AuraPalette.riderHues {
+            #expect(deltaE(h, AuraPalette.pink) >= 15)
         }
     }
 
