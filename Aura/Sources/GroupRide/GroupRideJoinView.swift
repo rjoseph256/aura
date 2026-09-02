@@ -76,9 +76,14 @@ struct GroupRideJoinView: View {
             VStack(spacing: AuraTheme.Spacing.sm) {
                 joinButton
                 if !isValid {
+                    // Inset past the trailing edge: iOS floats the keyboard toolbar's Done
+                    // button as a pill over this strip, and an un-inset caption renders with
+                    // its tail hidden behind it (measured on device-class sims, ROH-229).
                     Text("Enter the 8-character code from your host.")
                         .font(.footnote)
                         .foregroundStyle(AuraTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 72)
                 }
             }
             .padding(.horizontal, AuraTheme.Spacing.xxl)
