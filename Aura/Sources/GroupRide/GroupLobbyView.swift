@@ -119,17 +119,11 @@ struct GroupLobbyView: View {
 
     private var codeCard: some View {
         VStack(spacing: AuraTheme.Spacing.sm) {
-            Text("JOIN CODE")
-                .font(.caption.weight(.bold))
+            Text("Join code")
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(AuraTheme.textSecondary)
-                .tracking(1.2)
 
-            Text(codeText)
-                .font(AuraTheme.Typography.metricCockpit(40, relativeTo: .largeTitle))
-                .foregroundStyle(AuraTheme.textPrimary)
-                .tracking(4)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
+            JoinCodeText(code: codeText)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, AuraTheme.Spacing.xl)
@@ -163,11 +157,11 @@ struct GroupLobbyView: View {
 
     private var rosterSection: some View {
         VStack(alignment: .leading, spacing: AuraTheme.Spacing.md) {
-            Text(rows.isEmpty ? "Crew" : "Crew · \(rows.count) joined")
+            Text(LobbyCrewLabel.text(totalRows: rows.count))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(AuraTheme.textSecondary)
 
-            if rows.isEmpty {
+            if LobbyCrewLabel.isWaiting(totalRows: rows.count) {
                 emptyRosterState
             } else {
                 VStack(spacing: AuraTheme.Spacing.xs) {
@@ -186,17 +180,8 @@ struct GroupLobbyView: View {
     }
 
     private var emptyRosterState: some View {
-        VStack(spacing: AuraTheme.Spacing.xs) {
-            Image(systemName: "person.2.wave.2")
-                .font(.title2)
-                .foregroundStyle(AuraTheme.textSecondary)
-            Text("Waiting for your crew…")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(AuraTheme.textPrimary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, AuraTheme.Spacing.xl)
-        .background(AuraTheme.surface, in: RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous))
+        CrewEmptyState(variant: .lobby)
+            .background(AuraTheme.surface, in: RoundedRectangle(cornerRadius: AuraTheme.Radius.lg, style: .continuous))
     }
 
     // MARK: - Role-split CTA
