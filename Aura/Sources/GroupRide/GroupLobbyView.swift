@@ -25,13 +25,24 @@ struct GroupLobbyView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
 
-    /// Rows built straight from `session.peers` + `session.nameMap` — the lobby has no
-    /// progress/distance yet, so this is simpler than `GroupRosterViewData.rows`
-    /// (which is for the live map, where distance-to-peer matters).
+    /// Rows built from `session.peers` plus the session's one identity bundle — the lobby
+    /// derives nothing itself (ROH-228). `DisplayName.forDisplay` never returns "" (it falls
+    /// back to "Rider"), so an unresolved name is detected with `normalized == nil`, and the
+    /// "You" marker rides a real flag rather than a string compare against the name.
     private var rows: [LobbyRosterRow] {
-        session.peers.map { peer in
-            LobbyRosterRow(id: peer.userID,
-                          name: DisplayName.forDisplay(session.nameMap[peer.userID] ?? peer.displayName))
+        let identity = session.crewIdentity
+        return session.peers.map { peer in
+            let isSelf = peer.userID == session.selfUserID
+            let raw = session.nameMap[peer.userID] ?? peer.displayName
+            let unresolved = DisplayName.normalized(raw) == nil
+            let name = (isSelf && unresolved) ? "You" : DisplayName.forDisplay(raw)
+            return LobbyRosterRow(
+                id: peer.userID, name: name, isSelf: isSelf,
+                isHost: peer.userID == session.hostID,
+                colorIndex: identity.colors[peer.userID] ?? 0,
+                monogram: isSelf ? String(name.prefix(1)).uppercased()
+                                 : (identity.monograms[peer.userID] ?? "?"),
+                showsSelfMarker: isSelf && !unresolved)
         }
     }
 
@@ -284,34 +295,45 @@ struct GroupLobbyView: View {
 private struct LobbyRosterRow: Identifiable, Equatable {
     let id: UUID
     let name: String
+    let isSelf: Bool
+    let isHost: Bool
+    let colorIndex: Int
+    let monogram: String
+    let showsSelfMarker: Bool
 }
 
 private struct LobbyRosterRowView: View {
     let row: LobbyRosterRow
 
-    private var initial: String {
-        String(row.name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased()
-    }
-
     var body: some View {
         HStack(spacing: AuraTheme.Spacing.md) {
-            ZStack {
-                Circle()
-                    .fill(AuraTheme.accent)
-                    .frame(width: 32, height: 32)
-                Text(initial)
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(AuraTheme.onAccent)
-            }
+            CrewMonogram(isSelf: row.isSelf, colorIndex: row.colorIndex, label: row.monogram)
             Text(row.name)
                 .font(.system(.body, design: .rounded).weight(.semibold))
                 .foregroundStyle(AuraTheme.textPrimary)
                 .lineLimit(1)
+            if row.showsSelfMarker { marker("You") }
+            if row.isHost { marker("Host") }
             Spacer(minLength: 0)
         }
         .padding(.vertical, AuraTheme.Spacing.sm)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(row.name) joined")
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        var parts = [row.isSelf ? "\(row.name), you" : "\(row.name) joined"]
+        if row.isHost { parts.append("host") }
+        return parts.joined(separator: ", ")
+    }
+
+    private func marker(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(AuraTheme.textSecondary)
+            .padding(.horizontal, AuraTheme.Spacing.xs)
+            .padding(.vertical, 2)
+            .background(AuraTheme.textSecondary.opacity(0.14), in: Capsule())
     }
 }
 
