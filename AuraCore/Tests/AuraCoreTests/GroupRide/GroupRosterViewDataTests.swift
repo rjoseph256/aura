@@ -49,4 +49,20 @@ struct GroupRosterViewDataTests {
         // uuid1 < uuid2 lexicographically, so uuid1 should appear first
         #expect(rows.map(\.id) == [uuid1, uuid2, me])
     }
+    @Test func theSelfRowShowsTheRealNameWhenTheRosterResolvesIt() {
+        let selfID = UUID(uuidString: "EEEEEEEE-0000-0000-0000-000000000001")!
+        let rows = GroupRosterViewData.rows(peers: [], nameMap: [selfID: "Jamie Rivera"],
+                                            selfUserID: selfID, selfProgress: 0, isImperial: true)
+        #expect(rows[0].name == "Jamie Rivera")
+        #expect(rows[0].isSelf)
+        #expect(rows[0].nameResolved)
+    }
+
+    @Test func anUnresolvedSelfNameFallsBackToYouWithNoMarker() {
+        let selfID = UUID(uuidString: "EEEEEEEE-0000-0000-0000-000000000002")!
+        let rows = GroupRosterViewData.rows(peers: [], nameMap: [:],
+                                            selfUserID: selfID, selfProgress: 0, isImperial: true)
+        #expect(rows[0].name == "You")
+        #expect(!rows[0].nameResolved, "the view suppresses the marker so it can't read You YOU")
+    }
 }

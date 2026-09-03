@@ -35,7 +35,7 @@ struct GroupLobbyView: View {
             let isSelf = peer.userID == session.selfUserID
             let raw = session.nameMap[peer.userID] ?? peer.displayName
             let unresolved = DisplayName.normalized(raw) == nil
-            let name = (isSelf && unresolved) ? "You" : DisplayName.forDisplay(raw)
+            let name = (isSelf && unresolved) ? GroupRosterViewData.selfLabel : DisplayName.forDisplay(raw)
             return LobbyRosterRow(
                 id: peer.userID, name: name, isSelf: isSelf,
                 isHost: peer.userID == session.hostID,

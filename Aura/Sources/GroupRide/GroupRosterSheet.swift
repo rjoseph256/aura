@@ -239,7 +239,7 @@ struct RosterRowView: View {
                 .font(.system(.body, design: .rounded).weight(.semibold))
                 .foregroundStyle(AuraTheme.textPrimary)
                 .lineLimit(1)
-            if row.isSelf {
+            if row.isSelf && row.nameResolved {
                 Text("YOU")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(AuraTheme.textSecondary)
@@ -319,7 +319,7 @@ struct RosterRowView: View {
 
 #Preview("Collapsed button — all riding") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil),
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil),
         RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
         RosterRow(id: UUID(), name: "Marcus", isSelf: false, status: .riding, distanceLabel: "0.1 mi behind")
     ]
@@ -328,7 +328,7 @@ struct RosterRowView: View {
 
 #Preview("Collapsed button — peer dropped (warning)") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil),
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil),
         RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
         RosterRow(id: UUID(), name: "Sam", isSelf: false, status: .dropped, distanceLabel: "no signal")
     ]
@@ -337,14 +337,14 @@ struct RosterRowView: View {
 
 #Preview("Collapsed button — solo (waiting)") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil)
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil)
     ]
     previewHost(rows: rows, startsExpanded: false)
 }
 
 #Preview("4 riders — expanded") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil),
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil),
         RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
         RosterRow(id: UUID(), name: "Marcus", isSelf: false, status: .riding, distanceLabel: "0.1 mi behind"),
         RosterRow(id: UUID(), name: "Devon", isSelf: false, status: .stopped, distanceLabel: "0.6 mi behind")
@@ -354,14 +354,14 @@ struct RosterRowView: View {
 
 #Preview("Solo — waiting for crew") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil)
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil)
     ]
     previewHost(rows: rows, startsExpanded: true)
 }
 
 #Preview("Solo — guest waiting for crew") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil)
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil)
     ]
     previewHost(rows: rows, isHost: false, startsExpanded: true)
 }
@@ -374,6 +374,15 @@ struct RosterRowView: View {
         RosterRow(id: UUID(), name: "Lee", isSelf: false, status: .awaiting, distanceLabel: nil)
     ]
     previewHost(rows: rows, startsExpanded: true)
+}
+
+#Preview("Roster — self name not yet resolved") {
+    GroupRosterSheet(rows: [
+        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding,
+                  distanceLabel: nil, nameResolved: false),
+        RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead")
+    ])
+    .preferredColorScheme(.dark)
 }
 
 @ViewBuilder

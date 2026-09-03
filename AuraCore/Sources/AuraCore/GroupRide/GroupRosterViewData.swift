@@ -4,20 +4,23 @@ public struct RosterRow: Equatable, Sendable, Identifiable {
     public let id: UUID
     public let name: String
     public let isSelf: Bool
+    public let nameResolved: Bool
     public let status: PeerStatus
     public let distanceLabel: String?
 
-    public init(id: UUID, name: String, isSelf: Bool, status: PeerStatus, distanceLabel: String?) {
+    public init(id: UUID, name: String, isSelf: Bool, status: PeerStatus, distanceLabel: String?,
+                nameResolved: Bool = true) {
         self.id = id
         self.name = name
         self.isSelf = isSelf
         self.status = status
         self.distanceLabel = distanceLabel
+        self.nameResolved = nameResolved
     }
 }
 
 public enum GroupRosterViewData {
-    private static let selfLabel = "You"
+    public static let selfLabel = "You"
     private static let noSignalLabel = "no signal"
     public static func rows(peers: [RidePeer], nameMap: [UUID: String],
                             selfUserID: UUID, selfProgress: Double, isImperial: Bool) -> [RosterRow] {
@@ -36,8 +39,9 @@ public enum GroupRosterViewData {
         }
         return sorted.map { peer in
             let isSelf = peer.userID == selfUserID
-            let name = isSelf ? selfLabel
-                : DisplayName.forDisplay(nameMap[peer.userID] ?? peer.displayName)
+            let raw = nameMap[peer.userID] ?? peer.displayName
+            let resolved = DisplayName.normalized(raw) != nil
+            let name = (isSelf && !resolved) ? Self.selfLabel : DisplayName.forDisplay(raw)
             let distance: String?
             if isSelf {
                 distance = nil
@@ -47,7 +51,8 @@ public enum GroupRosterViewData {
                 distance = PeerDistance.label(selfProgress: selfProgress, peer: peer, isImperial: isImperial)
             }
             return RosterRow(id: peer.userID, name: name, isSelf: isSelf,
-                             status: peer.status, distanceLabel: distance)
+                             status: peer.status, distanceLabel: distance,
+                             nameResolved: !isSelf || resolved)
         }
     }
 }
