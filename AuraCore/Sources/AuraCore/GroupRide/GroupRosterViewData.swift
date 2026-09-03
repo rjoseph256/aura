@@ -8,6 +8,14 @@ public struct RosterRow: Equatable, Sendable, Identifiable {
     public let status: PeerStatus
     public let distanceLabel: String?
 
+    /// Whether the row should carry a "you" marker — visually AND in its spoken label.
+    /// It lives here, not in the view, because the view layer has no test target: as an
+    /// `if row.isSelf && row.nameResolved` written inline, the visible badge and the
+    /// VoiceOver string drifted apart (the badge was gated, the spoken label was not, so an
+    /// unresolved self name was announced as "You, you" — the very bug the badge gate
+    /// exists to prevent). One property, one rule, and it is testable.
+    public var showsSelfMarker: Bool { isSelf && nameResolved }
+
     public init(id: UUID, name: String, isSelf: Bool, status: PeerStatus, distanceLabel: String?,
                 nameResolved: Bool = true) {
         self.id = id

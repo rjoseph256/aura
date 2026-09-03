@@ -239,7 +239,7 @@ struct RosterRowView: View {
                 .font(.system(.body, design: .rounded).weight(.semibold))
                 .foregroundStyle(AuraTheme.textPrimary)
                 .lineLimit(1)
-            if row.isSelf && row.nameResolved {
+            if row.showsSelfMarker {
                 Text("YOU")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(AuraTheme.textSecondary)
@@ -260,7 +260,7 @@ struct RosterRowView: View {
     }
 
     private var accessibilityLabel: String {
-        var parts = [row.isSelf ? "\(row.name), you" : row.name]
+        var parts = [row.showsSelfMarker ? "\(row.name), you" : row.name]
         parts.append(statusAccessibilityLabel)
         if let distanceLabel = row.distanceLabel, !row.isSelf {
             parts.append(distanceLabel)
