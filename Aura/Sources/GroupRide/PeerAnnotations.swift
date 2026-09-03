@@ -77,6 +77,13 @@ final class PeerAnnotationDriver {
         // Snapshot-atomic lookups (ROH-228): the session's one writer guarantees every
         // non-self peer has an entry, so these defaults are compile-time appeasement,
         // not a second derivation path — never re-introduce assign() here.
+        // The assert exists because the fallbacks are quiet liars: index 0 is a REAL hue
+        // (cyan), so a `peers`/`identity` pair from two different snapshots would render a
+        // plausible-looking dot rather than an obviously broken one. Both call sites read
+        // the pair off the session in one synchronous expression; this catches the day one
+        // of them stops doing that.
+        assert(visible.allSatisfy { identity.colors[$0.userID] != nil },
+               "peers and identity came from different snapshots — see snapshotPeers(from:)")
         colorIndex = Dictionary(uniqueKeysWithValues:
             visible.map { ($0.userID, identity.colors[$0.userID] ?? 0) })
         monograms = Dictionary(uniqueKeysWithValues:
