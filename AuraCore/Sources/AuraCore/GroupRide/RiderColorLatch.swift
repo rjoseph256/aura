@@ -16,11 +16,15 @@ import Foundation
 /// tombstone — ROH-232). So `.memberLeft` is authoritative departure by convention, not by any
 /// guard in this type.
 ///
-/// Past `paletteCount` riders the palette is exhausted and hues REPEAT: the 9th rider in an
-/// 8-hue session latches a duplicate of someone else's colour, permanently, like any other
-/// assignment. That is intended degradation rather than a bug fixed here — the monogram is the
-/// colour-independent identity cue and stays distinct — but it does mean colour alone stops
-/// identifying a rider above 8. Pinned by `aNinthRiderRepeatsAHueRatherThanGoingUncoloured`.
+/// Past `paletteCount` riders the palette is exhausted and hues REPEAT: a 9th rider in an
+/// 8-hue session would latch a duplicate of someone else's colour, permanently, like any
+/// other assignment. It degrades rather than breaks — the monogram is the colour-independent
+/// cue and stays distinct — and it is unreachable through a legitimate join: `join_ride`
+/// caps a ride at 8 members INCLUDING the host (`0014_join_cap_lock.sql`, still enforced at
+/// `0021_open_rides.sql`), so peers-minus-self never exceeds 7 and the palette carries one
+/// spare slot. The behaviour is pinned anyway by
+/// `aNinthRiderRepeatsAHueRatherThanGoingUncoloured`, because the cap lives in SQL and this
+/// type must not silently depend on it.
 public struct RiderColorLatch: Equatable, Sendable {
     public private(set) var assignments: [UUID: Int] = [:]
     private let paletteCount: Int

@@ -346,9 +346,12 @@ public final class GroupRideSession {
 // MARK: - Lobby roster poll & crew snapshot
 extension GroupRideSession {
     /// Re-reads the roster on a cadence while the rider waits in the lobby, so a joining
-    /// friend appears without a `.position` (which never flows pre-ride). Called on EVERY
-    /// entry to `.lobby` — including an authoritative reconcile that corrects a phantom
-    /// start — so it is deliberately not latched by `didBeginLive`; it IS idempotent on
+    /// friend appears without a `.position` (which never flows pre-ride). Two callers reach
+    /// it: `beginLiveSession` (which the lobby view's `.task` drives, covering create and
+    /// join) and `applyLifecyclePhase` on an authoritative reconcile that corrects a phantom
+    /// start. `create()` and `join()` write `phase = .lobby` WITHOUT calling it and rely on
+    /// the view — so a future third writer of that phase must call this itself. It is
+    /// deliberately not latched by `didBeginLive`; it IS idempotent on
     /// `isLobbyPolling`, so a call while a poll is already running is a no-op rather than
     /// a restart (a flapping transport that reconciles repeatedly must not keep resetting
     /// the interval — review finding: that starved the poll of ever completing one).
