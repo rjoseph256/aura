@@ -296,8 +296,10 @@ struct NavigateHUDView: View {
                                     paused: !peerModel.shouldAnimate(now: Date()))) { context in
                 Map(viewport: $viewport) {
                     // Rider puck follows heading
-                    // Stock puck until the ROH-220 device heading check (see RideMapView).
                     Puck2D(bearing: .heading)
+                        .topImage(AuraPuck.clearTop)
+                        .bearingImage(AuraPuck.ridingBearing)
+                        .shadowImage(nil)
 
                     // Live route line: ONE lineMetrics source under two layers that differ only
                     // in the property on their last line. The bright layer trims itself away
