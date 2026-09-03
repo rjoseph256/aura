@@ -48,6 +48,12 @@ public final class GroupRideSession {
     public private(set) var isLive: Bool = false
     /// userID -> display name, populated from `backend.roster(rideID:)`.
     public private(set) var nameMap: [UUID: String] = [:]
+    /// Latched hues + resolved names + monograms, peers-minus-self (ROH-228). Surfaces LOOK
+    /// UP; the single writer is `snapshotPeers(from:)`, so no peer can be visible without
+    /// identity. `.memberLeft` releases the hue (see `RiderColorLatch`'s doc for the one
+    /// stated exception).
+    public private(set) var crewIdentity: CrewIdentity = .empty
+    private var colorLatch = RiderColorLatch(paletteCount: AuraPalette.riderHues.count)
     /// Append-only membership notifications; the UI drains this.
     public private(set) var toasts: [GroupToastEvent] = []
     /// Why the most recent create/join attempt failed — ALONGSIDE the payload-free phase
@@ -213,7 +219,7 @@ public final class GroupRideSession {
             }
         }
         startTicker()
-        peers = session.peers
+        snapshotPeers(from: session)
         if phase == .lobby { startLobbyPoll() }
     }
 
@@ -224,7 +230,7 @@ public final class GroupRideSession {
         guard let session = rideSession else { return }
         await session.publishIfDue(now: now, lifecycle: currentLifecycle)
         session.stalenessTick(now: now)
-        peers = session.peers
+        snapshotPeers(from: session)
         isLive = session.isLive
     }
 
@@ -245,6 +251,7 @@ public final class GroupRideSession {
                 toasts.append(.joined(name))
             }
         case .memberLeft(let id):
+            colorLatch.release(id)
             toasts.append(.left(nameMap[id] ?? "Rider"))
         case .rideStarted:
             if let current = lifecyclePhase {
@@ -260,7 +267,7 @@ public final class GroupRideSession {
             break
         }
         await session.ingest(event)
-        peers = session.peers
+        snapshotPeers(from: session)
         isLive = session.isLive
     }
 
@@ -336,7 +343,7 @@ public final class GroupRideSession {
     }
 }
 
-// MARK: - Lobby roster poll (ROH-227)
+// MARK: - Lobby roster poll & crew snapshot
 extension GroupRideSession {
     /// Re-reads the roster on a cadence while the rider waits in the lobby, so a joining
     /// friend appears without a `.position` (which never flows pre-ride). Called on EVERY
@@ -367,7 +374,16 @@ extension GroupRideSession {
         session.mergeRoster(members.map {
             RidePeer(userID: $0.userID, displayName: $0.displayName, status: .awaiting)
         })
+        snapshotPeers(from: session)
+    }
+
+    /// THE one writer for `peers` — keeps the latch and `crewIdentity` atomic with the
+    /// snapshot (a fifth ad-hoc `peers =` write was the failure mode the plan gate flagged).
+    private func snapshotPeers(from session: RideSession) {
         peers = session.peers
+        colorLatch.latch(peerIDs: peers.map(\.userID).filter { $0 != selfUserID })
+        crewIdentity = CrewIdentity.derive(peers: peers, selfUserID: selfUserID,
+                                           nameMap: nameMap, colors: colorLatch.assignments)
     }
 }
 

@@ -8,9 +8,13 @@ import Foundation
 /// replaces. Input is peers-minus-self
 /// (self consumes no hue: white = me). A peer missing from an update keeps their hue
 /// (staleness is not departure); `release` fires only on explicit `.memberLeft`, so a
-/// force-quit rider never releases — bounded, and stated rather than hidden. The one stated
-/// exception to "never changes": a rider who explicitly leaves and is later resurrected by a
-/// stale `.position` re-latches a fresh hue — `.memberLeft` is authoritative departure.
+/// force-quit rider never releases — bounded, and stated rather than hidden. A released rider
+/// who reappears re-latches a fresh hue, because "newcomer" here means only "not currently in
+/// `assignments`" — nothing distinguishes never-seen from seen-and-departed. That happens on a
+/// stale `.position`, and also when the lobby's roster poll races the `.memberLeft` broadcast
+/// and re-adds the departed rider (the presence merge is additive-only and keeps no departure
+/// tombstone — ROH-232). So `.memberLeft` is authoritative departure by convention, not by any
+/// guard in this type.
 ///
 /// Past `paletteCount` riders the palette is exhausted and hues REPEAT: the 9th rider in an
 /// 8-hue session latches a duplicate of someone else's colour, permanently, like any other
