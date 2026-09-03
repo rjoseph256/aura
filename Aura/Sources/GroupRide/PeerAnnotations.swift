@@ -66,16 +66,21 @@ final class PeerAnnotationDriver {
     private var prevClustered: [Bool] = []
 
     /// Recompute set-derived data + commit new fixes. Call from `.onChange(of: peers)` / `.onAppear`.
-    func updateSet(peers: [RidePeer], selfUserID: UUID?, nameMap: [UUID: String],
+    func updateSet(peers: [RidePeer], selfUserID: UUID?, identity: CrewIdentity,
                    reduceMotion: Bool, now: Date) {
         self.reduceMotion = reduceMotion
         visible = GroupMapDots.visiblePeers(peers: peers, selfUserID: selfUserID)
         anyRiding = visible.contains { $0.status == .riding }
         let ids = visible.map(\.userID)
         displayNames = Dictionary(uniqueKeysWithValues:
-            visible.map { ($0.userID, nameMap[$0.userID] ?? $0.displayName) })
-        colorIndex = PeerPalette.assign(userIDs: ids, paletteCount: max(1, AuraTheme.riderPalette.count))
-        monograms = RiderMonogram.assign(names: displayNames)
+            visible.map { ($0.userID, identity.names[$0.userID] ?? $0.displayName) })
+        // Snapshot-atomic lookups (ROH-228): the session's one writer guarantees every
+        // non-self peer has an entry, so these defaults are compile-time appeasement,
+        // not a second derivation path — never re-introduce assign() here.
+        colorIndex = Dictionary(uniqueKeysWithValues:
+            visible.map { ($0.userID, identity.colors[$0.userID] ?? 0) })
+        monograms = Dictionary(uniqueKeysWithValues:
+            visible.map { ($0.userID, identity.monograms[$0.userID] ?? "?") })
         leaderID = visible.max { ($0.progressMeters ?? -.infinity) < ($1.progressMeters ?? -.infinity) }?.userID
         interpolators.commit(peers: visible, now: now)
         let live = Set(ids)
@@ -182,7 +187,10 @@ final class PeerAnnotationDriver {
         center: CLLocationCoordinate2D(latitude: 37.7746, longitude: -122.4186), zoom: 15)
     let now = Date()
     let driver = PeerAnnotationDriver()
-    let maraID = UUID(), miraID = UUID(), devonID = UUID(), samID = UUID()
+    let maraID = UUID(uuidString: "AAAAAAAA-0000-0000-0000-00000000000A")!
+    let miraID = UUID(uuidString: "AAAAAAAA-0000-0000-0000-00000000000B")!
+    let devonID = UUID(uuidString: "AAAAAAAA-0000-0000-0000-00000000000C")!
+    let samID = UUID(uuidString: "AAAAAAAA-0000-0000-0000-00000000000D")!
     // Devon and Sam never move between the two fixes below, so they're identical in both
     // peer sets — they stay on `PeerInterpolator`'s stationary branch and never get a bearing,
     // which is correct: neither is `.riding`.
@@ -224,9 +232,15 @@ final class PeerAnnotationDriver {
                  lastUpdate: now, status: .riding),
         devon, sam
     ]
-    driver.updateSet(peers: priorPeers, selfUserID: nil, nameMap: [:],
+    // Frozen identity: hues pinned so the preview is reproducible, monograms derived through the
+    // real path so this can never disagree with what the session would produce (Mara/Mira collide
+    // on "M" and widen together).
+    let previewIdentity = CrewIdentity.derive(
+        peers: finalPeers, selfUserID: nil, nameMap: [:],
+        colors: [maraID: 0, miraID: 1, devonID: 2, samID: 3])
+    driver.updateSet(peers: priorPeers, selfUserID: nil, identity: previewIdentity,
                      reduceMotion: false, now: priorFixTime)
-    driver.updateSet(peers: finalPeers, selfUserID: nil, nameMap: [:],
+    driver.updateSet(peers: finalPeers, selfUserID: nil, identity: previewIdentity,
                      reduceMotion: false, now: now)
     // A linear stand-in for Mapbox's projection: ~10 points per 0.0001°, enough for the
     // declutter radii to mean what they mean on screen. A preview has no live MapProxy, and
