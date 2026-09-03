@@ -25,7 +25,7 @@ struct GroupRideFlowView: View {
     }
 
     @State private var session: GroupRideSession
-    @State private var displayNameStore = DisplayNameStore(backend: SupabaseGroupRideBackend())
+    @State private var displayNameStore = DisplayNameStore(backend: Self.liveBackend())
     /// Distinguishes a guest/host who actually entered the riding container (rode, then the
     /// ride ended — keep the solo HUD running) from one who never got past the lobby/join
     /// before the ride ended (show a dedicated ended surface instead of a blank/wrong screen).
@@ -45,6 +45,13 @@ struct GroupRideFlowView: View {
                     Task { await session.reconcileFromStatus() }
                 }
             }
+            #if DEBUG
+            .onChange(of: session.phase) { _, phase in
+                if phase == .lobby, let code = session.joinCode {
+                    GroupRideDemoMode.startDemoCrewIfRequested(code: code)
+                }
+            }
+            #endif
     }
 
     /// A rider who actually entered `.riding` and whose ride later ends (host-end, D9) must
@@ -69,9 +76,7 @@ struct GroupRideFlowView: View {
     @ViewBuilder private var otherPhaseContent: some View {
         switch session.phase {
         case .idle:
-            ProgressView()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(AuraTheme.background.ignoresSafeArea())
+            entryLoading
 
         case .needsDisplayName:
             // No wrapping NavigationStack here: this whole view is already a pushed
@@ -80,7 +85,8 @@ struct GroupRideFlowView: View {
             // (NavigationColumnState.boundPathChange) throw swift_unexpectedError and
             // crash the app. DisplayNameEditor only needs *a* navigation context for its
             // `.navigationTitle`, which the root stack already provides.
-            DisplayNameEditor(store: displayNameStore) {
+            DisplayNameEditor(store: displayNameStore,
+                              contextLine: "Pick a crew name — it's how your crew sees you.") {
                 Task { await invokeEntry() }
             }
 
@@ -99,20 +105,34 @@ struct GroupRideFlowView: View {
 
         case .createFailed:
             dismissMessage(
-                title: "Couldn't start the group ride — try again.",
-                systemImage: "person.2.slash"
+                title: connectionFailed ? "Couldn't reach the ride." : "Couldn't start your crew ride.",
+                detail: connectionFailed ? "Check your connection and try again." : "Try again in a moment.",
+                systemImage: connectionFailed ? "wifi.exclamationmark" : "person.2.slash",
+                retryTitle: "Try again",
+                retry: { Task { await invokeEntry() } }
             )
 
         case .routeUnavailable:
             dismissMessage(
                 title: "Couldn't load this ride's route.",
+                detail: "Ask your host to check the ride, then try joining again.",
                 systemImage: "exclamationmark.triangle"
             )
 
         case .joinFailed:
             dismissMessage(
-                title: "Couldn't join — double-check the code with your host.",
-                systemImage: "person.crop.circle.badge.xmark"
+                title: connectionFailed ? "Couldn't reach the ride." : "Couldn't join that ride.",
+                detail: connectionFailed ? "Check your connection and try again."
+                                         : "Check the code with your host and try again.",
+                systemImage: connectionFailed ? "wifi.exclamationmark" : "person.crop.circle.badge.xmark",
+                retryTitle: "Try again",
+                retry: {
+                    // .joinFailed is only written by join(code:), so the entry is always .join
+                    // (gate: v1's else-branch here was dead code).
+                    if case let .join(code) = entry {
+                        router.replaceTop(with: .joinRide(seed: code.rawValue))
+                    }
+                }
             )
 
         // Unreachable: `content`'s `if` renders `.riding`. Here only for switch exhaustiveness.
@@ -120,6 +140,33 @@ struct GroupRideFlowView: View {
             EmptyView()
         }
     }
+
+    // MARK: - Entry-aware loading
+
+    /// Entry-aware, bounded loading (ROH-231): the session's entryTimeout guarantees this
+    /// resolves — a hung create/join lands on the connection-failure surface, never here forever.
+    private var entryLoading: some View {
+        VStack(spacing: AuraTheme.Spacing.lg) {
+            Image(systemName: "person.2.fill")
+                .font(.largeTitle)
+                .foregroundStyle(AuraTheme.textSecondary)
+            ProgressView()
+            Text(entryIsJoin ? "Joining your crew…" : "Setting up your crew ride…")
+                .font(.subheadline)
+                .foregroundStyle(AuraTheme.textSecondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AuraTheme.background.ignoresSafeArea())
+    }
+
+    private var entryIsJoin: Bool {
+        if case .join = entry { return true }
+        return false
+    }
+
+    /// Distinguishes a client-detectable transport failure (server never reached) from a
+    /// server rejection, so the failure surfaces can give honest, distinct copy (ROH-231).
+    private var connectionFailed: Bool { session.entryFailureReason == .connectionFailed }
 
     // MARK: - Riding / ended-while-riding
 
@@ -152,6 +199,7 @@ struct GroupRideFlowView: View {
             // ride, stranding the crew on a ride nobody could end.
             dismissMessage(
                 title: "Couldn't load this ride's route.",
+                detail: "Ask your host to check the ride, then try joining again.",
                 systemImage: "exclamationmark.triangle"
             )
         }
@@ -185,22 +233,34 @@ struct GroupRideFlowView: View {
 
     // MARK: - Dismiss-with-message
 
-    private func dismissMessage(title: String, systemImage: String) -> some View {
+    private func dismissMessage(title: String, detail: String? = nil, systemImage: String,
+                                retryTitle: String? = nil, retry: (() -> Void)? = nil) -> some View {
         VStack(spacing: AuraTheme.Spacing.lg) {
             Spacer()
             Image(systemName: systemImage)
                 .font(.largeTitle)
                 .foregroundStyle(AuraTheme.textSecondary)
-            Text(title)
-                .font(.subheadline)
-                .foregroundStyle(AuraTheme.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, AuraTheme.Spacing.xxl)
-            Spacer()
-            Button("Back") {
-                router.pop()
+            VStack(spacing: AuraTheme.Spacing.xs) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AuraTheme.textPrimary)
+                if let detail {
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(AuraTheme.textSecondary)
+                }
             }
-            .buttonStyle(.ctaPrimary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, AuraTheme.Spacing.xxl)
+            Spacer()
+            VStack(spacing: AuraTheme.Spacing.sm) {
+                if let retryTitle, let retry {
+                    Button(retryTitle, action: retry).buttonStyle(.ctaPrimary)
+                    Button("Back") { router.pop() }.buttonStyle(.ctaTertiary)
+                } else {
+                    Button("Back") { router.pop() }.buttonStyle(.ctaPrimary)
+                }
+            }
             .padding(.horizontal, AuraTheme.Spacing.xxl)
             .padding(.bottom, AuraTheme.Spacing.xxl)
         }
@@ -218,11 +278,31 @@ struct GroupRideFlowView: View {
     @MainActor
     private static func makeSession() -> GroupRideSession {
         GroupRideSession(
-            backend: SupabaseGroupRideBackend(),
-            transport: SupabaseRideSessionTransport(),
+            backend: Self.liveBackend(),
+            transport: Self.liveTransport(),
             displayNameProvider: {
                 UserDefaults.standard.string(forKey: DisplayNameStore.crewDisplayNameKey) ?? ""
             }
         )
+    }
+
+    /// Real backend, except under the DEBUG demo launch argument (ROH-225), which routes
+    /// every group surface to the shared in-memory fake so Claude can drive them on a
+    /// simulator with no Apple Account. Release builds compile only the `return` line.
+    @MainActor
+    private static func liveBackend() -> any GroupRideBackend {
+        #if DEBUG
+        if GroupRideDemoMode.isActive { return GroupRideDemoMode.backend }
+        #endif
+        return SupabaseGroupRideBackend()
+    }
+
+    /// Real transport, except under the DEBUG demo launch argument — see `liveBackend()`.
+    @MainActor
+    private static func liveTransport() -> any RideSessionTransport {
+        #if DEBUG
+        if GroupRideDemoMode.isActive { return InMemoryRideSessionTransport() }
+        #endif
+        return SupabaseRideSessionTransport()
     }
 }

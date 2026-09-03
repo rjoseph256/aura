@@ -2,7 +2,11 @@ import Foundation
 import AuraCore
 
 public final actor InMemoryGroupRideBackend: GroupRideBackend {
-    final class Store: @unchecked Sendable {
+    /// Public so the app target's DEBUG demo mode (`GroupRideDemoMode`) can set spies;
+    /// tests keep using `@testable import AuraKit`. Only the specific spies the demo
+    /// mode touches (`forceJoinError`, `hangJoin`, `hangCreate`) are `public` — everything
+    /// else on `Store` stays `internal`, visible to tests only.
+    public final class Store: @unchecked Sendable {
         var rides: [UUID: GroupRide] = [:]
         var members: [UUID: [UUID]] = [:]   // rideID -> [userID]
         var codes: [String: UUID] = [:]     // joinCode -> rideID
@@ -15,9 +19,14 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var forceStartError: GroupRideError?     // test spy
         var forceRosterError: GroupRideError?    // test spy
         var forceEndError: GroupRideError?       // test spy, one-shot: cleared on throw so a retry succeeds
+        public var forceJoinError: GroupRideError?   // test spy; public — see type doc
         var hangEndLeave = false                          // test spy: park endRide/leaveRide until cancelled
+        public var hangJoin = false   // test spy: park joinRide until cancelled; public — see type doc
+        public var hangCreate = false   // test spy: park createRide until cancelled; public — see type doc
         var onEndLeaveEntered: (@Sendable () -> Void)?    // test spy: fired when end/leave is entered
         var endLeaveCallCount = 0                          // test spy: how many times end/leave ran
+        var rosterCallCount = 0   // test spy: how many times roster() ran
+        var joinCallCount = 0   // test spy: how many times joinRide was entered
 
         // Auth-state seam (added Task 2). The signed-in id and its observers live
         // here (not on the actor) so `cachedUserID` can be `nonisolated` while
@@ -27,8 +36,18 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         var authContinuations: [UUID: AsyncStream<AuthChange>.Continuation] = [:]
     }
     // nonisolated so `init(sharing:)` can read it synchronously across actors;
-    // `Store` is @unchecked Sendable, and tests drive it via serial awaits.
-    nonisolated let store: Store
+    // `Store` is @unchecked Sendable. The `currentUserID`/`authContinuations` pair is the
+    // only state actually covered by `lock` — everything else, including the plain `var`
+    // call-count spies (`rosterCallCount`, `joinCallCount`, `endLeaveCallCount`), is written
+    // on this actor's isolation and read unsynchronized from MainActor test code. That is a
+    // real data race by Swift's rules, not one `Store` structurally prevents; it is only
+    // safe in practice because tests read a counter after a settle loop has already observed
+    // its effect (the roster/peer count it gates), which happens-after the actor's write on
+    // the same async sequencing. Treat these counters as best-effort test spies meant to be
+    // read after quiescence, never under real concurrent access.
+    //
+    // Also `public`, for the same DEBUG-demo-mode reason as `Store` itself (see its doc).
+    public nonisolated let store: Store
 
     public init() { self.store = Store() }
     public init(sharing other: InMemoryGroupRideBackend) { self.store = other.store }
@@ -49,6 +68,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         return uid
     }
     public func createRide(route: Data?) async throws -> GroupRide {
+        if store.hangCreate { try await Task.sleep(for: .seconds(1000)) }
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
         if let forced = store.forceCreateError { throw forced }
         let code = JoinCode(rawValue: "ABCDEFGH")!   // fixed valid code for the fake (one ride per store)
@@ -66,6 +86,9 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         return ride
     }
     public func joinRide(code: JoinCode) async throws -> JoinedRide {
+        store.joinCallCount += 1
+        if store.hangJoin { try await Task.sleep(for: .seconds(1000)) }
+        if let forced = store.forceJoinError { throw forced }
         guard let uid = store.lock.withLock({ store.currentUserID }) else { throw GroupRideError.notAuthenticated }
         guard let rideID = store.codes[code.rawValue],
               let ride = store.rides[rideID] else { throw GroupRideError.joinFailed }
@@ -79,6 +102,7 @@ public final actor InMemoryGroupRideBackend: GroupRideBackend {
         return JoinedRide(ride: ride, route: store.routes[rideID])
     }
     public func roster(rideID: UUID) async throws -> [RosterMember] {
+        store.rosterCallCount += 1
         if let forced = store.forceRosterError { throw forced }
         return (store.members[rideID] ?? []).map {
             RosterMember(userID: $0, displayName: store.names[$0] ?? "Rider",

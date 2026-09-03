@@ -41,6 +41,8 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
         } catch let error as PostgrestError where error.message.contains("rides_route_check")
                                               || error.message.lowercased().contains("check constraint") {
             throw GroupRideError.routeTooLarge
+        } catch let error where EntryFailure.isConnectionFailure(error) {
+            throw GroupRideError.connectionFailed
         }
     }
     public nonisolated func joinRide(code: JoinCode) async throws -> JoinedRide {
@@ -53,6 +55,17 @@ public nonisolated struct SupabaseGroupRideBackend: GroupRideBackend {
                                            "p_supports_open": AnyJSON.bool(true)])
                 .single().execute().value
             return JoinedRide(ride: try row.toDomain(), route: try row.routeData())
+        } catch is CancellationError {
+            // Rethrow cancellation untouched so the catch-all can never misreport it as a
+            // rejection. Scope honestly: URLSession surfaces MID-FLIGHT cancellation as
+            // URLError(.cancelled) — which the reachability catch below maps to
+            // .connectionFailed — so this clause guards the narrower raw-CancellationError
+            // paths (PostgREST's pre-dispatch Task.checkCancellation, auth internals),
+            // where withTimeout's CancellationError → TimeoutError conversion still applies
+            // (ROH-231 review trace).
+            throw CancellationError()
+        } catch let error where EntryFailure.isConnectionFailure(error) {
+            throw GroupRideError.connectionFailed
         } catch { throw GroupRideError.joinFailed }
     }
     public nonisolated func roster(rideID: UUID) async throws -> [RosterMember] {

@@ -49,4 +49,49 @@ struct GroupRosterViewDataTests {
         // uuid1 < uuid2 lexicographically, so uuid1 should appear first
         #expect(rows.map(\.id) == [uuid1, uuid2, me])
     }
+    @Test func theSelfRowShowsTheRealNameWhenTheRosterResolvesIt() {
+        let selfID = UUID(uuidString: "EEEEEEEE-0000-0000-0000-000000000001")!
+        let rows = GroupRosterViewData.rows(peers: [], nameMap: [selfID: "Jamie Rivera"],
+                                            selfUserID: selfID, selfProgress: 0, isImperial: true)
+        #expect(rows[0].name == "Jamie Rivera")
+        #expect(rows[0].isSelf)
+        #expect(rows[0].nameResolved)
+    }
+
+    @Test func anUnresolvedSelfNameFallsBackToYouWithNoMarker() {
+        let selfID = UUID(uuidString: "EEEEEEEE-0000-0000-0000-000000000002")!
+        let rows = GroupRosterViewData.rows(peers: [], nameMap: [:],
+                                            selfUserID: selfID, selfProgress: 0, isImperial: true)
+        #expect(rows[0].name == "You")
+        #expect(!rows[0].nameResolved, "the view suppresses the marker so it can't read You YOU")
+    }
+
+    /// The badge and the spoken label both read this, so it is the one place the "You YOU"
+    /// rule is decided. Written because the view had the rule inline and the visible badge
+    /// and the VoiceOver string drifted apart — the badge was gated, the label was not.
+    @Test func showsSelfMarkerIsTrueOnlyForAResolvedSelfName() {
+        let id = UUID(uuidString: "EEEEEEEE-0000-0000-0000-000000000003")!
+        func row(isSelf: Bool, nameResolved: Bool) -> RosterRow {
+            RosterRow(id: id, name: "Jamie", isSelf: isSelf, status: .riding,
+                      distanceLabel: nil, nameResolved: nameResolved)
+        }
+        #expect(row(isSelf: true, nameResolved: true).showsSelfMarker)
+        #expect(!row(isSelf: true, nameResolved: false).showsSelfMarker, "already reads You")
+        #expect(!row(isSelf: false, nameResolved: true).showsSelfMarker)
+        #expect(!row(isSelf: false, nameResolved: false).showsSelfMarker)
+    }
+
+    /// Pins the `isSelf &&` half of the fallback: a PEER whose name never resolved must read
+    /// "Rider", never "You". Dropping that clause left both other new tests green.
+    @Test func anUnresolvedPeerReadsRiderNotYou() {
+        let selfID = UUID(uuidString: "EEEEEEEE-0000-0000-0000-000000000004")!
+        let peerID = UUID(uuidString: "EEEEEEEE-0000-0000-0000-00000000000A")!
+        let rows = GroupRosterViewData.rows(
+            peers: [RidePeer(userID: peerID, displayName: "", progressMeters: 500, status: .riding)],
+            nameMap: [:], selfUserID: selfID, selfProgress: 0, isImperial: true)
+        let peerRow = rows.first { $0.id == peerID }
+        #expect(peerRow?.name == "Rider")
+        #expect(peerRow?.nameResolved == true, "resolution is a self-row concern only")
+        #expect(peerRow?.showsSelfMarker == false)
+    }
 }

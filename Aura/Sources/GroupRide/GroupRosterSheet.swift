@@ -15,13 +15,18 @@ struct GroupRosterSheet: View {
     /// Shown in the expanded empty state so a host waiting on their crew can actually share
     /// the code — the lobby (the only other place it lives) is gone once the ride starts.
     let joinCode: String?
+    /// Selects the empty-state variant: a host sees their code to share, a guest sees the
+    /// guest line (every group rider has a `joinCode`, so code-presence alone can't tell
+    /// host from guest — role is the only reliable selector).
+    let isHost: Bool
     /// Starting detent. Real presentation always starts collapsed (the default);
     /// previews use `true` to show the expanded list without a tap.
     @State private var isExpanded: Bool
 
-    init(rows: [RosterRow], joinCode: String? = nil, startsExpanded: Bool = false) {
+    init(rows: [RosterRow], joinCode: String? = nil, isHost: Bool = true, startsExpanded: Bool = false) {
         self.rows = rows
         self.joinCode = joinCode
+        self.isHost = isHost
         _isExpanded = State(initialValue: startsExpanded)
     }
 
@@ -192,32 +197,10 @@ struct GroupRosterSheet: View {
 
     /// The join code renders right here when the host has one: this card is the only crew
     /// surface left once the ride starts (the lobby is gone), so telling the rider to "share
-    /// your ride code" without showing a code was a dead end (review-gate finding).
+    /// your ride code" without showing a code was a dead end (review-gate finding). Selected
+    /// by role, not code-presence — every group rider has a `joinCode` (gate finding).
     private var emptyState: some View {
-        VStack(spacing: AuraTheme.Spacing.xs) {
-            Image(systemName: "person.2.wave.2")
-                .font(.title2)
-                .foregroundStyle(AuraTheme.textSecondary)
-            Text("Waiting for your crew…")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(AuraTheme.textPrimary)
-            if let joinCode {
-                Text(joinCode)
-                    .font(.system(.title3, design: .monospaced).weight(.bold))
-                    .kerning(2)
-                    .foregroundStyle(AuraTheme.accent)
-                    .padding(.top, AuraTheme.Spacing.xs)
-                Text("Share this code so they can join.")
-                    .font(.footnote)
-                    .foregroundStyle(AuraTheme.textSecondary)
-            } else {
-                Text("Riders join from the ride they were invited to.")
-                    .font(.footnote)
-                    .foregroundStyle(AuraTheme.textSecondary)
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, AuraTheme.Spacing.xl)
+        CrewEmptyState(variant: (isHost && joinCode != nil) ? .rosterHost(code: joinCode!) : .rosterGuest)
     }
 
     @ViewBuilder private var background: some View {
@@ -256,7 +239,7 @@ struct RosterRowView: View {
                 .font(.system(.body, design: .rounded).weight(.semibold))
                 .foregroundStyle(AuraTheme.textPrimary)
                 .lineLimit(1)
-            if row.isSelf {
+            if row.showsSelfMarker {
                 Text("YOU")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(AuraTheme.textSecondary)
@@ -277,7 +260,7 @@ struct RosterRowView: View {
     }
 
     private var accessibilityLabel: String {
-        var parts = [row.isSelf ? "\(row.name), you" : row.name]
+        var parts = [row.showsSelfMarker ? "\(row.name), you" : row.name]
         parts.append(statusAccessibilityLabel)
         if let distanceLabel = row.distanceLabel, !row.isSelf {
             parts.append(distanceLabel)
@@ -336,7 +319,7 @@ struct RosterRowView: View {
 
 #Preview("Collapsed button — all riding") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil),
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil),
         RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
         RosterRow(id: UUID(), name: "Marcus", isSelf: false, status: .riding, distanceLabel: "0.1 mi behind")
     ]
@@ -345,7 +328,7 @@ struct RosterRowView: View {
 
 #Preview("Collapsed button — peer dropped (warning)") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil),
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil),
         RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
         RosterRow(id: UUID(), name: "Sam", isSelf: false, status: .dropped, distanceLabel: "no signal")
     ]
@@ -354,14 +337,14 @@ struct RosterRowView: View {
 
 #Preview("Collapsed button — solo (waiting)") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil)
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil)
     ]
     previewHost(rows: rows, startsExpanded: false)
 }
 
 #Preview("4 riders — expanded") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil),
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil),
         RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
         RosterRow(id: UUID(), name: "Marcus", isSelf: false, status: .riding, distanceLabel: "0.1 mi behind"),
         RosterRow(id: UUID(), name: "Devon", isSelf: false, status: .stopped, distanceLabel: "0.6 mi behind")
@@ -371,14 +354,21 @@ struct RosterRowView: View {
 
 #Preview("Solo — waiting for crew") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil)
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil)
     ]
     previewHost(rows: rows, startsExpanded: true)
 }
 
+#Preview("Solo — guest waiting for crew") {
+    let rows: [RosterRow] = [
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil)
+    ]
+    previewHost(rows: rows, isHost: false, startsExpanded: true)
+}
+
 #Preview("One dropped, one awaiting") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil),
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil),
         RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
         RosterRow(id: UUID(), name: "Sam", isSelf: false, status: .dropped, distanceLabel: "no signal"),
         RosterRow(id: UUID(), name: "Lee", isSelf: false, status: .awaiting, distanceLabel: nil)
@@ -386,14 +376,23 @@ struct RosterRowView: View {
     previewHost(rows: rows, startsExpanded: true)
 }
 
+#Preview("Roster — self name not yet resolved") {
+    GroupRosterSheet(rows: [
+        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding,
+                  distanceLabel: nil, nameResolved: false),
+        RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead")
+    ])
+    .preferredColorScheme(.dark)
+}
+
 @ViewBuilder
-private func previewHost(rows: [RosterRow], startsExpanded: Bool) -> some View {
+private func previewHost(rows: [RosterRow], isHost: Bool = true, startsExpanded: Bool) -> some View {
     ZStack(alignment: .bottom) {
         AuraTheme.background.ignoresSafeArea()
         VStack {
             Spacer()
-            GroupRosterSheet(rows: rows, joinCode: rows.count <= 1 ? "MX4T7Q" : nil,
-                             startsExpanded: startsExpanded)
+            GroupRosterSheet(rows: rows, joinCode: rows.count <= 1 ? "MX4T7Q2A" : nil,
+                             isHost: isHost, startsExpanded: startsExpanded)
                 .padding(.horizontal, AuraTheme.Spacing.md)
         }
     }

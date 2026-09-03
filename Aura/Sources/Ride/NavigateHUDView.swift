@@ -414,12 +414,12 @@ private extension NavigateHUDView {
 
     func syncPeers() {
         guard let groupSession else {
-            peerModel.updateSet(peers: [], selfUserID: nil, nameMap: [:],
+            peerModel.updateSet(peers: [], selfUserID: nil, identity: .empty,
                                 reduceMotion: reduceMotion, now: Date())
             return
         }
         peerModel.updateSet(peers: groupSession.peers, selfUserID: groupSession.selfUserID,
-                            nameMap: groupSession.nameMap, reduceMotion: reduceMotion, now: Date())
+                            identity: groupSession.crewIdentity, reduceMotion: reduceMotion, now: Date())
     }
 
     // MARK: Voice

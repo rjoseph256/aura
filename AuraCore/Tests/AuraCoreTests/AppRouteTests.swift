@@ -75,7 +75,7 @@ struct AppRouteTests {
 
     @Test func historyAndSettingsAreDistinctFromEachOtherAndOthers() {
         #expect(AppRoute.history != AppRoute.settings)
-        #expect(AppRoute.history != AppRoute.joinRide)
+        #expect(AppRoute.history != AppRoute.joinRide(seed: ""))
         #expect(AppRoute.settings != AppRoute.freeRide)
     }
 
@@ -165,5 +165,10 @@ struct AppRouteTests {
     @Test func aCreateIsNeverAJoin() {
         #expect(GroupRideEntry.create(route: nil, place: nil)
                 != GroupRideEntry.join(JoinCode(rawValue: "ABCDEFGH")!))
+    }
+
+    @Test func joinRideSeedParticipatesInIdentity() {
+        #expect(AppRoute.joinRide(seed: "AB3KQ9RT") == AppRoute.joinRide(seed: "AB3KQ9RT"))
+        #expect(AppRoute.joinRide(seed: "AB3KQ9RT") != AppRoute.joinRide(seed: ""))
     }
 }
