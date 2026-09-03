@@ -368,7 +368,7 @@ struct RosterRowView: View {
 
 #Preview("One dropped, one awaiting") {
     let rows: [RosterRow] = [
-        RosterRow(id: UUID(), name: "You", isSelf: true, status: .riding, distanceLabel: nil),
+        RosterRow(id: UUID(), name: "Jamie Rivera", isSelf: true, status: .riding, distanceLabel: nil),
         RosterRow(id: UUID(), name: "Priya", isSelf: false, status: .riding, distanceLabel: "0.4 mi ahead"),
         RosterRow(id: UUID(), name: "Sam", isSelf: false, status: .dropped, distanceLabel: "no signal"),
         RosterRow(id: UUID(), name: "Lee", isSelf: false, status: .awaiting, distanceLabel: nil)
