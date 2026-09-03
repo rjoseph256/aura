@@ -321,8 +321,16 @@ private struct LobbyRosterRowView: View {
         .accessibilityLabel(accessibilityText)
     }
 
+    /// Gated on `showsSelfMarker`, not `isSelf`: when your own name hasn't resolved the row
+    /// already reads "You", so appending ", you" would speak "You, you" — the same redundancy
+    /// the visible row is built to avoid, one layer down where only VoiceOver hears it.
     private var accessibilityText: String {
-        var parts = [row.isSelf ? "\(row.name), you" : "\(row.name) joined"]
+        var parts: [String]
+        if row.isSelf {
+            parts = [row.showsSelfMarker ? "\(row.name), you" : row.name]
+        } else {
+            parts = ["\(row.name) joined"]
+        }
         if row.isHost { parts.append("host") }
         return parts.joined(separator: ", ")
     }
