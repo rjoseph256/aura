@@ -26,6 +26,9 @@ struct AuraApp: App {
         let authStore = AuthStore(backend: SupabaseGroupRideBackend(), apple: AppleSignInController())
         let appRouter = AppRouter()
         appRouter.checkSignedIn = { [weak authStore] in authStore?.isSignedIn ?? false }
+        #if DEBUG
+        if GroupRideDemoMode.isActive { appRouter.checkSignedIn = { true } }
+        #endif
         _auth = State(initialValue: authStore)
         _router = State(initialValue: appRouter)
     }
@@ -112,10 +115,10 @@ private struct RootView: View {
                         NavigateHUDView(route: route, destination: destination)
                     case let .groupRide(entry):
                         GroupRideFlowView(entry: entry)
-                    case .joinRide:
+                    case let .joinRide(seed):
                         // Pushed (not a sheet) so it never conflicts with Home's
                         // always-present dashboard sheet; only the view's own Cancel shows.
-                        GroupRideJoinView()
+                        GroupRideJoinView(seed: seed)
                             .navigationBarBackButtonHidden(true)
                     case .history:
                         HistoryView()

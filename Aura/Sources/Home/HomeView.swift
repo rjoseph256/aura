@@ -351,7 +351,7 @@ private extension HomeView {
             HomeLaunchBand(
                 onWhereTo: { searchExpanded = true },
                 onExplore: { leaveHome(pushing: .freeRide) },
-                onJoin: { leaveHome(pushing: .joinRide) },
+                onJoin: { leaveHome(pushing: .joinRide(seed: "")) },
                 onSaved: {
                     if searchExpanded { searchExpanded = false }
                     selectedDetent = .large

@@ -97,6 +97,12 @@ public final class RideSession: GroupLocationSink {
         return sub.events
     }
 
+    /// The lobby poll's merge seam (ROH-227): newly-joined members appear in presence with
+    /// status `.awaiting`, exactly as the seed roster would have carried them.
+    public func mergeRoster(_ members: [RidePeer]) {
+        presence.merge(roster: members)
+    }
+
     /// The deterministic event seam. The production event task and the tests both call
     /// this; tests call it directly so event handling needs no `Task.sleep` to settle.
     public func ingest(_ event: TransportEvent) async {

@@ -34,4 +34,27 @@ struct PeerPaletteTests {
         #expect(m.count == 10)
         #expect(m.values.allSatisfy { (0..<6).contains($0) })
     }
+
+    @Test func reservedIndicesAreNotReissuedWhileRoomRemains() {
+        let id = UUID(uuidString: "BBBBBBBB-0000-0000-0000-000000000001")!
+        let plain = PeerPalette.assign(userIDs: [id], paletteCount: 8)[id]!
+        let probed = PeerPalette.assign(userIDs: [id], paletteCount: 8, reserved: [plain])[id]!
+        #expect(probed != plain)
+    }
+
+    @Test func aFullPaletteStillAssignsRatherThanDropping() {
+        let id = UUID(uuidString: "BBBBBBBB-0000-0000-0000-000000000002")!
+        let result = PeerPalette.assign(userIDs: [id], paletteCount: 4, reserved: [0, 1, 2, 3])
+        #expect(result[id] != nil, "over-capacity collides (as today) — it never drops a rider")
+    }
+
+    @Test func outOfRangeReservationsCannotStarveTheDeCollisionProbe() {
+        let id = UUID(uuidString: "BBBBBBBB-0000-0000-0000-000000000005")!
+        // Only index 0 is genuinely held; 100/101/102 are out of range. If they counted toward
+        // the room check, probing would be skipped and this rider would collide on 0.
+        let result = PeerPalette.assign(userIDs: [id], paletteCount: 4,
+                                        reserved: [0, 100, 101, 102])[id]!
+        #expect(result != 0, "a free in-range slot existed and had to be probed for")
+        #expect((0..<4).contains(result))
+    }
 }

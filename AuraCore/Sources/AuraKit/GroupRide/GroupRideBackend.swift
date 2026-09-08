@@ -7,6 +7,7 @@ public enum GroupRideError: Error, Equatable, Sendable {
     case notHost
     case notMember
     case routeTooLarge
+    case connectionFailed // transport reachability: the server was never reached (ROH-231)
 }
 
 /// A change in the backend's authenticated session, observed by `AuthStore`.

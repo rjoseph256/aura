@@ -56,8 +56,15 @@ was written; the group-rides SP3 whole-branch review caught three production-dea
 that unit tests passed.
 
 Reviewers must be independent (fresh subagents, no shared context) and given distinct lenses
-so they do not converge on one blind spot. Dispatch agent types that have no Agent tool, so
-grandchild subagents are structurally impossible rather than merely discouraged.
+so they do not converge on one blind spot. Dispatch **reviewers** as agent types that have no
+Agent tool, so grandchild subagents are structurally impossible rather than merely
+discouraged. That rule is scoped to reviewers (and builds, via the builder agent) — it is
+NOT a reason to avoid implementer subagents: step 5's fresh implementer per task is the
+norm here and write-capable types necessarily carry the Agent tool. Manage that instead of
+avoiding it: give implementers the full task text (nothing left to go exploring for), tell
+them the orchestrator owns all builds and reviews, and have them run tests/lint themselves
+rather than delegating. A session that reads the reviewer rule as "implement everything
+inline" is misreading it.
 
 Not for one-line fixes, mechanical edits, or pure debugging. Those go straight to the
 relevant skill: `superpowers:systematic-debugging` for a bug,

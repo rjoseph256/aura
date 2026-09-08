@@ -2,96 +2,19 @@ import XCTest
 import os
 @testable import AuraKit
 
-/// Hand-fired and **re-armable**: each `fire()` releases everyone waiting at that moment, and a
-/// later arm suspends again. A one-shot gate cannot express a test that arms the same hop twice.
-private final class ManualTimer: Sendable {
-    private struct State {
-        var credits = 0
-        var waiters: [CheckedContinuation<Void, Never>] = []
-    }
-    private let state = OSAllocatedUnfairLock(initialState: State())
-
-    var closure: @Sendable (Duration) async -> Void {
-        { [state] _ in
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                let alreadyFired = state.withLock { s -> Bool in
-                    guard s.credits > 0 else { s.waiters.append(continuation); return false }
-                    s.credits -= 1
-                    return true
-                }
-                if alreadyFired { continuation.resume() }
-            }
-        }
-    }
-
-    /// Releases everyone waiting now, and BANKS A CREDIT for an arm that has not registered yet.
-    /// Without the credit this is a race: a hop armed synchronously inside `attempt` may not have
-    /// reached its `await` when the test fires, and then waits forever. Two tests hung on exactly
-    /// that before the credit existed, and a hung test is far worse than a failing one — it burns
-    /// the agent gate's whole timeout and reads as a slow machine.
-    func fire() {
-        let pending = state.withLock { s -> [CheckedContinuation<Void, Never>] in
-            guard s.waiters.isEmpty else { defer { s.waiters = [] }; return s.waiters }
-            s.credits += 1
-            return []
-        }
-        for waiter in pending { waiter.resume() }
-    }
-}
-
-/// For hops a test never intends to fire. A long cancellable sleep rather than a continuation
-/// nobody resumes, so nothing is left suspended at teardown.
-private func neverFires() -> @Sendable (Duration) async -> Void {
-    { _ in try? await Task.sleep(for: .seconds(3600)) }
-}
-
-/// The inverse of `neverFires()`: a hop whose timing a test does not care about. Written as a
-/// factory for the same reason — a bare `{ _ in }` literal on the right of `??` is not inferred
-/// as `@Sendable` and fails strict concurrency.
-private func firesImmediately() -> @Sendable (Duration) async -> Void {
-    { _ in }
-}
-
-/// Holds `work` open until the test resolves it.
-private final class WorkGate: Sendable {
-    private let state = OSAllocatedUnfairLock(initialState: [CheckedContinuation<ShareUpgradeResult, Never>]())
-    func result() async -> ShareUpgradeResult {
-        await withCheckedContinuation { (continuation: CheckedContinuation<ShareUpgradeResult, Never>) in
-            state.withLock { $0.append(continuation) }
-        }
-    }
-    func resolve(_ value: ShareUpgradeResult) {
-        let pending = state.withLock { s -> [CheckedContinuation<ShareUpgradeResult, Never>] in
-            defer { s = [] }
-            return s
-        }
-        for p in pending { p.resume(returning: value) }
-    }
-}
-
-private func settle() async {
-    for _ in 0..<12 { await Task.yield() }
-}
-
-/// Yield until the condition holds, up to a generous budget. Use before asserting on state a
-/// fired timer must produce: a bare `settle()` there is a bet that the timer-continuation →
-/// presenter → MainActor resume chain finishes within 12 yields, which the Swift 6.3 canary
-/// scheduler lost (ROH-217). A real behavior break still fails — the budget exhausts and the
-/// following assertion fires exactly as before.
 @MainActor
-private func eventually(_ condition: () -> Bool) async {
-    for _ in 0..<10_000 where !condition() { await Task.yield() }
-}
-
-@MainActor
-final class ShareUpgradePresenterTests: XCTestCase {
+final class ShareUpgradePresenterTests: ShareUpgradeHopLedgerTestCase {
 
     private func makePresenter(showDelay: ManualTimer? = nil,
                                deadline: ManualTimer? = nil,
                                dwell: ManualTimer? = nil) -> ShareUpgradePresenter {
-        ShareUpgradePresenter(showDelayTimer: showDelay?.closure ?? neverFires(),
-                              deadlineTimer: deadline?.closure ?? neverFires(),
-                              dwellTimer: dwell?.closure ?? neverFires())
+        // The dwell default is NOT `neverFires()`: `attempt` waits on the gate the dwell hop
+        // opens, so a never-firing dwell on any test that shows an indicator would park that
+        // test for an hour (the ROH-233 hang class). A test that cares about the dwell floor
+        // injects a `ManualTimer`; one that does not gets a gate that opens at once.
+        ShareUpgradePresenter(showDelayTimer: showDelay?.closure ?? ledger.neverFires(),
+                              deadlineTimer: deadline?.closure ?? ledger.neverFires(),
+                              dwellTimer: dwell?.closure ?? firesImmediately())
     }
 
     // MARK: show-delay
@@ -102,10 +25,13 @@ final class ShareUpgradePresenterTests: XCTestCase {
         let work = WorkGate()
 
         let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
-        await settle()
+        await eventually { presenter.phase == .upgrading }
         XCTAssertEqual(presenter.phase, .upgrading, "in flight, nothing on screen yet")
 
-        showDelay.fire(); await settle()
+        // The 2026-09-01 CI red (ROH-233): `settle()` here lost the fire → pool thread → main
+        // actor race and read `.upgrading` one hop too early.
+        showDelay.fire()
+        await eventually { presenter.phase == .upgradingVisible }
         XCTAssertEqual(presenter.phase, .upgradingVisible)
 
         work.resolve(.gotMap); dwell.fire(); await running.value
@@ -124,7 +50,7 @@ final class ShareUpgradePresenterTests: XCTestCase {
         let work = WorkGate()
 
         let running = Task { await presenter.attempt(origin: .riderTap) { await work.result() } }
-        await settle()
+        await eventually { presenter.phase == .upgradingVisible }
         XCTAssertEqual(presenter.phase, .upgradingVisible, "the rider pressed a button")
 
         work.resolve(.gotMap); dwell.fire(); await running.value
@@ -138,8 +64,9 @@ final class ShareUpgradePresenterTests: XCTestCase {
         let work = WorkGate()
 
         let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
-        await settle(); showDelay.fire(); await settle()
-        deadline.fire(); await settle()
+        await eventually { presenter.phase == .upgrading }
+        showDelay.fire(); await eventually { presenter.phase == .upgradingVisible }
+        deadline.fire(); await eventually { presenter.phase == .unavailable(.mayRejoin) }
 
         XCTAssertEqual(presenter.phase, .unavailable(.mayRejoin),
                        "the pipeline may still be running — that is exactly what mayRejoin says")
@@ -148,11 +75,18 @@ final class ShareUpgradePresenterTests: XCTestCase {
     }
 
     func testTheDeadlineIsInertOnceTheAttemptHasResolved() async {
-        let deadline = ManualTimer()
-        let presenter = makePresenter(deadline: deadline)
+        let deadline = ManualTimer(), returned = HopReturn()
+        let presenter = ShareUpgradePresenter(showDelayTimer: ledger.neverFires(),
+                                              deadlineTimer: returned.wrapping(deadline.closure),
+                                              dwellTimer: firesImmediately())
 
         await presenter.attempt(origin: .first) { .gotMap }
-        deadline.fire(); await settle()
+        // A negative control: the phase must NOT move. `eventually` on the phase would return
+        // at once and pin nothing, so wait for the hop to come back from its timer — the turn in
+        // which it evaluates the guard this test exists for — then drain it with `settle()`.
+        deadline.fire()
+        await eventually { returned.happened }
+        await settle()
 
         XCTAssertEqual(presenter.phase, .upgraded(confirming: false),
                        "a fired deadline must never resurrect an offer over a finished attempt")
@@ -164,7 +98,12 @@ final class ShareUpgradePresenterTests: XCTestCase {
         let work = WorkGate()
 
         let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
-        await settle(); showDelay.fire(); await settle(); deadline.fire(); await settle()
+        await eventually { presenter.phase == .upgrading }
+        // The final assertion needs the indicator to have been ON SCREEN before the deadline
+        // fired. With a bare `settle()` between the two fires, a lost race lets the deadline
+        // land on `.upgrading` and the test ends `.upgraded(confirming: false)`.
+        showDelay.fire(); await eventually { presenter.phase == .upgradingVisible }
+        deadline.fire(); await eventually { presenter.phase == .unavailable(.mayRejoin) }
 
         work.resolve(.gotMap); dwell.fire(); await running.value
 
@@ -179,10 +118,23 @@ final class ShareUpgradePresenterTests: XCTestCase {
         let presenter = makePresenter(showDelay: showDelay, dwell: dwell)
         let work = WorkGate()
 
-        let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
-        await settle(); showDelay.fire(); await settle()
+        // `delivered` flips on the main actor in the same turn in which `attempt` receives the
+        // result and reaches the dwell gate, so the negative assertion below is about the dwell
+        // and not about a result that simply has not arrived yet.
+        let delivered = OSAllocatedUnfairLock(initialState: false)
+        let running = Task {
+            await presenter.attempt(origin: .first) {
+                let result = await work.result()
+                delivered.withLock { $0 = true }
+                return result
+            }
+        }
+        await eventually { presenter.phase == .upgrading }
+        showDelay.fire(); await eventually { presenter.phase == .upgradingVisible }
 
-        work.resolve(.rejected); await settle()
+        work.resolve(.rejected)
+        await eventually { delivered.withLock { $0 } }
+        await settle()
         XCTAssertEqual(presenter.phase, .upgradingVisible, "still held by the dwell")
 
         dwell.fire(); await running.value
@@ -194,7 +146,7 @@ final class ShareUpgradePresenterTests: XCTestCase {
         let presenter = makePresenter(dwell: dwell)
 
         let running = Task { await presenter.attempt(origin: .riderTap) { .gotMap } }
-        await settle()
+        await eventually { presenter.phase == .upgradingVisible }
         XCTAssertEqual(presenter.phase, .upgradingVisible,
                        "without the dwell a warm tap changes nothing the rider can see")
 
@@ -219,16 +171,23 @@ final class ShareUpgradePresenterTests: XCTestCase {
         let presenter = makePresenter(dwell: dwell)
         let first = WorkGate(), second = WorkGate()
 
+        // "Older" and "newer" are a claim about ORDER, and the wait between the two starts is
+        // what makes it true: the first attempt must be in flight before the second is created.
         let older = Task { await presenter.attempt(origin: .first) { await first.result() } }
-        await settle()
+        await eventually { presenter.phase == .upgrading }
         let newer = Task { await presenter.attempt(origin: .riderTap) { await second.result() } }
-        await settle()
+        await eventually { presenter.phase == .upgradingVisible }
         XCTAssertEqual(presenter.phase, .upgradingVisible)
 
         // Open the newer attempt's dwell gate BEFORE the older one resolves. Without this the
         // older attempt parks on that gate and returns without ever reaching the generation
         // guard, so this test passed with the guard deleted — a mutation run proved it, twice
         // over (both `mine == generation` sites removed, 16/16 green, 3 runs of 3).
+        //
+        // `settle()` rather than `eventually`: the gate opening is not observable through the
+        // phase, so there is no condition to wait on. It is also not load-bearing for timing —
+        // `ManualTimer.fire()` banks a credit if the dwell hop has not parked yet, and `attempt`
+        // waits on the gate if it is not open yet — so a lost race here changes nothing.
         dwell.fire(); await settle()
 
         first.resolve(.rejected); _ = await older.value
@@ -245,9 +204,9 @@ final class ShareUpgradePresenterTests: XCTestCase {
         let first = WorkGate(), second = WorkGate()
 
         let older = Task { await presenter.attempt(origin: .first) { await first.result() } }
-        await settle()
+        await eventually { presenter.phase == .upgrading }
         let newer = Task { await presenter.attempt(origin: .riderTap) { await second.result() } }
-        await settle()
+        await eventually { presenter.phase == .upgradingVisible }
 
         // `_ = await older.value` rather than `settle()`: 12 `Task.yield()`s is not a
         // quiescence bound, and this assertion failed 7 times in 20 runs against it.
@@ -276,7 +235,7 @@ final class ShareUpgradePresenterTests: XCTestCase {
                                               deadline: .seconds(3600),
                                               minimumDwell: .milliseconds(300),
                                               showDelayTimer: { _ in },
-                                              deadlineTimer: neverFires(),
+                                              deadlineTimer: ledger.neverFires(),
                                               dwellTimer: { try? await Task.sleep(for: $0) })
 
         let start = ContinuousClock.now
@@ -287,74 +246,87 @@ final class ShareUpgradePresenterTests: XCTestCase {
                                     "the indicator must hold for the dwell; ROH-186 made this ~0")
         XCTAssertEqual(presenter.phase, .unavailable(.freshAttempt))
     }
-}
 
-// MARK: - the connectivity caption
+    // MARK: the fixture's own gate (ROH-233)
 
-@MainActor
-final class ShareUpgradeCopyTests: XCTestCase {
+    /// Pins `WorkGate` as level-triggered. `result()` registers on a global-pool thread one hop
+    /// after it is called, so a resolve issued from the main actor can beat it; edge-triggered,
+    /// the value was dropped and the awaiting `attempt` never returned. The waiter is an
+    /// unstructured task polled under `eventually`'s wall-clock ceiling, so the old shape FAILS
+    /// here after five seconds instead of wedging the whole suite.
+    func testAResolveThatBeatsTheWaiterIsBankedNotLost() async {
+        let gate = WorkGate()
+        gate.resolve(.gotMap)
 
-    func testTheCaptionIsWithheldUntilARiderTapHasFailed() {
-        let terminal = ShareUpgradePhase.unavailable(.freshAttempt)
-        XCTAssertNil(ShareUpgradeCopy.caption(for: terminal, hasFailedARiderTap: false),
-                     "the first offer stands alone; the rider has not tried anything yet")
-        XCTAssertEqual(ShareUpgradeCopy.caption(for: terminal, hasFailedARiderTap: true),
-                       ShareUpgradeCopy.connectivityHint)
+        let landed = OSAllocatedUnfairLock(initialState: ShareUpgradeResult?.none)
+        let waiter = Task { let value = await gate.result(); landed.withLock { $0 = value } }
+        await eventually { landed.withLock { $0 } != nil }
+
+        XCTAssertEqual(landed.withLock { $0 }, .gotMap,
+                       "a resolve nobody was waiting for must be held for the next waiter")
+        // On the regression path `waiter` stays parked for the rest of the process and its
+        // continuation leaks; cancelling it would not help, since `result()` is not
+        // cancellation-aware. A leaked task inside a failing test is the acceptable outcome here.
+        _ = waiter
     }
 
-    func testTheCaptionNeverShowsOutsideATerminalOffer() {
-        for phase: ShareUpgradePhase in [.idle, .upgrading, .upgradingVisible,
-                                         .upgraded(confirming: true), .upgraded(confirming: false)] {
-            XCTAssertNil(ShareUpgradeCopy.caption(for: phase, hasFailedARiderTap: true),
-                         "\(phase) shows no offer, so it can carry no caption for one")
-        }
+    // MARK: never-firing hops are released, not leaked (ROH-233)
+
+    /// The ledger's positive control, so the `tearDown` check is known to be watching something.
+    /// Two never-firing hops — the show-delay and the deadline — are parked while the attempt is
+    /// outstanding, and both are gone once it resolves, because `attempt` cancels its own hops
+    /// on the way out. Without the first assertion the second is vacuous: a ledger nobody checks
+    /// in with reads zero forever.
+    func testResolvingTheNewestAttemptReleasesItsNeverFiringHops() async {
+        let presenter = makePresenter()
+        let work = WorkGate()
+
+        let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
+        await eventually { ledger.parkedCount == 2 }
+        XCTAssertEqual(ledger.liveCount, 2, "show-delay and deadline are parked in hour-long sleeps")
+
+        work.resolve(.gotMap); await running.value
+        await eventually { ledger.releasedCount == 2 }
+        XCTAssertEqual(ledger.liveCount, 0, "resolving the newest attempt cancelled both")
     }
 
-    func testBothRetryabilitiesCarryTheCaption() {
-        for retryability: Retryability in [.freshAttempt, .mayRejoin] {
-            XCTAssertEqual(
-                ShareUpgradeCopy.caption(for: .unavailable(retryability), hasFailedARiderTap: true),
-                ShareUpgradeCopy.connectivityHint,
-                "both render the same live offer, so both earn the same caption")
-        }
-    }
+    /// The other releaser: a newer attempt cancels the older attempt's hops at its own start, so
+    /// an attempt that is superseded rather than resolved does not leak either.
+    func testANewerAttemptReleasesTheOlderAttemptsNeverFiringHops() async {
+        // The rider tap shows an indicator, so its attempt waits on the dwell gate before it can
+        // return: the dwell MUST be fired below, or `await newer.value` parks forever. (This test
+        // wedged the suite once on its first run for exactly that omission.)
+        let dwell = ManualTimer()
+        let presenter = makePresenter(dwell: dwell)
+        let first = WorkGate(), second = WorkGate()
 
-    func testAFailedTapDoesNotAnnounceLikeASuccessfulOne() {
-        let failed = ShareUpgradeCopy.announcement(for: .unavailable(.mayRejoin),
-                                                   hasFailedARiderTap: true)
-        let succeeded = ShareUpgradeCopy.announcement(for: .upgraded(confirming: true),
-                                                      hasFailedARiderTap: true)
-        XCTAssertNotNil(failed)
-        XCTAssertNotEqual(failed, succeeded)
-        XCTAssertEqual(succeeded, ShareUpgradeCopy.confirmation)
-    }
+        let older = Task { await presenter.attempt(origin: .first) { await first.result() } }
+        await eventually { ledger.parkedCount == 2 }
+        XCTAssertEqual(ledger.liveCount, 2)
 
-    /// The row and the announcement must agree, or a VoiceOver rider and a sighted rider are told
-    /// different things about the same state.
-    func testTheAnnouncementCarriesTheHintExactlyWhenTheCaptionDoes() {
-        for hasFailed in [true, false] {
-            let phase = ShareUpgradePhase.unavailable(.freshAttempt)
-            let announced = ShareUpgradeCopy.announcement(for: phase, hasFailedARiderTap: hasFailed)
-            let captioned = ShareUpgradeCopy.caption(for: phase, hasFailedARiderTap: hasFailed)
-            XCTAssertEqual(announced?.contains(ShareUpgradeCopy.connectivityHint), captioned != nil)
-        }
-    }
+        let newer = Task { await presenter.attempt(origin: .riderTap) { await second.result() } }
+        // The newer attempt arms only a deadline (a rider tap has no show-delay), so once the
+        // older pair has checked out and the newer deadline has checked in, exactly one is live.
+        // Waited on the monotone counters, not on `liveCount == 1`, which is also a transient
+        // state on the way there.
+        await eventually { ledger.releasedCount == 2 && ledger.parkedCount == 3 }
+        XCTAssertEqual(ledger.liveCount, 1, "older pair released; newer deadline parked")
 
-    func testNonTerminalPhasesAnnounceNothing() {
-        for phase: ShareUpgradePhase in [.idle, .upgrading, .upgradingVisible] {
-            XCTAssertNil(ShareUpgradeCopy.announcement(for: phase, hasFailedARiderTap: true))
-        }
+        first.resolve(.rejected); _ = await older.value
+        second.resolve(.rejected); dwell.fire(); _ = await newer.value
+        await eventually { ledger.releasedCount == 3 }
+        XCTAssertEqual(ledger.liveCount, 0)
     }
 }
 
 // MARK: - the presenter records a failed rider tap
 
 @MainActor
-final class ShareUpgradeFailedTapTests: XCTestCase {
+final class ShareUpgradeFailedTapTests: ShareUpgradeHopLedgerTestCase {
 
     private func presenter() -> ShareUpgradePresenter {
         ShareUpgradePresenter(showDelayTimer: { _ in },
-                              deadlineTimer: { _ in try? await Task.sleep(for: .seconds(3600)) },
+                              deadlineTimer: ledger.neverFires(),
                               dwellTimer: { _ in })
     }
 
@@ -390,12 +362,12 @@ final class ShareUpgradeFailedTapTests: XCTestCase {
 /// The announcement counter. Its whole reason for existing is that `phase` cannot carry these
 /// events — see `ShareUpgradePresenter.announcements`.
 @MainActor
-final class ShareUpgradeAnnouncementTests: XCTestCase {
+final class ShareUpgradeAnnouncementTests: ShareUpgradeHopLedgerTestCase {
 
     private func makePresenter(deadline: ManualTimer? = nil,
                                dwell: ManualTimer? = nil) -> ShareUpgradePresenter {
         ShareUpgradePresenter(showDelayTimer: { _ in },
-                              deadlineTimer: deadline?.closure ?? neverFires(),
+                              deadlineTimer: deadline?.closure ?? ledger.neverFires(),
                               dwellTimer: dwell?.closure ?? firesImmediately())
     }
 
@@ -403,7 +375,9 @@ final class ShareUpgradeAnnouncementTests: XCTestCase {
         let presenter = makePresenter()
         let work = WorkGate()
         let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
-        await settle()
+        // main went red on this line three times (2026-08-31, 09-01, 09-03): even a `{ _ in }`
+        // show-delay is a nonisolated async call, so it still round-trips the global executor.
+        await eventually { presenter.phase == .upgradingVisible }
 
         XCTAssertEqual(presenter.phase, .upgradingVisible)
         XCTAssertEqual(presenter.announcements, 0, "a spinner is not news")
@@ -417,7 +391,7 @@ final class ShareUpgradeAnnouncementTests: XCTestCase {
         let work = WorkGate()
 
         let running = Task { await presenter.attempt(origin: .first) { await work.result() } }
-        await settle()
+        await eventually { presenter.phase == .upgradingVisible }
         deadline.fire()
         await eventually { presenter.phase == .unavailable(.mayRejoin) }
         XCTAssertEqual(presenter.phase, .unavailable(.mayRejoin))

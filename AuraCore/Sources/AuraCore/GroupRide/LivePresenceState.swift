@@ -35,6 +35,15 @@ public struct LivePresenceState: Equatable, Sendable {
         byID[userID] = nil
     }
 
+    /// Adds roster entries for members the presence layer hasn't seen yet, leaving every known
+    /// peer untouched — a lobby roster poll must never reset a live peer's position or status
+    /// (ROH-227). Idempotent.
+    public mutating func merge(roster: [RidePeer]) {
+        for member in roster where byID[member.userID] == nil {
+            byID[member.userID] = member
+        }
+    }
+
     public mutating func tick(now: Date) {
         for (id, var peer) in byID {
             peer.status = PeerStatusReducer.status(motionState: peer.motionState,
