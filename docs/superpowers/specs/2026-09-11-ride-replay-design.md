@@ -1,6 +1,6 @@
 # Ride replay — scrub a finished ride back (design)
 
-**Date:** 2026-09-11 (v2.1: v2 was reconciled after the 3-reviewer adversarial spec gate; v1 was
+**Date:** 2026-09-11 (v2.2: D8 reconciled to the one-layer route during execution; v2.1: v2 was reconciled after the 3-reviewer adversarial spec gate; v1 was
 PO-approved in chat the same day; v2.1 folds in the rule changes the two-reviewer plan gate
 forced, each marked **(v2.1)** — the plan's reconciliation log has the findings)
 **Epic:** Summary & Map Polish — [ROH-239](https://linear.app/rohun/issue/ROH-239)
@@ -282,8 +282,7 @@ gets no replay rather than a slow one, and a zero-span fixture cannot reach the 
 TimelineView(.animation(paused: !playback.isPlaying)) { context in
     Map(viewport: $viewport) {
         routeSource                      // GeoJSONSource, MultiLineString of drawable segments
-        routeLayer(casing)               // LineLayer, casing width/color
-        routeLayer(mint)                 // LineLayer, mint width/color
+        routeLayer                       // ONE LineLayer: mint width + the SDK's line border (v2.2)
         MapViewAnnotation(coordinate: sample.coordinate) { ReplayMarkerView(sample) }
             .allowOverlapWithPuck(true)
     }
@@ -292,9 +291,15 @@ TimelineView(.animation(paused: !playback.isPlaying)) { context in
 ```
 
 where `sample = timeline.sample(at: playback.fraction(at: context.date))`. This is the
-`NavigateHUDView` structure: the route is a `GeoJSONSource` under `LineLayer`s rather than a
+`NavigateHUDView` structure: the route is a `GeoJSONSource` under a `LineLayer` rather than a
 `PolylineAnnotationGroup`, because the SDK pushes GeoJSON only when `data` differs, so a
-frame that moves only the marker re-uploads nothing. The source value is rebuilt per pass
+frame that moves only the marker re-uploads nothing. **(v2.2)** The casing is the layer's own
+`lineBorderColor`/`lineBorderWidth`, one self-bordered stroke, not two stacked layers: that is
+the recipe `StaticRouteMap` and `RoutePreviewView` already draw (the numbers `RouteStroke`
+shares), and a bordered line renders its caps and joins as one stroke where two stacked
+layers show casing seams at self-overlaps. The Task 8 review flagged the sketch's two-layer
+wording against the plan's one-layer code; the code stands. Task 12's simulator pass eyeballs
+the replay line's ends and joins against the summary map. The source value is rebuilt per pass
 from a `[[CLLocationCoordinate2D]]` held in `@State` (mapped once on appear, never from
 `ride.segments` in `body`). The marker's identity is structural, so the SDK reuses its
 hosting view frame to frame. There is no `Puck2D`, no location provider, no projection, no
