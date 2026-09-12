@@ -110,7 +110,7 @@ has run — revert if it does (memory: `linear-pr-merge-autocompletes-issues`).
 - Rail-mode ZStack needs an explicit `.frame(width:height:alignment:)` or the hit area is
   32 pt short.
 - `viewport.isIdle` is the SDK's write-back on any idle, not only a gesture (spec §10).
-- The first jitter leg into a stationary run joins it: a 60 s jitter fixture yields a 61 s hold.
+- The leg into a stationary run joins it: 60 jitter points are 59 legs, plus that leg, so the fixture yields a 60 s hold (spec §4.4).
 
 ## Suggested opening for the implementer session
 

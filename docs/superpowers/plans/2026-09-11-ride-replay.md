@@ -979,7 +979,7 @@ struct ReplayTimelineHoldTests {
         let t = Fixtures.timeline([RideSegment(points: pts)])
         #expect(t.holds.count == 1)
         #expect(t.holds[0].kind == .stopped)
-        #expect(abs(t.holds[0].seconds - 61) < 1e-9)                   // 60 jitter legs + the leg into the run
+        #expect(abs(t.holds[0].seconds - 60) < 1e-9)                   // 59 jitter legs + the leg into the run
         let inside = t.sample(at: (t.holds[0].range.lowerBound + t.holds[0].range.upperBound) / 2)
         #expect(abs(inside.coordinate.longitude - stop.longitude) < 1e-7)
         #expect(inside.seconds > 300 && inside.seconds < 362)          // in-segment holds advance the clock

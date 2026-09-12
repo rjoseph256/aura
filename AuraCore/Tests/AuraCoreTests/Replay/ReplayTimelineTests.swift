@@ -195,3 +195,151 @@ struct ReplayTimelineSamplingTests {
         #expect(end.bearing == nil && end.speedMetersPerSecond == nil)
     }
 }
+
+struct ReplayTimelineHoldTests {
+    typealias Fixtures = ReplayFixtures
+
+    private func twoSegments(gap: TimeInterval) -> ReplayTimeline {
+        Fixtures.timeline([Fixtures.straight(seconds: 600),
+                           Fixtures.straight(seconds: 600, start: 600 + gap, from: Fixtures.east(3600))])
+    }
+
+    @Test func aTenMinutePauseIsOneHoldCappedByTheShare() {
+        let t = twoSegments(gap: 600)                        // moving 1200 s → 10 s playback, rate 120
+        #expect(t.holds.count == 1)
+        let hold = t.holds[0]
+        #expect(hold.kind == .paused && hold.seconds == 600)
+        // 600 / 120 = 5 → maxHold 4 → share cap 0.25 × 10 = 2.5.
+        let width = (hold.range.upperBound - hold.range.lowerBound) * t.playbackDuration
+        #expect(abs(width - 2.5) < 1e-9)
+        #expect(abs(t.playbackDuration - 12.5) < 1e-9)
+    }
+
+    @Test func aThreeSecondGapIsNotAPause() {
+        let t = twoSegments(gap: 3)
+        #expect(t.holds.isEmpty)
+        #expect(abs(t.playbackDuration - 10) < 1e-9)
+    }
+
+    // §4.3 the sample inside a hold, and at its exclusive end, for many gap lengths
+    @Test func holdRangesAreHalfOpenForEveryGap() {
+        for gap in stride(from: 60.0, through: 1200, by: 10) {
+            let t = twoSegments(gap: gap)
+            let hold = t.holds[0]
+            for f in [hold.range.lowerBound, (hold.range.lowerBound + hold.range.upperBound) / 2] {
+                let s = t.sample(at: f)
+                #expect(s.phase == .hold(.paused, seconds: gap), "gap \(gap) at \(f)")
+                #expect(abs(s.coordinate.longitude - Fixtures.east(3600).longitude) < 1e-9)
+                #expect(s.speedMetersPerSecond == nil && s.bearing == nil)
+                #expect(abs(s.distanceMeters - 3600) < 0.01)
+                #expect(abs(s.seconds - 600) < 1e-9)
+            }
+            let after = t.sample(at: hold.range.upperBound)
+            #expect(after.phase == .moving, "gap \(gap): hold's exclusive end is inside it")
+        }
+    }
+
+    @Test func noFractionOutsideAHoldRangeIsAHold() {
+        let t = twoSegments(gap: 600)
+        let hold = t.holds[0]
+        for k in 0...500 {
+            let f = Double(k) / 500
+            let isHold: Bool
+            if case .hold = t.sample(at: f).phase { isHold = true } else { isHold = false }
+            #expect(isHold == hold.range.contains(f), "fraction \(f)")
+        }
+    }
+
+    // §4.4 stationary runs and lost signal
+    @Test func sixtySecondsOfJitterIsOneStoppedHold() {
+        var pts = Fixtures.straight(seconds: 300).points
+        let stop = pts[300].coordinate
+        pts.append(contentsOf: Fixtures.jitter(seconds: 60, at: stop, start: 301))
+        pts.append(contentsOf: Fixtures.straight(seconds: 300, start: 361, from: stop).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        #expect(t.holds.count == 1)
+        #expect(t.holds[0].kind == .stopped)
+        #expect(abs(t.holds[0].seconds - 60) < 1e-9)                   // 59 jitter legs + the leg into the run
+        let inside = t.sample(at: (t.holds[0].range.lowerBound + t.holds[0].range.upperBound) / 2)
+        #expect(abs(inside.coordinate.longitude - stop.longitude) < 1e-7)
+        #expect(inside.seconds > 300 && inside.seconds < 362)          // in-segment holds advance the clock
+    }
+
+    @Test func thirtySecondsOfJitterIsNoHold() {
+        var pts = Fixtures.straight(seconds: 300).points
+        let stop = pts[300].coordinate
+        pts.append(contentsOf: Fixtures.jitter(seconds: 30, at: stop, start: 301))
+        pts.append(contentsOf: Fixtures.straight(seconds: 300, start: 331, from: stop).points.dropFirst())
+        #expect(Fixtures.timeline([RideSegment(points: pts)]).holds.isEmpty)
+    }
+
+    @Test func twoRunsSeparatedByAMovingLegAreTwoHolds() {
+        var pts = Fixtures.straight(seconds: 100).points
+        let a = pts[100].coordinate
+        pts.append(contentsOf: Fixtures.jitter(seconds: 50, at: a, start: 101))
+        pts.append(contentsOf: Fixtures.straight(seconds: 100, start: 151, from: a).points.dropFirst())
+        let b = Fixtures.east(600, from: a)
+        pts.append(contentsOf: Fixtures.jitter(seconds: 50, at: b, start: 252))
+        pts.append(contentsOf: Fixtures.straight(seconds: 100, start: 302, from: b).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        #expect(t.holds.count == 2)
+        #expect(t.holds.allSatisfy { $0.kind == .stopped })
+    }
+
+    @Test func aLongLegIsSignalLostWhenItMovesAndStoppedWhenItDoesNot() {
+        var far = Fixtures.straight(seconds: 100).points
+        far.append(Fixtures.point(Fixtures.east(1400), at: 220))                       // 120 s, 800 m
+        far.append(contentsOf: Fixtures.straight(seconds: 100, start: 221, from: Fixtures.east(1400)).points.dropFirst())
+        let lost = Fixtures.timeline([RideSegment(points: far)])
+        #expect(lost.holds.count == 1 && lost.holds[0].kind == .signalLost)
+
+        var near = Fixtures.straight(seconds: 100).points
+        near.append(Fixtures.point(Fixtures.east(610), at: 220))                       // 120 s, 10 m
+        near.append(contentsOf: Fixtures.straight(seconds: 100, start: 221, from: Fixtures.east(610)).points.dropFirst())
+        let stopped = Fixtures.timeline([RideSegment(points: near)])
+        #expect(stopped.holds.count == 1 && stopped.holds[0].kind == .stopped)
+    }
+
+    // §4.5 the lost leg's interior is never sampled
+    @Test func aLostSignalLegIsAJumpNotAGlide() {
+        var pts = Fixtures.straight(seconds: 100).points
+        let from = pts[100].coordinate, to = Fixtures.east(1400)
+        pts.append(Fixtures.point(to, at: 220))
+        pts.append(contentsOf: Fixtures.straight(seconds: 100, start: 221, from: to).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        for k in 0...2000 {
+            let lon = t.sample(at: Double(k) / 2000).coordinate.longitude
+            let strictlyInside = lon > from.longitude + 1e-9 && lon < to.longitude - 1e-9
+            #expect(!strictlyInside, "sampled inside the lost leg at \(k)/2000")
+        }
+    }
+
+    // A zero-width leg with a real displacement is not folded into a stop.
+    @Test func aTeleportWithNoTimeBreaksAStationaryRun() {
+        var pts = Fixtures.straight(seconds: 100).points
+        let a = pts[100].coordinate
+        pts.append(contentsOf: Fixtures.jitter(seconds: 40, at: a, start: 101))
+        pts.append(Fixtures.point(Fixtures.east(300, from: a), at: 140))               // same stamp, 300 m away
+        pts.append(contentsOf: Fixtures.jitter(seconds: 40, at: Fixtures.east(300, from: a), start: 141))
+        pts.append(contentsOf: Fixtures.straight(seconds: 100, start: 181, from: Fixtures.east(300, from: a)).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        #expect(t.holds.isEmpty)                                       // two 40 s runs, neither ≥ 45 s
+    }
+
+    // §4.1 the share cap with many pauses
+    @Test func twelvePausesAreCappedAtAQuarterOfTheMovingPlayback() {
+        var segments: [RideSegment] = []
+        var start: TimeInterval = 0
+        var from = Fixtures.origin
+        for _ in 0..<13 {
+            segments.append(Fixtures.straight(seconds: 100, start: start, from: from))
+            start += 130
+            from = Fixtures.east(700, from: from)
+        }
+        let t = Fixtures.timeline(segments)
+        #expect(t.holds.count == 12)
+        let movingPlayback = 1300.0 / 120
+        let holdTotal = t.holds.reduce(0.0) { $0 + ($1.range.upperBound - $1.range.lowerBound) } * t.playbackDuration
+        #expect(abs(holdTotal - 0.25 * movingPlayback) < 1e-9)
+    }
+}
