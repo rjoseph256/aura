@@ -2116,6 +2116,14 @@ struct ReplayMap: View {
     @Environment(SettingsStore.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewport: Viewport = .styleDefault
+    /// True once a real (non-programmatic) camera change has arrived — the `HomeLiveMap` idiom.
+    /// MapboxMaps 11.28 never writes `viewport` back to `.idle` after a gesture or the initial
+    /// fit, so `viewport.isIdle` alone never flips and the recenter control never showed. Written
+    /// once per gesture, never per frame.
+    @State private var movedOffFit = false
+    /// True while OUR animation (the initial fit or recenter) drives the camera, so its
+    /// `onCameraChanged` callback isn't counted as a rider gesture.
+    @State private var programmatic = false
 
     private static let sourceID = "aura-replay-route"
 
@@ -2139,6 +2147,12 @@ struct ReplayMap: View {
                 }
                 .allowOverlapWithPuck(true)
             }
+            // Map-specific modifier (above) returns `Self` (still `Map`); `.onCameraChanged` must
+            // stay in that chain — a generic View modifier below (e.g. `.overlay`) would
+            // type-erase to `some View` and drop the Map-only API.
+            .onCameraChanged { _ in
+                if !programmatic, !movedOffFit { movedOffFit = true }
+            }
             .gestureOptions(gestureOptions)
             .ornamentOptions(ornamentOptions)
             .mapStyle(settings.mapStyle.mapboxStyle)
@@ -2150,16 +2164,17 @@ struct ReplayMap: View {
                         .padding(.horizontal, AuraTheme.Spacing.md)
                         .padding(.vertical, AuraTheme.Spacing.sm)
                         .mapChip(Capsule())
-                        .padding(AuraTheme.Spacing.md)
+                        .padding(.leading, AuraTheme.Spacing.md)
+                        .padding(.bottom, 48)
                         .accessibilityHidden(true)
                 }
             }
         }
         .overlay(alignment: .topTrailing) {
-            // `viewport.isIdle` is the SDK's write-back when the viewport manager goes idle,
-            // which a rider gesture causes; recenter's `.overview` clears it. A failed initial
-            // fit would also show it (spec §10) — accepted.
-            if viewport.isIdle {
+            // Shown once `movedOffFit` sees a real (non-programmatic) camera change — MapboxMaps
+            // 11.28 never writes `viewport` back to `.idle` after a gesture, so `viewport.isIdle`
+            // is kept only as a fallback (belt-and-braces).
+            if movedOffFit || viewport.isIdle {
                 Button(action: recenter) { Image(systemName: "location.fill") }
                     .buttonStyle(.hudControl(active: true))
                     .accessibilityLabel("Recenter map")
@@ -2191,21 +2206,34 @@ struct ReplayMap: View {
 
     private var overview: Viewport {
         .overview(geometry: LineString(lines.flatMap { $0 }),
-                  geometryPadding: .init(top: 24, leading: 24, bottom: 24, trailing: 24),
+                  geometryPadding: .init(top: 24, leading: 24, bottom: 56, trailing: 24),
                   maxZoom: 16)
     }
 
     private func fit() {
         guard lines.flatMap({ $0 }).count > 1 else { return }
-        viewport = overview
+        programmatic = true
+        // Zero-duration `.easeOut` (not a plain assignment) so this still lands through the
+        // viewport-animation completion, which clears `programmatic`. 0.01, not 0: the SDK
+        // source did not confirm a 0-duration animation invokes its completion.
+        withViewportAnimation(.easeOut(duration: 0.01)) {
+            viewport = overview
+        } completion: { _ in
+            programmatic = false
+        }
     }
 
-    /// Snaps under Reduce Motion, flies otherwise — `RideHUDView.recenter()`'s rule.
+    /// Reduce Motion snaps (zero-duration animation), otherwise flies — `RideHUDView.recenter()`'s
+    /// rule. Both paths go through `withViewportAnimation` so `programmatic`/`movedOffFit` are
+    /// only ever cleared from the completion.
     private func recenter() {
-        if reduceMotion {
+        programmatic = true
+        let duration = reduceMotion ? 0.01 : 0.4
+        withViewportAnimation(.easeOut(duration: duration)) {
             viewport = overview
-        } else {
-            withViewportAnimation(.easeOut(duration: 0.4)) { viewport = overview }
+        } completion: { _ in
+            programmatic = false
+            movedOffFit = false
         }
     }
 }
@@ -2457,7 +2485,7 @@ import SwiftUI
 import AuraKit
 
 /// The three readouts (spec D5): speed as the hero, distance and time with their totals. One
-/// combined VoiceOver element. Wraps to two lines at accessibility sizes.
+/// combined VoiceOver element. Stacks all three vertically at accessibility sizes **(v2.3)**.
 struct ReplayInstrumentRow: View {
     let readout: ReplayReadout
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -2466,16 +2494,24 @@ struct ReplayInstrumentRow: View {
     var body: some View {
         Group {
             if typeSize.isAccessibilitySize {
+                // Speed (hero), then distance so-far/total, then time so-far/total — each its
+                // own row, leading-aligned — rather than distance+time sharing a second row,
+                // which truncated the time value ("0:00 / 7:…") at AX3.
                 VStack(alignment: .leading, spacing: AuraTheme.Spacing.md) {
                     hero
-                    HStack(spacing: AuraTheme.Spacing.xxl) { distance; time }
+                    distance
+                    time
                 }
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.xxl) {
                     hero
                     Spacer(minLength: 0)
                     distance
+                    // Higher layout priority so distance (not time) is squeezed first when the
+                    // row is tight — a 3-hour ride's "0:00 / 3:01:56" is the value most likely to
+                    // wrap otherwise.
                     time
+                        .layoutPriority(1)
                 }
             }
         }
@@ -2496,8 +2532,19 @@ struct ReplayInstrumentRow: View {
         }
     }
 
-    private var distance: some View { StatPair(value: readout.distanceText, label: readout.distanceUnit.uppercased()) }
-    private var time: some View { StatPair(value: readout.timeText, label: "TIME") }
+    // `.lineLimit(1).minimumScaleFactor(0.7)` so a long value ("0:00 / 3:01:56") shrinks instead
+    // of wrapping or truncating; it reaches both Texts inside `StatPair`, but the label is
+    // already a short single word so it never needs the floor.
+    private var distance: some View {
+        StatPair(value: readout.distanceText, label: readout.distanceUnit.uppercased())
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+    }
+    private var time: some View {
+        StatPair(value: readout.timeText, label: "TIME")
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+    }
 }
 ```
 
@@ -2713,7 +2760,8 @@ private struct ReplayEntryModifier: ViewModifier {
                             .padding(.vertical, AuraTheme.Spacing.sm)
                     }
                     .mapChip(Capsule())
-                    .padding(AuraTheme.Spacing.md)
+                    .padding(.trailing, AuraTheme.Spacing.md)
+                    .padding(.bottom, 48)
                     .accessibilityLabel("Replay this ride")
                     .accessibilityIdentifier(RideTestID.replayEntry)
                 }

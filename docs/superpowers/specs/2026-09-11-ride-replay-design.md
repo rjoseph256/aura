@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-11 (v2.2: D8 reconciled to the one-layer route during execution; v2.1: v2 was reconciled after the 3-reviewer adversarial spec gate; v1 was
 PO-approved in chat the same day; v2.1 folds in the rule changes the two-reviewer plan gate
-forced, each marked **(v2.1)** — the plan's reconciliation log has the findings)
+forced, each marked **(v2.1)** — the plan's reconciliation log has the findings; v2.3: recenter
+detection, capsule/pill/fit insets, and the AX-size row stack corrected from the simulator pass)
 **Epic:** Summary & Map Polish — [ROH-239](https://linear.app/rohun/issue/ROH-239)
 **Verification:** Tier 1, with one queued Verification issue for device smoothness and memory
 on a long ride (§9)
@@ -257,11 +258,11 @@ summary file is not touched in this slice.
   Type. Camera fits `.overview` across drawable segments once on appear (padding 24,
   maxZoom 16). Pan and pinch enabled; `GestureOptions` with `rotateEnabled = false` and
   `pitchEnabled = false`, applied in the `Map` modifier chain before any generic modifier
-  (the repo's Map-modifiers-first rule). One recenter-to-fit control top-trailing, shown when
-  `viewport.isIdle` **(v2)**: the SDK writes the viewport binding to `.idle` when the rider
-  moves the camera, and setting `viewport = .overview(...)` on recenter clears it, so no
-  camera callback and no latch exist. Snaps under Reduce Motion, `withViewportAnimation`
-  otherwise.
+  (the repo's Map-modifiers-first rule). One recenter-to-fit control top-trailing, **(v2.3)**
+  shown when a camera change arrives through `.onCameraChanged` while no programmatic fit or
+  recenter is in flight (`movedOffFit`, the `HomeLiveMap` idiom); the simulator pass showed
+  MapboxMaps 11.28 never writes `.idle` back to the binding, so `viewport.isIdle` is kept only
+  as a fallback. Snaps under Reduce Motion, `withViewportAnimation` otherwise.
 - Status capsule over the map, bottom-leading, during a hold (§D3).
 - Instrument row (D5), band (D6), play/pause.
 
@@ -496,7 +497,7 @@ Each is a test that can fail. Fixtures are synthetic and named for what they exe
   combined element whose label is `ReplayReadout.accessibilityLabel` (spoken once; the band's
   value is the short form, not this string).
 - Dismissal while playing: the `TimelineView` dies with the view; there is nothing else.
-- Dynamic Type: the row wraps to two lines at accessibility sizes (speed alone on the first);
+- Dynamic Type: the row stacks its three readouts vertically at accessibility sizes **(v2.3)**;
   the band height is fixed; the title truncates to two lines; the map takes what is left
   (D7).
 
@@ -587,4 +588,5 @@ Tier 1, plus one queued Verification issue.
 - **`viewport.isIdle` means "the viewport manager went idle for any reason"** **(v2.1)**, not
   only a rider gesture. A failed initial fit (empty geometry, zero-size first layout) would
   show the recenter control over an unframed map. Low probability, accepted; the simulator
-  pass looks for it at fraction 0.
+  pass looks for it at fraction 0. **Superseded in v2.3**: the control now keys off
+  `movedOffFit`, not `viewport.isIdle`, so this risk no longer applies to the primary path.

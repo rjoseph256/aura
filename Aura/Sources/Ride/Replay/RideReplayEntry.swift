@@ -33,7 +33,8 @@ private struct ReplayEntryModifier: ViewModifier {
                             .padding(.vertical, AuraTheme.Spacing.sm)
                     }
                     .mapChip(Capsule())
-                    .padding(AuraTheme.Spacing.md)
+                    .padding(.trailing, AuraTheme.Spacing.md)
+                    .padding(.bottom, 48)
                     .accessibilityLabel("Replay this ride")
                     .accessibilityIdentifier(RideTestID.replayEntry)
                 }
