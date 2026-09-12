@@ -1463,6 +1463,17 @@ struct ReplayPlaybackTests {
         p.play(now: t0)
         #expect(p.fraction(at: t0 + 1).isFinite)
     }
+
+    @Test func playWhileScrubbingIsIgnored() {
+        let p = ReplayPlayback(playbackDuration: 20)
+        p.play(now: t0); p.beginScrub(now: t0 + 2); p.scrub(to: 0.4)
+        p.play(now: t0 + 3)                                   // second finger on Play mid-drag
+        #expect(p.isPlaying == false && p.isScrubbing)
+        #expect(abs(p.fraction(at: t0 + 4) - 0.4) < 1e-9)     // still parked where the drag left it
+        p.endScrub(now: t0 + 5)                               // the drag's own resume rule still applies
+        #expect(p.isPlaying && p.isScrubbing == false)
+        #expect(abs(p.fraction(at: t0 + 7) - 0.5) < 1e-9)     // 0.4 + 2 s / 20 s
+    }
 }
 ```
 
@@ -1503,7 +1514,9 @@ public final class ReplayPlayback {
     public func hasEnded(at now: Date) -> Bool { fraction(at: now) >= 1 }
 
     /// D4: play at the end restarts from 0.
+    /// A scrub owns playback until it ends (spec D4); Play mid-drag is a no-op.
     public func play(now: Date) {
+        guard !isScrubbing else { return }
         if anchorFraction >= 1 { anchorFraction = 0 }
         anchorDate = now
         isPlaying = true

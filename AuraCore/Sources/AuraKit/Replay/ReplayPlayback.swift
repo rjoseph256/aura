@@ -30,7 +30,9 @@ public final class ReplayPlayback {
     public func hasEnded(at now: Date) -> Bool { fraction(at: now) >= 1 }
 
     /// D4: play at the end restarts from 0.
+    /// A scrub owns playback until it ends (spec D4); Play mid-drag is a no-op.
     public func play(now: Date) {
+        guard !isScrubbing else { return }
         if anchorFraction >= 1 { anchorFraction = 0 }
         anchorDate = now
         isPlaying = true
