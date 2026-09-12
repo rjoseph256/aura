@@ -40,6 +40,12 @@ public enum RideTestID {
     /// up). The two disagree on the History path, where the summary is itself a sheet — which was
     /// the whole bug, and is why the shipping predicate keys on the activity sheet rather than depth.
     public static let summaryPresentationProbe = "summary.presentation.probe"
+    /// The summary map's Replay pill (ROH-239).
+    public static let replayEntry = "summary.replay"
+    /// The replay cover's play/pause control. One identifier for both states.
+    public static let replayPlay = "replay.play"
+    /// The replay scrub band, an adjustable element whose value is the short readout.
+    public static let replayBand = "replay.band"
 }
 
 /// ROH-178 diagnostic probe line. `depth` is how many view controllers deep the presentation

@@ -59,6 +59,13 @@ public struct SimulatedRideConfig: Equatable, Sendable {
         arguments.contains("-skipLaunchOrphanSweep") || suppressesOrphanSweep(arguments: arguments)
     }
 
+    /// "-auraSeedLongRide" → DEBUG builds insert `SyntheticRide.threeHour` into the store at
+    /// launch, so the replay's cap regime (ROH-239 spec §9) is reachable in a simulator. Honored
+    /// ONLY with an ephemeral store: the persistent store mirrors to the developer's real iCloud.
+    public static func seedsLongRide(arguments: [String]) -> Bool {
+        arguments.contains("-auraSeedLongRide")
+    }
+
     /// Process-wide values, parsed once. MainActor confines the lazy statics under Swift 6.
     @MainActor public static let current = parse(arguments: ProcessInfo.processInfo.arguments)
     @MainActor public static let currentForcesInMemoryStore =
@@ -67,4 +74,5 @@ public struct SimulatedRideConfig: Equatable, Sendable {
         suppressesOrphanSweep(arguments: ProcessInfo.processInfo.arguments)
     @MainActor public static let currentSuppressesLaunchOrphanSweep =
         suppressesLaunchOrphanSweep(arguments: ProcessInfo.processInfo.arguments)
+    @MainActor public static let currentSeedsLongRide = seedsLongRide(arguments: ProcessInfo.processInfo.arguments)
 }

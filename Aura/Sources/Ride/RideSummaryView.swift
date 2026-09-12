@@ -73,7 +73,7 @@ struct RideSummaryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: AuraTheme.Spacing.xl) {
                 if !segs.isEmpty {
-                    StaticRouteMap(segments: segs)
+                    StaticRouteMap(segments: segs).replayEntry(ride: ride)
                         .frame(height: 240)
                         .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous))
                         .overlay(

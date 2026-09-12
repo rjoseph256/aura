@@ -66,4 +66,9 @@ struct SimulatedRideConfigTests {
         #expect(!SimulatedRideConfig.suppressesOrphanSweep(arguments: ["App", "-skipLaunchOrphanSweep"]))
         #expect(!SimulatedRideConfig.suppressesLaunchOrphanSweep(arguments: ["App"]))
     }
+
+    @Test func seedLongRideFlag() {
+        #expect(SimulatedRideConfig.seedsLongRide(arguments: ["-auraSeedLongRide"]))
+        #expect(SimulatedRideConfig.seedsLongRide(arguments: []) == false)
+    }
 }

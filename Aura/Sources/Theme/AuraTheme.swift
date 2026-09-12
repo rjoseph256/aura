@@ -142,3 +142,20 @@ enum AuraTheme {
         }
     }
 }
+
+extension AuraTheme {
+    /// The cased route stroke the Mapbox line surfaces share (summary, route preview, replay).
+    /// Mapbox draws `lineBorderWidth` INSIDE `lineWidth`: 8 − 2×1.5 = 5 pt of visible mint.
+    /// The share card's Core Graphics stroke (`ShareCardLayout`, AuraKit) expresses the same 5 pt
+    /// core as an 8 pt casing under a 5 pt line; the two are not one constant because they are
+    /// different drawing models. Keep `width − 2 × casingWidth == ShareCardLayout.routeStrokeWidth`.
+    enum RouteStroke {
+        static let width: Double = 8
+        static let casingWidth: Double = 1.5
+    }
+
+    /// The replay band's hold strip. Brighter than a hairline on purpose: it is the band's
+    /// headline signal for a 45–119 s stop, and it draws ABOVE the silhouette's 18% fill.
+    /// PO eyeball owed on the simulator pass (spec D6).
+    static let replayHoldStrip = Color.white.opacity(0.28)
+}

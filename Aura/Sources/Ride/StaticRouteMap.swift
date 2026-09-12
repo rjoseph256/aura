@@ -35,9 +35,9 @@ struct StaticRouteMap: View {
                 PolylineAnnotation(lineCoordinates: item.element)
                     .lineColor(StyleColor(AuraTheme.routeUIColor))
                     // 8 − 2×1.5 = 5pt of mint. The border is INSET; see RoutePreviewView.
-                    .lineWidth(8)
+                    .lineWidth(AuraTheme.RouteStroke.width)
                     .lineBorderColor(StyleColor(AuraTheme.routeCasingUIColor))
-                    .lineBorderWidth(1.5)
+                    .lineBorderWidth(AuraTheme.RouteStroke.casingWidth)
             }
             // Caps/joins are layer-level in MapboxMaps 11, so they live on the group. Round
             // caps also blunt the two ends a pause split exposes.

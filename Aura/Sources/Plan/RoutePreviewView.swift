@@ -359,9 +359,9 @@ private extension RoutePreviewView {
                             }
                         )
                         .lineColor(StyleColor(AuraTheme.routeUIColor))
-                        .lineWidth(8)
+                        .lineWidth(AuraTheme.RouteStroke.width)
                         .lineBorderColor(StyleColor(AuraTheme.routeCasingUIColor))
-                        .lineBorderWidth(1.5)
+                        .lineBorderWidth(AuraTheme.RouteStroke.casingWidth)
                     }
                     // Caps/joins are layer-level in MapboxMaps 11, so they live on the group.
                     .lineCap(.round)
