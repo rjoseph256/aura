@@ -59,6 +59,7 @@ struct ReplayScrubBand: View {
         .accessibilityIdentifier(RideTestID.replayBand)
         .sensoryFeedback(.selection, trigger: holdUnderThumb) { _, new in dragMoved && new != nil }
         .onChange(of: fraction) { _, new in
+            guard playback.isScrubbing else { return }
             let index = timeline.holds.firstIndex { $0.range.contains(new) }
             if index != holdUnderThumb { holdUnderThumb = index }
         }
@@ -84,7 +85,6 @@ struct ReplayScrubBand: View {
             Capsule().fill(AuraTheme.accent).frame(width: max(head - start, 6), height: 6)
         }
         .offset(x: start, y: height / 2 - 3)
-        .frame(width: g.width, height: height, alignment: .topLeading)
     }
 
     private func playhead(_ g: ReplayBandGeometry, height: CGFloat) -> some View {
@@ -145,6 +145,7 @@ struct ReplayScrubBand: View {
                     playback.tap(to: g.fraction(atX: value.location.x), now: Date())
                 }
                 dragMoved = false
+                holdUnderThumb = nil
             }
     }
 
