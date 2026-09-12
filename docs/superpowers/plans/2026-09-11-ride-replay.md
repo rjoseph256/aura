@@ -1092,11 +1092,11 @@ struct ReplayTimelineSpeedProfileEventTests {
 
     // §4.6 speed
     @Test func quarterCircleReadsTheArcSpeedNotTheChord() {
-        let t = Fixtures.timeline([Fixtures.quarterCircle(radius: 500, speed: 6)])
+        let t = Fixtures.timeline([Fixtures.quarterCircle(radius: 100, speed: 6)])
         for k in 5...19 {
             let s = t.sample(at: Double(k) / 20)
             #expect(s.seconds > t.speedWindowSeconds)
-            #expect(abs((s.speedMetersPerSecond ?? 0) - 6) < 0.05, "at \(k)/20")
+            #expect(abs((s.speedMetersPerSecond ?? 0) - 6) < 0.005, "at \(k)/20")
         }
     }
 
