@@ -500,8 +500,8 @@ Each is a test that can fail. Fixtures are synthetic and named for what they exe
   value is the short form, not this string).
 - Dismissal while playing: the `TimelineView` dies with the view; there is nothing else.
 - Dynamic Type: the row stacks its three readouts vertically at accessibility sizes **(v2.3)**;
-  the band height is fixed; the title truncates to two lines; the map takes what is left
-  (D7).
+  the band height is fixed; the title truncates to two lines (one at accessibility sizes, where
+  the stacked row takes the height) **(v2.3)**; the map takes what is left (D7).
 
 ## 6. Files
 

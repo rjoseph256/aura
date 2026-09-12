@@ -2592,6 +2592,7 @@ struct RideReplayView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(SettingsStore.self) private var settings
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var playback: ReplayPlayback
     @State private var lastAnnouncedHold: ReplayPhase?
 
@@ -2627,10 +2628,15 @@ struct RideReplayView: View {
                 Text(ride.startedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.headline)
                     .foregroundStyle(AuraTheme.textPrimary)
-                    .lineLimit(2)
-                    // Without this, at accessibility sizes the second line `.lineLimit(2)` should
-                    // allow was measured away before layout and the title truncated to one line
-                    // with an ellipsis instead of actually wrapping.
+                    // One line at accessibility sizes: the stacked instrument row (spec D5) needs
+                    // that vertical budget, and the cover's `VStack` has no room to spare once the
+                    // title also grows to two lines — that pushed the top bar up under the status
+                    // bar with the map already at its 200 pt floor. Two lines at standard sizes,
+                    // same as before.
+                    .lineLimit(typeSize.isAccessibilitySize ? 1 : 2)
+                    // Without this, at standard sizes the second line `.lineLimit(2)` allows was
+                    // measured away before layout and the title truncated to one line with an
+                    // ellipsis instead of actually wrapping.
                     .fixedSize(horizontal: false, vertical: true)
                 Text(ReplayReadout.subtitle(for: ride))
                     .font(.subheadline)
