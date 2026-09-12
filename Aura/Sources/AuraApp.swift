@@ -20,6 +20,12 @@ struct AuraApp: App {
     init() {
         AuraApp.configureMapbox()
         let store = AuraApp.makeRideStore()
+        #if DEBUG
+        // Never into the persistent store: it mirrors to iCloud (RideStore.persistent()).
+        if SimulatedRideConfig.currentSeedsLongRide, store.isEphemeral {
+            try? store.save(SyntheticRide.threeHour(startingAt: Date().addingTimeInterval(-4 * 3600)))
+        }
+        #endif
         _rideStore = State(initialValue: store)
         _savedPlaces = State(initialValue: SavedPlacesStore(container: store.container))
 
