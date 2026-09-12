@@ -3,7 +3,9 @@
 **Date:** 2026-09-11 (v2.2: D8 reconciled to the one-layer route during execution; v2.1: v2 was reconciled after the 3-reviewer adversarial spec gate; v1 was
 PO-approved in chat the same day; v2.1 folds in the rule changes the two-reviewer plan gate
 forced, each marked **(v2.1)** — the plan's reconciliation log has the findings; v2.3: recenter
-detection, capsule/pill/fit insets, and the AX-size row stack corrected from the simulator pass)
+detection, capsule/pill/fit insets, and the AX-size row stack corrected from the simulator pass;
+v2.4: post-final-review fixes — VoiceOver hold value, growing post-hold window, AX-size map
+floor, cold-load guard)
 **Epic:** Summary & Map Polish — [ROH-239](https://linear.app/rohun/issue/ROH-239)
 **Verification:** Tier 1, with one queued Verification issue for device smoothness and memory
 on a long ride (§9)
@@ -74,7 +76,7 @@ rect and fades in with it. The modifier lives in a new file, `RideReplayEntry.sw
   on the ink capsule the map chips use, accessibility label "Replay this ride". **(v2)** The
   map itself is not tappable. ROH-84 taught riders that tapping a map makes it live; the
   summary map stays inert, and the button is the whole affordance.
-- Presents `RideReplayView(ride:timeline:band:)` in a `.fullScreenCover`. There is no other
+- Presents `RideReplayView(ride:timeline:band:lines:)` in a `.fullScreenCover`. There is no other
   `fullScreenCover` in the app today; it presents over the History sheet and over the pushed
   ride-end route, and `SettingsStore` reaches it because it is injected at the app root.
 
@@ -185,7 +187,9 @@ Three readouts in an instrument row between the map and the band:
    (12 s at 120×; exposed as `speedWindowSeconds`). It trails rather than centers so the
    number never anticipates the marker. **(v2.1)** The window never reaches back across an
    in-segment hold: a lost-signal leg's 900 m over 120 s is not a speed, and D3 forbids
-   treating it as one. For the first `w` seconds after a hold the readout is "—".
+   treating it as one. **(v2.4)** After a hold the window grows from the hold's end: one
+   post-hold leg reads that leg's speed, and the full trailing mean arrives after `w`; it
+   reads "—" only while fewer than two points sit past the hold.
    It never reads `TrackPoint.speedMetersPerSecond`, so GPX and simulated rides degrade
    identically. It is nil, rendered "—", inside a hold, at `.ended`, at fraction 0, or when
    the window holds fewer than two points with a positive span. It is smoother than the
@@ -255,16 +259,18 @@ summary file is not touched in this slice.
   `ride.isUnfinished`.
 - Map: the remainder of the height after the controls take theirs **(v2)**; the instrument
   row, band, and button have a fixed floor so they are never what clips at large Dynamic
-  Type. Camera fits `.overview` across drawable segments once on appear (padding 24,
-  maxZoom 16). Pan and pinch enabled; `GestureOptions` with `rotateEnabled = false` and
-  `pitchEnabled = false`, applied in the `Map` modifier chain before any generic modifier
-  (the repo's Map-modifiers-first rule). One recenter-to-fit control top-trailing, **(v2.3)**
-  shown when a camera change arrives through `.onCameraChanged` while no programmatic fit or
-  recenter is in flight (`movedOffFit`, the `HomeLiveMap` idiom), with the programmatic window
-  closed on the map's next `.onMapIdle`; the simulator pass showed MapboxMaps 11.28 never
-  writes `.idle` back to the binding, so `viewport.isIdle` is kept only as a fallback, and a
-  real camera change also writes the binding to `.idle`, so recenter is always a state change.
-  Snaps under Reduce Motion, `withViewportAnimation` otherwise.
+  Type. Camera fits `.overview` across drawable segments once on appear (padding 24 on top,
+  leading, and trailing, 56 on the bottom so a route that starts at the frame's corner clears
+  the attribution row; maxZoom 16). Pan and pinch enabled; `GestureOptions` with
+  `rotateEnabled = false` and `pitchEnabled = false`, applied in the `Map` modifier chain
+  before any generic modifier (the repo's Map-modifiers-first rule). One recenter-to-fit
+  control top-trailing, **(v2.3)** shown when a camera change arrives through
+  `.onCameraChanged` while no programmatic fit or recenter is in flight (`movedOffFit`, the
+  `HomeLiveMap` idiom), with the programmatic window closed on the map's next `.onMapIdle`;
+  the binding did not go idle on the simulator pass (the SDK's touch-to-idle path is present
+  but was not observed), and the map no longer depends on it, so `viewport.isIdle` is kept
+  only as a fallback, and a real camera change also writes the binding to `.idle`, so recenter
+  is always a state change. Snaps under Reduce Motion, `withViewportAnimation` otherwise.
 - Status capsule over the map, bottom-leading, during a hold (§D3).
 - Instrument row (D5), band (D6), play/pause.
 
@@ -353,11 +359,11 @@ skip a hold.
   rail, built once), and `ReplayPlayback` **(v2)**: `@MainActor @Observable final class`,
   the `ShareUpgradePresenter` arrangement, holding `anchorFraction`, `anchorDate`,
   `isPlaying`, `resumeAfterScrub`, with event methods `play(now:)`, `pause(now:)`,
-  `beginScrub(now:)`, `scrub(to:)`, `endScrub(now:)`, `jump(to:)`, `settle(now:)`, and the
+  `beginScrub(now:)`, `scrub(to:)`, `endScrub(now:)`, `jump(to:)`, `settle()`, and the
   pure read `fraction(at now: Date) -> Double` =
   `isPlaying ? min(1, anchorFraction + (now − anchorDate) / playbackDuration) : anchorFraction`.
   **No write happens in a view body.** Reaching 1 is observed by the view as a derived Bool
-  and reported through `.onChange` → `settle(now:)`, which parks the state at 1, not playing.
+  and reported through `.onChange` → `settle()`, which parks the state at 1, not playing.
   There is no `Task` and no `Timer`; the `TimelineView` is the only clock and dies with the
   view.
 - **App target (dumb projection):** `RideReplayView`, `ReplayMap`, `ReplayMarkerView`,
@@ -477,7 +483,7 @@ Each is a test that can fail. Fixtures are synthetic and named for what they exe
 14. **Readout strings (D5/D7):** "—" for nil speed, "2.4 / 12.3" distance, "14:08 / 1:02:11"
     time, "Stopped · 10 min", "Paused · 45 s", "No signal · 3 min", the elevation tag with
     unit, the three-valued subtitle, and the VoiceOver value ("4.2 miles, 22 minutes") and
-    label.
+    label. **(v2.4)** The VoiceOver value leads with the hold while in one.
 15. **Band geometry (D6) (v2.1):** `x(0)`/`x(1)` are inset by half the thumb plus the stroke;
     `fraction(atX:)` inverts `x` and clamps; a degenerate width divides by nothing; the thumb's
     y follows the silhouette and centers on the rail; strips have a 12 pt minimum; captions
@@ -492,7 +498,8 @@ Each is a test that can fail. Fixtures are synthetic and named for what they exe
   `RideTestID.replayPlay`.
 - Band: `accessibilityAdjustableAction` moves the fraction to the next / previous entry of
   `timeline.events` **(v2)**, so a hold is always reachable in a handful of swipes and never
-  skipped; `accessibilityValue` is the short readout value, the label is "Ride scrubber".
+  skipped; `accessibilityValue` is the short readout value — **(v2.4)** the VoiceOver value
+  leads with the hold while in one — the label is "Ride scrubber".
   Identifier `RideTestID.replayBand`. Entering a hold during play posts an accessibility
   announcement with the hold label, the only channel a VoiceOver rider has for it.
 - Marker, playhead, and silhouette are `accessibilityHidden`; the instrument row is one
@@ -545,8 +552,8 @@ Mint `#7CF0A8` on near-black. The accent is spent on: the play/pause fill, the p
 thumb, the silhouette stroke and its 18% fill (the summary band's values), the rail's
 traversed fill, and the Replay pill. The route line is the cased mint polyline the summary
 draws, from the shared constants. Numerals use the existing metric typography; units use
-`AuraTheme.Typography.unit`. No gradients. Hold strips are `AuraTheme.hairline` fill; the
-status capsule is the ink chip surface the map controls use.
+`AuraTheme.Typography.unit`. No gradients. Hold strips are `AuraTheme.replayHoldStrip` (white
+at 0.28) above the silhouette; the status capsule is the ink chip surface the map controls use.
 
 ## 8. Out of scope, named
 
@@ -564,8 +571,11 @@ Tier 1, plus one queued Verification issue.
 - Package suites in §4 green in the gate.
 - Simulator, two rides: the golden-ride fixture (445 s moving, floor regime, ~44×) and the
   paused fixture (290 s, one pause). Both land on the floor, so they exercise the floor branch
-  and the hold path but not the cap. For the cap regime, `-auraSeedLongRide` together with
-  `-auraInMemoryRideStore` seeds `SyntheticRide.threeHour` into the in-memory store; the seed
+  and the hold path but not the cap. The pause-gap capsule is taken from the seeded ride's real
+  601 s `.paused` hold: a manual pause in the simulator records an empty second segment (the
+  paused fixture's designed replay silence), so it cannot show one. For the cap regime,
+  `-auraSeedLongRide` together with `-auraInMemoryRideStore` seeds `SyntheticRide.threeHour`
+  into the in-memory store; the seed
   refuses a persistent store **(v2.1)**. The pass also opens the cover, waits 30 s, taps
   Play, and confirms playback starts at 0. Screenshots: replay at fraction 0 with the marker on the
   first vertex, mid-ride moving with the triangle on the line, mid-hold (capsule, disc,
@@ -592,3 +602,4 @@ Tier 1, plus one queued Verification issue.
   show the recenter control over an unframed map. Low probability, accepted; the simulator
   pass looks for it at fraction 0. **Superseded in v2.3**: the control now keys off
   `movedOffFit`, not `viewport.isIdle`, so this risk no longer applies to the primary path.
+  **(v2.4)** The programmatic window now also waits for the fit's camera to arrive.

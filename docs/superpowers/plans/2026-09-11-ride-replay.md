@@ -1124,20 +1124,38 @@ struct ReplayTimelineSpeedProfileEventTests {
         #expect(abs((t.sample(at: 26 / t.totalSeconds).speedMetersPerSecond ?? 0) - 4.5) < 0.05)
     }
 
-    /// D5.1: the window never reaches back across a hold, so a lost leg's 900 m / 120 s never
-    /// fabricates a speed for the seconds after it.
+    /// D5.1: never reaches back across a hold. Barrier-irrelevant fixture: the lost leg's own
+    /// time gap makes the unclamped search skip it anyway — see the mutation-proven test below.
     @Test func speedAfterALostLegIgnoresTheGap() {
         var pts = Fixtures.straight(seconds: 200).points
         let to = Fixtures.east(2100)
         pts.append(Fixtures.point(to, at: 320))                                        // 120 s, 900 m
         pts.append(contentsOf: Fixtures.straight(seconds: 200, start: 321, from: to).points.dropFirst())
         let t = Fixtures.timeline([RideSegment(points: pts)])
-        let hold = t.holds[0]
-        let justAfter = t.sample(at: hold.range.upperBound + 0.002)
+        var f = t.holds[0].range.upperBound   // first non-nil read: one real leg past the hold —
+        while t.sample(at: f).speedMetersPerSecond == nil, f < 1 { f += 1e-6 }   // 3 m/s, that leg's own
+        let justAfter = t.sample(at: f)                                         // speed, not the ride's 6
         #expect(justAfter.seconds > 320 && justAfter.seconds < 326)
-        #expect(justAfter.speedMetersPerSecond == nil || abs((justAfter.speedMetersPerSecond ?? 0) - 6) < 0.1)
-        let later = t.sample(at: (hold.range.upperBound + 1) / 2)
+        #expect(abs((justAfter.speedMetersPerSecond ?? -1) - 3) < 0.1)
+        let later = t.sample(at: (t.holds[0].range.upperBound + 1) / 2)
         #expect(abs((later.speedMetersPerSecond ?? 0) - 6) < 0.05)
+    }
+    /// Mutation-proven: a stop's barrier sits inside dense real timestamps, so an unclamped
+    /// search reaches into its near-zero jitter — the lost leg above cannot show this.
+    @Test func speedAfterAStopNeverReachesIntoIt() {
+        var pts = Fixtures.straight(seconds: 300).points
+        let stop = pts[300].coordinate
+        pts.append(contentsOf: Fixtures.jitter(seconds: 60, at: stop, start: 301))
+        pts.append(contentsOf: Fixtures.straight(seconds: 300, start: 361, from: stop).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        let hold = t.holds[0]; #expect(hold.kind == .stopped)
+        let holdClockEnd = t.sample(at: hold.range.upperBound).seconds
+        var f = hold.range.upperBound   // search to 2-3 s past the hold's clock end
+        while t.sample(at: f).seconds - holdClockEnd < 2, f < 1 { f += 1e-6 }
+        let s = t.sample(at: f)
+        #expect(s.seconds - holdClockEnd >= 2 && s.seconds - holdClockEnd < 3)
+        // Barrier: ~2.9 m/s (growing toward 6). No barrier: ~1.0-1.25 m/s (jitter reached). 2 m/s separates them (measured).
+        #expect((s.speedMetersPerSecond ?? 0) > 2)
     }
 
     // §4.9 profile
@@ -1495,7 +1513,7 @@ import Observation
 /// target has no test bundle.
 @MainActor @Observable
 public final class ReplayPlayback {
-    public let playbackDuration: TimeInterval
+    private let playbackDuration: TimeInterval
     public private(set) var anchorFraction: Double = 0
     public private(set) var isPlaying = false
     public private(set) var isScrubbing = false
@@ -1658,6 +1676,20 @@ struct ReplayReadoutTests {
                               timeline: timeline, units: .imperial)
         #expect(r.holdText == "Stopped · 10 min")
         #expect(r.accessibilityLabel.hasPrefix("Stopped · 10 min."))
+    }
+
+    /// The VoiceOver value leads with the hold, in words, not the "·" capsule string (spec
+    /// §4.14, §5).
+    @Test func accessibilityValueLeadsWithTheHoldInAHold() {
+        let r = ReplayReadout(sample: sample(speed: nil, distance: 100, seconds: 30, phase: .hold(.stopped, seconds: 600)),
+                              timeline: timeline, units: .imperial)
+        #expect(r.accessibilityValue == "Stopped 10 minutes, 0.1 miles, 0 minutes")
+    }
+
+    /// A non-hold sample's accessibilityValue is unchanged: no hold prefix.
+    @Test func accessibilityValueHasNoHoldPrefixWhenMoving() {
+        let r = ReplayReadout(sample: sample(speed: 8.9408, distance: 2.4 * 1609.344, seconds: 848), timeline: timeline, units: .imperial)
+        #expect(r.accessibilityValue == "2.4 miles, 14 minutes")
     }
 
     @Test func subtitleIsThreeValued() {
@@ -1834,13 +1866,15 @@ public struct ReplayReadout: Equatable, Sendable {
         let totalTime = PauseControlCopy.clock(timeline.totalSeconds)
         timeText = "\(elapsed) / \(totalTime)"
         elevationText = sample.elevation.map { "\(fmt.elevationValue($0)) \(fmt.elevationUnit)" }
+        let minutes = Int(sample.seconds / 60)
+        let baseAccessibilityValue = "\(soFar) \(fmt.distanceUnitSpoken), \(minutes) minute\(minutes == 1 ? "" : "s")"
         if case let .hold(kind, seconds) = sample.phase {
             holdText = Self.holdLabel(kind: kind, seconds: seconds)
+            accessibilityValue = "\(Self.holdSpokenPrefix(kind: kind, seconds: seconds)), \(baseAccessibilityValue)"
         } else {
             holdText = nil
+            accessibilityValue = baseAccessibilityValue
         }
-        let minutes = Int(sample.seconds / 60)
-        accessibilityValue = "\(soFar) \(fmt.distanceUnitSpoken), \(minutes) minute\(minutes == 1 ? "" : "s")"
         var parts: [String] = []
         if let holdText { parts.append("\(holdText).") }
         if let speed = sample.speedMetersPerSecond {
@@ -1864,6 +1898,27 @@ public struct ReplayReadout: Equatable, Sendable {
         }
         let duration = seconds >= 60 ? RideStatsFormatter(units: .metric).minutes(seconds) : "\(Int(seconds)) s"
         return "\(word) · \(duration)"
+    }
+
+    /// Words, not the "·" capsule, for the VoiceOver value: "Stopped 10 minutes",
+    /// "Paused 45 seconds", "No signal 3 minutes". Same threshold as `holdLabel`: minutes at or
+    /// above 60 s (truncated), seconds below, both pluralized.
+    private static func holdSpokenPrefix(kind: ReplayHold.Kind, seconds: TimeInterval) -> String {
+        let word: String
+        switch kind {
+        case .stopped: word = "Stopped"
+        case .paused: word = "Paused"
+        case .signalLost: word = "No signal"
+        }
+        let duration: String
+        if seconds >= 60 {
+            let minutes = Int(seconds / 60)
+            duration = "\(minutes) minute\(minutes == 1 ? "" : "s")"
+        } else {
+            let secs = Int(seconds)
+            duration = "\(secs) second\(secs == 1 ? "" : "s")"
+        }
+        return "\(word) \(duration)"
     }
 
     /// The History row's three-valued rule; `HistoryView` keeps its own private copy.
@@ -2117,13 +2172,17 @@ struct ReplayMap: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewport: Viewport = .styleDefault
     /// True once a real (non-programmatic) camera change has arrived — the `HomeLiveMap` idiom.
-    /// MapboxMaps 11.28 never writes `viewport` back to `.idle` after a gesture or the initial
-    /// fit, so `viewport.isIdle` alone never flips and the recenter control never showed. Written
-    /// once per gesture, never per frame.
+    /// The binding did not go idle on the simulator pass (the SDK's touch-to-idle path is
+    /// present but was not observed), so `viewport.isIdle` alone never flipped and the recenter
+    /// control never showed; this state no longer depends on it. Written once per gesture,
+    /// never per frame.
     @State private var movedOffFit = false
     /// True while OUR animation (the initial fit or recenter) drives the camera, so its
     /// `onCameraChanged` callback isn't counted as a rider gesture.
     @State private var programmatic = false
+    /// True once the fit's own camera (not the style-load default) has actually arrived — guards
+    /// `.onMapIdle` clearing `programmatic` on the style-load idle that precedes the fit.
+    @State private var fitApplied = false
 
     private static let sourceID = "aura-replay-route"
 
@@ -2150,16 +2209,20 @@ struct ReplayMap: View {
             // Map-specific modifiers (above) return `Self` (still `Map`); `.onCameraChanged` and
             // `.onMapIdle` must stay in that chain — a generic View modifier below (e.g.
             // `.overlay`) would type-erase to `some View` and drop the Map-only API.
-            .onCameraChanged { _ in
-                // Also write `.idle` here: MapboxMaps 11.28 never does (that's the whole reason
-                // `movedOffFit` exists), so without this a pinch leaves `viewport` holding the
-                // SAME `.overview` `fit()` already stored, and `recenter()`'s later
-                // `viewport = overview` is then a no-op SwiftUI value — no state change, no
-                // animation, no completion, so `programmatic`/`movedOffFit` never clear and the
-                // control neither moves the camera nor hides. Writing `.idle` restores the
-                // invariant the SDK was supposed to keep: the rider's camera position is left
-                // alone (`.idle` doesn't move it), but the NEXT `.overview` write is guaranteed
-                // to be a real change again.
+            .onCameraChanged { ctx in
+                // The world-default camera is ~zoom 0; any ride overview is far above 3, so this
+                // only trips once the fit's own camera (not the style-load default) has arrived.
+                if programmatic, ctx.cameraState.zoom > 3 { fitApplied = true }
+                // Also write `.idle` here: the binding did not go idle on the simulator pass
+                // (that's the whole reason `movedOffFit` exists, and the map no longer depends
+                // on the SDK's own touch-to-idle path), so without this a pinch leaves
+                // `viewport` holding the SAME `.overview` `fit()` already stored, and
+                // `recenter()`'s later `viewport = overview` is then a no-op SwiftUI value — no
+                // state change, no animation, no completion, so `programmatic`/`movedOffFit`
+                // never clear and the control neither moves the camera nor hides. Writing
+                // `.idle` restores the invariant: the rider's camera position is left alone
+                // (`.idle` doesn't move it), but the NEXT `.overview` write is guaranteed to be
+                // a real change again.
                 if !programmatic, !movedOffFit { movedOffFit = true; viewport = .idle }
             }
             // The map goes idle after the initial fit lands (the style-load camera changes that
@@ -2167,7 +2230,9 @@ struct ReplayMap: View {
             // animation completes, so this is where the programmatic window actually closes for
             // `fit()`'s direct assignment (see its comment: an animation on an unloaded map is
             // dropped by the SDK, so `fit()` cannot rely on a `withViewportAnimation` completion).
-            .onMapIdle { _ in programmatic = false }
+            // Gated on `fitApplied` so the style-load idle that precedes the fit's own camera
+            // can't clear `programmatic` early (v2.4: low-probability cold-load race).
+            .onMapIdle { _ in if fitApplied { programmatic = false } }
             .gestureOptions(gestureOptions)
             .ornamentOptions(ornamentOptions)
             .mapStyle(settings.mapStyle.mapboxStyle)
@@ -2186,8 +2251,8 @@ struct ReplayMap: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            // Shown once `movedOffFit` sees a real (non-programmatic) camera change. MapboxMaps
-            // 11.28 never writes `viewport` back to `.idle` on its own, so `onCameraChanged`
+            // Shown once `movedOffFit` sees a real (non-programmatic) camera change. The binding
+            // did not go idle on its own on the simulator pass, so `onCameraChanged`
             // above writes it explicitly — that also keeps `recenter()`'s later `.overview`
             // write a real state change (not a no-op equal to what's already there), so tapping
             // this control both moves the camera and clears the flags that hide it again.
@@ -2231,27 +2296,34 @@ struct ReplayMap: View {
     private func fit() {
         guard lines.flatMap({ $0 }).count > 1 else { return }
         programmatic = true
-        // Zero-duration `.easeOut` (not a plain assignment) so this still lands through the
-        // viewport-animation completion, which clears `programmatic`. 0.01, not 0: the SDK
-        // source did not confirm a 0-duration animation invokes its completion.
-        withViewportAnimation(.easeOut(duration: 0.01)) {
-            viewport = overview
-        } completion: { _ in
-            programmatic = false
-        }
+        // Direct assignment, not `withViewportAnimation`: the map has not loaded its style yet
+        // when this runs from `.onAppear`, and the SDK drops an animation on an unloaded map —
+        // its completion then fired before the style-load camera settle arrived, so that settle
+        // read as a rider gesture and the recenter control showed at fraction 0 with the marker
+        // off-screen. A direct set is what the SDK applies correctly once the map is ready.
+        // `programmatic` is cleared by `.onMapIdle` below, not by an animation completion.
+        viewport = overview
     }
 
-    /// Reduce Motion snaps (zero-duration animation), otherwise flies — `RideHUDView.recenter()`'s
-    /// rule. Both paths go through `withViewportAnimation` so `programmatic`/`movedOffFit` are
-    /// only ever cleared from the completion.
+    /// Reduce Motion snaps (a direct assignment — a snap has no flight to await, so `onMapIdle`
+    /// is the only thing that clears `programmatic`, and there's nothing to keep the control
+    /// hidden for until then), otherwise flies via `withViewportAnimation` — `RideHUDView
+    /// .recenter()`'s rule.
     private func recenter() {
-        programmatic = true
-        let duration = reduceMotion ? 0.01 : 0.4
-        withViewportAnimation(.easeOut(duration: duration)) {
+        if reduceMotion {
+            programmatic = true
+            fitApplied = true   // the map is already framed; no fit-arrival to wait for
             viewport = overview
-        } completion: { _ in
-            programmatic = false
             movedOffFit = false
+        } else {
+            programmatic = true
+            fitApplied = true   // the map is already framed; no fit-arrival to wait for
+            withViewportAnimation(.easeOut(duration: 0.4)) {
+                viewport = overview
+            } completion: { _ in
+                programmatic = false
+                movedOffFit = false
+            }
         }
     }
 }
@@ -2302,6 +2374,7 @@ struct ReplayScrubBand: View {
 
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @ScaledMetric(relativeTo: .caption2) private var captionWidth: CGFloat = 44
     @State private var dragMoved = false
     @State private var holdUnderThumb: Int?
@@ -2345,10 +2418,21 @@ struct ReplayScrubBand: View {
         .accessibilityIdentifier(RideTestID.replayBand)
         .sensoryFeedback(.selection, trigger: holdUnderThumb) { _, new in dragMoved && new != nil }
         .onChange(of: fraction) { _, new in
+            guard playback.isScrubbing else { return }
             let index = timeline.holds.firstIndex { $0.range.contains(new) }
             if index != holdUnderThumb { holdUnderThumb = index }
         }
         .onDisappear { playback.cancelScrub() }
+        // A system-cancelled `DragGesture` (e.g. the app backgrounding mid-drag) delivers no
+        // `onEnded`, so without this `isScrubbing` would stay true and `play(now:)` a silent
+        // no-op until the band is touched again.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                playback.cancelScrub()
+                holdUnderThumb = nil
+                dragMoved = false
+            }
+        }
     }
 
     // MARK: Layers
@@ -2392,6 +2476,7 @@ struct ReplayScrubBand: View {
                     .offset(x: min(px + Self.thumb / 2 + 4, g.width - 72), y: max(py - 12, 0))
             }
         }
+        .accessibilityHidden(true)
         .animation(reduceMotion || playback.isPlaying ? nil : .easeOut(duration: 0.12), value: fraction)
     }
 
@@ -2429,6 +2514,7 @@ struct ReplayScrubBand: View {
                     playback.tap(to: g.fraction(atX: value.location.x), now: Date())
                 }
                 dragMoved = false
+                holdUnderThumb = nil
             }
     }
 
@@ -2470,6 +2556,7 @@ private struct ReplaySilhouette: View, Equatable {
         .overlay(alignment: .bottom) {
             Rectangle().fill(AuraTheme.hairline(contrast)).frame(height: 1)
         }
+        .accessibilityHidden(true)
     }
 }
 ```
@@ -2608,7 +2695,9 @@ struct RideReplayView: View {
         VStack(spacing: 0) {
             topBar
             ReplayMap(timeline: timeline, lines: lines, playback: playback)
-                .frame(minHeight: 200, maxHeight: .infinity)
+                // 200 pt, 120 at accessibility sizes, where the stacked readouts below take the
+                // height (spec §5/D7, A10, v2.4).
+                .frame(minHeight: typeSize.isAccessibilitySize ? 120 : 200, maxHeight: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous))
                 .padding(.horizontal, AuraTheme.Spacing.lg)
             controls
