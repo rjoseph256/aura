@@ -4,6 +4,7 @@ public enum ReplayMarkerStyle {
     public static func displayBearing(_ raw: Double?, reduceMotion: Bool) -> Double? {
         guard let raw else { return nil }
         guard reduceMotion else { return raw }
-        return ((raw / 45).rounded() * 45).truncatingRemainder(dividingBy: 360)
+        let rounded = ((raw / 45).rounded() * 45).truncatingRemainder(dividingBy: 360)
+        return rounded < 0 ? rounded + 360 : rounded
     }
 }

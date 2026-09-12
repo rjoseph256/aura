@@ -35,8 +35,23 @@ struct ReplayBandGeometryTests {
         let narrow = ReplayHold(kind: .paused, seconds: 60, range: 0.5..<0.501)
         let frame = g.stripFrame(narrow)
         #expect(frame.width == 12)
+        #expect(abs((frame.x + 6) - (g.x(0.5) + g.x(0.501)) / 2) < 1e-9)
         let wide = ReplayHold(kind: .paused, seconds: 600, range: 0.2..<0.4)
         #expect(abs(g.stripFrame(wide).width - (g.x(0.4) - g.x(0.2))) < 1e-9)
+    }
+
+    /// A short hold near either end of the ride would otherwise widen past `x(0)`/`x(1)` — the
+    /// farthest the thumb can actually sit — since the naive fix only extends rightward.
+    @Test func stripsNearTheEndsStayOnTheTrack() {
+        let nearEnd = ReplayHold(kind: .paused, seconds: 60, range: 0.997..<0.9985)
+        let endFrame = g.stripFrame(nearEnd)
+        #expect(endFrame.width == 12)
+        #expect(endFrame.x + endFrame.width <= g.x(1) + 1e-9)
+
+        let nearStart = ReplayHold(kind: .paused, seconds: 60, range: 0.001..<0.002)
+        let startFrame = g.stripFrame(nearStart)
+        #expect(startFrame.width == 12)
+        #expect(startFrame.x >= g.x(0) - 1e-9)
     }
 
     @Test func captionsDropWhenTheyWouldOverlapAndSkipShortHolds() {
@@ -59,5 +74,10 @@ struct ReplayMarkerStyleTests {
         #expect(ReplayMarkerStyle.displayBearing(113, reduceMotion: false) == 113)
         #expect(ReplayMarkerStyle.displayBearing(nil, reduceMotion: true) == nil)
         #expect(ReplayMarkerStyle.displayBearing(359, reduceMotion: true) == 0)
+        #expect(ReplayMarkerStyle.displayBearing(-30, reduceMotion: true) == 315)
+        #expect(ReplayMarkerStyle.displayBearing(112.5, reduceMotion: true) == 135)
+        #expect(ReplayMarkerStyle.displayBearing(337.5, reduceMotion: true) == 0)
+        #expect(ReplayMarkerStyle.displayBearing(360, reduceMotion: true) == 0)
+        #expect(ReplayMarkerStyle.displayBearing(-30, reduceMotion: false) == -30)
     }
 }

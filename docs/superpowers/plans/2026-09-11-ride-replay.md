@@ -1751,8 +1751,23 @@ struct ReplayBandGeometryTests {
         let narrow = ReplayHold(kind: .paused, seconds: 60, range: 0.5..<0.501)
         let frame = g.stripFrame(narrow)
         #expect(frame.width == 12)
+        #expect(abs((frame.x + 6) - (g.x(0.5) + g.x(0.501)) / 2) < 1e-9)
         let wide = ReplayHold(kind: .paused, seconds: 600, range: 0.2..<0.4)
         #expect(abs(g.stripFrame(wide).width - (g.x(0.4) - g.x(0.2))) < 1e-9)
+    }
+
+    /// A short hold near either end of the ride would otherwise widen past `x(0)`/`x(1)` — the
+    /// farthest the thumb can actually sit — since the naive fix only extends rightward.
+    @Test func stripsNearTheEndsStayOnTheTrack() {
+        let nearEnd = ReplayHold(kind: .paused, seconds: 60, range: 0.997..<0.9985)
+        let endFrame = g.stripFrame(nearEnd)
+        #expect(endFrame.width == 12)
+        #expect(endFrame.x + endFrame.width <= g.x(1) + 1e-9)
+
+        let nearStart = ReplayHold(kind: .paused, seconds: 60, range: 0.001..<0.002)
+        let startFrame = g.stripFrame(nearStart)
+        #expect(startFrame.width == 12)
+        #expect(startFrame.x >= g.x(0) - 1e-9)
     }
 
     @Test func captionsDropWhenTheyWouldOverlapAndSkipShortHolds() {
@@ -1775,6 +1790,11 @@ struct ReplayMarkerStyleTests {
         #expect(ReplayMarkerStyle.displayBearing(113, reduceMotion: false) == 113)
         #expect(ReplayMarkerStyle.displayBearing(nil, reduceMotion: true) == nil)
         #expect(ReplayMarkerStyle.displayBearing(359, reduceMotion: true) == 0)
+        #expect(ReplayMarkerStyle.displayBearing(-30, reduceMotion: true) == 315)
+        #expect(ReplayMarkerStyle.displayBearing(112.5, reduceMotion: true) == 135)
+        #expect(ReplayMarkerStyle.displayBearing(337.5, reduceMotion: true) == 0)
+        #expect(ReplayMarkerStyle.displayBearing(360, reduceMotion: true) == 0)
+        #expect(ReplayMarkerStyle.displayBearing(-30, reduceMotion: false) == -30)
     }
 }
 ```
@@ -1924,10 +1944,28 @@ public struct ReplayBandGeometry: Equatable, Sendable {
 
     public struct Frame: Equatable, Sendable { public var x: Double; public var width: Double }
 
+    /// Below the minimum, widens symmetrically about the hold's own center rather than only
+    /// rightward, then shifts the whole frame back inside `[x(0), x(1)]` if the widening pushed
+    /// either edge past the thumb's actual travel — a hold near either end of the ride must not
+    /// draw a strip the thumb can never reach.
     public func stripFrame(_ hold: ReplayHold) -> Frame {
-        let start = x(hold.range.lowerBound)
-        let end = max(x(hold.range.upperBound), start + Self.minStripWidth)
-        return Frame(x: start, width: end - start)
+        var minX = x(hold.range.lowerBound)
+        var maxX = x(hold.range.upperBound)
+        if maxX - minX < Self.minStripWidth {
+            let center = (minX + maxX) / 2
+            minX = center - Self.minStripWidth / 2
+            maxX = center + Self.minStripWidth / 2
+        }
+        let low = x(0), high = x(1)
+        if minX < low {
+            maxX += low - minX
+            minX = low
+        }
+        if maxX > high {
+            minX -= maxX - high
+            maxX = high
+        }
+        return Frame(x: minX, width: maxX - minX)
     }
 
     public struct Caption: Equatable, Sendable { public var center: Double; public var seconds: TimeInterval }
@@ -1959,7 +1997,8 @@ public enum ReplayMarkerStyle {
     public static func displayBearing(_ raw: Double?, reduceMotion: Bool) -> Double? {
         guard let raw else { return nil }
         guard reduceMotion else { return raw }
-        return ((raw / 45).rounded() * 45).truncatingRemainder(dividingBy: 360)
+        let rounded = ((raw / 45).rounded() * 45).truncatingRemainder(dividingBy: 360)
+        return rounded < 0 ? rounded + 360 : rounded
     }
 }
 ```

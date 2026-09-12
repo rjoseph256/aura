@@ -37,10 +37,28 @@ public struct ReplayBandGeometry: Equatable, Sendable {
 
     public struct Frame: Equatable, Sendable { public var x: Double; public var width: Double }
 
+    /// Below the minimum, widens symmetrically about the hold's own center rather than only
+    /// rightward, then shifts the whole frame back inside `[x(0), x(1)]` if the widening pushed
+    /// either edge past the thumb's actual travel — a hold near either end of the ride must not
+    /// draw a strip the thumb can never reach.
     public func stripFrame(_ hold: ReplayHold) -> Frame {
-        let start = x(hold.range.lowerBound)
-        let end = max(x(hold.range.upperBound), start + Self.minStripWidth)
-        return Frame(x: start, width: end - start)
+        var minX = x(hold.range.lowerBound)
+        var maxX = x(hold.range.upperBound)
+        if maxX - minX < Self.minStripWidth {
+            let center = (minX + maxX) / 2
+            minX = center - Self.minStripWidth / 2
+            maxX = center + Self.minStripWidth / 2
+        }
+        let low = x(0), high = x(1)
+        if minX < low {
+            maxX += low - minX
+            minX = low
+        }
+        if maxX > high {
+            minX -= maxX - high
+            maxX = high
+        }
+        return Frame(x: minX, width: maxX - minX)
     }
 
     public struct Caption: Equatable, Sendable { public var center: Double; public var seconds: TimeInterval }
