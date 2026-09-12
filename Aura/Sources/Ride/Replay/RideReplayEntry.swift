@@ -43,15 +43,21 @@ private struct ReplayEntryModifier: ViewModifier {
                     RideReplayView(ride: ride, timeline: built.timeline, band: built.band, lines: built.lines)
                 }
             }
+            // The build runs detached, so it does not inherit this `.task`'s cancellation; the
+            // guard below keeps a superseded build from landing if one ever outlives it. Both
+            // shipped presentations — the History sheet's `.id(ride.id)` and the pushed ride-end
+            // route — already give this modifier a fresh identity per ride.
             .task(id: ride.id) {
                 let ride = ride
-                built = await Task.detached(priority: .userInitiated) {
+                let result = await Task.detached(priority: .userInitiated) {
                     let timeline = ReplayTimeline(segments: ride.segments)
                     let lines = timeline.drawableLines.map { line in
                         line.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
                     }
                     return Built(timeline: timeline, band: ReplayBandContent(ride: ride, timeline: timeline), lines: lines)
                 }.value
+                guard !Task.isCancelled else { return }
+                built = result
             }
     }
 }
