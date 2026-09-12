@@ -343,3 +343,112 @@ struct ReplayTimelineHoldTests {
         #expect(abs(holdTotal - 0.25 * movingPlayback) < 1e-9)
     }
 }
+
+struct ReplayTimelineSpeedProfileEventTests {
+    typealias Fixtures = ReplayFixtures
+
+    // §4.6 speed
+    @Test func quarterCircleReadsTheArcSpeedNotTheChord() {
+        let t = Fixtures.timeline([Fixtures.quarterCircle(radius: 500, speed: 6)])
+        for k in 5...19 {
+            let s = t.sample(at: Double(k) / 20)
+            #expect(s.seconds > t.speedWindowSeconds)
+            #expect(abs((s.speedMetersPerSecond ?? 0) - 6) < 0.05, "at \(k)/20")
+        }
+    }
+
+    @Test func speedIsNilAtStartInsideAHoldAndForAZeroSpan() {
+        let t = Fixtures.timeline([Fixtures.straight(seconds: 600),
+                                   Fixtures.straight(seconds: 600, start: 1200, from: Fixtures.east(3600))])
+        #expect(t.sample(at: 0).speedMetersPerSecond == nil)
+        let mid = (t.holds[0].range.lowerBound + t.holds[0].range.upperBound) / 2
+        #expect(t.sample(at: mid).speedMetersPerSecond == nil)
+        let same = RideSegment(points: (0...3).map { Fixtures.point(Fixtures.east(Double($0) * 10), at: 0) })
+        #expect(Fixtures.timeline([same]).sample(at: 0.5).speedMetersPerSecond == nil)
+    }
+
+    @Test func windowIsTwelveSecondsAtRate120AndFiveAtRate30() {
+        #expect(abs(Fixtures.timeline([Fixtures.straight(seconds: 2400)]).speedWindowSeconds - 12) < 1e-9)
+        #expect(abs(Fixtures.timeline([Fixtures.straight(seconds: 300)]).speedWindowSeconds - 5) < 1e-9)
+        // Speed drops 6 → 3 m/s at 20 s. At 34 s the 12 s trailing window is all post-change:
+        // reads 3. A 6 s window would too, but a centered ±12 s window would blend.
+        var pts = Fixtures.straight(seconds: 20, speed: 6).points
+        let c = pts[20].coordinate
+        pts.append(contentsOf: Fixtures.straight(seconds: 2400, speed: 3, start: 20, from: c).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        #expect(abs((t.sample(at: 34 / t.totalSeconds).speedMetersPerSecond ?? 0) - 3) < 0.05)
+        // At 26 s the window [14, 26] straddles the change: 36 + 18 = 54 m over 12 s = 4.5.
+        #expect(abs((t.sample(at: 26 / t.totalSeconds).speedMetersPerSecond ?? 0) - 4.5) < 0.05)
+    }
+
+    /// D5.1: the window never reaches back across a hold, so a lost leg's 900 m / 120 s never
+    /// fabricates a speed for the seconds after it.
+    @Test func speedAfterALostLegIgnoresTheGap() {
+        var pts = Fixtures.straight(seconds: 200).points
+        let to = Fixtures.east(2100)
+        pts.append(Fixtures.point(to, at: 320))                                        // 120 s, 900 m
+        pts.append(contentsOf: Fixtures.straight(seconds: 200, start: 321, from: to).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        let hold = t.holds[0]
+        let justAfter = t.sample(at: hold.range.upperBound + 0.002)
+        #expect(justAfter.seconds > 320 && justAfter.seconds < 326)
+        #expect(justAfter.speedMetersPerSecond == nil || abs((justAfter.speedMetersPerSecond ?? 0) - 6) < 0.1)
+        let later = t.sample(at: (hold.range.upperBound + 1) / 2)
+        #expect(abs((later.speedMetersPerSecond ?? 0) - 6) < 0.05)
+    }
+
+    // §4.9 profile
+    @Test func profileRepeatsThroughAHoldAndCarriesAcrossNil() {
+        let a = Fixtures.straight(seconds: 600, elevation: { i in i == 300 ? nil : 300 + Double(i) / 10 })
+        let b = Fixtures.straight(seconds: 600, start: 1200, from: Fixtures.east(3600), elevation: { _ in 100 })
+        let t = Fixtures.timeline([a, b])
+        let profile = t.profile(sampleCount: 240)
+        #expect(profile?.count == 240)
+        let hold = t.holds[0]
+        let inHold = profile!.enumerated().filter { hold.range.contains(Double($0.offset) / 239) }
+        #expect(!inHold.isEmpty)
+        #expect(inHold.allSatisfy { abs($0.element - 360) < 1e-9 })
+        // The nil at i == 300 lands inside leg 299→300 / 300→301; the samples there carry 329.9…330.1.
+        let aroundNil = profile!.enumerated().filter { (0.245...0.255).contains(Double($0.offset) / 239 * (t.playbackDuration / 10)) }
+        #expect(aroundNil.allSatisfy { $0.element > 329 && $0.element < 331 })
+    }
+
+    @Test func profileIsNilWithoutElevationAndFillsLeadingNils() {
+        let none = Fixtures.timeline([Fixtures.straight(seconds: 100, elevation: { _ in nil })])
+        #expect(none.profile(sampleCount: 10) == nil)
+        let late = Fixtures.timeline([Fixtures.straight(seconds: 100, elevation: { i in i < 50 ? nil : 420 })])
+        #expect(late.profile(sampleCount: 10) == Array(repeating: 420, count: 10))
+    }
+
+    // §4.10 events
+    @Test func eventsCoverEndsHoldsAndWholeUnits() {
+        let t = Fixtures.timeline([Fixtures.straight(seconds: 300, speed: 6),
+                                   Fixtures.straight(seconds: 300, start: 900, from: Fixtures.east(1800))])
+        let e = t.events
+        #expect(e.first == 0 && e.last == 1)
+        #expect(e == e.sorted())
+        #expect(zip(e, e.dropFirst()).allSatisfy { $1 - $0 > 1e-9 })
+        for hold in t.holds {
+            #expect(e.contains { abs($0 - hold.range.lowerBound) < 1e-12 })
+            #expect(e.contains { abs($0 - hold.range.upperBound) < 1e-12 })
+        }
+        let marks = e.filter { f in
+            let d = t.sample(at: f).distanceMeters
+            return [1000.0, 2000, 3000, 1609.344, 3218.688].contains { abs($0 - d) < 0.01 }
+        }
+        #expect(marks.count == 5)
+    }
+
+    @Test func unitMarksInsideALostLegLandOnTheHoldStart() {
+        var pts = Fixtures.straight(seconds: 200).points                               // 1200 m
+        let to = Fixtures.east(2100)
+        pts.append(Fixtures.point(to, at: 320))                                        // 900 m lost leg
+        pts.append(contentsOf: Fixtures.straight(seconds: 200, start: 321, from: to).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        let hold = t.holds[0]
+        // 1609.344 and 2000 fall inside the lost leg → both events are the hold's start.
+        #expect(t.events.filter { abs($0 - hold.range.lowerBound) < 1e-12 }.count == 1)   // deduplicated
+        #expect(t.events.contains { abs($0 - hold.range.upperBound) < 1e-12 })
+        #expect(t.events.contains { abs(t.sample(at: $0).distanceMeters - 3000) < 0.01 })
+    }
+}

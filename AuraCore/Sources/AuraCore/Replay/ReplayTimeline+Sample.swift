@@ -95,11 +95,17 @@ extension ReplayTimeline {
         return (speed, bearing)
     }
 
+    /// `seconds` reaches these searches through several floating-point divisions (the fraction
+    /// → playback-duration → per-leg-`t` chain in `sample(at:)`), so a boundary that is exactly
+    /// on a sample time can arrive a few ULPs off on either side. A tolerance keeps a boundary
+    /// that lands exactly on a recorded time from flipping to its neighbor.
+    private static let boundaryEpsilon: TimeInterval = 1e-9
+
     static func lastIndex(in times: [TimeInterval], atOrBefore t: TimeInterval) -> Int {
         var lo = 0, hi = times.count - 1
         while lo < hi {
             let mid = (lo + hi + 1) / 2
-            if times[mid] <= t { lo = mid } else { hi = mid - 1 }
+            if times[mid] <= t + boundaryEpsilon { lo = mid } else { hi = mid - 1 }
         }
         return lo
     }
@@ -108,7 +114,7 @@ extension ReplayTimeline {
         var lo = 0, hi = times.count - 1
         while lo < hi {
             let mid = (lo + hi) / 2
-            if times[mid] >= t { hi = mid } else { lo = mid + 1 }
+            if times[mid] >= t - boundaryEpsilon { hi = mid } else { lo = mid + 1 }
         }
         return lo
     }
