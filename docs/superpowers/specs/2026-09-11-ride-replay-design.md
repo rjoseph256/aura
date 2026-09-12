@@ -262,8 +262,9 @@ summary file is not touched in this slice.
   shown when a camera change arrives through `.onCameraChanged` while no programmatic fit or
   recenter is in flight (`movedOffFit`, the `HomeLiveMap` idiom), with the programmatic window
   closed on the map's next `.onMapIdle`; the simulator pass showed MapboxMaps 11.28 never
-  writes `.idle` back to the binding, so `viewport.isIdle` is kept only as a fallback. Snaps
-  under Reduce Motion, `withViewportAnimation` otherwise.
+  writes `.idle` back to the binding, so `viewport.isIdle` is kept only as a fallback, and a
+  real camera change also writes the binding to `.idle`, so recenter is always a state change.
+  Snaps under Reduce Motion, `withViewportAnimation` otherwise.
 - Status capsule over the map, bottom-leading, during a hold (§D3).
 - Instrument row (D5), band (D6), play/pause.
 

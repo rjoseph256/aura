@@ -51,6 +51,10 @@ struct RideReplayView: View {
                     .font(.headline)
                     .foregroundStyle(AuraTheme.textPrimary)
                     .lineLimit(2)
+                    // Without this, at accessibility sizes the second line `.lineLimit(2)` should
+                    // allow was measured away before layout and the title truncated to one line
+                    // with an ellipsis instead of actually wrapping.
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(ReplayReadout.subtitle(for: ride))
                     .font(.subheadline)
                     .foregroundStyle(AuraTheme.secondaryText(contrast))

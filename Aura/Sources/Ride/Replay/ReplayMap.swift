@@ -54,7 +54,16 @@ struct ReplayMap: View {
             // `.onMapIdle` must stay in that chain — a generic View modifier below (e.g.
             // `.overlay`) would type-erase to `some View` and drop the Map-only API.
             .onCameraChanged { _ in
-                if !programmatic, !movedOffFit { movedOffFit = true }
+                // Also write `.idle` here: MapboxMaps 11.28 never does (that's the whole reason
+                // `movedOffFit` exists), so without this a pinch leaves `viewport` holding the
+                // SAME `.overview` `fit()` already stored, and `recenter()`'s later
+                // `viewport = overview` is then a no-op SwiftUI value — no state change, no
+                // animation, no completion, so `programmatic`/`movedOffFit` never clear and the
+                // control neither moves the camera nor hides. Writing `.idle` restores the
+                // invariant the SDK was supposed to keep: the rider's camera position is left
+                // alone (`.idle` doesn't move it), but the NEXT `.overview` write is guaranteed
+                // to be a real change again.
+                if !programmatic, !movedOffFit { movedOffFit = true; viewport = .idle }
             }
             // The map goes idle after the initial fit lands (the style-load camera changes that
             // arrive first are ignored while `programmatic` is still true) and after every
@@ -80,9 +89,12 @@ struct ReplayMap: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            // Shown once `movedOffFit` sees a real (non-programmatic) camera change — MapboxMaps
-            // 11.28 never writes `viewport` back to `.idle` after a gesture, so `viewport.isIdle`
-            // is kept only as a fallback (belt-and-braces).
+            // Shown once `movedOffFit` sees a real (non-programmatic) camera change. MapboxMaps
+            // 11.28 never writes `viewport` back to `.idle` on its own, so `onCameraChanged`
+            // above writes it explicitly — that also keeps `recenter()`'s later `.overview`
+            // write a real state change (not a no-op equal to what's already there), so tapping
+            // this control both moves the camera and clears the flags that hide it again.
+            // `viewport.isIdle` is kept only as a fallback (belt-and-braces).
             if movedOffFit || viewport.isIdle {
                 Button(action: recenter) { Image(systemName: "location.fill") }
                     .buttonStyle(.hudControl(active: true))
