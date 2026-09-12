@@ -50,12 +50,18 @@ struct ReplayMap: View {
                 }
                 .allowOverlapWithPuck(true)
             }
-            // Map-specific modifier (above) returns `Self` (still `Map`); `.onCameraChanged` must
-            // stay in that chain — a generic View modifier below (e.g. `.overlay`) would
-            // type-erase to `some View` and drop the Map-only API.
+            // Map-specific modifiers (above) return `Self` (still `Map`); `.onCameraChanged` and
+            // `.onMapIdle` must stay in that chain — a generic View modifier below (e.g.
+            // `.overlay`) would type-erase to `some View` and drop the Map-only API.
             .onCameraChanged { _ in
                 if !programmatic, !movedOffFit { movedOffFit = true }
             }
+            // The map goes idle after the initial fit lands (the style-load camera changes that
+            // arrive first are ignored while `programmatic` is still true) and after every
+            // animation completes, so this is where the programmatic window actually closes for
+            // `fit()`'s direct assignment (see its comment: an animation on an unloaded map is
+            // dropped by the SDK, so `fit()` cannot rely on a `withViewportAnimation` completion).
+            .onMapIdle { _ in programmatic = false }
             .gestureOptions(gestureOptions)
             .ornamentOptions(ornamentOptions)
             .mapStyle(settings.mapStyle.mapboxStyle)
@@ -116,28 +122,32 @@ struct ReplayMap: View {
     private func fit() {
         guard lines.flatMap({ $0 }).count > 1 else { return }
         programmatic = true
-        // Zero-duration `.easeOut` (not a plain assignment) so this still lands through the
-        // viewport-animation completion, which clears `programmatic`. NOTE: 0.01, not 0 — could
-        // not confirm from the SDK source alone whether a 0-duration animation invokes its
-        // completion; 0.01 guarantees the animator actually runs. See fixwave report.
-        withViewportAnimation(.easeOut(duration: 0.01)) {
-            viewport = overview
-        } completion: { _ in
-            programmatic = false
-        }
+        // Direct assignment, not `withViewportAnimation`: the map has not loaded its style yet
+        // when this runs from `.onAppear`, and the SDK drops an animation on an unloaded map —
+        // its completion then fired before the style-load camera settle arrived, so that settle
+        // read as a rider gesture and the recenter control showed at fraction 0 with the marker
+        // off-screen. A direct set is what the SDK applies correctly once the map is ready.
+        // `programmatic` is cleared by `.onMapIdle` below, not by an animation completion.
+        viewport = overview
     }
 
-    /// Reduce Motion snaps (zero-duration animation), otherwise flies — `RideHUDView.recenter()`'s
-    /// rule. Both paths go through `withViewportAnimation` (rather than a plain assignment for the
-    /// snap case) so `programmatic`/`movedOffFit` are only ever cleared from the completion.
+    /// Reduce Motion snaps (a direct assignment — a snap has no flight to await, so `onMapIdle`
+    /// is the only thing that clears `programmatic`, and there's nothing to keep the control
+    /// hidden for until then), otherwise flies via `withViewportAnimation` — `RideHUDView
+    /// .recenter()`'s rule.
     private func recenter() {
-        programmatic = true
-        let duration = reduceMotion ? 0.01 : 0.4
-        withViewportAnimation(.easeOut(duration: duration)) {
+        if reduceMotion {
+            programmatic = true
             viewport = overview
-        } completion: { _ in
-            programmatic = false
             movedOffFit = false
+        } else {
+            programmatic = true
+            withViewportAnimation(.easeOut(duration: 0.4)) {
+                viewport = overview
+            } completion: { _ in
+                programmatic = false
+                movedOffFit = false
+            }
         }
     }
 }

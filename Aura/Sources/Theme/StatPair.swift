@@ -14,6 +14,14 @@ struct StatPair: View {
     /// Label color override. Defaults to `nil` (→ `AuraTheme.textSecondary`); the share card
     /// passes its high-contrast secondary because a fixed PNG can't honor Increase Contrast.
     var labelColor: Color?
+    /// Line limit for the VALUE text only — never the label, which is always a short, fixed
+    /// word and never needs it. `nil` (default) leaves the value unconstrained, matching every
+    /// caller before this parameter existed (replay's instrument row is the first to set it, so
+    /// a long value like "32:28 / 3:01:56" shrinks instead of wrapping or truncating).
+    var valueLineLimit: Int?
+    /// Minimum scale factor for the VALUE text only. `1` (default, i.e. no shrinking) matches
+    /// every caller before this parameter existed.
+    var valueMinimumScaleFactor: CGFloat = 1
     // Brand (system) font has a fixed size → @ScaledMetric drives Dynamic Type.
     @ScaledMetric(relativeTo: .title2) private var brandValueSize: CGFloat = 21
     // Cockpit (Saira) font self-scales via relativeTo: → plain base size (no @ScaledMetric).
@@ -26,6 +34,8 @@ struct StatPair: View {
                       ? AuraTheme.Typography.metricCockpit(cockpitValueSize, relativeTo: .title2)
                       : AuraTheme.Typography.metricBrand(brandValueSize))
                 .foregroundStyle(AuraTheme.textPrimary)
+                .lineLimit(valueLineLimit)
+                .minimumScaleFactor(valueMinimumScaleFactor)
             Text(label)
                 .font(labelFont)
                 .foregroundStyle(labelColor ?? AuraTheme.textSecondary)

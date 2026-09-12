@@ -260,9 +260,10 @@ summary file is not touched in this slice.
   `pitchEnabled = false`, applied in the `Map` modifier chain before any generic modifier
   (the repo's Map-modifiers-first rule). One recenter-to-fit control top-trailing, **(v2.3)**
   shown when a camera change arrives through `.onCameraChanged` while no programmatic fit or
-  recenter is in flight (`movedOffFit`, the `HomeLiveMap` idiom); the simulator pass showed
-  MapboxMaps 11.28 never writes `.idle` back to the binding, so `viewport.isIdle` is kept only
-  as a fallback. Snaps under Reduce Motion, `withViewportAnimation` otherwise.
+  recenter is in flight (`movedOffFit`, the `HomeLiveMap` idiom), with the programmatic window
+  closed on the map's next `.onMapIdle`; the simulator pass showed MapboxMaps 11.28 never
+  writes `.idle` back to the binding, so `viewport.isIdle` is kept only as a fallback. Snaps
+  under Reduce Motion, `withViewportAnimation` otherwise.
 - Status capsule over the map, bottom-leading, during a hold (§D3).
 - Instrument row (D5), band (D6), play/pause.
 

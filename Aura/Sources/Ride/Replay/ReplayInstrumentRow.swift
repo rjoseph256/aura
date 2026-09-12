@@ -16,19 +16,21 @@ struct ReplayInstrumentRow: View {
                 // which truncated the time value ("0:00 / 7:…") at AX3.
                 VStack(alignment: .leading, spacing: AuraTheme.Spacing.md) {
                     hero
-                    distance
-                    time
+                    distance(minimumScaleFactor: 0.7)
+                    time(minimumScaleFactor: 0.7)
                 }
             } else {
+                // Distance and time split the remaining width evenly (not `.layoutPriority`,
+                // which let time take its full width and squeezed distance into truncating —
+                // "6.7 / 3…" — once time grew to "32:28 / 3:01:56"). Each column's own
+                // `minimumScaleFactor` absorbs its longest value within its half instead.
                 HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.xxl) {
                     hero
                     Spacer(minLength: 0)
-                    distance
-                    // Higher layout priority so distance (not time) is squeezed first when the
-                    // row is tight — a 3-hour ride's "0:00 / 3:01:56" is the value most likely to
-                    // wrap otherwise.
-                    time
-                        .layoutPriority(1)
+                    distance(minimumScaleFactor: 0.6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    time(minimumScaleFactor: 0.6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -49,17 +51,16 @@ struct ReplayInstrumentRow: View {
         }
     }
 
-    // `.lineLimit(1).minimumScaleFactor(0.7)` so a long value ("0:00 / 3:01:56") shrinks instead
-    // of wrapping or truncating; it reaches both Texts inside `StatPair`, but the label is
-    // already a short single word so it never needs the floor.
-    private var distance: some View {
-        StatPair(value: readout.distanceText, label: readout.distanceUnit.uppercased())
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
+    // `valueLineLimit`/`valueMinimumScaleFactor` reach only `StatPair`'s value text, never its
+    // unit label ("MI"/"TIME"), which is a short fixed word and must stay unscaled. The default
+    // and accessibility branches pass different floors (see call sites above).
+    private func distance(minimumScaleFactor: CGFloat) -> some View {
+        StatPair(
+            value: readout.distanceText, label: readout.distanceUnit.uppercased(),
+            valueLineLimit: 1, valueMinimumScaleFactor: minimumScaleFactor)
     }
-    private var time: some View {
-        StatPair(value: readout.timeText, label: "TIME")
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
+    private func time(minimumScaleFactor: CGFloat) -> some View {
+        StatPair(value: readout.timeText, label: "TIME",
+                 valueLineLimit: 1, valueMinimumScaleFactor: minimumScaleFactor)
     }
 }
