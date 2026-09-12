@@ -20,13 +20,17 @@ struct ReplayMap: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewport: Viewport = .styleDefault
     /// True once a real (non-programmatic) camera change has arrived — the `HomeLiveMap` idiom.
-    /// MapboxMaps 11.28 never writes `viewport` back to `.idle` after a gesture or the initial
-    /// fit, so `viewport.isIdle` alone never flips and the recenter control never showed. Written
-    /// once per gesture, never per frame.
+    /// The binding did not go idle on the simulator pass (the SDK's touch-to-idle path is
+    /// present but was not observed), so `viewport.isIdle` alone never flipped and the recenter
+    /// control never showed; this state no longer depends on it. Written once per gesture,
+    /// never per frame.
     @State private var movedOffFit = false
     /// True while OUR animation (the initial fit or recenter) drives the camera, so its
     /// `onCameraChanged` callback isn't counted as a rider gesture.
     @State private var programmatic = false
+    /// True once the fit's own camera (not the style-load default) has actually arrived — guards
+    /// `.onMapIdle` clearing `programmatic` on the style-load idle that precedes the fit.
+    @State private var fitApplied = false
 
     private static let sourceID = "aura-replay-route"
 
@@ -53,16 +57,20 @@ struct ReplayMap: View {
             // Map-specific modifiers (above) return `Self` (still `Map`); `.onCameraChanged` and
             // `.onMapIdle` must stay in that chain — a generic View modifier below (e.g.
             // `.overlay`) would type-erase to `some View` and drop the Map-only API.
-            .onCameraChanged { _ in
-                // Also write `.idle` here: MapboxMaps 11.28 never does (that's the whole reason
-                // `movedOffFit` exists), so without this a pinch leaves `viewport` holding the
-                // SAME `.overview` `fit()` already stored, and `recenter()`'s later
-                // `viewport = overview` is then a no-op SwiftUI value — no state change, no
-                // animation, no completion, so `programmatic`/`movedOffFit` never clear and the
-                // control neither moves the camera nor hides. Writing `.idle` restores the
-                // invariant the SDK was supposed to keep: the rider's camera position is left
-                // alone (`.idle` doesn't move it), but the NEXT `.overview` write is guaranteed
-                // to be a real change again.
+            .onCameraChanged { ctx in
+                // The world-default camera is ~zoom 0; any ride overview is far above 3, so this
+                // only trips once the fit's own camera (not the style-load default) has arrived.
+                if programmatic, ctx.cameraState.zoom > 3 { fitApplied = true }
+                // Also write `.idle` here: the binding did not go idle on the simulator pass
+                // (that's the whole reason `movedOffFit` exists, and the map no longer depends
+                // on the SDK's own touch-to-idle path), so without this a pinch leaves
+                // `viewport` holding the SAME `.overview` `fit()` already stored, and
+                // `recenter()`'s later `viewport = overview` is then a no-op SwiftUI value — no
+                // state change, no animation, no completion, so `programmatic`/`movedOffFit`
+                // never clear and the control neither moves the camera nor hides. Writing
+                // `.idle` restores the invariant: the rider's camera position is left alone
+                // (`.idle` doesn't move it), but the NEXT `.overview` write is guaranteed to be
+                // a real change again.
                 if !programmatic, !movedOffFit { movedOffFit = true; viewport = .idle }
             }
             // The map goes idle after the initial fit lands (the style-load camera changes that
@@ -70,7 +78,9 @@ struct ReplayMap: View {
             // animation completes, so this is where the programmatic window actually closes for
             // `fit()`'s direct assignment (see its comment: an animation on an unloaded map is
             // dropped by the SDK, so `fit()` cannot rely on a `withViewportAnimation` completion).
-            .onMapIdle { _ in programmatic = false }
+            // Gated on `fitApplied` so the style-load idle that precedes the fit's own camera
+            // can't clear `programmatic` early (v2.4: low-probability cold-load race).
+            .onMapIdle { _ in if fitApplied { programmatic = false } }
             .gestureOptions(gestureOptions)
             .ornamentOptions(ornamentOptions)
             .mapStyle(settings.mapStyle.mapboxStyle)
@@ -89,8 +99,8 @@ struct ReplayMap: View {
             }
         }
         .overlay(alignment: .topTrailing) {
-            // Shown once `movedOffFit` sees a real (non-programmatic) camera change. MapboxMaps
-            // 11.28 never writes `viewport` back to `.idle` on its own, so `onCameraChanged`
+            // Shown once `movedOffFit` sees a real (non-programmatic) camera change. The binding
+            // did not go idle on its own on the simulator pass, so `onCameraChanged`
             // above writes it explicitly — that also keeps `recenter()`'s later `.overview`
             // write a real state change (not a no-op equal to what's already there), so tapping
             // this control both moves the camera and clears the flags that hide it again.
@@ -150,10 +160,12 @@ struct ReplayMap: View {
     private func recenter() {
         if reduceMotion {
             programmatic = true
+            fitApplied = true   // the map is already framed; no fit-arrival to wait for
             viewport = overview
             movedOffFit = false
         } else {
             programmatic = true
+            fitApplied = true   // the map is already framed; no fit-arrival to wait for
             withViewportAnimation(.easeOut(duration: 0.4)) {
                 viewport = overview
             } completion: { _ in

@@ -11,7 +11,7 @@ import Observation
 /// target has no test bundle.
 @MainActor @Observable
 public final class ReplayPlayback {
-    public let playbackDuration: TimeInterval
+    private let playbackDuration: TimeInterval
     public private(set) var anchorFraction: Double = 0
     public private(set) var isPlaying = false
     public private(set) var isScrubbing = false

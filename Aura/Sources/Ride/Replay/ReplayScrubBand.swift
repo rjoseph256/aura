@@ -16,6 +16,7 @@ struct ReplayScrubBand: View {
 
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @ScaledMetric(relativeTo: .caption2) private var captionWidth: CGFloat = 44
     @State private var dragMoved = false
     @State private var holdUnderThumb: Int?
@@ -64,6 +65,16 @@ struct ReplayScrubBand: View {
             if index != holdUnderThumb { holdUnderThumb = index }
         }
         .onDisappear { playback.cancelScrub() }
+        // A system-cancelled `DragGesture` (e.g. the app backgrounding mid-drag) delivers no
+        // `onEnded`, so without this `isScrubbing` would stay true and `play(now:)` a silent
+        // no-op until the band is touched again.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                playback.cancelScrub()
+                holdUnderThumb = nil
+                dragMoved = false
+            }
+        }
     }
 
     // MARK: Layers

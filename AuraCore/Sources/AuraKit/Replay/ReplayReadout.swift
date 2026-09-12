@@ -26,13 +26,15 @@ public struct ReplayReadout: Equatable, Sendable {
         let totalTime = PauseControlCopy.clock(timeline.totalSeconds)
         timeText = "\(elapsed) / \(totalTime)"
         elevationText = sample.elevation.map { "\(fmt.elevationValue($0)) \(fmt.elevationUnit)" }
+        let minutes = Int(sample.seconds / 60)
+        let baseAccessibilityValue = "\(soFar) \(fmt.distanceUnitSpoken), \(minutes) minute\(minutes == 1 ? "" : "s")"
         if case let .hold(kind, seconds) = sample.phase {
             holdText = Self.holdLabel(kind: kind, seconds: seconds)
+            accessibilityValue = "\(Self.holdSpokenPrefix(kind: kind, seconds: seconds)), \(baseAccessibilityValue)"
         } else {
             holdText = nil
+            accessibilityValue = baseAccessibilityValue
         }
-        let minutes = Int(sample.seconds / 60)
-        accessibilityValue = "\(soFar) \(fmt.distanceUnitSpoken), \(minutes) minute\(minutes == 1 ? "" : "s")"
         var parts: [String] = []
         if let holdText { parts.append("\(holdText).") }
         if let speed = sample.speedMetersPerSecond {
@@ -56,6 +58,27 @@ public struct ReplayReadout: Equatable, Sendable {
         }
         let duration = seconds >= 60 ? RideStatsFormatter(units: .metric).minutes(seconds) : "\(Int(seconds)) s"
         return "\(word) · \(duration)"
+    }
+
+    /// Words, not the "·" capsule, for the VoiceOver value: "Stopped 10 minutes",
+    /// "Paused 45 seconds", "No signal 3 minutes". Same threshold as `holdLabel`: minutes at or
+    /// above 60 s (truncated), seconds below, both pluralized.
+    private static func holdSpokenPrefix(kind: ReplayHold.Kind, seconds: TimeInterval) -> String {
+        let word: String
+        switch kind {
+        case .stopped: word = "Stopped"
+        case .paused: word = "Paused"
+        case .signalLost: word = "No signal"
+        }
+        let duration: String
+        if seconds >= 60 {
+            let minutes = Int(seconds / 60)
+            duration = "\(minutes) minute\(minutes == 1 ? "" : "s")"
+        } else {
+            let secs = Int(seconds)
+            duration = "\(secs) second\(secs == 1 ? "" : "s")"
+        }
+        return "\(word) \(duration)"
     }
 
     /// The History row's three-valued rule; `HistoryView` keeps its own private copy.

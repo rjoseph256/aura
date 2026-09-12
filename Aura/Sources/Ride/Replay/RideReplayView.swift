@@ -31,7 +31,9 @@ struct RideReplayView: View {
         VStack(spacing: 0) {
             topBar
             ReplayMap(timeline: timeline, lines: lines, playback: playback)
-                .frame(minHeight: 200, maxHeight: .infinity)
+                // 200 pt, 120 at accessibility sizes, where the stacked readouts below take the
+                // height (spec §5/D7, A10, v2.4).
+                .frame(minHeight: typeSize.isAccessibilitySize ? 120 : 200, maxHeight: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous))
                 .padding(.horizontal, AuraTheme.Spacing.lg)
             controls

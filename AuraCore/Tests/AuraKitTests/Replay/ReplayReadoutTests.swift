@@ -58,6 +58,20 @@ struct ReplayReadoutTests {
         #expect(r.accessibilityLabel.hasPrefix("Stopped · 10 min."))
     }
 
+    /// The VoiceOver value leads with the hold, in words, not the "·" capsule string (spec
+    /// §4.14, §5).
+    @Test func accessibilityValueLeadsWithTheHoldInAHold() {
+        let r = ReplayReadout(sample: sample(speed: nil, distance: 100, seconds: 30, phase: .hold(.stopped, seconds: 600)),
+                              timeline: timeline, units: .imperial)
+        #expect(r.accessibilityValue == "Stopped 10 minutes, 0.1 miles, 0 minutes")
+    }
+
+    /// A non-hold sample's accessibilityValue is unchanged: no hold prefix.
+    @Test func accessibilityValueHasNoHoldPrefixWhenMoving() {
+        let r = ReplayReadout(sample: sample(speed: 8.9408, distance: 2.4 * 1609.344, seconds: 848), timeline: timeline, units: .imperial)
+        #expect(r.accessibilityValue == "2.4 miles, 14 minutes")
+    }
+
     @Test func subtitleIsThreeValued() {
         func ride(kind: Ride.Kind, name: String?) -> Ride {
             Ride(kind: kind, startedAt: .distantPast, endedAt: .distantPast, segments: [], stats: nil,

@@ -381,20 +381,38 @@ struct ReplayTimelineSpeedProfileEventTests {
         #expect(abs((t.sample(at: 26 / t.totalSeconds).speedMetersPerSecond ?? 0) - 4.5) < 0.05)
     }
 
-    /// D5.1: the window never reaches back across a hold, so a lost leg's 900 m / 120 s never
-    /// fabricates a speed for the seconds after it.
+    /// D5.1: never reaches back across a hold. Barrier-irrelevant fixture: the lost leg's own
+    /// time gap makes the unclamped search skip it anyway — see the mutation-proven test below.
     @Test func speedAfterALostLegIgnoresTheGap() {
         var pts = Fixtures.straight(seconds: 200).points
         let to = Fixtures.east(2100)
         pts.append(Fixtures.point(to, at: 320))                                        // 120 s, 900 m
         pts.append(contentsOf: Fixtures.straight(seconds: 200, start: 321, from: to).points.dropFirst())
         let t = Fixtures.timeline([RideSegment(points: pts)])
-        let hold = t.holds[0]
-        let justAfter = t.sample(at: hold.range.upperBound + 0.002)
+        var f = t.holds[0].range.upperBound   // first non-nil read: one real leg past the hold —
+        while t.sample(at: f).speedMetersPerSecond == nil, f < 1 { f += 1e-6 }   // 3 m/s, that leg's own
+        let justAfter = t.sample(at: f)                                         // speed, not the ride's 6
         #expect(justAfter.seconds > 320 && justAfter.seconds < 326)
-        #expect(justAfter.speedMetersPerSecond == nil || abs((justAfter.speedMetersPerSecond ?? 0) - 6) < 0.1)
-        let later = t.sample(at: (hold.range.upperBound + 1) / 2)
+        #expect(abs((justAfter.speedMetersPerSecond ?? -1) - 3) < 0.1)
+        let later = t.sample(at: (t.holds[0].range.upperBound + 1) / 2)
         #expect(abs((later.speedMetersPerSecond ?? 0) - 6) < 0.05)
+    }
+    /// Mutation-proven: a stop's barrier sits inside dense real timestamps, so an unclamped
+    /// search reaches into its near-zero jitter — the lost leg above cannot show this.
+    @Test func speedAfterAStopNeverReachesIntoIt() {
+        var pts = Fixtures.straight(seconds: 300).points
+        let stop = pts[300].coordinate
+        pts.append(contentsOf: Fixtures.jitter(seconds: 60, at: stop, start: 301))
+        pts.append(contentsOf: Fixtures.straight(seconds: 300, start: 361, from: stop).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        let hold = t.holds[0]; #expect(hold.kind == .stopped)
+        let holdClockEnd = t.sample(at: hold.range.upperBound).seconds
+        var f = hold.range.upperBound   // search to 2-3 s past the hold's clock end
+        while t.sample(at: f).seconds - holdClockEnd < 2, f < 1 { f += 1e-6 }
+        let s = t.sample(at: f)
+        #expect(s.seconds - holdClockEnd >= 2 && s.seconds - holdClockEnd < 3)
+        // Barrier: ~2.9 m/s (growing toward 6). No barrier: ~1.0-1.25 m/s (jitter reached). 2 m/s separates them (measured).
+        #expect((s.speedMetersPerSecond ?? 0) > 2)
     }
 
     // §4.9 profile
