@@ -452,3 +452,31 @@ struct ReplayTimelineSpeedProfileEventTests {
         #expect(t.events.contains { abs(t.sample(at: $0).distanceMeters - 3000) < 0.01 })
     }
 }
+
+struct ReplayTimelineScaleTests {
+    // §4.12 the working size: 10,800 points, four holds, two segments
+    @Test func threeHourRideBuildsAndHoldsTheInvariants() {
+        let ride = SyntheticRide.threeHour(startingAt: ReplayFixtures.t0)
+        #expect(ride.segments.count == 2)
+        #expect(ride.flattenedPoints.count == 10_800)
+        let t = ReplayTimeline(segments: ride.segments)
+        #expect(t.isReplayable)
+        #expect(t.playbackDuration <= 45 * 1.25 + 1e-9)
+        #expect(t.holds.map(\.kind) == [.stopped, .paused, .signalLost, .stopped])
+        #expect(t.holds[1].seconds == 601)                                 // 5399 → 6000
+        let stats = RideStatsCalculator.stats(segments: ride.segments)
+        #expect(abs(t.sample(at: 1).distanceMeters - stats.distanceMeters) < 1e-6)
+        for hold in t.holds {
+            #expect(t.sample(at: hold.range.lowerBound).phase == .hold(hold.kind, seconds: hold.seconds))
+            #expect(t.sample(at: hold.range.upperBound).phase == .moving)
+        }
+        var d = -1.0
+        for k in 0...1000 {
+            let s = t.sample(at: Double(k) / 1000)
+            #expect(s.distanceMeters >= d - 1e-9); d = s.distanceMeters
+            #expect(s.coordinate.latitude.isFinite && s.coordinate.longitude.isFinite)
+        }
+        #expect(t.profile(sampleCount: 240)?.count == 240)
+        #expect(t.events.count > 40)                                      // ~65 km → 64 km + 40 mi marks + holds
+    }
+}
