@@ -2988,7 +2988,7 @@ Two independent reviewers (`review-skeptic` on the pure layer, `review-architect
 | A7 | Tap rule was an untested call ordering | `ReplayPlayback.tap(to:now:)` + test |
 | A8 | Pixel math, caption rule, thumb y, 45° rounding lived in the app target | `ReplayBandGeometry`, `ReplayMarkerStyle` in AuraKit with suites; `@ScaledMetric` caption width |
 | A9 | `lines` derived twice and per `View.init` | `ReplayTimeline.drawableLines`; built once in the modifier's task |
-| A10 | Map could squeeze to nothing at AX sizes | `minHeight: 200`; hero capped at 56 |
+| A10 | Map could squeeze to nothing at AX sizes | `minHeight: 200` (120 at accessibility sizes, v2.4); hero capped at 56 |
 | A11 | No compile-error loop | Global constraint: orchestrator builds, implementer amends |
 | A12 | Elevation tag/spoken value from the 4 Hz sample, thumb from the frame | Second readout at the band's fraction |
 | A13–23 | Line refs; `RouteStroke` scope; repeated-hold announcement; `holdUnderThumb` churn; lower clamp; scrub latch; `isIdle` semantics; forbidden-file name; identifiers; 32 vs 34 pt canvases; Task 1 lint | All applied: `RoutePreviewView` included; announcement reset; guarded write; `cancelScrub` on disappear; `isIdle` caveat in code + spec §10; real file names; fixed 34 pt marker frame |

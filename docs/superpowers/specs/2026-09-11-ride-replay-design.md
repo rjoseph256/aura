@@ -259,7 +259,8 @@ summary file is not touched in this slice.
   `ride.isUnfinished`.
 - Map: the remainder of the height after the controls take theirs **(v2)**; the instrument
   row, band, and button have a fixed floor so they are never what clips at large Dynamic
-  Type. Camera fits `.overview` across drawable segments once on appear (padding 24 on top,
+  Type. The map itself floors at 200 pt, 120 pt at accessibility sizes where the stacked
+  readouts take the height **(v2.4)**. Camera fits `.overview` across drawable segments once on appear (padding 24 on top,
   leading, and trailing, 56 on the bottom so a route that starts at the frame's corner clears
   the attribution row; maxZoom 16). Pan and pinch enabled; `GestureOptions` with
   `rotateEnabled = false` and `pitchEnabled = false`, applied in the `Map` modifier chain
@@ -359,7 +360,7 @@ skip a hold.
   rail, built once), and `ReplayPlayback` **(v2)**: `@MainActor @Observable final class`,
   the `ShareUpgradePresenter` arrangement, holding `anchorFraction`, `anchorDate`,
   `isPlaying`, `resumeAfterScrub`, with event methods `play(now:)`, `pause(now:)`,
-  `beginScrub(now:)`, `scrub(to:)`, `endScrub(now:)`, `jump(to:)`, `settle()`, and the
+  `beginScrub(now:)`, `scrub(to:)`, `endScrub(now:)`, `tap(to:now:)`, `settle()`, and the
   pure read `fraction(at now: Date) -> Double` =
   `isPlaying ? min(1, anchorFraction + (now − anchorDate) / playbackDuration) : anchorFraction`.
   **No write happens in a view body.** Reaching 1 is observed by the view as a derived Bool
@@ -478,7 +479,7 @@ Each is a test that can fail. Fixtures are synthetic and named for what they exe
     invariants 3, 5, and 7 hold on it. Performance is unmeasured and accepted.
 13. **Playback (D11):** `fraction(at:)` is `anchorFraction` while paused; advances linearly
     while playing; clamps at 1; `beginScrub`/`endScrub` restore playing iff it was playing
-    and re-anchor at the scrubbed fraction; `jump` leaves it paused; `settle` parks at 1 not
+    and re-anchor at the scrubbed fraction; `tap` leaves it paused; `settle` parks at 1 not
     playing; `play` at 1 restarts from 0.
 14. **Readout strings (D5/D7):** "—" for nil speed, "2.4 / 12.3" distance, "14:08 / 1:02:11"
     time, "Stopped · 10 min", "Paused · 45 s", "No signal · 3 min", the elevation tag with
