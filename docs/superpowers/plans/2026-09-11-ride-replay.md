@@ -2,27 +2,30 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Version:** v2 (2026-09-11), reconciled after two independent adversarial plan reviews. v1's pure layer was compiled and run by the skeptic reviewer in a scratch package: one compile error, five lint violations, six failing tests. v1's app layer was type-checked by the architecture reviewer: one compile error, and every playback event was driven by a paused `TimelineView`'s frozen date. Every fix below was verified by the reviewer that found it unless marked otherwise. The reconciliation log is at the end.
+
 **Goal:** Scrub a finished ride back on the summary map: a rider marker runs the recorded track while speed, distance, time, and elevation track a scrubber, with every stop the rider remembers visible as a hold.
 
-**Architecture:** A pure `ReplayTimeline` in AuraCore normalizes a ride's segments into a playback axis of moving legs and holds, and samples any fraction of it without allocation. AuraKit holds the playback state machine (`ReplayPlayback`), the readout strings (`ReplayReadout`), and the band content (`ReplayBandContent`), all tested. The app target is a dumb projection: a `MapViewAnnotation` inside a `TimelineView`, a scrub band, an instrument row, and a one-line entry on the summary.
+**Architecture:** A pure `ReplayTimeline` in AuraCore normalizes a ride's segments into a playback axis of moving legs and holds, and samples any fraction of it without allocation. AuraKit holds the playback state machine (`ReplayPlayback`), the readout strings (`ReplayReadout`), the band content and geometry (`ReplayBandContent`, `ReplayBandGeometry`), and the marker style rule, all tested. The app target is a dumb projection: a `MapViewAnnotation` inside a `TimelineView`, a scrub band, an instrument row, and a one-line entry on the summary.
 
-**Tech Stack:** Swift 6 strict concurrency, Swift Testing, SwiftUI (iOS 17 deployment target), MapboxMaps 11.28.0 SwiftUI `Map`, XcodeGen-generated project, SwiftLint `--strict`.
+**Tech Stack:** Swift 6 strict concurrency, Swift Testing, SwiftUI (iOS 17 deployment target), MapboxMaps 11.28.0 SwiftUI `Map`, XcodeGen-generated project, SwiftLint 0.64.1 `--strict`.
 
-**Spec:** `docs/superpowers/specs/2026-09-11-ride-replay-design.md` (v2). Decisions are cited as D1…D11; invariants as §4.N.
+**Spec:** `docs/superpowers/specs/2026-09-11-ride-replay-design.md` (v2.1). Decisions are cited as D1…D11; invariants as §4.N.
 
 ## Global Constraints
 
-- Swift language mode 6; every public pure type is `Sendable` and `Equatable`. `@Observable` classes are `@MainActor`.
-- The app target has no unit-test bundle. Every rule lives in AuraCore or AuraKit with a Swift Testing suite; SwiftUI files contain layout only.
-- Never read `ride.flattenedPoints` or map `ride.segments` inside a SwiftUI `body`. Build once, hold in `@State`.
+- Swift language mode 6; every public pure type is `Sendable` and `Equatable`. Stored properties on `Equatable` structs must be nominal types (a tuple stored property breaks synthesis). `@Observable` classes are `@MainActor`.
+- The app target has no unit-test bundle. Every rule lives in AuraCore or AuraKit with a Swift Testing suite; SwiftUI files contain layout only. Pixel↔fraction mapping, caption placement, the thumb's y, and the Reduce Motion bearing rule are rules, and live in AuraKit.
+- Never read `ride.flattenedPoints` or map `ride.segments` inside a SwiftUI `body` or a `View.init`. Build once in the entry modifier's task, hold in `@State`, pass down.
 - No write to observable state inside a view body. Writes happen in event handlers and `.onChange`.
-- SwiftLint `--strict`: line length ≤ 140, file length ≤ 500 warning, no `ultraThinMaterial` outside Theme (use `.mapChip`), no async closure default arguments.
+- **`TimelineView`'s `context.date` is for rendering only.** Every call that mutates `ReplayPlayback` passes `Date()` taken in the event handler. A paused schedule's date is frozen; using it as `now` starts playback from wherever the rider hesitated to.
+- SwiftLint `--strict` fails on warnings. Beyond the repo's overrides, the defaults that bite here: `type_body_length` 250 lines (extensions do not count), `function_body_length` 50, `cyclomatic_complexity` 10, `nesting` types at most one level deep, `type_name` 3–40 characters (so no `typealias F`), `line_length` 140, `file_length` 500. No `ultraThinMaterial` outside Theme (use `.mapChip`); no async closure default arguments.
 - Mapbox `Map` modifiers (`.gestureOptions`, `.ornamentOptions`, `.mapStyle`) go on the `Map` before any generic SwiftUI modifier.
 - Package tests: run from `AuraCore/` with `swift test --no-parallel --filter <Suite>`. One `swift test` at a time on this machine. Lint from the repo root: `swiftlint lint --strict --quiet`.
-- App builds are run by the orchestrator via the `apple-platform-build-tools:builder` agent, not by implementers. The project is regenerated with `cd Aura && xcodegen generate`; new files under `Aura/Sources` need no project edit.
+- App builds are run by the orchestrator via the `apple-platform-build-tools:builder` agent. **Compile-error loop:** after each app-target task the orchestrator regenerates (`cd Aura && xcodegen generate`) and builds the `Aura` scheme for the iPhone 17 simulator. On failure the orchestrator sends the error text to the same implementer, who fixes it and `git commit --amend`s the task's commit; the task is not reviewed until the build is green. The `TaskCompleted` gate runs lint and package tests only; it cannot see an app compile error.
 - Config values (D2/D3/D5/D7), verbatim: rate 120; minPlayback 10 s; maxPlayback 45 s; minHold 1.5 s; maxHold 4 s; maxHoldShare 0.25; signalGapSeconds 30 s; holdDistanceMeters 50 m; stoppedSpeed 0.5 m/s; minStopSeconds 45 s; minPauseSeconds 5 s; speedWindowFloor 5 s; speedWindowPlayback 0.1 s; coincidentMeters 0.5 m; minReplayableSeconds 60 s; minReplayableMeters 200 m.
-- Copy, verbatim: "Replay", "Replay this ride", "Stopped · 10 min", "Paused · 45 s", "No signal · 3 min", "Play replay", "Pause replay", "Ride scrubber", "Recenter map", "—".
-- Files the branch must not touch: `NavigateHUDView.swift`, `RideMapView.swift`, `RideSummaryView+ShareUpgrade.swift`, every file under `Aura/Sources/GroupRide/`, `AppRoute.swift`, `SimulatedRideSupport`, `HistoryView.swift`. `RideSummaryView.swift` changes by exactly one line.
+- Copy, verbatim: "Replay", "Replay this ride", "Stopped · 10 min", "Paused · 45 s", "No signal · 3 min", "Play replay", "Pause replay", "Ride scrubber", "Recenter map", "Close", "—".
+- Files the branch must not touch: `NavigateHUDView.swift`, `RideMapView.swift`, `RideSummaryView+ShareUpgrade.swift`, every file under `Aura/Sources/GroupRide/`, `AppRoute.swift`, `Aura/Sources/Ride/SimulatedRideSupport.swift`, `AuraCore/Sources/AuraKit/SimulatedLocationProvider.swift`, `SimulatedRideFixture.swift`, `HistoryView.swift`. `RideSummaryView.swift` changes by exactly one line. (`SimulatedRideConfig.swift` is edited, by one flag, in Task 11.)
 - Commit after every task with the `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` trailer.
 
 ---
@@ -31,46 +34,49 @@
 
 | File | Responsibility |
 |---|---|
-| `AuraCore/Sources/AuraCore/Replay/ReplayTimeline.swift` | Build the playback axis from segments; `sample`, `holds`, `events`, `profile`. |
 | `AuraCore/Sources/AuraCore/Replay/ReplaySample.swift` | `ReplaySample`, `ReplayPhase`, `ReplayHold`. |
-| `AuraCore/Sources/AuraCore/Replay/SyntheticRide.swift` | Deterministic synthetic rides (the 3-hour one) for tests and the DEBUG seed. |
-| `AuraCore/Tests/AuraCoreTests/Replay/ReplayFixtures.swift` | Small segment builders for the timeline suites. |
+| `AuraCore/Sources/AuraCore/Replay/ReplayTimeline.swift` | Types, `Config`, `init` (layout of spans), `Builder`. |
+| `AuraCore/Sources/AuraCore/Replay/ReplayTimeline+Sample.swift` | `sample(at:)`, speed window, bearing window, `profile`, `events` (an extension, so `type_body_length` is not hit). |
+| `AuraCore/Sources/AuraCore/Replay/SyntheticRide.swift` | `#if DEBUG` deterministic rides for tests and the seed. |
+| `AuraCore/Tests/AuraCoreTests/Replay/ReplayFixtures.swift` | Segment builders. |
 | `AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift` | §4.1–4.12. |
-| `AuraCore/Sources/AuraKit/Replay/ReplayPlayback.swift` | Anchor-based playback state; D11. |
+| `AuraCore/Sources/AuraKit/Replay/ReplayPlayback.swift` | Anchor-based playback state; D4, D11. |
 | `AuraCore/Sources/AuraKit/Replay/ReplayReadout.swift` | Every displayed string; D5, D7 subtitle. |
-| `AuraCore/Sources/AuraKit/Replay/ReplayBandContent.swift` | Silhouette or rail decision, built once; D6. |
-| `AuraCore/Tests/AuraKitTests/Replay/ReplayPlaybackTests.swift` | §4.13. |
-| `AuraCore/Tests/AuraKitTests/Replay/ReplayReadoutTests.swift` | §4.14 and band content. |
-| `Aura/Sources/Theme/AuraTheme.swift` | `RouteStroke` constants (append). |
-| `Aura/Sources/Ride/StaticRouteMap.swift` | Read `RouteStroke` (two literals replaced). |
-| `Aura/Sources/Ride/Replay/ReplayMap.swift` | `TimelineView` → `Map` → source, layer, marker annotation; recenter; hold capsule. D8. |
-| `Aura/Sources/Ride/Replay/ReplayMarkerView.swift` | Puck image + rotation. |
+| `AuraCore/Sources/AuraKit/Replay/ReplayBandContent.swift` | Silhouette or rail, built once; D6. |
+| `AuraCore/Sources/AuraKit/Replay/ReplayBandGeometry.swift` | Pixel↔fraction, thumb y, caption placement; D6. |
+| `AuraCore/Sources/AuraKit/Replay/ReplayMarkerStyle.swift` | Reduce Motion bearing rounding; D10. |
+| `AuraCore/Tests/AuraKitTests/Replay/*Tests.swift` | §4.13–4.16. |
+| `Aura/Sources/Theme/AuraTheme.swift` | `RouteStroke` constants and the hold-strip color (append). |
+| `Aura/Sources/Ride/StaticRouteMap.swift`, `Aura/Sources/Plan/RoutePreviewView.swift` | Read `RouteStroke` (two literals each). |
+| `Aura/Sources/Ride/Replay/ReplayMap.swift` | `TimelineView` → `Map` → source, layer, marker; recenter; hold capsule. D8. |
+| `Aura/Sources/Ride/Replay/ReplayMarkerView.swift` | Puck image + rotation, fixed 34 pt frame. |
 | `Aura/Sources/Ride/Replay/ReplayScrubBand.swift` | Silhouette/rail, strips, captions, thumb, drag, a11y. D6. |
 | `Aura/Sources/Ride/Replay/ReplayInstrumentRow.swift` | Three readouts. D5. |
 | `Aura/Sources/Ride/Replay/RideReplayView.swift` | The cover: top bar, map, controls. D7. |
-| `Aura/Sources/Ride/Replay/RideReplayEntry.swift` | The modifier and pill. D1. |
-| `Aura/Sources/Ride/RideSummaryView.swift` | One line. |
+| `Aura/Sources/Ride/Replay/RideReplayEntry.swift` | The modifier, the pill, the one-time build of timeline/band/lines. D1. |
+| `Aura/Sources/Ride/RideSummaryView.swift:76` | One line. |
 | `AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift` | Three identifiers. |
 | `AuraCore/Sources/AuraKit/Testing/SimulatedRideConfig.swift` | `-auraSeedLongRide` flag. |
-| `Aura/Sources/AuraApp.swift` | DEBUG seed after store creation. |
+| `Aura/Sources/AuraApp.swift:22` | DEBUG seed, in-memory store only. |
 
 ---
 
-### Task 1: `ReplayTimeline` — construction, normalization, duration, replayability
+### Task 1: `ReplayTimeline` — types, builder, layout; construction and normalization tests
 
 **Files:**
 - Create: `AuraCore/Sources/AuraCore/Replay/ReplaySample.swift`
 - Create: `AuraCore/Sources/AuraCore/Replay/ReplayTimeline.swift`
+- Create: `AuraCore/Sources/AuraCore/Replay/ReplayTimeline+Sample.swift`
 - Create: `AuraCore/Tests/AuraCoreTests/Replay/ReplayFixtures.swift`
 - Create: `AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift`
 
 **Interfaces:**
-- Consumes: `RideSegment`, `TrackPoint`, `Coordinate`, `Geo.distance`, `PeerBearing.heading` (all AuraCore).
-- Produces: `ReplayTimeline(segments:config:)`, `.config`, `.isReplayable`, `.playbackDuration`, `.rate`, `.totalDistanceMeters`, `.totalSeconds`, `.holds`, `.events`, `.sample(at:)`, `.profile(sampleCount:)`; `ReplaySample`, `ReplayPhase`, `ReplayHold`. This task writes the whole implementation; Tasks 2–4 add the suites that pin sampling, holds, and speed/profile/events and fix whatever they catch.
+- Consumes: `RideSegment`, `TrackPoint`, `Coordinate`, `Geo.distance`, `PeerBearing.heading`.
+- Produces: `ReplayTimeline(segments:config:)`, `.config`, `.isReplayable`, `.playbackDuration`, `.rate`, `.speedWindowSeconds`, `.totalDistanceMeters`, `.totalSeconds`, `.drawableLines: [[Coordinate]]`, `.holds`, `.events`, `.sample(at:)`, `.profile(sampleCount:)`; `ReplaySample`, `ReplayPhase`, `ReplayHold`. The whole implementation lands here; Tasks 2–4 add the suites that pin sampling, holds, and speed/profile/events.
 
 - [ ] **Step 1: Create the value types**
 
-`AuraCore/Sources/AuraCore/Replay/ReplaySample.swift`:
+`ReplaySample.swift`:
 
 ```swift
 import Foundation
@@ -100,14 +106,15 @@ public enum ReplayPhase: Sendable, Equatable {
 /// Everything the map, the band, and the instrument row need for one moment of the ride.
 public struct ReplaySample: Sendable, Equatable {
     public var coordinate: Coordinate
-    /// Course of the current leg (spec D9). nil in a hold, at the end, and before the first
-    /// non-coincident leg; the marker draws the disc then.
+    /// Course over the trailing speed window (spec D9); the leg's own course before the
+    /// window fills. nil in a hold, at the end, and before the first non-coincident leg.
     public var bearing: Double?
     public var elevation: Double?
     /// Trailing mean over the speed window (spec D5.1). nil → "—".
     public var speedMetersPerSecond: Double?
     public var distanceMeters: Double
-    /// Ride seconds elapsed within segments: pause gaps excluded, in-segment stops included.
+    /// Σ normalized leg time up to here: pause gaps excluded, in-segment stops included. A
+    /// backwards stamp lengthens the leg after it (spec §3).
     public var seconds: TimeInterval
     public var phase: ReplayPhase
 
@@ -121,24 +128,36 @@ public struct ReplaySample: Sendable, Equatable {
 }
 ```
 
-- [ ] **Step 2: Write the failing construction tests**
+- [ ] **Step 2: Write the fixtures and the construction suite**
 
-`AuraCore/Tests/AuraCoreTests/Replay/ReplayFixtures.swift`:
+`ReplayFixtures.swift`:
 
 ```swift
 import Foundation
 @testable import AuraCore
 
-/// Segment builders for the replay suites. Everything is one point per second unless a
-/// builder says otherwise, so "seconds" and "points − 1" are the same number.
+/// Segment builders for the replay suites. One point per second unless a builder says
+/// otherwise, so "seconds" and "points − 1" are the same number. Distances use the same
+/// sphere `Geo.distance` uses (R = 6 371 000 m), so a fixture's meters are the meters the
+/// timeline measures, to ~1e-8.
 enum ReplayFixtures {
     static let t0 = Date(timeIntervalSince1970: 1_700_000_000)
     static let origin = Coordinate(latitude: 40.44, longitude: -79.99)
+    static let metersPerDegree = 6_371_000 * Double.pi / 180
 
-    /// A coordinate `meters` east of `from` on a flat-earth approximation good to ~1e-6.
     static func east(_ meters: Double, from: Coordinate = origin) -> Coordinate {
-        let metersPerDegreeLon = 111_320 * cos(from.latitude * .pi / 180)
-        return Coordinate(latitude: from.latitude, longitude: from.longitude + meters / metersPerDegreeLon)
+        Coordinate(latitude: from.latitude,
+                   longitude: from.longitude + meters / (metersPerDegree * cos(from.latitude * .pi / 180)))
+    }
+
+    static func north(_ meters: Double, from: Coordinate = origin) -> Coordinate {
+        Coordinate(latitude: from.latitude + meters / metersPerDegree, longitude: from.longitude)
+    }
+
+    /// `meters` along `bearing` (degrees clockwise from north), flat-earth.
+    static func move(_ meters: Double, bearing: Double, from: Coordinate) -> Coordinate {
+        let rad = bearing * .pi / 180
+        return north(meters * cos(rad), from: east(meters * sin(rad), from: from))
     }
 
     static func point(_ c: Coordinate, at offset: TimeInterval, elevation: Double? = 300) -> TrackPoint {
@@ -155,23 +174,29 @@ enum ReplayFixtures {
 
     /// `seconds` of GPS jitter around `at`: ±0.2 m, well under the 0.5 m/s stopped threshold.
     static func jitter(seconds: Int, at: Coordinate, start: TimeInterval) -> [TrackPoint] {
-        (0..<seconds).map { i in
-            point(east(0.2 * sin(Double(i)), from: at), at: start + Double(i))
-        }
+        (0..<seconds).map { i in point(east(0.2 * sin(Double(i)), from: at), at: start + Double(i)) }
     }
 
-    /// A quarter circle of radius `radius` m at `speed` m/s, one point per second. The arc
-    /// length is what a leg-sum speed reads; a chord implementation reads less.
+    /// A quarter circle of radius `radius` m at `speed` m/s. The arc length is what a leg-sum
+    /// speed reads; a chord implementation reads less.
     static func quarterCircle(radius: Double = 500, speed: Double = 6, start: TimeInterval = 0) -> RideSegment {
         let seconds = Int((.pi / 2 * radius / speed).rounded(.down))
-        let metersPerDegreeLat = 111_320.0
-        let metersPerDegreeLon = 111_320 * cos(origin.latitude * .pi / 180)
         return RideSegment(points: (0...seconds).map { i in
             let theta = Double(i) * speed / radius
-            let c = Coordinate(latitude: origin.latitude + radius * sin(theta) / metersPerDegreeLat,
-                               longitude: origin.longitude + radius * cos(theta) / metersPerDegreeLon)
-            return point(c, at: start + Double(i))
+            return point(north(radius * sin(theta), from: east(radius * cos(theta))), at: start + Double(i))
         })
+    }
+
+    /// Legs alternate between bearings 60° and 120° at 6 m/s: the net course is 90° but every
+    /// single leg is 30° off it.
+    static func zigzag(seconds: Int, start: TimeInterval = 0) -> RideSegment {
+        var pts = [point(origin, at: start)]
+        var c = origin
+        for i in 1...seconds {
+            c = move(6, bearing: i.isMultiple(of: 2) ? 60 : 120, from: c)
+            pts.append(point(c, at: start + Double(i)))
+        }
+        return RideSegment(points: pts)
     }
 
     static func timeline(_ segments: [RideSegment], config: ReplayTimeline.Config = .init()) -> ReplayTimeline {
@@ -180,7 +205,7 @@ enum ReplayFixtures {
 }
 ```
 
-`AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift`:
+`ReplayTimelineTests.swift`:
 
 ```swift
 import Testing
@@ -188,42 +213,42 @@ import Foundation
 @testable import AuraCore
 
 struct ReplayTimelineConstructionTests {
-    typealias F = ReplayFixtures
+    typealias Fixtures = ReplayFixtures
 
     // §4.1 duration rule
     @Test func underTheFloorClampsToMinPlayback() {
-        let t = F.timeline([F.straight(seconds: 300)])          // 300 s / 120 = 2.5 s → floor
-        #expect(t.playbackDuration == 10)
-        #expect(abs(t.rate - 30) < 1e-9)                         // 300 / 10
+        let t = Fixtures.timeline([Fixtures.straight(seconds: 300)])   // 300 s / 120 = 2.5 s → floor
+        #expect(abs(t.playbackDuration - 10) < 1e-9)
+        #expect(abs(t.rate - 30) < 1e-9)
     }
 
     @Test func atRateIsExactlyRate() {
-        let t = F.timeline([F.straight(seconds: 2400)])         // 20 min / 120 = 10 s exactly
+        let t = Fixtures.timeline([Fixtures.straight(seconds: 2400)])  // 20 min / 120 = 10 s exactly
         #expect(abs(t.playbackDuration - 20) < 1e-9)
         #expect(abs(t.rate - 120) < 1e-9)
     }
 
     @Test func overTheCapClampsToMaxPlayback() {
-        let t = F.timeline([F.straight(seconds: 7200)])         // 2 h / 120 = 60 s → cap 45
-        #expect(t.playbackDuration == 45)
+        let t = Fixtures.timeline([Fixtures.straight(seconds: 7200)])  // 2 h / 120 = 60 s → cap 45
+        #expect(abs(t.playbackDuration - 45) < 1e-9)
         #expect(abs(t.rate - 160) < 1e-9)
     }
 
     @Test func emptyAndSinglePointInteriorSegmentsAddNoHold() {
-        let a = F.straight(seconds: 600)
-        let lone = RideSegment(points: [F.point(F.origin, at: 700)])
-        let b = F.straight(seconds: 600, start: 800, from: F.east(4000))
-        let with = F.timeline([a, RideSegment(points: []), lone, b])
-        let without = F.timeline([a, b])
+        let a = Fixtures.straight(seconds: 600)
+        let lone = RideSegment(points: [Fixtures.point(Fixtures.origin, at: 700)])
+        let b = Fixtures.straight(seconds: 600, start: 800, from: Fixtures.east(4000))
+        let with = Fixtures.timeline([a, RideSegment(points: []), lone, b])
+        let without = Fixtures.timeline([a, b])
         #expect(with.holds.count == 1)
         #expect(with.holds == without.holds)
-        #expect(with.playbackDuration == without.playbackDuration)
+        #expect(abs(with.playbackDuration - without.playbackDuration) < 1e-9)
     }
 
     // §4.2 normalization
     @Test func identicalTimestampsBuildAndAreNotReplayable() {
-        let pts = (0...5).map { F.point(F.east(Double($0) * 50), at: 0) }
-        let t = F.timeline([RideSegment(points: pts)])
+        let pts = (0...5).map { Fixtures.point(Fixtures.east(Double($0) * 50), at: 0) }
+        let t = Fixtures.timeline([RideSegment(points: pts)])
         #expect(t.totalSeconds == 0)
         #expect(t.isReplayable == false)
         #expect(t.playbackDuration.isFinite)
@@ -234,11 +259,14 @@ struct ReplayTimelineConstructionTests {
         }
     }
 
-    @Test func backwardsStampIsZeroWidthAndNeverNegative() {
-        var pts = F.straight(seconds: 200).points
-        pts[100] = F.point(pts[100].coordinate, at: 60)        // clock stepped back 40 s
-        let t = F.timeline([RideSegment(points: pts)])
-        #expect(t.rate >= 0)
+    @Test func backwardsStampIsZeroWidthAndLengthensTheNextLeg() {
+        var pts = Fixtures.straight(seconds: 200).points
+        pts[100] = Fixtures.point(pts[100].coordinate, at: 98)       // stamped 1 s BEFORE its predecessor
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        // Leg 99→100 normalizes to 0 s (keeps its 6 m); leg 100→101 is 101 − 98 = 3 s at 2 m/s.
+        #expect(abs(t.totalSeconds - 201) < 1e-9)
+        #expect(t.holds.isEmpty)
+        #expect(t.rate > 0)
         var lastDistance = -1.0, lastSeconds = -1.0
         for k in 0...200 {
             let s = t.sample(at: Double(k) / 200)
@@ -246,46 +274,56 @@ struct ReplayTimelineConstructionTests {
             #expect(s.seconds >= lastSeconds - 1e-9)
             lastDistance = s.distanceMeters; lastSeconds = s.seconds
         }
-        // Legs 99→100 and 100→101 both normalize to dt 0, so the moving span lost 2 s.
-        #expect(abs(t.totalSeconds - 198) < 1e-9)
+        #expect(abs(t.totalDistanceMeters - 1200) < 0.01)              // the zero-width leg kept its distance
     }
 
     // §4.11 replayable
     @Test func replayableNeedsSixtySecondsAndTwoHundredMeters() {
-        #expect(F.timeline([F.straight(seconds: 59, speed: 6)]).isReplayable == false)   // 354 m, 59 s
-        #expect(F.timeline([F.straight(seconds: 120, speed: 1)]).isReplayable == false)  // 120 m
-        #expect(F.timeline([F.straight(seconds: 60, speed: 4)]).isReplayable == true)    // 240 m, 60 s
-        #expect(F.timeline([]).isReplayable == false)
-        #expect(F.timeline([RideSegment(points: [F.point(F.origin, at: 0)])]).isReplayable == false)
+        #expect(Fixtures.timeline([Fixtures.straight(seconds: 59, speed: 6)]).isReplayable == false)
+        #expect(Fixtures.timeline([Fixtures.straight(seconds: 120, speed: 1)]).isReplayable == false)
+        #expect(Fixtures.timeline([Fixtures.straight(seconds: 60, speed: 4)]).isReplayable == true)
+        #expect(Fixtures.timeline([]).isReplayable == false)
+        #expect(Fixtures.timeline([RideSegment(points: [Fixtures.point(Fixtures.origin, at: 0)])]).isReplayable == false)
     }
 
     @Test func totalsAreTheSegmentSums() {
-        let t = F.timeline([F.straight(seconds: 100), F.straight(seconds: 50, start: 400, from: F.east(2000))])
+        let t = Fixtures.timeline([Fixtures.straight(seconds: 100),
+                                   Fixtures.straight(seconds: 50, start: 400, from: Fixtures.east(2000))])
         #expect(abs(t.totalSeconds - 150) < 1e-9)
-        #expect(abs(t.totalDistanceMeters - 900) < 0.5)   // 600 + 300, haversine vs flat
+        #expect(abs(t.totalDistanceMeters - 900) < 0.01)
+        #expect(t.drawableLines.count == 2)
+        #expect(t.drawableLines[0].count == 101 && t.drawableLines[1].count == 51)
+    }
+
+    @Test func emptyTimelineIsTotal() {
+        let t = Fixtures.timeline([])
+        #expect(t.drawableLines.isEmpty && t.holds.isEmpty && t.events == [0, 1])
+        #expect(t.sample(at: 0.5).phase == .ended)
+        #expect(t.profile(sampleCount: 10) == nil)
     }
 }
 ```
 
-- [ ] **Step 3: Run the suite to verify it fails to compile**
+- [ ] **Step 3: Run to verify it fails to compile**
 
 Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimelineConstructionTests`
 Expected: compile error, `ReplayTimeline` not found.
 
-- [ ] **Step 4: Write the implementation**
+- [ ] **Step 4: Write the timeline (types, config, builder, layout)**
 
-`AuraCore/Sources/AuraCore/Replay/ReplayTimeline.swift`:
+`ReplayTimeline.swift`:
 
 ```swift
 import Foundation
 
 /// A finished ride laid out on a playback axis: moving legs at a constant compression of ride
 /// time, and holds — pause gaps, stationary runs, lost-signal legs — at a fixed width each
-/// (spec D2, D3). Built once; `sample(at:)` is a binary search and allocates nothing.
+/// (spec D2, D3). Built once; `sample(at:)` (in `ReplayTimeline+Sample.swift`) is a binary
+/// search and allocates nothing.
 ///
-/// Time is normalized in `init`: a leg's `dt` is `max(0, next − prev)`, so a backwards or
+/// Time is normalized here: a leg's `dt` is `max(0, next − prev)`, so a backwards or
 /// repeated stamp is a zero-width leg that keeps its distance and occupies no time. Nothing
-/// downstream has to guard `dt > 0` again.
+/// downstream guards `dt > 0` again.
 public struct ReplayTimeline: Sendable, Equatable {
     public struct Config: Sendable, Equatable {
         public var rate: Double = 120
@@ -307,13 +345,16 @@ public struct ReplayTimeline: Sendable, Equatable {
         public init() {}
     }
 
+    struct Endpoint: Sendable, Equatable {
+        var coordinate: Coordinate
+        var elevation: Double?
+    }
+
     struct Leg: Sendable, Equatable {
         var segment: Int
         var startIndex: Int
-        var start: Coordinate
-        var end: Coordinate
-        var startElevation: Double?
-        var endElevation: Double?
+        var start: Endpoint
+        var end: Endpoint
         var distance: Double
         var dt: TimeInterval
         var bearing: Double?
@@ -322,8 +363,7 @@ public struct ReplayTimeline: Sendable, Equatable {
     struct Hold: Sendable, Equatable {
         var kind: ReplayHold.Kind
         var seconds: TimeInterval
-        var anchor: Coordinate
-        var anchorElevation: Double?
+        var anchor: Endpoint
         /// In-segment holds advance the ride clock across their width; a pause gap does not.
         var advancesClock: Bool
         /// Distance folded into the hold (jitter, or the lost-signal leg). Counted after it.
@@ -337,61 +377,97 @@ public struct ReplayTimeline: Sendable, Equatable {
         case skip(distance: Double)
     }
 
+    enum SpanContent: Sendable, Equatable {
+        case leg(Leg)
+        case hold(Hold)
+    }
+
     struct Span: Sendable, Equatable {
-        enum Content: Sendable, Equatable { case leg(Leg), hold(Hold) }
-        var content: Content
+        var content: SpanContent
         var playStart: TimeInterval
         var width: TimeInterval
+        /// `playStart / playbackDuration`, stored so the search uses the SAME divided value the
+        /// hold ranges are built from. Searching on seconds put a hold's exclusive end back
+        /// inside the hold in 94 of 115 sampled gaps (plan review, v1).
+        var fractionStart: Double
         var distanceAtStart: Double
         var secondsAtStart: TimeInterval
     }
 
-    /// Per drawable segment: global cumulative seconds and distance at each point, for the
-    /// speed window (spec D5.1).
+    /// Per drawable segment: global cumulative seconds and distance at each point, the point
+    /// coordinates, and for each point the index the speed/bearing window may not look behind
+    /// (the end of the last in-segment hold, spec D5.1).
     struct SegmentIndex: Sendable, Equatable {
         var times: [TimeInterval]
         var distances: [Double]
+        var coordinates: [Coordinate]
+        var windowFloor: [Int]
     }
 
     public let config: Config
     public let playbackDuration: TimeInterval
     public let rate: Double
+    /// `max(speedWindowFloor, rate × speedWindowPlayback)`: 12 s at 120×, 5 s at 30× (D5.1).
+    public let speedWindowSeconds: TimeInterval
     public let totalDistanceMeters: Double
     public let totalSeconds: TimeInterval
     public let isReplayable: Bool
+    /// The coordinates of every drawable segment (≥ 2 points), in order. The one definition of
+    /// "drawable" the map and the sampler share.
+    public let drawableLines: [[Coordinate]]
     public let holds: [ReplayHold]
     public let events: [Double]
 
     let spans: [Span]
     let segmentIndices: [SegmentIndex]
-    let last: (coordinate: Coordinate, elevation: Double?)?
-    let first: (coordinate: Coordinate, elevation: Double?)?
-
-    // MARK: - Build
+    let first: Endpoint?
+    let last: Endpoint?
 
     public init(segments: [RideSegment], config: Config = .init()) {
         self.config = config
         let drawable = segments.filter { $0.points.count > 1 }
         var builder = Builder(config: config)
         for (index, segment) in drawable.enumerated() { builder.add(segment, index: index) }
-        let items = builder.items
         segmentIndices = builder.segmentIndices
         totalDistanceMeters = builder.cumulativeDistance
         totalSeconds = builder.cumulativeSeconds
-        first = drawable.first.map { ($0.points[0].coordinate, $0.points[0].elevation) }
+        drawableLines = drawable.map { $0.points.map(\.coordinate) }
+        first = drawable.first.map { Endpoint(coordinate: $0.points[0].coordinate, elevation: $0.points[0].elevation) }
         last = drawable.last.map { seg in
             let p = seg.points[seg.points.count - 1]
-            return (p.coordinate, p.elevation)
+            return Endpoint(coordinate: p.coordinate, elevation: p.elevation)
         }
+        let layout = Self.layout(items: builder.items, config: config)
+        playbackDuration = layout.duration
+        rate = layout.rate
+        speedWindowSeconds = max(config.speedWindowFloor, layout.rate * config.speedWindowPlayback)
+        spans = layout.spans
+        holds = layout.spans.compactMap { span in
+            guard case let .hold(hold) = span.content else { return nil }
+            return ReplayHold(kind: hold.kind, seconds: hold.seconds,
+                              range: span.fractionStart..<((span.playStart + span.width) / layout.duration))
+        }
+        isReplayable = !drawable.isEmpty
+            && layout.movingSpan >= config.minReplayableSeconds
+            && totalDistanceMeters >= config.minReplayableMeters
+        events = Self.events(spans: spans, holds: holds, duration: layout.duration)
+    }
 
-        // D2: constant compression of the moving span.
+    struct Layout {
+        var spans: [Span]
+        var duration: TimeInterval
+        var rate: Double
+        var movingSpan: TimeInterval
+    }
+
+    /// D2 + D3: the moving span at constant compression, holds at clamped widths capped as a
+    /// share of the moving playback. `duration` is the exact sum, not an accumulation.
+    static func layout(items: [Item], config: Config) -> Layout {
         var movingSpan: TimeInterval = 0
         for case let .leg(leg) in items { movingSpan += leg.dt }
         let movingPlayback = min(max(movingSpan / config.rate, config.minPlayback), config.maxPlayback)
         let rate = movingSpan / movingPlayback
-        self.rate = rate
 
-        // D3: hold widths, capped as a share of the moving playback.
         var holdWidths: [TimeInterval] = []
         for case let .hold(hold) in items {
             let raw = rate > 0 ? hold.seconds / rate : config.maxHold
@@ -403,13 +479,10 @@ public struct ReplayTimeline: Sendable, Equatable {
             let scale = holdCap / holdTotal
             holdWidths = holdWidths.map { $0 * scale }
         }
+        let duration = movingPlayback + holdWidths.reduce(0, +)
 
-        // Lay the spans out. Zero-width legs (or all legs, when movingSpan is 0) fold into the
-        // running totals and produce no span.
         var spans: [Span] = []
-        var play: TimeInterval = 0
-        var distance = 0.0
-        var seconds: TimeInterval = 0
+        var play: TimeInterval = 0, distance = 0.0, seconds: TimeInterval = 0
         var holdCursor = 0
         for item in items {
             switch item {
@@ -419,7 +492,7 @@ public struct ReplayTimeline: Sendable, Equatable {
                 let width = movingSpan > 0 ? leg.dt * movingPlayback / movingSpan : 0
                 if width > 0 {
                     spans.append(Span(content: .leg(leg), playStart: play, width: width,
-                                      distanceAtStart: distance, secondsAtStart: seconds))
+                                      fractionStart: play / duration, distanceAtStart: distance, secondsAtStart: seconds))
                     play += width
                 }
                 distance += leg.distance
@@ -428,29 +501,17 @@ public struct ReplayTimeline: Sendable, Equatable {
                 let width = holdWidths[holdCursor]
                 holdCursor += 1
                 spans.append(Span(content: .hold(hold), playStart: play, width: width,
-                                  distanceAtStart: distance, secondsAtStart: seconds))
+                                  fractionStart: play / duration, distanceAtStart: distance, secondsAtStart: seconds))
                 play += width
                 distance += hold.distance
                 if hold.advancesClock { seconds += hold.seconds }
             }
         }
-        let duration = spans.isEmpty ? movingPlayback : play
-        playbackDuration = duration
-        self.spans = spans
-
-        holds = spans.compactMap { span in
-            guard case let .hold(hold) = span.content else { return nil }
-            return ReplayHold(kind: hold.kind, seconds: hold.seconds,
-                              range: (span.playStart / duration)..<((span.playStart + span.width) / duration))
-        }
-        isReplayable = !drawable.isEmpty
-            && movingSpan >= config.minReplayableSeconds
-            && totalDistanceMeters >= config.minReplayableMeters
-        events = Self.events(spans: spans, holds: holds, duration: duration)
+        return Layout(spans: spans, duration: duration, rate: rate, movingSpan: movingSpan)
     }
 
     /// Walks segments once, classifying legs (spec D2) and emitting items in ride order.
-    private struct Builder {
+    struct Builder {
         let config: Config
         var items: [Item] = []
         var segmentIndices: [SegmentIndex] = []
@@ -460,22 +521,17 @@ public struct ReplayTimeline: Sendable, Equatable {
         /// Legs of the stationary run being accumulated; flushed at a moving leg or the end.
         private var run: [Leg] = []
         private var lastBearing: Double?
+        /// Point indices in the current segment where an in-segment hold ends.
+        private var barriers: [Int] = []
 
         init(config: Config) { self.config = config }
 
         mutating func add(_ segment: RideSegment, index: Int) {
             let points = segment.points
-            if let prev = previousLast {
-                let gap = max(0, points[0].timestamp.timeIntervalSince(prev.timestamp))
-                if gap >= config.minPauseSeconds {
-                    items.append(.hold(Hold(kind: .paused, seconds: gap, anchor: prev.coordinate,
-                                            anchorElevation: prev.elevation, advancesClock: false,
-                                            distance: 0)))
-                }
-            }
+            addPauseGap(before: points[0])
             lastBearing = nil
-            var times = [cumulativeSeconds]
-            var distances = [cumulativeDistance]
+            barriers = []
+            var times = [cumulativeSeconds], distances = [cumulativeDistance]
             for i in 1..<points.count {
                 let a = points[i - 1], b = points[i]
                 let dt = max(0, b.timestamp.timeIntervalSince(a.timestamp))
@@ -485,76 +541,92 @@ public struct ReplayTimeline: Sendable, Equatable {
                 times.append(cumulativeSeconds)
                 distances.append(cumulativeDistance)
                 if d >= config.coincidentMeters { lastBearing = PeerBearing.heading(from: a.coordinate, to: b.coordinate) }
-                let leg = Leg(segment: index, startIndex: i - 1, start: a.coordinate, end: b.coordinate,
-                              startElevation: a.elevation, endElevation: b.elevation,
+                let leg = Leg(segment: index, startIndex: i - 1,
+                              start: Endpoint(coordinate: a.coordinate, elevation: a.elevation),
+                              end: Endpoint(coordinate: b.coordinate, elevation: b.elevation),
                               distance: d, dt: dt, bearing: lastBearing)
-                if dt >= config.signalGapSeconds {
-                    flushRun()
-                    let kind: ReplayHold.Kind = d < config.holdDistanceMeters ? .stopped : .signalLost
-                    items.append(.hold(Hold(kind: kind, seconds: dt, anchor: a.coordinate,
-                                            anchorElevation: a.elevation, advancesClock: true, distance: d)))
-                } else if dt == 0 {
-                    if run.isEmpty { items.append(.skip(distance: d)) } else { run.append(leg) }
-                } else if d / dt < config.stoppedSpeed {
-                    run.append(leg)
-                } else {
-                    flushRun()
-                    items.append(.leg(leg))
-                }
+                classify(leg, endIndex: i)
             }
             flushRun()
-            segmentIndices.append(SegmentIndex(times: times, distances: distances))
+            segmentIndices.append(SegmentIndex(times: times, distances: distances,
+                                               coordinates: points.map(\.coordinate),
+                                               windowFloor: Self.floors(barriers: barriers, count: points.count)))
             previousLast = points[points.count - 1]
         }
 
+        private mutating func addPauseGap(before first: TrackPoint) {
+            guard let prev = previousLast else { return }
+            let gap = max(0, first.timestamp.timeIntervalSince(prev.timestamp))
+            guard gap >= config.minPauseSeconds else { return }
+            items.append(.hold(Hold(kind: .paused, seconds: gap,
+                                    anchor: Endpoint(coordinate: prev.coordinate, elevation: prev.elevation),
+                                    advancesClock: false, distance: 0)))
+        }
+
+        private mutating func classify(_ leg: Leg, endIndex: Int) {
+            if leg.dt >= config.signalGapSeconds {
+                flushRun()
+                let kind: ReplayHold.Kind = leg.distance < config.holdDistanceMeters ? .stopped : .signalLost
+                items.append(.hold(Hold(kind: kind, seconds: leg.dt, anchor: leg.start,
+                                        advancesClock: true, distance: leg.distance)))
+                barriers.append(endIndex)
+            } else if leg.dt == 0 {
+                // Zero width. A real displacement with no time is not "stopped"; it breaks a run.
+                if leg.distance >= config.coincidentMeters { flushRun(); items.append(.skip(distance: leg.distance)) }
+                else if run.isEmpty { items.append(.skip(distance: leg.distance)) }
+                else { run.append(leg) }
+            } else if leg.distance / leg.dt < config.stoppedSpeed {
+                run.append(leg)
+            } else {
+                flushRun()
+                items.append(.leg(leg))
+            }
+        }
+
         private mutating func flushRun() {
-            guard let head = run.first else { return }
+            guard let head = run.first, let tail = run.last else { return }
             let seconds = run.reduce(0) { $0 + $1.dt }
             if seconds >= config.minStopSeconds {
                 items.append(.hold(Hold(kind: .stopped, seconds: seconds, anchor: head.start,
-                                        anchorElevation: head.startElevation, advancesClock: true,
-                                        distance: run.reduce(0) { $0 + $1.distance })))
+                                        advancesClock: true, distance: run.reduce(0) { $0 + $1.distance })))
+                barriers.append(tail.startIndex + 1)
             } else {
                 for leg in run { items.append(leg.dt > 0 ? .leg(leg) : .skip(distance: leg.distance)) }
             }
             run.removeAll(keepingCapacity: true)
         }
-    }
 
-    private static func events(spans: [Span], holds: [ReplayHold], duration: TimeInterval) -> [Double] {
-        var out: [Double] = [0, 1]
-        for hold in holds { out.append(hold.range.lowerBound); out.append(hold.range.upperBound) }
-        let units: [Double] = [1000, 1609.344]
-        for span in spans {
-            guard case let .leg(leg) = span.content, leg.distance > 0 else { continue }
-            let from = span.distanceAtStart, to = from + leg.distance
-            for unit in units {
-                var k = (from / unit).rounded(.down) + 1
-                while k * unit <= to {
-                    let fraction = (span.playStart + (k * unit - from) / leg.distance * span.width) / duration
-                    out.append(fraction)
-                    k += 1
-                }
+        /// `floors[j]` = the greatest barrier ≤ j, or 0.
+        static func floors(barriers: [Int], count: Int) -> [Int] {
+            var out = [Int](repeating: 0, count: count)
+            var current = 0
+            var next = 0
+            for j in 0..<count {
+                while next < barriers.count, barriers[next] <= j { current = barriers[next]; next += 1 }
+                out[j] = current
             }
+            return out
         }
-        out.sort()
-        var deduped: [Double] = []
-        for f in out where deduped.last.map({ f - $0 > 1e-9 }) ?? true { deduped.append(f) }
-        return deduped
     }
+}
+```
 
-    // MARK: - Sample
+- [ ] **Step 5: Write the sampling extension**
 
-    /// Total: any fraction, clamped to 0…1. With no drawable segment the sample is the
-    /// origin at `.ended`; the entry point never presents such a timeline (`isReplayable`).
+`ReplayTimeline+Sample.swift`:
+
+```swift
+import Foundation
+
+extension ReplayTimeline {
+    /// Total: any fraction, clamped to 0…1. With no drawable segment the sample is the origin
+    /// at `.ended`; the entry point never presents such a timeline (`isReplayable`).
     public func sample(at fraction: Double) -> ReplaySample {
         let f = min(max(fraction.isFinite ? fraction : 0, 0), 1)
         guard let first else {
-            return ReplaySample(coordinate: Coordinate(latitude: 0, longitude: 0), bearing: nil,
-                                elevation: nil, speedMetersPerSecond: nil, distanceMeters: 0,
-                                seconds: 0, phase: .ended)
+            return ReplaySample(coordinate: Coordinate(latitude: 0, longitude: 0), bearing: nil, elevation: nil,
+                                speedMetersPerSecond: nil, distanceMeters: 0, seconds: 0, phase: .ended)
         }
-        let p = f * playbackDuration
         if f >= 1 || spans.isEmpty {
             if f < 1 {
                 return ReplaySample(coordinate: first.coordinate, bearing: nil, elevation: first.elevation,
@@ -565,81 +637,30 @@ public struct ReplayTimeline: Sendable, Equatable {
                                 speedMetersPerSecond: nil, distanceMeters: totalDistanceMeters,
                                 seconds: totalSeconds, phase: .ended)
         }
-        let span = spans[spanIndex(at: p)]
-        let t = min(max((p - span.playStart) / span.width, 0), 1)
+        let span = spans[spanIndex(atFraction: f)]
+        let t = min(max((f * playbackDuration - span.playStart) / span.width, 0), 1)
         switch span.content {
         case let .leg(leg):
             let coordinate = Coordinate(
-                latitude: leg.start.latitude + (leg.end.latitude - leg.start.latitude) * t,
-                longitude: leg.start.longitude + (leg.end.longitude - leg.start.longitude) * t)
-            let elevation: Double?
-            switch (leg.startElevation, leg.endElevation) {
-            case let (a?, b?): elevation = a + (b - a) * t
-            case let (a?, nil): elevation = a
-            case let (nil, b?): elevation = b
-            case (nil, nil): elevation = nil
-            }
+                latitude: leg.start.coordinate.latitude + (leg.end.coordinate.latitude - leg.start.coordinate.latitude) * t,
+                longitude: leg.start.coordinate.longitude + (leg.end.coordinate.longitude - leg.start.coordinate.longitude) * t)
             let seconds = span.secondsAtStart + leg.dt * t
-            return ReplaySample(coordinate: coordinate, bearing: leg.bearing, elevation: elevation,
-                                speedMetersPerSecond: windowedSpeed(segment: leg.segment, at: seconds),
+            let window = window(segment: leg.segment, at: seconds)
+            return ReplaySample(coordinate: coordinate,
+                                bearing: window.bearing ?? leg.bearing,
+                                elevation: Self.lerp(leg.start.elevation, leg.end.elevation, t),
+                                speedMetersPerSecond: window.speed,
                                 distanceMeters: span.distanceAtStart + leg.distance * t,
                                 seconds: seconds, phase: .moving)
         case let .hold(hold):
-            return ReplaySample(coordinate: hold.anchor, bearing: nil, elevation: hold.anchorElevation,
+            return ReplaySample(coordinate: hold.anchor.coordinate, bearing: nil, elevation: hold.anchor.elevation,
                                 speedMetersPerSecond: nil, distanceMeters: span.distanceAtStart,
-                                seconds: hold.advancesClock ? span.secondsAtStart + hold.seconds * t
-                                                            : span.secondsAtStart,
+                                seconds: hold.advancesClock ? span.secondsAtStart + hold.seconds * t : span.secondsAtStart,
                                 phase: .hold(hold.kind, seconds: hold.seconds))
         }
     }
 
-    /// Last span whose `playStart` ≤ `p`. Spans start at 0 and are contiguous, so this is the
-    /// span containing `p` for every `p` below `playbackDuration`.
-    private func spanIndex(at p: TimeInterval) -> Int {
-        var lo = 0, hi = spans.count - 1
-        while lo < hi {
-            let mid = (lo + hi + 1) / 2
-            if spans[mid].playStart <= p { lo = mid } else { hi = mid - 1 }
-        }
-        return lo
-    }
-
-    /// Spec D5.1: sum of leg distances between the points bracketing `[T − w, T]` within the
-    /// segment, over their time span. nil with fewer than two points or a zero span.
-    private func windowedSpeed(segment: Int, at seconds: TimeInterval) -> Double? {
-        let index = segmentIndices[segment]
-        let w = max(config.speedWindowFloor, rate * config.speedWindowPlayback)
-        let j = Self.lastIndex(in: index.times, atOrBefore: seconds)
-        let i = Self.firstIndex(in: index.times, atOrAfter: seconds - w)
-        guard j > i else { return nil }
-        let span = index.times[j] - index.times[i]
-        guard span > 0 else { return nil }
-        return (index.distances[j] - index.distances[i]) / span
-    }
-
-    private static func lastIndex(in times: [TimeInterval], atOrBefore t: TimeInterval) -> Int {
-        var lo = 0, hi = times.count - 1
-        while lo < hi {
-            let mid = (lo + hi + 1) / 2
-            if times[mid] <= t { lo = mid } else { hi = mid - 1 }
-        }
-        return lo
-    }
-
-    private static func firstIndex(in times: [TimeInterval], atOrAfter t: TimeInterval) -> Int {
-        var lo = 0, hi = times.count - 1
-        while lo < hi {
-            let mid = (lo + hi) / 2
-            if times[mid] >= t { hi = mid } else { lo = mid + 1 }
-        }
-        return lo
-    }
-
-    // MARK: - Profile
-
-    /// Elevation at `sampleCount` uniform playback fractions (spec D6): the anchor's value
-    /// through a hold, the last known value across points without one, the first known value
-    /// before any. nil when no point has elevation.
+    /// Elevation at `sampleCount` uniform playback fractions (spec D6). nil when no point has one.
     public func profile(sampleCount: Int) -> [Double]? {
         guard sampleCount >= 2 else { return nil }
         var raw: [Double?] = []
@@ -655,17 +676,101 @@ public struct ReplayTimeline: Sendable, Equatable {
         }
         return out
     }
+
+    // MARK: - Internals
+
+    private static func lerp(_ a: Double?, _ b: Double?, _ t: Double) -> Double? {
+        switch (a, b) {
+        case let (a?, b?): return a + (b - a) * t
+        case let (a?, nil): return a
+        case let (nil, b?): return b
+        case (nil, nil): return nil
+        }
+    }
+
+    /// Last span whose `fractionStart` ≤ `f`. Spans start at 0 and are contiguous.
+    private func spanIndex(atFraction f: Double) -> Int {
+        var lo = 0, hi = spans.count - 1
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            if spans[mid].fractionStart <= f { lo = mid } else { hi = mid - 1 }
+        }
+        return lo
+    }
+
+    /// Spec D5.1 + D9: the trailing window `[T − w, T]` within the segment, never reaching back
+    /// past the last in-segment hold. Speed is Σ leg distances over the time span; bearing is
+    /// the course between the window's endpoints. Both nil with fewer than two points.
+    private func window(segment: Int, at seconds: TimeInterval) -> (speed: Double?, bearing: Double?) {
+        let index = segmentIndices[segment]
+        let j = Self.lastIndex(in: index.times, atOrBefore: seconds)
+        let i = max(Self.firstIndex(in: index.times, atOrAfter: seconds - speedWindowSeconds), index.windowFloor[j])
+        guard j > i else { return (nil, nil) }
+        let span = index.times[j] - index.times[i]
+        let speed = span > 0 ? (index.distances[j] - index.distances[i]) / span : nil
+        let a = index.coordinates[i], b = index.coordinates[j]
+        let bearing = Geo.distance(a, b) >= config.coincidentMeters ? PeerBearing.heading(from: a, to: b) : nil
+        return (speed, bearing)
+    }
+
+    static func lastIndex(in times: [TimeInterval], atOrBefore t: TimeInterval) -> Int {
+        var lo = 0, hi = times.count - 1
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            if times[mid] <= t { lo = mid } else { hi = mid - 1 }
+        }
+        return lo
+    }
+
+    static func firstIndex(in times: [TimeInterval], atOrAfter t: TimeInterval) -> Int {
+        var lo = 0, hi = times.count - 1
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if times[mid] >= t { hi = mid } else { lo = mid + 1 }
+        }
+        return lo
+    }
+
+    /// Spec §4.10: 0, every hold edge, every whole km and mi (a mark that falls inside a hold's
+    /// folded distance lands on the hold's start), and 1 — sorted, deduplicated, 1 always kept.
+    static func events(spans: [Span], holds: [ReplayHold], duration: TimeInterval) -> [Double] {
+        var out: [Double] = [0]
+        for hold in holds { out.append(hold.range.lowerBound); out.append(hold.range.upperBound) }
+        for span in spans {
+            let (distance, from): (Double, Double)
+            switch span.content {
+            case let .leg(leg): (distance, from) = (leg.distance, span.distanceAtStart)
+            case let .hold(hold): (distance, from) = (hold.distance, span.distanceAtStart)
+            }
+            guard distance > 0 else { continue }
+            for unit in [1000.0, 1609.344] {
+                var k = (from / unit).rounded(.down) + 1
+                while k * unit <= from + distance {
+                    let within = (k * unit - from) / distance
+                    let offset: Double
+                    if case .leg = span.content { offset = within * span.width } else { offset = 0 }
+                    out.append((span.playStart + offset) / duration)
+                    k += 1
+                }
+            }
+        }
+        out = out.filter { $0 < 1 - 1e-9 }.sorted()
+        var deduped: [Double] = []
+        for f in out where deduped.last.map({ f - $0 > 1e-9 }) ?? true { deduped.append(f) }
+        deduped.append(1)
+        return deduped
+    }
 }
 ```
 
-- [ ] **Step 5: Run the construction suite until it passes**
+- [ ] **Step 6: Run the construction suite until it passes**
 
 Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimelineConstructionTests`
-Expected: all 8 tests pass. If `overTheCapClampsToMaxPlayback` reports a rate other than 160, check that `movingSpan` counts only `.leg` items.
+Expected: all 9 pass.
 
-- [ ] **Step 6: Lint and commit**
+- [ ] **Step 7: Lint and commit**
 
-Run from the repo root: `swiftlint lint --strict --quiet` — expected: no output.
+Run from the root: `swiftlint lint --strict --quiet` — expected: no output. If `cyclomatic_complexity` fires on `Builder.classify`, split the `dt == 0` branch into a helper.
 
 ```bash
 git add AuraCore/Sources/AuraCore/Replay AuraCore/Tests/AuraCoreTests/Replay
@@ -676,60 +781,56 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 2: Sampling on moving legs, totals, bearing, never-a-chord
+### Task 2: Sampling on moving legs, totals, bearing, never-a-chord across a pause
 
 **Files:**
-- Modify: `AuraCore/Sources/AuraCore/Replay/ReplayTimeline.swift` (only if a test fails)
-- Modify: `AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift` (append a suite)
-
-**Interfaces:**
-- Consumes: Task 1's `ReplayTimeline`, `ReplayFixtures`, `RideStatsCalculator.stats(segments:)`.
-- Produces: pinned behavior for §4.5 (partial), §4.7, §4.8.
+- Modify: `AuraCore/Sources/AuraCore/Replay/ReplayTimeline*.swift` (only if a test fails)
+- Modify: `AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift` (append)
 
 - [ ] **Step 1: Append the sampling suite**
 
-Append to `ReplayTimelineTests.swift`:
-
 ```swift
 struct ReplayTimelineSamplingTests {
-    typealias F = ReplayFixtures
+    typealias Fixtures = ReplayFixtures
 
     @Test func fractionZeroIsTheFirstPointMovingWithNoSpeed() {
-        let t = F.timeline([F.straight(seconds: 600)])
+        let t = Fixtures.timeline([Fixtures.straight(seconds: 600)])
         let s = t.sample(at: 0)
-        #expect(s.coordinate == F.origin)
+        #expect(s.coordinate == Fixtures.origin)
         #expect(s.distanceMeters == 0 && s.seconds == 0)
         #expect(s.phase == .moving)
         #expect(s.speedMetersPerSecond == nil)
     }
 
     @Test func midpointOfAStraightRideIsHalfway() {
-        let t = F.timeline([F.straight(seconds: 600, speed: 6)])
+        let t = Fixtures.timeline([Fixtures.straight(seconds: 600, speed: 6)])
         let s = t.sample(at: 0.5)
         #expect(abs(s.seconds - 300) < 1e-6)
-        #expect(abs(s.distanceMeters - 1800) < 0.5)
-        #expect(abs(s.coordinate.longitude - F.east(1800).longitude) < 1e-7)
+        #expect(abs(s.distanceMeters - 1800) < 0.01)
+        #expect(abs(s.coordinate.longitude - Fixtures.east(1800).longitude) < 1e-7)
         #expect(s.phase == .moving)
     }
 
     // §4.7 totals agree with RideStats
     @Test func fractionOneIsEndedWithTheStatsTotals() {
-        let a = F.straight(seconds: 600)
-        let stopAt = F.east(3600)
-        var b = F.straight(seconds: 200, start: 900, from: stopAt).points
-        b.append(contentsOf: F.jitter(seconds: 90, at: F.east(1200, from: stopAt), start: 1101))
-        let segments = [a, RideSegment(points: b), F.straight(seconds: 100, start: 1400, from: F.east(6000))]
-        let t = F.timeline(segments)
+        let a = Fixtures.straight(seconds: 600)
+        let stopAt = Fixtures.east(3600)
+        var b = Fixtures.straight(seconds: 200, start: 900, from: stopAt).points
+        b.append(contentsOf: Fixtures.jitter(seconds: 90, at: Fixtures.east(1200, from: stopAt), start: 1101))
+        let segments = [a, RideSegment(points: b), Fixtures.straight(seconds: 100, start: 1400, from: Fixtures.east(6000))]
+        let t = Fixtures.timeline(segments)
         let stats = RideStatsCalculator.stats(segments: segments)
         let end = t.sample(at: 1)
         #expect(end.phase == .ended)
         #expect(abs(end.distanceMeters - stats.distanceMeters) < 1e-6)
         #expect(abs(end.seconds - t.totalSeconds) < 1e-9)
-        #expect(end.coordinate == segments[2].points.last!.coordinate)
+        #expect(abs(t.totalSeconds - 990) < 1e-9)                    // 600 + (200 + 90) + 100
+        #expect(end.coordinate == segments[2].points[100].coordinate)
     }
 
     @Test func distanceAndSecondsAreMonotonicAcrossAPause() {
-        let t = F.timeline([F.straight(seconds: 300), F.straight(seconds: 300, start: 900, from: F.east(1800))])
+        let t = Fixtures.timeline([Fixtures.straight(seconds: 300),
+                                   Fixtures.straight(seconds: 300, start: 900, from: Fixtures.east(1800))])
         var d = -1.0, s = -1.0
         for k in 0...400 {
             let sample = t.sample(at: Double(k) / 400)
@@ -738,87 +839,97 @@ struct ReplayTimelineSamplingTests {
         }
     }
 
+    // §4.5 never a chord across a pause gap: the second segment starts 1 km NORTH, so any
+    // interpolation across the gap has a latitude strictly between the two.
+    @Test func aPauseGapIsNeverChorded() {
+        let a = Fixtures.straight(seconds: 300)
+        let bStart = Fixtures.north(1000, from: Fixtures.east(1800))
+        let b = Fixtures.straight(seconds: 300, start: 900, from: bStart)
+        let t = Fixtures.timeline([a, b])
+        for k in 0...2000 {
+            let lat = t.sample(at: Double(k) / 2000).coordinate.latitude
+            let inside = lat > Fixtures.origin.latitude + 1e-9 && lat < bStart.latitude - 1e-9
+            #expect(!inside, "chord sampled at \(k)/2000")
+        }
+    }
+
     // §4.8 bearing
-    @Test func bearingIsTheLegCourseAndHoldsAcrossCoincidentPoints() {
-        var pts = F.straight(seconds: 100).points
-        pts[50] = F.point(pts[49].coordinate, at: 50)          // coincident with its predecessor
-        let t = F.timeline([RideSegment(points: pts)])
-        let mid = t.sample(at: 0.3)
-        #expect(mid.bearing != nil)
-        #expect(abs((mid.bearing ?? 0) - 90) < 0.5)               // due east
-        // The coincident leg (49→50) is stationary-speed 0 and under 45 s, so it plays as a leg
-        // holding the last bearing.
-        let atCoincident = t.sample(at: 49.5 / 100)
-        #expect(abs((atCoincident.bearing ?? 0) - 90) < 0.5)
+    @Test func bearingIsTheCourseAndHoldsAcrossCoincidentPoints() {
+        var pts = Fixtures.straight(seconds: 100).points
+        pts[50] = Fixtures.point(pts[49].coordinate, at: 50)          // coincident with its predecessor
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        #expect(abs((t.sample(at: 0.3).bearing ?? 0) - 90) < 0.5)
+        #expect(abs((t.sample(at: 0.495).bearing ?? 0) - 90) < 0.5)
     }
 
     @Test func bearingIsNilBeforeTheFirstNonCoincidentLeg() {
-        var pts = F.jitter(seconds: 10, at: F.origin, start: 0)
-        pts.append(contentsOf: F.straight(seconds: 100, start: 10, from: F.origin).points)
-        let t = F.timeline([RideSegment(points: pts)])
-        // First 10 s are jitter (< 0.5 m/s, under minStopSeconds) → played as legs with nil bearing.
-        #expect(t.sample(at: 0.01).bearing == nil)
+        var pts = Fixtures.jitter(seconds: 10, at: Fixtures.origin, start: 0)
+        pts.append(contentsOf: Fixtures.straight(seconds: 100, start: 10, from: Fixtures.origin).points)
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        #expect(t.sample(at: 0.001).bearing == nil)
         #expect(t.sample(at: 0.9).bearing != nil)
     }
 
+    /// D9: the rendered course is over the window, so a zig-zag track reads its net heading,
+    /// not a 60°/120° staircase at 120 changes per second.
+    @Test func bearingIsSmoothOverTheWindow() {
+        let t = Fixtures.timeline([Fixtures.zigzag(seconds: 300)])
+        for k in 10...99 {
+            let b = t.sample(at: Double(k) / 100).bearing ?? 0
+            #expect(abs(b - 90) < 12, "bearing \(b) at \(k)/100")
+        }
+    }
+
     @Test func elevationInterpolatesAndBridgesANil() {
-        let seg = F.straight(seconds: 100, elevation: { i in i == 50 ? nil : Double(300 + i) })
-        let t = F.timeline([seg])
+        let seg = Fixtures.straight(seconds: 100, elevation: { i in i == 50 ? nil : Double(300 + i) })
+        let t = Fixtures.timeline([seg])
         #expect(abs((t.sample(at: 0.25).elevation ?? 0) - 325) < 0.01)
-        let bridged = t.sample(at: 0.495)                  // inside leg 49→50, end elevation nil
-        #expect(bridged.elevation == 349)
+        #expect(t.sample(at: 0.495).elevation == 349)                // inside leg 49→50, end nil
     }
 
     @Test func endedSampleHasNoBearingOrSpeed() {
-        let t = F.timeline([F.straight(seconds: 600)])
-        let end = t.sample(at: 1)
+        let end = Fixtures.timeline([Fixtures.straight(seconds: 600)]).sample(at: 1)
         #expect(end.bearing == nil && end.speedMetersPerSecond == nil)
     }
 }
 ```
 
-- [ ] **Step 2: Run it**
+- [ ] **Step 2: Run, fix, commit**
 
-Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimelineSamplingTests`
-Expected: all pass. A failure in `bearingIsTheLegCourseAndHoldsAcrossCoincidentPoints` means `lastBearing` is being reset per leg instead of per segment; a failure in `fractionOneIsEndedWithTheStatsTotals` means jitter distance is not being folded into the hold's `distance`.
-
-- [ ] **Step 3: Commit**
+Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimelineSamplingTests`. Expected: all pass. `bearingIsSmoothOverTheWindow`: the zig-zag's window endpoints 5 s apart give a course within a few degrees of 90; if it reads 60/120 the sampler is returning `leg.bearing` instead of the window's.
 
 ```bash
-git add AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift AuraCore/Sources/AuraCore/Replay/ReplayTimeline.swift
-git commit -m "test(roh-239): ReplayTimeline sampling, totals, and bearing are pinned
+git add AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift AuraCore/Sources/AuraCore/Replay
+git commit -m "test(roh-239): ReplayTimeline sampling, totals, bearing, and the pause chord are pinned
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 3: Holds — pause gaps, stationary runs, lost signal, widths, and the share cap
+### Task 3: Holds — pause gaps, stationary runs, lost signal, widths, share cap
 
 **Files:**
-- Modify: `AuraCore/Sources/AuraCore/Replay/ReplayTimeline.swift` (only if a test fails)
-- Modify: `AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift` (append a suite)
-
-**Interfaces:**
-- Consumes: Task 1's `ReplayTimeline`, `ReplayHold`, `ReplayPhase`.
-- Produces: pinned §4.1 (holds), §4.3, §4.4, §4.5.
+- Modify: `AuraCore/Sources/AuraCore/Replay/ReplayTimeline*.swift` (only if a test fails)
+- Modify: `AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift` (append)
 
 - [ ] **Step 1: Append the holds suite**
 
 ```swift
 struct ReplayTimelineHoldTests {
-    typealias F = ReplayFixtures
+    typealias Fixtures = ReplayFixtures
 
     private func twoSegments(gap: TimeInterval) -> ReplayTimeline {
-        F.timeline([F.straight(seconds: 600), F.straight(seconds: 600, start: 600 + gap, from: F.east(3600))])
+        Fixtures.timeline([Fixtures.straight(seconds: 600),
+                           Fixtures.straight(seconds: 600, start: 600 + gap, from: Fixtures.east(3600))])
     }
 
-    @Test func aTenMinutePauseIsOneHoldOfMaxHoldWidth() {
-        let t = twoSegments(gap: 600)                       // moving 1200 s → 10 s playback, rate 120
+    @Test func aTenMinutePauseIsOneHoldCappedByTheShare() {
+        let t = twoSegments(gap: 600)                        // moving 1200 s → 10 s playback, rate 120
         #expect(t.holds.count == 1)
         let hold = t.holds[0]
         #expect(hold.kind == .paused && hold.seconds == 600)
-        // 600 / 120 = 5 s → capped at maxHold 4; share cap 2.5 s of 10 s → scaled to 2.5.
+        // 600 / 120 = 5 → maxHold 4 → share cap 0.25 × 10 = 2.5.
         let width = (hold.range.upperBound - hold.range.lowerBound) * t.playbackDuration
         #expect(abs(width - 2.5) < 1e-9)
         #expect(abs(t.playbackDuration - 12.5) < 1e-9)
@@ -830,22 +941,22 @@ struct ReplayTimelineHoldTests {
         #expect(abs(t.playbackDuration - 10) < 1e-9)
     }
 
-    // §4.3 the sample inside a hold
-    @Test func sampleInsideAHoldSitsOnTheAnchor() {
-        let t = twoSegments(gap: 600)
-        let hold = t.holds[0]
-        let anchor = F.east(3600)
-        for f in [hold.range.lowerBound, (hold.range.lowerBound + hold.range.upperBound) / 2] {
-            let s = t.sample(at: f)
-            #expect(s.phase == .hold(.paused, seconds: 600))
-            #expect(abs(s.coordinate.longitude - anchor.longitude) < 1e-9)
-            #expect(s.speedMetersPerSecond == nil && s.bearing == nil)
-            #expect(abs(s.distanceMeters - 3600) < 0.5)
-            #expect(abs(s.seconds - 600) < 1e-9)              // a pause does not advance the clock
+    // §4.3 the sample inside a hold, and at its exclusive end, for many gap lengths
+    @Test func holdRangesAreHalfOpenForEveryGap() {
+        for gap in stride(from: 60.0, through: 1200, by: 10) {
+            let t = twoSegments(gap: gap)
+            let hold = t.holds[0]
+            for f in [hold.range.lowerBound, (hold.range.lowerBound + hold.range.upperBound) / 2] {
+                let s = t.sample(at: f)
+                #expect(s.phase == .hold(.paused, seconds: gap), "gap \(gap) at \(f)")
+                #expect(abs(s.coordinate.longitude - Fixtures.east(3600).longitude) < 1e-9)
+                #expect(s.speedMetersPerSecond == nil && s.bearing == nil)
+                #expect(abs(s.distanceMeters - 3600) < 0.01)
+                #expect(abs(s.seconds - 600) < 1e-9)
+            }
+            let after = t.sample(at: hold.range.upperBound)
+            #expect(after.phase == .moving, "gap \(gap): hold's exclusive end is inside it")
         }
-        let after = t.sample(at: hold.range.upperBound)
-        #expect(after.phase == .moving)
-        #expect(abs(after.coordinate.longitude - anchor.longitude) < 1e-9)   // next segment's first point
     }
 
     @Test func noFractionOutsideAHoldRangeIsAHold() {
@@ -853,70 +964,69 @@ struct ReplayTimelineHoldTests {
         let hold = t.holds[0]
         for k in 0...500 {
             let f = Double(k) / 500
-            let isHoldPhase: Bool
-            if case .hold = t.sample(at: f).phase { isHoldPhase = true } else { isHoldPhase = false }
-            #expect(isHoldPhase == hold.range.contains(f), "fraction \(f)")
+            let isHold: Bool
+            if case .hold = t.sample(at: f).phase { isHold = true } else { isHold = false }
+            #expect(isHold == hold.range.contains(f), "fraction \(f)")
         }
     }
 
     // §4.4 stationary runs and lost signal
     @Test func sixtySecondsOfJitterIsOneStoppedHold() {
-        var pts = F.straight(seconds: 300).points
-        let stop = pts.last!.coordinate
-        pts.append(contentsOf: F.jitter(seconds: 60, at: stop, start: 301))
-        pts.append(contentsOf: F.straight(seconds: 300, start: 361, from: stop).points.dropFirst())
-        let t = F.timeline([RideSegment(points: pts)])
+        var pts = Fixtures.straight(seconds: 300).points
+        let stop = pts[300].coordinate
+        pts.append(contentsOf: Fixtures.jitter(seconds: 60, at: stop, start: 301))
+        pts.append(contentsOf: Fixtures.straight(seconds: 300, start: 361, from: stop).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
         #expect(t.holds.count == 1)
         #expect(t.holds[0].kind == .stopped)
-        #expect(abs(t.holds[0].seconds - 60) < 1e-9)
+        #expect(abs(t.holds[0].seconds - 61) < 1e-9)                   // 60 jitter legs + the leg into the run
         let inside = t.sample(at: (t.holds[0].range.lowerBound + t.holds[0].range.upperBound) / 2)
         #expect(abs(inside.coordinate.longitude - stop.longitude) < 1e-7)
-        // In-segment holds advance the clock across their width.
-        #expect(inside.seconds > 300 && inside.seconds < 361)
+        #expect(inside.seconds > 300 && inside.seconds < 362)          // in-segment holds advance the clock
     }
 
     @Test func thirtySecondsOfJitterIsNoHold() {
-        var pts = F.straight(seconds: 300).points
-        let stop = pts.last!.coordinate
-        pts.append(contentsOf: F.jitter(seconds: 30, at: stop, start: 301))
-        pts.append(contentsOf: F.straight(seconds: 300, start: 331, from: stop).points.dropFirst())
-        #expect(F.timeline([RideSegment(points: pts)]).holds.isEmpty)
+        var pts = Fixtures.straight(seconds: 300).points
+        let stop = pts[300].coordinate
+        pts.append(contentsOf: Fixtures.jitter(seconds: 30, at: stop, start: 301))
+        pts.append(contentsOf: Fixtures.straight(seconds: 300, start: 331, from: stop).points.dropFirst())
+        #expect(Fixtures.timeline([RideSegment(points: pts)]).holds.isEmpty)
     }
 
     @Test func twoRunsSeparatedByAMovingLegAreTwoHolds() {
-        var pts = F.straight(seconds: 100).points
-        let a = pts.last!.coordinate
-        pts.append(contentsOf: F.jitter(seconds: 50, at: a, start: 101))
-        let b = F.east(600, from: a)
-        pts.append(contentsOf: F.straight(seconds: 100, start: 151, from: a).points.dropFirst())
-        pts.append(contentsOf: F.jitter(seconds: 50, at: b, start: 252))
-        pts.append(contentsOf: F.straight(seconds: 100, start: 302, from: b).points.dropFirst())
-        let t = F.timeline([RideSegment(points: pts)])
+        var pts = Fixtures.straight(seconds: 100).points
+        let a = pts[100].coordinate
+        pts.append(contentsOf: Fixtures.jitter(seconds: 50, at: a, start: 101))
+        pts.append(contentsOf: Fixtures.straight(seconds: 100, start: 151, from: a).points.dropFirst())
+        let b = Fixtures.east(600, from: a)
+        pts.append(contentsOf: Fixtures.jitter(seconds: 50, at: b, start: 252))
+        pts.append(contentsOf: Fixtures.straight(seconds: 100, start: 302, from: b).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
         #expect(t.holds.count == 2)
         #expect(t.holds.allSatisfy { $0.kind == .stopped })
     }
 
     @Test func aLongLegIsSignalLostWhenItMovesAndStoppedWhenItDoesNot() {
-        var far = F.straight(seconds: 100).points
-        far.append(F.point(F.east(1400), at: 220))                           // 120 s, 800 m
-        far.append(contentsOf: F.straight(seconds: 100, start: 221, from: F.east(1400)).points.dropFirst())
-        let lost = F.timeline([RideSegment(points: far)])
+        var far = Fixtures.straight(seconds: 100).points
+        far.append(Fixtures.point(Fixtures.east(1400), at: 220))                       // 120 s, 800 m
+        far.append(contentsOf: Fixtures.straight(seconds: 100, start: 221, from: Fixtures.east(1400)).points.dropFirst())
+        let lost = Fixtures.timeline([RideSegment(points: far)])
         #expect(lost.holds.count == 1 && lost.holds[0].kind == .signalLost)
 
-        var near = F.straight(seconds: 100).points
-        near.append(F.point(F.east(610), at: 220))                           // 120 s, 10 m
-        near.append(contentsOf: F.straight(seconds: 100, start: 221, from: F.east(610)).points.dropFirst())
-        let stopped = F.timeline([RideSegment(points: near)])
+        var near = Fixtures.straight(seconds: 100).points
+        near.append(Fixtures.point(Fixtures.east(610), at: 220))                       // 120 s, 10 m
+        near.append(contentsOf: Fixtures.straight(seconds: 100, start: 221, from: Fixtures.east(610)).points.dropFirst())
+        let stopped = Fixtures.timeline([RideSegment(points: near)])
         #expect(stopped.holds.count == 1 && stopped.holds[0].kind == .stopped)
     }
 
-    // §4.5 never a chord: the lost leg's interior is never sampled
+    // §4.5 the lost leg's interior is never sampled
     @Test func aLostSignalLegIsAJumpNotAGlide() {
-        var pts = F.straight(seconds: 100).points
-        let from = pts.last!.coordinate, to = F.east(1400)
-        pts.append(F.point(to, at: 220))
-        pts.append(contentsOf: F.straight(seconds: 100, start: 221, from: to).points.dropFirst())
-        let t = F.timeline([RideSegment(points: pts)])
+        var pts = Fixtures.straight(seconds: 100).points
+        let from = pts[100].coordinate, to = Fixtures.east(1400)
+        pts.append(Fixtures.point(to, at: 220))
+        pts.append(contentsOf: Fixtures.straight(seconds: 100, start: 221, from: to).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
         for k in 0...2000 {
             let lon = t.sample(at: Double(k) / 2000).coordinate.longitude
             let strictlyInside = lon > from.longitude + 1e-9 && lon < to.longitude - 1e-9
@@ -924,17 +1034,29 @@ struct ReplayTimelineHoldTests {
         }
     }
 
+    // A zero-width leg with a real displacement is not folded into a stop.
+    @Test func aTeleportWithNoTimeBreaksAStationaryRun() {
+        var pts = Fixtures.straight(seconds: 100).points
+        let a = pts[100].coordinate
+        pts.append(contentsOf: Fixtures.jitter(seconds: 40, at: a, start: 101))
+        pts.append(Fixtures.point(Fixtures.east(300, from: a), at: 140))               // same stamp, 300 m away
+        pts.append(contentsOf: Fixtures.jitter(seconds: 40, at: Fixtures.east(300, from: a), start: 141))
+        pts.append(contentsOf: Fixtures.straight(seconds: 100, start: 181, from: Fixtures.east(300, from: a)).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        #expect(t.holds.isEmpty)                                       // two 40 s runs, neither ≥ 45 s
+    }
+
     // §4.1 the share cap with many pauses
     @Test func twelvePausesAreCappedAtAQuarterOfTheMovingPlayback() {
         var segments: [RideSegment] = []
         var start: TimeInterval = 0
-        var from = F.origin
-        for _ in 0..<13 {                                   // 13 segments of 100 s → 1300 s moving
-            segments.append(F.straight(seconds: 100, start: start, from: from))
-            start += 100 + 30                               // 30 s pauses
-            from = F.east(700, from: from)
+        var from = Fixtures.origin
+        for _ in 0..<13 {
+            segments.append(Fixtures.straight(seconds: 100, start: start, from: from))
+            start += 130
+            from = Fixtures.east(700, from: from)
         }
-        let t = F.timeline(segments)
+        let t = Fixtures.timeline(segments)
         #expect(t.holds.count == 12)
         let movingPlayback = 1300.0 / 120
         let holdTotal = t.holds.reduce(0.0) { $0 + ($1.range.upperBound - $1.range.lowerBound) } * t.playbackDuration
@@ -943,15 +1065,12 @@ struct ReplayTimelineHoldTests {
 }
 ```
 
-- [ ] **Step 2: Run it**
+- [ ] **Step 2: Run, fix, commit**
 
-Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimelineHoldTests`
-Expected: all pass. If `aTenMinutePauseIsOneHoldOfMaxHoldWidth` gets width 4, the share cap is not applied; if `sampleInsideAHoldSitsOnTheAnchor` fails at `upperBound`, the span search is returning the hold at its exclusive end (check the `<=` in `spanIndex` against a `playStart` that equals `p`).
-
-- [ ] **Step 3: Commit**
+Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimelineHoldTests`. Expected: all pass. `sixtySecondsOfJitterIsOneStoppedHold` expects 61 s: the leg from the last straight point into the first jitter point is ~0.2 m over 1 s, so it joins the run (v1 said 60 and was wrong).
 
 ```bash
-git add AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift AuraCore/Sources/AuraCore/Replay/ReplayTimeline.swift
+git add AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift AuraCore/Sources/AuraCore/Replay
 git commit -m "test(roh-239): holds — pauses, stops, lost signal, widths, share cap
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
@@ -959,87 +1078,95 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: Speed window, profile, and events
+### Task 4: Speed window, profile, events
 
 **Files:**
-- Modify: `AuraCore/Sources/AuraCore/Replay/ReplayTimeline.swift` (only if a test fails)
-- Modify: `AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift` (append a suite)
-
-**Interfaces:**
-- Consumes: Task 1's `ReplayTimeline`.
-- Produces: pinned §4.6, §4.9, §4.10.
+- Modify: `AuraCore/Sources/AuraCore/Replay/ReplayTimeline*.swift` (only if a test fails)
+- Modify: `AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift` (append)
 
 - [ ] **Step 1: Append the suite**
 
 ```swift
 struct ReplayTimelineSpeedProfileEventTests {
-    typealias F = ReplayFixtures
+    typealias Fixtures = ReplayFixtures
 
     // §4.6 speed
     @Test func quarterCircleReadsTheArcSpeedNotTheChord() {
-        let t = F.timeline([F.quarterCircle(radius: 500, speed: 6)])   // ~130 s → floor, rate ~13
-        let w = max(5, t.rate * 0.1)
-        for k in 5...19 {                                              // past the first window
-            let f = Double(k) / 20
-            let s = t.sample(at: f)
-            #expect(s.seconds > w)
-            #expect(abs((s.speedMetersPerSecond ?? 0) - 6) < 0.05, "at \(f)")
+        let t = Fixtures.timeline([Fixtures.quarterCircle(radius: 500, speed: 6)])
+        for k in 5...19 {
+            let s = t.sample(at: Double(k) / 20)
+            #expect(s.seconds > t.speedWindowSeconds)
+            #expect(abs((s.speedMetersPerSecond ?? 0) - 6) < 0.05, "at \(k)/20")
         }
     }
 
     @Test func speedIsNilAtStartInsideAHoldAndForAZeroSpan() {
-        let t = F.timeline([F.straight(seconds: 600), F.straight(seconds: 600, start: 1200, from: F.east(3600))])
+        let t = Fixtures.timeline([Fixtures.straight(seconds: 600),
+                                   Fixtures.straight(seconds: 600, start: 1200, from: Fixtures.east(3600))])
         #expect(t.sample(at: 0).speedMetersPerSecond == nil)
         let mid = (t.holds[0].range.lowerBound + t.holds[0].range.upperBound) / 2
         #expect(t.sample(at: mid).speedMetersPerSecond == nil)
-
-        let same = RideSegment(points: (0...3).map { F.point(F.east(Double($0) * 10), at: 0) })
-        let z = F.timeline([same])
-        #expect(z.sample(at: 0.5).speedMetersPerSecond == nil)
+        let same = RideSegment(points: (0...3).map { Fixtures.point(Fixtures.east(Double($0) * 10), at: 0) })
+        #expect(Fixtures.timeline([same]).sample(at: 0.5).speedMetersPerSecond == nil)
     }
 
     @Test func windowIsTwelveSecondsAtRate120AndFiveAtRate30() {
-        let fast = F.timeline([F.straight(seconds: 2400)])         // rate 120
-        let slow = F.timeline([F.straight(seconds: 300)])          // rate 30
-        #expect(abs(max(5, fast.rate * 0.1) - 12) < 1e-9)
-        #expect(abs(max(5, slow.rate * 0.1) - 5) < 1e-9)
-        // A speed change 20 s in: at 24 s ride time the 12 s trailing window is entirely
-        // post-change, so the readout is the new speed, not a blend.
-        var pts = F.straight(seconds: 20, speed: 6).points
-        let c = pts.last!.coordinate
-        pts.append(contentsOf: F.straight(seconds: 2400, speed: 3, start: 20, from: c).points.dropFirst())
-        let t = F.timeline([RideSegment(points: pts)])
-        let at34 = t.sample(at: 34 / t.totalSeconds)              // rate ≈ 120 → w = 12
-        #expect(abs((at34.speedMetersPerSecond ?? 0) - 3) < 0.05)
+        #expect(abs(Fixtures.timeline([Fixtures.straight(seconds: 2400)]).speedWindowSeconds - 12) < 1e-9)
+        #expect(abs(Fixtures.timeline([Fixtures.straight(seconds: 300)]).speedWindowSeconds - 5) < 1e-9)
+        // Speed drops 6 → 3 m/s at 20 s. At 34 s the 12 s trailing window is all post-change:
+        // reads 3. A 6 s window would too, but a centered ±12 s window would blend.
+        var pts = Fixtures.straight(seconds: 20, speed: 6).points
+        let c = pts[20].coordinate
+        pts.append(contentsOf: Fixtures.straight(seconds: 2400, speed: 3, start: 20, from: c).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        #expect(abs((t.sample(at: 34 / t.totalSeconds).speedMetersPerSecond ?? 0) - 3) < 0.05)
+        // At 26 s the window [14, 26] straddles the change: 36 + 18 = 54 m over 12 s = 4.5.
+        #expect(abs((t.sample(at: 26 / t.totalSeconds).speedMetersPerSecond ?? 0) - 4.5) < 0.05)
+    }
+
+    /// D5.1: the window never reaches back across a hold, so a lost leg's 900 m / 120 s never
+    /// fabricates a speed for the seconds after it.
+    @Test func speedAfterALostLegIgnoresTheGap() {
+        var pts = Fixtures.straight(seconds: 200).points
+        let to = Fixtures.east(2100)
+        pts.append(Fixtures.point(to, at: 320))                                        // 120 s, 900 m
+        pts.append(contentsOf: Fixtures.straight(seconds: 200, start: 321, from: to).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        let hold = t.holds[0]
+        let justAfter = t.sample(at: hold.range.upperBound + 0.002)
+        #expect(justAfter.seconds > 320 && justAfter.seconds < 326)
+        #expect(justAfter.speedMetersPerSecond == nil || abs((justAfter.speedMetersPerSecond ?? 0) - 6) < 0.1)
+        let later = t.sample(at: (hold.range.upperBound + 1) / 2)
+        #expect(abs((later.speedMetersPerSecond ?? 0) - 6) < 0.05)
     }
 
     // §4.9 profile
     @Test func profileRepeatsThroughAHoldAndCarriesAcrossNil() {
-        let a = F.straight(seconds: 600, elevation: { i in i == 300 ? nil : 300 + Double(i) / 10 })
-        let b = F.straight(seconds: 600, start: 1200, from: F.east(3600), elevation: { _ in 100 })
-        let t = F.timeline([a, b])
+        let a = Fixtures.straight(seconds: 600, elevation: { i in i == 300 ? nil : 300 + Double(i) / 10 })
+        let b = Fixtures.straight(seconds: 600, start: 1200, from: Fixtures.east(3600), elevation: { _ in 100 })
+        let t = Fixtures.timeline([a, b])
         let profile = t.profile(sampleCount: 240)
         #expect(profile?.count == 240)
         let hold = t.holds[0]
         let inHold = profile!.enumerated().filter { hold.range.contains(Double($0.offset) / 239) }
         #expect(!inHold.isEmpty)
-        #expect(inHold.allSatisfy { abs($0.element - 360) < 1e-9 })      // segment a's last elevation
-        for k in 0..<240 {
-            let expected = t.sample(at: Double(k) / 239).elevation
-            if let expected { #expect(abs(profile![k] - expected) < 1e-9) }
-        }
+        #expect(inHold.allSatisfy { abs($0.element - 360) < 1e-9 })
+        // The nil at i == 300 lands inside leg 299→300 / 300→301; the samples there carry 329.9…330.1.
+        let aroundNil = profile!.enumerated().filter { (0.245...0.255).contains(Double($0.offset) / 239 * (t.playbackDuration / 10)) }
+        #expect(aroundNil.allSatisfy { $0.element > 329 && $0.element < 331 })
     }
 
     @Test func profileIsNilWithoutElevationAndFillsLeadingNils() {
-        let none = F.timeline([F.straight(seconds: 100, elevation: { _ in nil })])
+        let none = Fixtures.timeline([Fixtures.straight(seconds: 100, elevation: { _ in nil })])
         #expect(none.profile(sampleCount: 10) == nil)
-        let late = F.timeline([F.straight(seconds: 100, elevation: { i in i < 50 ? nil : 420 })])
+        let late = Fixtures.timeline([Fixtures.straight(seconds: 100, elevation: { i in i < 50 ? nil : 420 })])
         #expect(late.profile(sampleCount: 10) == Array(repeating: 420, count: 10))
     }
 
     // §4.10 events
     @Test func eventsCoverEndsHoldsAndWholeUnits() {
-        let t = F.timeline([F.straight(seconds: 300, speed: 6), F.straight(seconds: 300, start: 900, from: F.east(1800))])
+        let t = Fixtures.timeline([Fixtures.straight(seconds: 300, speed: 6),
+                                   Fixtures.straight(seconds: 300, start: 900, from: Fixtures.east(1800))])
         let e = t.events
         #expect(e.first == 0 && e.last == 1)
         #expect(e == e.sorted())
@@ -1048,27 +1175,34 @@ struct ReplayTimelineSpeedProfileEventTests {
             #expect(e.contains { abs($0 - hold.range.lowerBound) < 1e-12 })
             #expect(e.contains { abs($0 - hold.range.upperBound) < 1e-12 })
         }
-        // 3600 m total: km marks at 1000, 2000, 3000; mile marks at 1609.344, 3218.688.
-        let kmAndMi = e.filter { f in
+        let marks = e.filter { f in
             let d = t.sample(at: f).distanceMeters
-            return [1000.0, 2000, 3000, 1609.344, 3218.688].contains { abs($0 - d) < 0.5 }
+            return [1000.0, 2000, 3000, 1609.344, 3218.688].contains { abs($0 - d) < 0.01 }
         }
-        #expect(kmAndMi.count == 5)
+        #expect(marks.count == 5)
+    }
+
+    @Test func unitMarksInsideALostLegLandOnTheHoldStart() {
+        var pts = Fixtures.straight(seconds: 200).points                               // 1200 m
+        let to = Fixtures.east(2100)
+        pts.append(Fixtures.point(to, at: 320))                                        // 900 m lost leg
+        pts.append(contentsOf: Fixtures.straight(seconds: 200, start: 321, from: to).points.dropFirst())
+        let t = Fixtures.timeline([RideSegment(points: pts)])
+        let hold = t.holds[0]
+        // 1609.344 and 2000 fall inside the lost leg → both events are the hold's start.
+        #expect(t.events.filter { abs($0 - hold.range.lowerBound) < 1e-12 }.count == 1)   // deduplicated
+        #expect(t.events.contains { abs($0 - hold.range.upperBound) < 1e-12 })
+        #expect(t.events.contains { abs(t.sample(at: $0).distanceMeters - 3000) < 0.01 })
     }
 }
 ```
 
-- [ ] **Step 2: Run it**
+- [ ] **Step 2: Run the whole replay group, lint, commit**
 
-Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimelineSpeedProfileEventTests`
-Expected: all pass.
-
-- [ ] **Step 3: Run the whole replay group plus lint, then commit**
-
-Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimeline` then `swiftlint lint --strict --quiet` from the root.
+Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimeline` then `swiftlint lint --strict --quiet`. In `profileRepeatsThroughAHoldAndCarriesAcrossNil` the second filter is deliberately loose; if it selects zero indices, replace it with a direct check that `t.sample(at:)` at the fraction of ride-second 300 has an elevation within 0.2 of 330.
 
 ```bash
-git add AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift AuraCore/Sources/AuraCore/Replay/ReplayTimeline.swift
+git add AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift AuraCore/Sources/AuraCore/Replay
 git commit -m "test(roh-239): speed window, profile, and events are pinned
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
@@ -1080,17 +1214,16 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `AuraCore/Sources/AuraCore/Replay/SyntheticRide.swift`
-- Modify: `AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift` (append a suite)
+- Modify: `AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift` (append)
 
 **Interfaces:**
-- Consumes: `Ride`, `RideSegment`, `TrackPoint`, `RideStatsCalculator`.
-- Produces: `SyntheticRide.threeHour(startingAt:) -> Ride` (public; the DEBUG seed in Task 11 uses it).
+- Produces: `SyntheticRide.threeHour(startingAt:) -> Ride` (public, `#if DEBUG`; fixed id `00000000-0000-0000-0000-00000000C0DE`). Spec deviation, stated: the builder lives in the library rather than the test target because the DEBUG seed (Task 11) inserts it into the store; `#if DEBUG` keeps it out of release.
 
 - [ ] **Step 1: Write the failing scale test**
 
 ```swift
 struct ReplayTimelineScaleTests {
-    // §4.12 the working size: 10,800 points, four stops, one pause
+    // §4.12 the working size: 10,800 points, four holds, two segments
     @Test func threeHourRideBuildsAndHoldsTheInvariants() {
         let ride = SyntheticRide.threeHour(startingAt: ReplayFixtures.t0)
         #expect(ride.segments.count == 2)
@@ -1099,11 +1232,12 @@ struct ReplayTimelineScaleTests {
         #expect(t.isReplayable)
         #expect(t.playbackDuration <= 45 * 1.25 + 1e-9)
         #expect(t.holds.map(\.kind) == [.stopped, .paused, .signalLost, .stopped])
+        #expect(t.holds[1].seconds == 601)                                 // 5399 → 6000
         let stats = RideStatsCalculator.stats(segments: ride.segments)
         #expect(abs(t.sample(at: 1).distanceMeters - stats.distanceMeters) < 1e-6)
         for hold in t.holds {
-            let s = t.sample(at: hold.range.lowerBound)
-            #expect(s.phase == .hold(hold.kind, seconds: hold.seconds))
+            #expect(t.sample(at: hold.range.lowerBound).phase == .hold(hold.kind, seconds: hold.seconds))
+            #expect(t.sample(at: hold.range.upperBound).phase == .moving)
         }
         var d = -1.0
         for k in 0...1000 {
@@ -1112,41 +1246,42 @@ struct ReplayTimelineScaleTests {
             #expect(s.coordinate.latitude.isFinite && s.coordinate.longitude.isFinite)
         }
         #expect(t.profile(sampleCount: 240)?.count == 240)
+        #expect(t.events.count > 40)                                      // ~65 km → 64 km + 40 mi marks + holds
     }
 }
 ```
 
-- [ ] **Step 2: Run it to verify it fails**
+- [ ] **Step 2: Run to verify it fails**
 
-Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimelineScaleTests`
-Expected: compile error, `SyntheticRide` not found.
+Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimelineScaleTests` — compile error, `SyntheticRide` not found.
 
 - [ ] **Step 3: Write the builder**
 
-`AuraCore/Sources/AuraCore/Replay/SyntheticRide.swift`:
-
 ```swift
+#if DEBUG
 import Foundation
 
 /// Deterministic rides for the replay suites and the DEBUG seed (spec §9). Not a fixture of
 /// anything real: a loop around a center at a constant 6 m/s with four stops placed where the
-/// playback regime needs them. Lives in the library rather than the test target because the
-/// app's DEBUG seed inserts it into the store.
+/// playback regime needs them. In the library rather than the test target because the app's
+/// DEBUG seed inserts it into the store; `#if DEBUG` keeps it out of release.
 public enum SyntheticRide {
     static let center = Coordinate(latitude: 40.44, longitude: -79.99)
+    public static let threeHourID = UUID(uuidString: "00000000-0000-0000-0000-00000000C0DE")!
 
-    /// 3 hours, one point per second, 10,800 points in two segments:
-    /// - 0:30:00 → 5 min of jitter (a `.stopped` hold)
-    /// - 1:30:00 → a 10 min pause gap (segment boundary, `.paused`)
-    /// - 2:00:00 → one 120 s leg spanning ~700 m (`.signalLost`)
-    /// - 2:30:00 → 90 s of jitter (`.stopped`)
+    /// 3 hours, one point per second, 10,800 points in two segments (split at i == 5400):
+    /// - i 1800…2099: 300 s of jitter (a `.stopped` hold)
+    /// - between i 5399 and 5400: the second segment starts 601 s after the first ends (`.paused`)
+    /// - i 7200 (in the second segment): one leg stamped 120 s late spanning 700 m (`.signalLost`),
+    ///   followed by a backwards stamp that normalizes to zero width
+    /// - i 9000…9089: 90 s of jitter (`.stopped`)
     /// Elevation is a slow three-lobe wave over 300–380 m so the profile has a shape.
     public static func threeHour(startingAt start: Date) -> Ride {
         let speed = 6.0
         let totalSeconds = 10_800
-        let radius = speed * Double(totalSeconds) / (2 * .pi)      // one full loop
-        let metersPerDegreeLat = 111_320.0
-        let metersPerDegreeLon = 111_320 * cos(center.latitude * .pi / 180)
+        let radius = speed * Double(totalSeconds) / (2 * .pi)
+        let metersPerDegreeLat = 6_371_000 * Double.pi / 180
+        let metersPerDegreeLon = metersPerDegreeLat * cos(center.latitude * .pi / 180)
 
         func onLoop(_ meters: Double) -> Coordinate {
             let theta = meters / radius
@@ -1159,50 +1294,41 @@ public enum SyntheticRide {
                        longitude: c.longitude + 0.2 * cos(Double(i)) / metersPerDegreeLon)
         }
 
-        var first: [TrackPoint] = []
-        var second: [TrackPoint] = []
+        var first: [TrackPoint] = [], second: [TrackPoint] = []
         var meters = 0.0
-        var i = 0
-        while i < totalSeconds {
+        for i in 0..<totalSeconds {
             let stamp = start.addingTimeInterval(Double(i))
             let stationary = (1800..<2100).contains(i) || (9000..<9090).contains(i)
-            let lostLeg = i == 7200
             var point: TrackPoint
             if stationary {
                 point = TrackPoint(coordinate: jitter(onLoop(meters), i), elevation: elevation(meters), timestamp: stamp)
-            } else if lostLeg {
-                // The previous point is at i − 1; this one lands 120 s later and 700 m on.
+            } else if i == 7200 {
                 meters += 700
                 point = TrackPoint(coordinate: onLoop(meters), elevation: elevation(meters),
-                                   timestamp: start.addingTimeInterval(Double(i) + 119))
+                                   timestamp: stamp.addingTimeInterval(119))
             } else {
                 point = TrackPoint(coordinate: onLoop(meters), elevation: elevation(meters), timestamp: stamp)
                 meters += speed
             }
-            if i < 5400 { first.append(point) } else {
-                // Second segment starts 10 minutes after the first ended.
+            if i < 5400 {
+                first.append(point)
+            } else {
                 point.timestamp = point.timestamp.addingTimeInterval(600)
                 second.append(point)
             }
-            i += 1
         }
         let segments = [RideSegment(points: first), RideSegment(points: second)]
-        let ended = second[second.count - 1].timestamp
-        return Ride(kind: .freeRide, startedAt: start, endedAt: ended, segments: segments,
-                    stats: RideStatsCalculator.stats(segments: segments), pausedSeconds: 600,
+        return Ride(id: threeHourID, kind: .freeRide, startedAt: start, endedAt: second[second.count - 1].timestamp,
+                    segments: segments, stats: RideStatsCalculator.stats(segments: segments), pausedSeconds: 600,
                     destinationName: nil, routeId: nil, destinationPlaceId: nil)
     }
 }
+#endif
 ```
 
-Note the lost leg: points after `i == 7200` keep stamping at `start + i`, so the leg from 7199 to 7200 spans 120 s and the leg from 7200 to 7201 is a backwards stamp normalized to zero width. That is deliberate; it exercises §4.2 on the working size. `TrackPoint.timestamp` is `var`, so the `+600` shift compiles.
+- [ ] **Step 4: Run until green, lint, commit**
 
-- [ ] **Step 4: Run the scale test until it passes**
-
-Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimelineScaleTests`
-Expected: pass. If the hold kinds come out in a different order or count, print `t.holds` and check the stationary windows against `minStopSeconds` (the 90 s run must be ≥ 45 s; the 300 s run is far over).
-
-- [ ] **Step 5: Lint and commit**
+Run: `cd AuraCore && swift test --no-parallel --filter ReplayTimelineScaleTests`.
 
 ```bash
 git add AuraCore/Sources/AuraCore/Replay/SyntheticRide.swift AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift
@@ -1220,7 +1346,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Create: `AuraCore/Tests/AuraKitTests/Replay/ReplayPlaybackTests.swift`
 
 **Interfaces:**
-- Produces: `@MainActor @Observable public final class ReplayPlayback` with `init(playbackDuration:)`, `anchorFraction`, `isPlaying`, `isScrubbing`, `fraction(at:)`, `hasEnded(at:)`, `play(now:)`, `pause(now:)`, `togglePlay(now:)`, `beginScrub(now:)`, `scrub(to:)`, `endScrub(now:)`, `jump(to:)`, `settle(now:)`.
+- Produces: `@MainActor @Observable public final class ReplayPlayback` with `init(playbackDuration:)`, `anchorFraction`, `isPlaying`, `isScrubbing`, `fraction(at:)`, `hasEnded(at:)`, `play(now:)`, `pause(now:)`, `togglePlay(now:)`, `beginScrub(now:)`, `scrub(to:)`, `endScrub(now:)`, `tap(to:now:)`, `cancelScrub()`, `settle()`. Every `now` is the caller's live `Date()`, never a `TimelineView` date.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1235,26 +1361,32 @@ struct ReplayPlaybackTests {
 
     @Test func pausedFractionIsTheAnchor() {
         let p = ReplayPlayback(playbackDuration: 20)
-        #expect(p.fraction(at: t0) == 0)
-        #expect(p.fraction(at: t0 + 100) == 0)
+        #expect(p.fraction(at: t0) == 0 && p.fraction(at: t0 + 100) == 0)
         #expect(p.isPlaying == false)
     }
 
-    @Test func playingAdvancesLinearlyAndClampsAtOne() {
+    @Test func playingAdvancesLinearlyAndClampsBothEnds() {
         let p = ReplayPlayback(playbackDuration: 20)
         p.play(now: t0)
         #expect(p.isPlaying)
         #expect(abs(p.fraction(at: t0 + 5) - 0.25) < 1e-12)
-        #expect(p.fraction(at: t0 + 20) == 1)
-        #expect(p.fraction(at: t0 + 99) == 1)
-        #expect(p.hasEnded(at: t0 + 20))
-        #expect(p.hasEnded(at: t0 + 19) == false)
+        #expect(p.fraction(at: t0 + 20) == 1 && p.fraction(at: t0 + 99) == 1)
+        #expect(p.fraction(at: t0 - 5) == 0)                          // a quantized-down date never goes negative
+        #expect(p.hasEnded(at: t0 + 20) && p.hasEnded(at: t0 + 19) == false)
+    }
+
+    /// The rule the view must honor: `play` anchors at the date it is GIVEN. A rider who looks
+    /// at the paused screen for a minute and then taps Play starts at 0, not at 1.
+    @Test func playAfterALongPauseStartsAtZero() {
+        let p = ReplayPlayback(playbackDuration: 20)
+        p.play(now: t0 + 60)
+        #expect(p.fraction(at: t0 + 60) == 0)
+        #expect(abs(p.fraction(at: t0 + 65) - 0.25) < 1e-12)
     }
 
     @Test func pauseFreezesWhereItWas() {
         let p = ReplayPlayback(playbackDuration: 20)
-        p.play(now: t0)
-        p.pause(now: t0 + 5)
+        p.play(now: t0); p.pause(now: t0 + 5)
         #expect(p.isPlaying == false)
         #expect(abs(p.fraction(at: t0 + 50) - 0.25) < 1e-12)
         p.play(now: t0 + 60)
@@ -1275,49 +1407,54 @@ struct ReplayPlaybackTests {
 
     @Test func scrubWhilePausedStaysPaused() {
         let p = ReplayPlayback(playbackDuration: 20)
-        p.beginScrub(now: t0)
-        p.scrub(to: 0.3)
-        p.endScrub(now: t0 + 1)
-        #expect(p.isPlaying == false)
-        #expect(p.fraction(at: t0 + 9) == 0.3)
+        p.beginScrub(now: t0); p.scrub(to: 0.3); p.endScrub(now: t0 + 1)
+        #expect(p.isPlaying == false && p.fraction(at: t0 + 9) == 0.3)
     }
 
     @Test func scrubToTheEndDoesNotResume() {
         let p = ReplayPlayback(playbackDuration: 20)
-        p.play(now: t0)
-        p.beginScrub(now: t0 + 1)
-        p.scrub(to: 1)
-        p.endScrub(now: t0 + 2)
-        #expect(p.isPlaying == false)
+        p.play(now: t0); p.beginScrub(now: t0 + 1); p.scrub(to: 1); p.endScrub(now: t0 + 2)
+        #expect(p.isPlaying == false && p.fraction(at: t0 + 3) == 1)
+    }
+
+    /// D4: a tap on the band lands paused at the tapped fraction, whatever was happening.
+    @Test func tapWhilePlayingLandsPaused() {
+        let p = ReplayPlayback(playbackDuration: 20)
+        p.play(now: t0); p.beginScrub(now: t0 + 1)
+        p.tap(to: 0.4, now: t0 + 1)
+        #expect(p.isPlaying == false && p.isScrubbing == false)
+        #expect(p.fraction(at: t0 + 30) == 0.4)
+        p.tap(to: 1.7, now: t0 + 2)
         #expect(p.fraction(at: t0 + 3) == 1)
     }
 
-    @Test func jumpLeavesItPausedAndClamps() {
+    @Test func aSecondBeginScrubDoesNotOverwriteTheResumeIntent() {
         let p = ReplayPlayback(playbackDuration: 20)
-        p.play(now: t0)
-        p.jump(to: 1.7)
-        #expect(p.isPlaying == false)
-        #expect(p.fraction(at: t0 + 1) == 1)
-        p.jump(to: -3)
-        #expect(p.fraction(at: t0 + 1) == 0)
+        p.play(now: t0); p.beginScrub(now: t0 + 1); p.beginScrub(now: t0 + 2)
+        p.endScrub(now: t0 + 3)
+        #expect(p.isPlaying)
+    }
+
+    @Test func cancelScrubClearsTheLatch() {
+        let p = ReplayPlayback(playbackDuration: 20)
+        p.play(now: t0); p.beginScrub(now: t0 + 1); p.cancelScrub()
+        #expect(p.isScrubbing == false && p.isPlaying == false)
+        p.beginScrub(now: t0 + 5); p.endScrub(now: t0 + 6)
+        #expect(p.isPlaying == false)                                 // the old "was playing" did not leak
     }
 
     @Test func settleParksAtOneAndPlayRestartsFromZero() {
         let p = ReplayPlayback(playbackDuration: 20)
-        p.play(now: t0)
-        p.settle(now: t0 + 30)
+        p.play(now: t0); p.settle()
         #expect(p.isPlaying == false && p.anchorFraction == 1)
         p.play(now: t0 + 40)
-        #expect(p.isPlaying)
         #expect(abs(p.fraction(at: t0 + 45) - 0.25) < 1e-12)
     }
 
     @Test func togglePlayFlips() {
         let p = ReplayPlayback(playbackDuration: 20)
-        p.togglePlay(now: t0)
-        #expect(p.isPlaying)
-        p.togglePlay(now: t0 + 2)
-        #expect(p.isPlaying == false)
+        p.togglePlay(now: t0); #expect(p.isPlaying)
+        p.togglePlay(now: t0 + 2); #expect(p.isPlaying == false)
         #expect(abs(p.fraction(at: t0 + 9) - 0.1) < 1e-12)
     }
 
@@ -1329,10 +1466,7 @@ struct ReplayPlaybackTests {
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `cd AuraCore && swift test --no-parallel --filter ReplayPlaybackTests`
-Expected: compile error.
+- [ ] **Step 2: Run to verify it fails** — `cd AuraCore && swift test --no-parallel --filter ReplayPlaybackTests` → compile error.
 
 - [ ] **Step 3: Implement**
 
@@ -1342,12 +1476,12 @@ import Observation
 
 /// Playback state for the replay screen (spec D11). The fraction is DERIVED from an anchor,
 /// never accumulated: a view reads `fraction(at:)` with its clock's date and writes nothing.
-/// Every write is an event — play, pause, scrub, jump, settle — so a body that runs twice in
-/// a frame changes nothing, and a pinch that re-runs the map's body cannot speed the ride up.
+/// Every write is an event, and every event takes the caller's LIVE `Date()`. A paused
+/// `TimelineView` hands out a frozen date; anchoring on it starts playback from wherever
+/// the rider hesitated to (plan review, v1).
 ///
-/// In AuraKit rather than the app target for the same reason `ShareUpgradePresenter` is: the
-/// app target has no test bundle, and D4's rules are the kind that survive to a whole-branch
-/// review when they live in a view.
+/// In AuraKit rather than the app target for the reason `ShareUpgradePresenter` is: the app
+/// target has no test bundle.
 @MainActor @Observable
 public final class ReplayPlayback {
     public let playbackDuration: TimeInterval
@@ -1358,13 +1492,12 @@ public final class ReplayPlayback {
     @ObservationIgnored private var resumeAfterScrub = false
 
     public init(playbackDuration: TimeInterval) {
-        // Never zero: a zero-length ride is not replayable (D7), and this keeps the division finite.
         self.playbackDuration = max(playbackDuration, 0.001)
     }
 
     public func fraction(at now: Date) -> Double {
         guard isPlaying else { return anchorFraction }
-        return min(1, anchorFraction + now.timeIntervalSince(anchorDate) / playbackDuration)
+        return Self.clamp(anchorFraction + now.timeIntervalSince(anchorDate) / playbackDuration)
     }
 
     public func hasEnded(at now: Date) -> Bool { fraction(at: now) >= 1 }
@@ -1385,7 +1518,9 @@ public final class ReplayPlayback {
         if isPlaying { pause(now: now) } else { play(now: now) }
     }
 
+    /// Idempotent: a second touch-down during a scrub keeps the first one's resume intent.
     public func beginScrub(now: Date) {
+        guard !isScrubbing else { return }
         resumeAfterScrub = isPlaying
         pause(now: now)
         isScrubbing = true
@@ -1402,14 +1537,22 @@ public final class ReplayPlayback {
         resumeAfterScrub = false
     }
 
-    /// A tap on the band: move there and stay paused.
-    public func jump(to fraction: Double) {
+    /// A tap on the band (a drag that never moved): land there, paused, whatever was happening.
+    public func tap(to fraction: Double, now: Date) {
+        isScrubbing = false
+        resumeAfterScrub = false
         anchorFraction = Self.clamp(fraction)
         isPlaying = false
     }
 
+    /// A drag that never delivered `onEnded` (system gesture, dismissal): drop the latch.
+    public func cancelScrub() {
+        isScrubbing = false
+        resumeAfterScrub = false
+    }
+
     /// Called by the view when it observes `hasEnded`: park at 1, not playing.
-    public func settle(now: Date) {
+    public func settle() {
         anchorFraction = 1
         isPlaying = false
     }
@@ -1420,8 +1563,6 @@ public final class ReplayPlayback {
 
 - [ ] **Step 4: Run until green, lint, commit**
 
-Run: `cd AuraCore && swift test --no-parallel --filter ReplayPlaybackTests` then lint from the root.
-
 ```bash
 git add AuraCore/Sources/AuraKit/Replay/ReplayPlayback.swift AuraCore/Tests/AuraKitTests/Replay/ReplayPlaybackTests.swift
 git commit -m "feat(roh-239): ReplayPlayback derives the fraction from an anchor
@@ -1431,19 +1572,19 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: `ReplayReadout`, `ReplayBandContent`, and the test identifiers (AuraKit)
+### Task 7: `ReplayReadout`, `ReplayBandContent`, `ReplayBandGeometry`, `ReplayMarkerStyle`, identifiers (AuraKit)
 
 **Files:**
-- Create: `AuraCore/Sources/AuraKit/Replay/ReplayReadout.swift`
-- Create: `AuraCore/Sources/AuraKit/Replay/ReplayBandContent.swift`
-- Create: `AuraCore/Tests/AuraKitTests/Replay/ReplayReadoutTests.swift`
+- Create: `AuraCore/Sources/AuraKit/Replay/ReplayReadout.swift`, `ReplayBandContent.swift`, `ReplayBandGeometry.swift`, `ReplayMarkerStyle.swift`
+- Create: `AuraCore/Tests/AuraKitTests/Replay/ReplayReadoutTests.swift`, `ReplayBandGeometryTests.swift`
 - Modify: `AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift` (append three identifiers inside `RideTestID`)
 
 **Interfaces:**
-- Consumes: `ReplaySample`, `ReplayTimeline`, `ReplayHold`, `RideStatsFormatter`, `PauseControlCopy.clock`, `ElevationProfile.classify`, `Ride`.
-- Produces: `ReplayReadout(sample:timeline:units:)` with `speedText`, `speedUnit`, `distanceText`, `distanceUnit`, `timeText`, `elevationText`, `holdText`, `accessibilityValue`, `accessibilityLabel`; `ReplayReadout.holdLabel(kind:seconds:)`, `ReplayReadout.subtitle(for:)`; `ReplayBandContent(ride:timeline:)` with `kind` (`.silhouette([Double])` / `.rail`), `holds`, `ReplayBandContent.sampleCount`; `RideTestID.replayEntry`, `.replayPlay`, `.replayBand`.
+- Produces: `ReplayReadout(sample:timeline:units:)` with `speedText`, `speedUnit`, `distanceText`, `distanceUnit`, `timeText`, `elevationText`, `holdText`, `accessibilityValue`, `accessibilityLabel`; `ReplayReadout.holdLabel(kind:seconds:)`, `.subtitle(for:)`. `ReplayBandContent(ride:timeline:)` with `kind` (`.silhouette([Double])`/`.rail`), `holds`, `.sampleCount`. `ReplayBandGeometry(width:thumb:strokeInset:)` with `x(_:)`, `fraction(atX:)`, `thumbY(fraction:samples:height:)`, `stripFrame(_:)`, `captionCenters(holds:captionWidth:minSeconds:)`. `ReplayMarkerStyle.displayBearing(_:reduceMotion:)`. `RideTestID.replayEntry`, `.replayPlay`, `.replayBand`.
 
 - [ ] **Step 1: Write the failing tests**
+
+`ReplayReadoutTests.swift` — the `ReplayReadoutTests` and `ReplayBandContentTests` suites from plan v1 are unchanged **except**: in `ReplayBandContentTests.holdsAreCarriedFromTheTimeline`, build the ride from two segments with a 300 s gap so the timeline has one hold, and assert `c.holds.count == 1 && c.holds[0].kind == .paused`. (Copy the v1 suites verbatim from the reconciliation log's pointer; the skeptic ran them green, 17/17.)
 
 ```swift
 import Testing
@@ -1465,7 +1606,7 @@ struct ReplayReadoutTests {
         let seconds = 3731
         let meters = 12.3 * 1609.344
         let step = meters / Double(seconds)
-        let metersPerDegreeLon = 111_320 * cos(origin.latitude * .pi / 180)
+        let metersPerDegreeLon = 6_371_000 * Double.pi / 180 * cos(origin.latitude * .pi / 180)
         let pts = (0...seconds).map { i in
             TrackPoint(coordinate: Coordinate(latitude: origin.latitude,
                                               longitude: origin.longitude + Double(i) * step / metersPerDegreeLon),
@@ -1477,10 +1618,8 @@ struct ReplayReadoutTests {
     @Test func imperialStrings() {
         let r = ReplayReadout(sample: sample(speed: 8.9408, distance: 2.4 * 1609.344, seconds: 848, elevation: 95.1),
                               timeline: timeline, units: .imperial)
-        #expect(r.speedText == "20")
-        #expect(r.speedUnit == "mph")
-        #expect(r.distanceText == "2.4 / 12.3")
-        #expect(r.distanceUnit == "mi")
+        #expect(r.speedText == "20" && r.speedUnit == "mph")
+        #expect(r.distanceText == "2.4 / 12.3" && r.distanceUnit == "mi")
         #expect(r.timeText == "14:08 / 1:02:11")
         #expect(r.elevationText == "312 ft")
         #expect(r.holdText == nil)
@@ -1490,10 +1629,8 @@ struct ReplayReadoutTests {
 
     @Test func metricStringsAndNilSpeed() {
         let r = ReplayReadout(sample: sample(speed: nil, distance: 3862.4, seconds: 60), timeline: timeline, units: .metric)
-        #expect(r.speedText == "—")
-        #expect(r.speedUnit == "km/h")
-        #expect(r.distanceText == "3.9 / 19.8")
-        #expect(r.distanceUnit == "km")
+        #expect(r.speedText == "—" && r.speedUnit == "km/h")
+        #expect(r.distanceText == "3.9 / 19.8" && r.distanceUnit == "km")
         #expect(r.timeText == "1:00 / 1:02:11")
         #expect(r.elevationText == nil)
         #expect(r.accessibilityLabel.hasPrefix("Speed unavailable."))
@@ -1504,8 +1641,7 @@ struct ReplayReadoutTests {
         #expect(ReplayReadout.holdLabel(kind: .paused, seconds: 45) == "Paused · 45 s")
         #expect(ReplayReadout.holdLabel(kind: .signalLost, seconds: 180) == "No signal · 3 min")
         #expect(ReplayReadout.holdLabel(kind: .paused, seconds: 3720) == "Paused · 62 min")
-        let r = ReplayReadout(sample: sample(speed: nil, distance: 100, seconds: 30,
-                                             phase: .hold(.stopped, seconds: 600)),
+        let r = ReplayReadout(sample: sample(speed: nil, distance: 100, seconds: 30, phase: .hold(.stopped, seconds: 600)),
                               timeline: timeline, units: .imperial)
         #expect(r.holdText == "Stopped · 10 min")
         #expect(r.accessibilityLabel.hasPrefix("Stopped · 10 min."))
@@ -1523,51 +1659,118 @@ struct ReplayReadoutTests {
 }
 
 struct ReplayBandContentTests {
-    private func ride(elevation: (Int) -> Double?, gain: Double) -> Ride {
+    private func segment(seconds: Int, start: TimeInterval, elevation: (Int) -> Double?) -> RideSegment {
         let origin = Coordinate(latitude: 40.44, longitude: -79.99)
-        let metersPerDegreeLon = 111_320 * cos(origin.latitude * .pi / 180)
-        let pts = (0...600).map { i in
+        let metersPerDegreeLon = 6_371_000 * Double.pi / 180 * cos(origin.latitude * .pi / 180)
+        return RideSegment(points: (0...seconds).map { i in
             TrackPoint(coordinate: Coordinate(latitude: origin.latitude,
-                                              longitude: origin.longitude + Double(i) * 6 / metersPerDegreeLon),
-                       elevation: elevation(i), timestamp: Date(timeIntervalSince1970: Double(i)))
-        }
+                                              longitude: origin.longitude + (start + Double(i)) * 6 / metersPerDegreeLon),
+                       elevation: elevation(i), timestamp: Date(timeIntervalSince1970: start + Double(i)))
+        })
+    }
+    private func ride(_ segments: [RideSegment], gain: Double) -> Ride {
         let stats = RideStats(distanceMeters: 3600, movingTimeSeconds: 600, averageSpeedMetersPerSecond: 6,
                               maxSpeedMetersPerSecond: 6, elevationGainMeters: gain)
-        return Ride(kind: .freeRide, startedAt: .distantPast, endedAt: .distantPast,
-                    track: pts, stats: stats, destinationName: nil, routeId: nil, destinationPlaceId: nil)
+        return Ride(kind: .freeRide, startedAt: .distantPast, endedAt: .distantPast, segments: segments,
+                    stats: stats, destinationName: nil, routeId: nil, destinationPlaceId: nil)
     }
 
     @Test func climbIsASilhouetteOnThePlaybackAxis() {
-        let r = ride(elevation: { 300 + Double($0) / 5 }, gain: 120)
+        let r = ride([segment(seconds: 600, start: 0) { 300 + Double($0) / 5 }], gain: 120)
         let c = ReplayBandContent(ride: r, timeline: ReplayTimeline(segments: r.segments))
         guard case let .silhouette(samples) = c.kind else { Issue.record("expected silhouette"); return }
         #expect(samples.count == ReplayBandContent.sampleCount)
-        #expect(samples.first! < samples.last!)
+        #expect(samples[0] < samples[samples.count - 1])
     }
 
     @Test func flatAndMissingElevationAreARail() {
-        let flat = ride(elevation: { _ in 300 }, gain: 2)
+        let flat = ride([segment(seconds: 600, start: 0) { _ in 300 }], gain: 2)
         #expect(ReplayBandContent(ride: flat, timeline: ReplayTimeline(segments: flat.segments)).kind == .rail)
-        let none = ride(elevation: { _ in nil }, gain: 0)
+        let none = ride([segment(seconds: 600, start: 0) { _ in nil }], gain: 0)
         #expect(ReplayBandContent(ride: none, timeline: ReplayTimeline(segments: none.segments)).kind == .rail)
     }
 
     @Test func holdsAreCarriedFromTheTimeline() {
-        let r = ride(elevation: { _ in 300 }, gain: 0)
-        let t = ReplayTimeline(segments: r.segments)
-        #expect(ReplayBandContent(ride: r, timeline: t).holds == t.holds)
+        let r = ride([segment(seconds: 300, start: 0) { _ in 300 }, segment(seconds: 300, start: 600) { _ in 300 }], gain: 0)
+        let c = ReplayBandContent(ride: r, timeline: ReplayTimeline(segments: r.segments))
+        #expect(c.holds.count == 1 && c.holds[0].kind == .paused && c.holds[0].seconds == 300)
     }
 }
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+`ReplayBandGeometryTests.swift`:
 
-Run: `cd AuraCore && swift test --no-parallel --filter ReplayReadoutTests`
-Expected: compile error.
+```swift
+import Testing
+import Foundation
+import AuraCore
+@testable import AuraKit
 
-- [ ] **Step 3: Implement the readout**
+struct ReplayBandGeometryTests {
+    let g = ReplayBandGeometry(width: 343, thumb: 28, strokeInset: 2)
 
-`AuraCore/Sources/AuraKit/Replay/ReplayReadout.swift`:
+    @Test func endpointsAreInsetByHalfTheThumbPlusTheStroke() {
+        #expect(g.x(0) == 16 && g.x(1) == 327)
+        #expect(abs(g.x(0.5) - 171.5) < 1e-9)
+    }
+
+    @Test func fractionAtXIsTheInverseAndClamps() {
+        for f in stride(from: 0.0, through: 1, by: 0.05) { #expect(abs(g.fraction(atX: g.x(f)) - f) < 1e-12) }
+        #expect(g.fraction(atX: -50) == 0 && g.fraction(atX: 999) == 1)
+    }
+
+    @Test func degenerateWidthNeverDividesByZero() {
+        let tiny = ReplayBandGeometry(width: 10, thumb: 28, strokeInset: 2)
+        #expect(tiny.fraction(atX: 5).isFinite && tiny.x(0.5).isFinite)
+    }
+
+    @Test func thumbYFollowsTheSilhouetteAndCentersOnTheRail() {
+        let rising: [Double] = [0, 10, 20, 30, 40]
+        let top = g.thumbY(fraction: 1, samples: rising, height: 88)
+        let bottom = g.thumbY(fraction: 0, samples: rising, height: 88)
+        #expect(top < bottom)
+        let mid = g.thumbY(fraction: 0.5, samples: rising, height: 88)
+        #expect(abs(mid - (top + bottom) / 2) < 1e-9)
+        #expect(g.thumbY(fraction: 0.3, samples: nil, height: 88) == 44)
+    }
+
+    @Test func stripsHaveAMinimumWidth() {
+        let narrow = ReplayHold(kind: .paused, seconds: 60, range: 0.5..<0.501)
+        let frame = g.stripFrame(narrow)
+        #expect(frame.width == 12)
+        let wide = ReplayHold(kind: .paused, seconds: 600, range: 0.2..<0.4)
+        #expect(abs(g.stripFrame(wide).width - (g.x(0.4) - g.x(0.2))) < 1e-9)
+    }
+
+    @Test func captionsDropWhenTheyWouldOverlapAndSkipShortHolds() {
+        let holds = [
+            ReplayHold(kind: .stopped, seconds: 600, range: 0.10..<0.14),   // caption
+            ReplayHold(kind: .stopped, seconds: 300, range: 0.15..<0.18),   // overlaps → dropped
+            ReplayHold(kind: .paused, seconds: 60, range: 0.50..<0.52),     // under 120 s → none
+            ReplayHold(kind: .signalLost, seconds: 180, range: 0.80..<0.83) // caption
+        ]
+        let centers = g.captionCenters(holds: holds, captionWidth: 44, minSeconds: 120)
+        #expect(centers.map(\.seconds) == [600, 180])
+        #expect(abs(centers[0].center - (g.x(0.10) + g.x(0.14)) / 2) < 1e-9)
+    }
+}
+
+struct ReplayMarkerStyleTests {
+    @Test func reduceMotionRoundsToTheEightPointCompass() {
+        #expect(ReplayMarkerStyle.displayBearing(100, reduceMotion: true) == 90)
+        #expect(ReplayMarkerStyle.displayBearing(113, reduceMotion: true) == 135)
+        #expect(ReplayMarkerStyle.displayBearing(113, reduceMotion: false) == 113)
+        #expect(ReplayMarkerStyle.displayBearing(nil, reduceMotion: true) == nil)
+        #expect(ReplayMarkerStyle.displayBearing(359, reduceMotion: true) == 0)
+    }
+}
+```
+
+- [ ] **Step 2: Run to verify it fails** — `cd AuraCore && swift test --no-parallel --filter "ReplayReadoutTests|ReplayBandGeometryTests"` → compile error.
+
+- [ ] **Step 3: Implement**
+
+`ReplayReadout.swift` and `ReplayBandContent.swift` are unchanged from plan v1 (the skeptic ran them green); the log at the end of this file points at them. Reproduced here so the task is self-contained:
 
 ```swift
 import Foundation
@@ -1583,9 +1786,7 @@ public struct ReplayReadout: Equatable, Sendable {
     public let timeText: String
     public let elevationText: String?
     public let holdText: String?
-    /// Short, for the band's `accessibilityValue`: "4.2 miles, 22 minutes".
     public let accessibilityValue: String
-    /// Long, for the instrument row's combined element.
     public let accessibilityLabel: String
 
     public init(sample: ReplaySample, timeline: ReplayTimeline, units: DistanceUnits) {
@@ -1632,8 +1833,7 @@ public struct ReplayReadout: Equatable, Sendable {
         return "\(word) · \(duration)"
     }
 
-    /// The History row's three-valued rule: the destination's name, else "Navigated" for a
-    /// navigate ride, else "Explore". `HistoryView` keeps its own private copy; this one is tested.
+    /// The History row's three-valued rule; `HistoryView` keeps its own private copy.
     public static func subtitle(for ride: Ride) -> String {
         if let name = ride.destinationName, !name.isEmpty { return name }
         return ride.kind == .navigate ? "Navigated" : "Explore"
@@ -1641,15 +1841,11 @@ public struct ReplayReadout: Equatable, Sendable {
 }
 ```
 
-`AuraCore/Sources/AuraKit/Replay/ReplayBandContent.swift`:
-
 ```swift
 import AuraCore
 
-/// What the scrub band draws under the playhead (spec D6): the elevation silhouette on the
-/// playback axis when the ride clears `ElevationProfile`'s gain gate and has elevation, else
-/// a plain rail. Built once by the entry modifier — `ElevationProfile.classify` needs the
-/// flattened track, which must never be read in a `body`.
+/// What the scrub band draws under the playhead (spec D6). Built once by the entry modifier —
+/// `ElevationProfile.classify` needs the flattened track, which must never be read in a `body`.
 public struct ReplayBandContent: Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         case silhouette([Double])
@@ -1673,7 +1869,89 @@ public struct ReplayBandContent: Equatable, Sendable {
 }
 ```
 
-Append inside `RideTestID` in `RideTestSupport.swift`:
+`ReplayBandGeometry.swift`:
+
+```swift
+import Foundation
+import AuraCore
+
+/// The scrub band's pixel arithmetic (spec D6), out of the view so it can be pinned: the
+/// fraction↔x mapping the rider's finger depends on, the thumb's y on the silhouette, strip
+/// frames with their minimum width, and caption placement with the overlap-drop rule.
+public struct ReplayBandGeometry: Equatable, Sendable {
+    public let width: Double
+    public let thumb: Double
+    public let strokeInset: Double
+    public static let minStripWidth: Double = 12
+
+    public init(width: Double, thumb: Double, strokeInset: Double) {
+        self.width = width; self.thumb = thumb; self.strokeInset = strokeInset
+    }
+
+    private var inset: Double { thumb / 2 + strokeInset }
+    private var drawable: Double { max(width - 2 * inset, 1) }
+
+    public func x(_ fraction: Double) -> Double { inset + fraction * drawable }
+
+    public func fraction(atX px: Double) -> Double { min(max((px - inset) / drawable, 0), 1) }
+
+    /// y of the silhouette at `fraction` in a band of `height`, using the same mapping
+    /// `Sparkline.points` draws with (the silhouette is inset by `thumb / 2` horizontally and
+    /// `strokeInset` all round). `samples == nil` is the rail: vertical center.
+    public func thumbY(fraction: Double, samples: [Double]?, height: Double) -> Double {
+        guard let samples, samples.count > 1 else { return height / 2 }
+        let size = CGSize(width: width - thumb, height: height)
+        let points = Sparkline.points(values: samples, in: size, inset: strokeInset)
+        guard points.count > 1 else { return height / 2 }
+        let position = min(max(fraction, 0), 1) * Double(points.count - 1)
+        let i = min(Int(position), points.count - 2)
+        let t = position - Double(i)
+        return points[i].y + (points[i + 1].y - points[i].y) * t
+    }
+
+    public struct Frame: Equatable, Sendable { public var x: Double; public var width: Double }
+
+    public func stripFrame(_ hold: ReplayHold) -> Frame {
+        let start = x(hold.range.lowerBound)
+        let end = max(x(hold.range.upperBound), start + Self.minStripWidth)
+        return Frame(x: start, width: end - start)
+    }
+
+    public struct Caption: Equatable, Sendable { public var center: Double; public var seconds: TimeInterval }
+
+    /// Captions for holds of at least `minSeconds`, centered under their strips, left to right; a
+    /// caption whose `captionWidth` box would overlap the previous one, or overflow the band, is dropped.
+    public func captionCenters(holds: [ReplayHold], captionWidth: Double, minSeconds: TimeInterval) -> [Caption] {
+        var out: [Caption] = []
+        var lastRight = -Double.infinity
+        for hold in holds where hold.seconds >= minSeconds {
+            let frame = stripFrame(hold)
+            let center = frame.x + frame.width / 2
+            let left = center - captionWidth / 2, right = center + captionWidth / 2
+            guard left >= lastRight, right <= width else { continue }
+            out.append(Caption(center: center, seconds: hold.seconds))
+            lastRight = right
+        }
+        return out
+    }
+}
+```
+
+`ReplayMarkerStyle.swift`:
+
+```swift
+/// The marker's Reduce Motion rule (spec D10): round the course to the 8-point compass, the
+/// peer-pointer precedent. Out of the view so it is pinned.
+public enum ReplayMarkerStyle {
+    public static func displayBearing(_ raw: Double?, reduceMotion: Bool) -> Double? {
+        guard let raw else { return nil }
+        guard reduceMotion else { return raw }
+        return ((raw / 45).rounded() * 45).truncatingRemainder(dividingBy: 360)
+    }
+}
+```
+
+Append inside `RideTestID`:
 
 ```swift
     /// The summary map's Replay pill (ROH-239).
@@ -1686,11 +1964,11 @@ Append inside `RideTestID` in `RideTestSupport.swift`:
 
 - [ ] **Step 4: Run until green, lint, commit**
 
-Run: `cd AuraCore && swift test --no-parallel --filter "ReplayReadoutTests|ReplayBandContentTests"` then lint. If `imperialStrings` fails on `speedText`, note `speedValue` defaults to 0 decimals and 8.9408 m/s is 20.0 mph exactly.
+Run: `cd AuraCore && swift test --no-parallel --filter "ReplayReadoutTests|ReplayBandContentTests|ReplayBandGeometryTests|ReplayMarkerStyleTests"`. `Sparkline.points` takes `CGSize`; AuraKit already imports Foundation/CoreGraphics through `Plotting.swift`, so `CGSize` resolves.
 
 ```bash
 git add AuraCore/Sources/AuraKit/Replay AuraCore/Tests/AuraKitTests/Replay AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift
-git commit -m "feat(roh-239): ReplayReadout and ReplayBandContent resolve every replay string once
+git commit -m "feat(roh-239): replay readout, band content and geometry, marker style — all pinned
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
@@ -1700,71 +1978,69 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ### Task 8: Route stroke constants, `ReplayMarkerView`, `ReplayMap`
 
 **Files:**
-- Modify: `Aura/Sources/Theme/AuraTheme.swift` (append an extension at the end of the file)
-- Modify: `Aura/Sources/Ride/StaticRouteMap.swift:34-36` (two literals)
-- Create: `Aura/Sources/Ride/Replay/ReplayMarkerView.swift`
-- Create: `Aura/Sources/Ride/Replay/ReplayMap.swift`
+- Modify: `Aura/Sources/Theme/AuraTheme.swift` (append an extension at the end)
+- Modify: `Aura/Sources/Ride/StaticRouteMap.swift:38,40` and `Aura/Sources/Plan/RoutePreviewView.swift:362,364` (the `.lineWidth(8)` / `.lineBorderWidth(1.5)` literals)
+- Create: `Aura/Sources/Ride/Replay/ReplayMarkerView.swift`, `Aura/Sources/Ride/Replay/ReplayMap.swift`
 
 **Interfaces:**
-- Consumes: `ReplayTimeline`, `ReplaySample`, `ReplayPlayback`, `ReplayReadout.holdLabel`, `AuraPuck.ridingBearing`/`browseTop`, `SettingsStore.mapStyle.mapboxStyle`, `.hudControl` button style, `.mapChip`.
-- Produces: `ReplayMap(timeline:lines:playback:)`; `AuraTheme.RouteStroke.width`, `.casingWidth`.
+- Consumes: `ReplayTimeline`, `ReplaySample`, `ReplayPlayback`, `ReplayReadout.holdLabel`, `ReplayMarkerStyle`, `AuraPuck.ridingBearing`/`browseTop`, `.hudControl(active:)`, `.mapChip`.
+- Produces: `ReplayMap(timeline:lines:playback:)`; `AuraTheme.RouteStroke.width`, `.casingWidth`; `AuraTheme.replayHoldStrip`.
 
-- [ ] **Step 1: Add the constants and point `StaticRouteMap` at them**
+- [ ] **Step 1: Theme constants**
 
-Append to `Aura/Sources/Theme/AuraTheme.swift`:
+Append to `AuraTheme.swift`:
 
 ```swift
 extension AuraTheme {
-    /// The cased route stroke the static maps share (summary, replay). Mapbox draws
-    /// `lineBorderWidth` INSIDE `lineWidth`: 8 − 2×1.5 = 5 pt of visible mint.
+    /// The cased route stroke the Mapbox line surfaces share (summary, route preview, replay).
+    /// Mapbox draws `lineBorderWidth` INSIDE `lineWidth`: 8 − 2×1.5 = 5 pt of visible mint.
+    /// The share card's Core Graphics stroke (`ShareCardLayout`, AuraKit) expresses the same 5 pt
+    /// core as an 8 pt casing under a 5 pt line; the two are not one constant because they are
+    /// different drawing models. Keep `width − 2 × casingWidth == ShareCardLayout.routeStrokeWidth`.
     enum RouteStroke {
         static let width: Double = 8
         static let casingWidth: Double = 1.5
     }
+
+    /// The replay band's hold strip. Brighter than a hairline on purpose: it is the band's
+    /// headline signal for a 45–119 s stop, and it draws ABOVE the silhouette's 18% fill.
+    /// PO eyeball owed on the simulator pass (spec D6).
+    static let replayHoldStrip = Color.white.opacity(0.28)
 }
 ```
 
-In `StaticRouteMap.swift`, replace `.lineWidth(8)` with `.lineWidth(AuraTheme.RouteStroke.width)` and `.lineBorderWidth(1.5)` with `.lineBorderWidth(AuraTheme.RouteStroke.casingWidth)`. Leave the comment above them; update its arithmetic reference only if it names the literal.
+Replace the four literals with `AuraTheme.RouteStroke.width` / `AuraTheme.RouteStroke.casingWidth`. No other change in either file.
 
-- [ ] **Step 2: Write the marker**
-
-`Aura/Sources/Ride/Replay/ReplayMarkerView.swift`:
+- [ ] **Step 2: The marker**
 
 ```swift
 import SwiftUI
 import AuraCore
+import AuraKit
 
-/// The replay rider (spec D8): the riding triangle rotated to the track bearing while moving,
-/// the browse disc in a hold and at the end. Field-full on purpose — the bearing changes every
-/// frame — but its position in the map content tree is fixed, so the SDK reuses one hosting
-/// view. Rotation and pitch are disabled on the replay map, so a geographic bearing is a
-/// screen bearing.
+/// The replay rider (spec D8): the riding triangle rotated to the sampled course while moving,
+/// the browse disc in a hold and at the end. Fixed 34 pt frame so swapping images (32 pt vs
+/// 34 pt canvases) never shifts the annotation. Rotation and pitch are disabled on the replay
+/// map, so a geographic bearing is a screen bearing.
 struct ReplayMarkerView: View {
     let sample: ReplaySample
     let reduceMotion: Bool
 
-    private var isMoving: Bool {
-        if case .moving = sample.phase { return sample.bearing != nil }
-        return false
-    }
-
-    /// Reduce Motion rounds to the 8-point compass, the peer-pointer rule (spec D10).
-    private var displayBearing: Double {
-        let raw = sample.bearing ?? 0
-        return reduceMotion ? (raw / 45).rounded() * 45 : raw
+    private var bearing: Double? {
+        guard case .moving = sample.phase else { return nil }
+        return ReplayMarkerStyle.displayBearing(sample.bearing, reduceMotion: reduceMotion)
     }
 
     var body: some View {
-        Image(uiImage: isMoving ? AuraPuck.ridingBearing : AuraPuck.browseTop)
-            .rotationEffect(.degrees(isMoving ? displayBearing : 0))
+        Image(uiImage: bearing == nil ? AuraPuck.browseTop : AuraPuck.ridingBearing)
+            .rotationEffect(.degrees(bearing ?? 0))
+            .frame(width: 34, height: 34)
             .accessibilityHidden(true)
     }
 }
 ```
 
-- [ ] **Step 3: Write the map**
-
-`Aura/Sources/Ride/Replay/ReplayMap.swift`:
+- [ ] **Step 3: The map**
 
 ```swift
 import SwiftUI
@@ -1774,11 +2050,12 @@ import AuraCore
 import AuraKit
 
 /// The replay's map (spec D8): the cased route as a style source under a line layer, and the
-/// rider as a `MapViewAnnotation`, both inside one `TimelineView` that runs only while
-/// playing. The same structure `NavigateHUDView` runs at 30 Hz: the SDK re-uploads the
-/// GeoJSON only when `data` differs, so a frame that moves the marker touches nothing else.
+/// rider as a `MapViewAnnotation`, inside one `TimelineView` that runs only while playing. The
+/// structure `NavigateHUDView` runs at 30 Hz: the SDK re-uploads GeoJSON only when `data`
+/// differs, so a frame that moves the marker touches nothing else.
 ///
-/// `lines` is mapped once by the parent; nothing here reads `ride.segments`.
+/// `lines` is built once by the entry modifier from `ReplayTimeline.drawableLines`.
+/// `context.date` is used for RENDERING ONLY; every mutation takes `Date()`.
 struct ReplayMap: View {
     let timeline: ReplayTimeline
     let lines: [[CLLocationCoordinate2D]]
@@ -1822,13 +2099,14 @@ struct ReplayMap: View {
                         .padding(.vertical, AuraTheme.Spacing.sm)
                         .mapChip(Capsule())
                         .padding(AuraTheme.Spacing.md)
-                        .accessibilityHidden(true)   // the row announces it
+                        .accessibilityHidden(true)
                 }
             }
         }
         .overlay(alignment: .topTrailing) {
-            // `viewport.isIdle` is the SDK's own "the rider moved the camera" signal; setting
-            // `.overview` on recenter clears it. No camera callback, no latch (spec D7).
+            // `viewport.isIdle` is the SDK's write-back when the viewport manager goes idle,
+            // which a rider gesture causes; recenter's `.overview` clears it. A failed initial
+            // fit would also show it (spec §10) — accepted.
             if viewport.isIdle {
                 Button(action: recenter) { Image(systemName: "location.fill") }
                     .buttonStyle(.hudControl(active: true))
@@ -1881,22 +2159,18 @@ struct ReplayMap: View {
 }
 ```
 
-Check `.hudControl(active:)` against `HUDControlButton.swift`: `ControlCluster` calls `.buttonStyle(.hudControl(active: !isFollowing, metrics: .ride))`, so `.hudControl(active:)` with the default `.standard` metrics exists; if the static helper requires `metrics`, pass `metrics: .standard`.
+- [ ] **Step 4: Lint, commit; orchestrator builds**
 
-- [ ] **Step 4: Lint**
-
-Run from the root: `swiftlint lint --strict --quiet`. Expected: no output. Do not build; the orchestrator builds after this task and reports any compile error back with the task.
-
-- [ ] **Step 5: Commit**
+Run from the root: `swiftlint lint --strict --quiet`.
 
 ```bash
-git add Aura/Sources/Theme/AuraTheme.swift Aura/Sources/Ride/StaticRouteMap.swift Aura/Sources/Ride/Replay/ReplayMarkerView.swift Aura/Sources/Ride/Replay/ReplayMap.swift
+git add Aura/Sources/Theme/AuraTheme.swift Aura/Sources/Ride/StaticRouteMap.swift Aura/Sources/Plan/RoutePreviewView.swift Aura/Sources/Ride/Replay/ReplayMarkerView.swift Aura/Sources/Ride/Replay/ReplayMap.swift
 git commit -m "feat(roh-239): ReplayMap draws the route as a source and the rider as an annotation
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
-**Orchestrator step (not the implementer's):** run the builder agent: `cd Aura && xcodegen generate` then build the `Aura` scheme for the iPhone 17 simulator. `ReplayMap` is not yet referenced, so this verifies the file compiles in the target.
+**Orchestrator:** `cd Aura && xcodegen generate`, then build via the builder agent. On failure, the error goes back to this implementer, who amends this commit.
 
 ---
 
@@ -1906,8 +2180,8 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Create: `Aura/Sources/Ride/Replay/ReplayScrubBand.swift`
 
 **Interfaces:**
-- Consumes: `ReplayBandContent`, `ReplayTimeline`, `ReplayPlayback`, `ReplayReadout`, `Sparkline.points(values:in:inset:)` (AuraKit), `RideTestID.replayBand`, `RideStatsFormatter.minutes`.
-- Produces: `ReplayScrubBand(content:timeline:playback:readout:fraction:now:)`.
+- Consumes: `ReplayBandContent`, `ReplayBandGeometry`, `ReplayTimeline`, `ReplayPlayback`, `ReplayReadout`, `Sparkline.points`, `RideTestID.replayBand`, `RideStatsFormatter.minutes`, `AuraTheme.replayHoldStrip`.
+- Produces: `ReplayScrubBand(content:timeline:playback:readout:fraction:)`. No `now` parameter: the band takes `Date()` in its own handlers.
 
 - [ ] **Step 1: Write the band**
 
@@ -1916,21 +2190,21 @@ import SwiftUI
 import AuraCore
 import AuraKit
 
-/// The scrubber (spec D6): the elevation silhouette or a rail on the playback axis, hold
-/// strips with captions, a 28 pt thumb on the playhead, and the drag that moves it. The
-/// silhouette is a child whose only input is the sample array, so the per-frame playhead
-/// invalidation never re-strokes it.
+/// The scrubber (spec D6). Geometry comes from `ReplayBandGeometry`; this file only draws and
+/// forwards touches. The silhouette is an `Equatable` child so the per-frame playhead
+/// invalidation never re-strokes it. Strips draw ABOVE the silhouette.
 struct ReplayScrubBand: View {
     let content: ReplayBandContent
     let timeline: ReplayTimeline
     let playback: ReplayPlayback
+    /// Resolved at the playhead's own fraction, so the elevation tag and the spoken value
+    /// match the thumb, not the 4 Hz instrument row.
     let readout: ReplayReadout
-    /// The playhead's fraction for this frame (the parent resolves it from its clock).
     let fraction: Double
-    let now: Date
 
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .caption2) private var captionWidth: CGFloat = 44
     @State private var dragMoved = false
     @State private var holdUnderThumb: Int?
 
@@ -1938,25 +2212,30 @@ struct ReplayScrubBand: View {
     static let strokeInset: CGFloat = 2
     private static let bandHeight: CGFloat = 88
     private static let captionMinSeconds: TimeInterval = 120
-    private static let captionWidthEstimate: CGFloat = 44
+
+    private var samples: [Double]? {
+        if case let .silhouette(s) = content.kind { return s }
+        return nil
+    }
 
     var body: some View {
         VStack(spacing: AuraTheme.Spacing.xs) {
             GeometryReader { geo in
-                let width = geo.size.width
+                let g = ReplayBandGeometry(width: geo.size.width, thumb: Self.thumb, strokeInset: Self.strokeInset)
                 ZStack(alignment: .topLeading) {
-                    strips(width: width, height: geo.size.height)
-                    switch content.kind {
-                    case let .silhouette(samples):
+                    if let samples {
                         ReplaySilhouette(samples: samples, contrast: contrast)
+                            .equatable()
                             .padding(.horizontal, Self.thumb / 2)
-                    case .rail:
-                        rail(width: width, height: geo.size.height)
+                    } else {
+                        rail(g, height: geo.size.height)
                     }
-                    playhead(width: width, height: geo.size.height)
+                    strips(g, height: geo.size.height)
+                    playhead(g, height: geo.size.height)
                 }
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
                 .contentShape(Rectangle())
-                .gesture(drag(width: width))
+                .gesture(drag(g))
             }
             .frame(height: Self.bandHeight)
             captions
@@ -1967,48 +2246,27 @@ struct ReplayScrubBand: View {
         .accessibilityAdjustableAction(adjust)
         .accessibilityIdentifier(RideTestID.replayBand)
         .sensoryFeedback(.selection, trigger: holdUnderThumb) { _, new in dragMoved && new != nil }
-        .onChange(of: fraction) { _, new in holdUnderThumb = timeline.holds.firstIndex { $0.range.contains(new) } }
-    }
-
-    // MARK: Geometry
-
-    /// x of a fraction inside the drawable width (thumb inset + stroke inset each side).
-    private func x(_ f: Double, width: CGFloat) -> CGFloat {
-        let inset = Self.thumb / 2 + Self.strokeInset
-        return inset + CGFloat(f) * max(width - 2 * inset, 1)
-    }
-
-    private func fraction(atX px: CGFloat, width: CGFloat) -> Double {
-        let inset = Self.thumb / 2 + Self.strokeInset
-        return Double(min(max((px - inset) / max(width - 2 * inset, 1), 0), 1))
-    }
-
-    private func thumbY(width: CGFloat, height: CGFloat) -> CGFloat {
-        guard case let .silhouette(samples) = content.kind else { return height / 2 }
-        let size = CGSize(width: width - Self.thumb, height: height)
-        let points = Sparkline.points(values: samples, in: size, inset: Self.strokeInset)
-        guard points.count > 1 else { return height / 2 }
-        let position = fraction * Double(points.count - 1)
-        let i = min(Int(position), points.count - 2)
-        let t = CGFloat(position - Double(i))
-        return points[i].y + (points[i + 1].y - points[i].y) * t
+        .onChange(of: fraction) { _, new in
+            let index = timeline.holds.firstIndex { $0.range.contains(new) }
+            if index != holdUnderThumb { holdUnderThumb = index }
+        }
+        .onDisappear { playback.cancelScrub() }
     }
 
     // MARK: Layers
 
-    private func strips(width: CGFloat, height: CGFloat) -> some View {
+    private func strips(_ g: ReplayBandGeometry, height: CGFloat) -> some View {
         ForEach(Array(content.holds.enumerated()), id: \.offset) { _, hold in
-            let start = x(hold.range.lowerBound, width: width)
-            let end = max(x(hold.range.upperBound, width: width), start + 12)
+            let frame = g.stripFrame(hold)
             Rectangle()
-                .fill(AuraTheme.hairline(contrast))
-                .frame(width: end - start, height: height)
-                .offset(x: start)
+                .fill(AuraTheme.replayHoldStrip)
+                .frame(width: frame.width, height: height)
+                .offset(x: frame.x)
         }
     }
 
-    private func rail(width: CGFloat, height: CGFloat) -> some View {
-        let start = x(0, width: width), end = x(1, width: width), head = x(fraction, width: width)
+    private func rail(_ g: ReplayBandGeometry, height: CGFloat) -> some View {
+        let start = g.x(0), end = g.x(1), head = g.x(fraction)
         return ZStack(alignment: .leading) {
             Capsule().fill(AuraTheme.textSecondary.opacity(0.25)).frame(width: end - start, height: 6)
             Capsule().fill(AuraTheme.accent).frame(width: max(head - start, 6), height: 6)
@@ -2016,9 +2274,9 @@ struct ReplayScrubBand: View {
         .offset(x: start, y: height / 2 - 3)
     }
 
-    private func playhead(width: CGFloat, height: CGFloat) -> some View {
-        let px = x(fraction, width: width)
-        let py = thumbY(width: width, height: height)
+    private func playhead(_ g: ReplayBandGeometry, height: CGFloat) -> some View {
+        let px = g.x(fraction)
+        let py = g.thumbY(fraction: fraction, samples: samples, height: height)
         return ZStack(alignment: .topLeading) {
             Rectangle().fill(AuraTheme.accent).frame(width: 2, height: height).offset(x: px - 1)
             Circle()
@@ -2026,68 +2284,51 @@ struct ReplayScrubBand: View {
                 .overlay(Circle().strokeBorder(AuraTheme.background, lineWidth: 2))
                 .frame(width: Self.thumb, height: Self.thumb)
                 .offset(x: px - Self.thumb / 2, y: py - Self.thumb / 2)
-            if case .silhouette = content.kind, let tag = readout.elevationText {
+            if samples != nil, let tag = readout.elevationText {
                 Text(tag)
                     .font(AuraTheme.Typography.unit)
                     .foregroundStyle(AuraTheme.textPrimary)
                     .padding(.horizontal, AuraTheme.Spacing.sm)
                     .padding(.vertical, AuraTheme.Spacing.xs)
                     .background(AuraTheme.surface, in: Capsule())
-                    .offset(x: min(px + Self.thumb / 2 + 4, width - 72), y: max(py - 12, 0))
+                    .offset(x: min(px + Self.thumb / 2 + 4, g.width - 72), y: max(py - 12, 0))
             }
         }
         .animation(reduceMotion || playback.isPlaying ? nil : .easeOut(duration: 0.12), value: fraction)
     }
 
-    /// Duration captions under holds of two minutes or more, dropped when they would overlap
-    /// the previous caption (spec D6).
     private var captions: some View {
         GeometryReader { geo in
-            let placed = Self.captionPlacements(holds: content.holds, width: geo.size.width,
-                                                x: { x($0, width: geo.size.width) })
+            let g = ReplayBandGeometry(width: geo.size.width, thumb: Self.thumb, strokeInset: Self.strokeInset)
+            let placed = g.captionCenters(holds: content.holds, captionWidth: captionWidth,
+                                          minSeconds: Self.captionMinSeconds)
             ForEach(placed, id: \.center) { item in
                 Text(RideStatsFormatter(units: .metric).minutes(item.seconds))
                     .font(.caption2)
+                    .lineLimit(1)
                     .foregroundStyle(AuraTheme.secondaryText(contrast))
-                    .frame(width: Self.captionWidthEstimate)
-                    .position(x: item.center, y: 8)
+                    .frame(width: captionWidth)
+                    .position(x: item.center, y: geo.size.height / 2)
             }
         }
-        .frame(height: 16)
+        .frame(height: max(16, captionWidth * 0.4))
         .accessibilityHidden(true)
-    }
-
-    struct CaptionPlacement: Hashable { let center: CGFloat; let seconds: TimeInterval }
-
-    static func captionPlacements(holds: [ReplayHold], width: CGFloat,
-                                  x: (Double) -> CGFloat) -> [CaptionPlacement] {
-        var out: [CaptionPlacement] = []
-        var lastRight: CGFloat = -.infinity
-        for hold in holds where hold.seconds >= captionMinSeconds {
-            let center = (x(hold.range.lowerBound) + x(hold.range.upperBound)) / 2
-            let left = center - captionWidthEstimate / 2
-            guard left >= lastRight, center + captionWidthEstimate / 2 <= width else { continue }
-            out.append(CaptionPlacement(center: center, seconds: hold.seconds))
-            lastRight = center + captionWidthEstimate / 2
-        }
-        return out
     }
 
     // MARK: Input
 
-    private func drag(width: CGFloat) -> some Gesture {
+    private func drag(_ g: ReplayBandGeometry) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                if !playback.isScrubbing { playback.beginScrub(now: now) }
+                if !playback.isScrubbing { playback.beginScrub(now: Date()) }
                 if abs(value.translation.width) > 4 { dragMoved = true }
-                playback.scrub(to: fraction(atX: value.location.x, width: width))
+                playback.scrub(to: g.fraction(atX: value.location.x))
             }
             .onEnded { value in
                 if dragMoved {
-                    playback.endScrub(now: now)
+                    playback.endScrub(now: Date())
                 } else {
-                    playback.endScrub(now: now)
-                    playback.jump(to: fraction(atX: value.location.x, width: width))
+                    playback.tap(to: g.fraction(atX: value.location.x), now: Date())
                 }
                 dragMoved = false
             }
@@ -2102,11 +2343,11 @@ struct ReplayScrubBand: View {
         case .decrement: target = events.last { $0 < fraction - 1e-9 }
         @unknown default: target = nil
         }
-        if let target { playback.jump(to: target) }
+        if let target { playback.tap(to: target, now: Date()) }
     }
 }
 
-/// The silhouette alone. `Equatable` on its inputs so a playhead move does not re-stroke it.
+/// The silhouette alone. `Equatable` on its inputs; the caller applies `.equatable()`.
 private struct ReplaySilhouette: View, Equatable {
     let samples: [Double]
     let contrast: ColorSchemeContrast
@@ -2131,16 +2372,13 @@ private struct ReplaySilhouette: View, Equatable {
         .overlay(alignment: .bottom) {
             Rectangle().fill(AuraTheme.hairline(contrast)).frame(height: 1)
         }
-        .equatable()
     }
 }
 ```
 
-Note on `endScrub` before `jump` in the tap branch: `beginScrub` paused playback on touch-down; `endScrub` would resume it if it had been playing, and `jump` then pauses again at the tapped fraction. That is D4 ("tap leaves playback paused"). The order matters: `jump` last.
+`Sparkline.points` takes `CGSize` and `CGFloat`; `ReplayBandGeometry` is `Double`-typed and `CGFloat` bridges implicitly on 64-bit. If the compiler complains at `ReplayBandGeometry(width: geo.size.width, …)`, wrap with `Double(...)`.
 
-- [ ] **Step 2: Lint and commit**
-
-Run from the root: `swiftlint lint --strict --quiet`.
+- [ ] **Step 2: Lint, commit; orchestrator builds**
 
 ```bash
 git add Aura/Sources/Ride/Replay/ReplayScrubBand.swift
@@ -2149,21 +2387,18 @@ git commit -m "feat(roh-239): ReplayScrubBand — silhouette or rail, hold strip
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
-**Orchestrator step:** builder agent build. `.equatable()` on a `View` that conforms to `Equatable` is the standard SwiftUI idiom; if the compiler rejects placing it inside `body`, apply it at the call site (`ReplaySilhouette(...).equatable()`) instead.
-
 ---
 
 ### Task 10: `ReplayInstrumentRow` and `RideReplayView`
 
 **Files:**
-- Create: `Aura/Sources/Ride/Replay/ReplayInstrumentRow.swift`
-- Create: `Aura/Sources/Ride/Replay/RideReplayView.swift`
+- Create: `Aura/Sources/Ride/Replay/ReplayInstrumentRow.swift`, `Aura/Sources/Ride/Replay/RideReplayView.swift`
 
 **Interfaces:**
-- Consumes: everything from Tasks 6–9, `UnfinishedRideBadge(checkpointedAt:style:)`, `AccessibilityAnnouncer.announce`, `RideTestID.replayPlay`.
-- Produces: `RideReplayView(ride:timeline:band:)`.
+- Consumes: Tasks 6–9, `UnfinishedRideBadge(checkpointedAt:style:)`, `AccessibilityAnnouncer.announce`, `RideTestID.replayPlay`.
+- Produces: `RideReplayView(ride:timeline:band:lines:)`. `lines` arrives pre-mapped; nothing here touches `ride.segments`.
 
-- [ ] **Step 1: Write the row**
+- [ ] **Step 1: The row** — unchanged from plan v1:
 
 ```swift
 import SwiftUI
@@ -2200,7 +2435,7 @@ struct ReplayInstrumentRow: View {
     private var hero: some View {
         HStack(alignment: .firstTextBaseline, spacing: AuraTheme.Spacing.xs) {
             Text(readout.speedText)
-                .font(AuraTheme.Typography.metricBrand(heroSize))
+                .font(AuraTheme.Typography.metricBrand(min(heroSize, 56)))
                 .monospacedDigit()
                 .foregroundStyle(AuraTheme.textPrimary)
             Text(readout.speedUnit)
@@ -2209,17 +2444,12 @@ struct ReplayInstrumentRow: View {
         }
     }
 
-    private var distance: some View {
-        StatPair(value: readout.distanceText, label: readout.distanceUnit.uppercased())
-    }
-
-    private var time: some View {
-        StatPair(value: readout.timeText, label: "TIME")
-    }
+    private var distance: some View { StatPair(value: readout.distanceText, label: readout.distanceUnit.uppercased()) }
+    private var time: some View { StatPair(value: readout.timeText, label: "TIME") }
 }
 ```
 
-- [ ] **Step 2: Write the cover**
+- [ ] **Step 2: The cover**
 
 ```swift
 import SwiftUI
@@ -2227,37 +2457,34 @@ import CoreLocation
 import AuraCore
 import AuraKit
 
-/// The replay cover (spec D7). Owns the playback state and the one-time mappings; the map and
-/// the controls each run their own `TimelineView` so the map's body never encloses the row.
+/// The replay cover (spec D7). Owns the playback state; the map and the controls each run their
+/// own `TimelineView`, so the map's body never encloses the row. `context.date` renders; every
+/// mutation takes `Date()`.
 struct RideReplayView: View {
     let ride: Ride
     let timeline: ReplayTimeline
     let band: ReplayBandContent
+    let lines: [[CLLocationCoordinate2D]]
 
     @Environment(\.dismiss) private var dismiss
     @Environment(SettingsStore.self) private var settings
     @Environment(\.colorSchemeContrast) private var contrast
     @State private var playback: ReplayPlayback
-    @State private var lines: [[CLLocationCoordinate2D]]
-    @State private var announcedHold: ReplayPhase?
+    @State private var lastAnnouncedHold: ReplayPhase?
 
-    init(ride: Ride, timeline: ReplayTimeline, band: ReplayBandContent) {
+    init(ride: Ride, timeline: ReplayTimeline, band: ReplayBandContent, lines: [[CLLocationCoordinate2D]]) {
         self.ride = ride
         self.timeline = timeline
         self.band = band
+        self.lines = lines
         _playback = State(initialValue: ReplayPlayback(playbackDuration: timeline.playbackDuration))
-        // Mapped once, here, so no body ever walks `ride.segments`.
-        _lines = State(initialValue: ride.segments
-            .filter { $0.points.count > 1 }
-            .map { $0.points.map { CLLocationCoordinate2D(latitude: $0.coordinate.latitude,
-                                                          longitude: $0.coordinate.longitude) } })
     }
 
     var body: some View {
         VStack(spacing: 0) {
             topBar
             ReplayMap(timeline: timeline, lines: lines, playback: playback)
-                .frame(maxHeight: .infinity)
+                .frame(minHeight: 200, maxHeight: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: AuraTheme.Radius.xl, style: .continuous))
                 .padding(.horizontal, AuraTheme.Spacing.lg)
             controls
@@ -2297,32 +2524,34 @@ struct RideReplayView: View {
             let now = context.date
             let fraction = playback.fraction(at: now)
             // The row re-samples at 4 Hz so numerals do not blur at high rate (spec D5); the
-            // band's thumb follows the frame.
+            // band's thumb, tag, and spoken value follow the frame.
             let rowDate = Date(timeIntervalSinceReferenceDate: (now.timeIntervalSinceReferenceDate * 4).rounded(.down) / 4)
             let rowSample = timeline.sample(at: playback.fraction(at: rowDate))
-            let readout = ReplayReadout(sample: rowSample, timeline: timeline, units: settings.units)
+            let rowReadout = ReplayReadout(sample: rowSample, timeline: timeline, units: settings.units)
+            let bandReadout = ReplayReadout(sample: timeline.sample(at: fraction), timeline: timeline, units: settings.units)
             let ended = playback.isPlaying && playback.hasEnded(at: now)
             VStack(spacing: AuraTheme.Spacing.lg) {
-                ReplayInstrumentRow(readout: readout)
+                ReplayInstrumentRow(readout: rowReadout)
                 ReplayScrubBand(content: band, timeline: timeline, playback: playback,
-                                readout: readout, fraction: fraction, now: now)
-                playButton(now: now)
+                                readout: bandReadout, fraction: fraction)
+                playButton
             }
             .onChange(of: ended) { _, isEnded in
-                if isEnded { playback.settle(now: now) }
+                if isEnded { playback.settle() }
             }
             .onChange(of: rowSample.phase) { _, phase in
-                // A VoiceOver rider's only channel for a stop reached under play (spec §5).
-                guard playback.isPlaying, case .hold = phase, phase != announcedHold,
-                      let text = readout.holdText else { return }
-                announcedHold = phase
+                // A VoiceOver rider's only channel for a stop reached under play (spec §5). Reset
+                // between holds so two identical stops are both announced.
+                guard case .hold = phase else { lastAnnouncedHold = nil; return }
+                guard playback.isPlaying, phase != lastAnnouncedHold, let text = rowReadout.holdText else { return }
+                lastAnnouncedHold = phase
                 AccessibilityAnnouncer.announce(text)
             }
         }
     }
 
-    private func playButton(now: Date) -> some View {
-        Button { playback.togglePlay(now: now) } label: {
+    private var playButton: some View {
+        Button { playback.togglePlay(now: Date()) } label: {
             Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(AuraTheme.background)
@@ -2335,7 +2564,7 @@ struct RideReplayView: View {
 }
 ```
 
-- [ ] **Step 3: Lint and commit**
+- [ ] **Step 3: Lint, commit; orchestrator builds**
 
 ```bash
 git add Aura/Sources/Ride/Replay/ReplayInstrumentRow.swift Aura/Sources/Ride/Replay/RideReplayView.swift
@@ -2344,26 +2573,18 @@ git commit -m "feat(roh-239): RideReplayView assembles the cover
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
-**Orchestrator step:** builder agent build.
-
 ---
 
-### Task 11: Entry modifier, the one summary line, and the DEBUG seed
+### Task 11: Entry modifier, the one summary line, the DEBUG seed
 
 **Files:**
 - Create: `Aura/Sources/Ride/Replay/RideReplayEntry.swift`
-- Modify: `Aura/Sources/Ride/RideSummaryView.swift:79` (the `StaticRouteMap(segments: segs)` line)
-- Modify: `AuraCore/Sources/AuraKit/Testing/SimulatedRideConfig.swift` (append one parser and one static)
+- Modify: `Aura/Sources/Ride/RideSummaryView.swift:76`
+- Modify: `AuraCore/Sources/AuraKit/Testing/SimulatedRideConfig.swift` (one parser + one static)
 - Modify: `Aura/Sources/AuraApp.swift:22` (after `let store = AuraApp.makeRideStore()`)
-- Test: `AuraCore/Tests/AuraKitTests/SimulatedRideConfigTests.swift` (append one test; find the existing suite with `grep -rn "forcesInMemoryStore" AuraCore/Tests/AuraKitTests`)
+- Test: `AuraCore/Tests/AuraKitTests/SimulatedRideConfigTests.swift` (append one test)
 
-**Interfaces:**
-- Consumes: `RideReplayView`, `ReplayTimeline`, `ReplayBandContent`, `SyntheticRide.threeHour`, `RideStore.save`, `RideTestID.replayEntry`.
-- Produces: `View.replayEntry(ride:)`; `SimulatedRideConfig.seedsLongRide(arguments:)`, `.currentSeedsLongRide`; launch argument `-auraSeedLongRide`.
-
-- [ ] **Step 1: Write the failing config test**
-
-Append to the existing `SimulatedRideConfig` suite in `AuraCore/Tests/AuraKitTests/`:
+- [ ] **Step 1: Failing config test**
 
 ```swift
     @Test func seedLongRideFlag() {
@@ -2372,70 +2593,66 @@ Append to the existing `SimulatedRideConfig` suite in `AuraCore/Tests/AuraKitTes
     }
 ```
 
-Run: `cd AuraCore && swift test --no-parallel --filter SimulatedRideConfig` — expected: compile error.
+Run: `cd AuraCore && swift test --no-parallel --filter SimulatedRideConfig` → compile error.
 
-- [ ] **Step 2: Add the flag**
+- [ ] **Step 2: The flag**
 
-In `SimulatedRideConfig.swift`, after `suppressesLaunchOrphanSweep`:
+After `suppressesLaunchOrphanSweep` in `SimulatedRideConfig.swift`:
 
 ```swift
     /// "-auraSeedLongRide" → DEBUG builds insert `SyntheticRide.threeHour` into the store at
-    /// launch, so the replay's cap regime (spec ROH-239 §9) is reachable in a simulator without
-    /// a three-hour recording. Idempotent: the ride has a fixed id.
+    /// launch, so the replay's cap regime (ROH-239 spec §9) is reachable in a simulator. Honored
+    /// ONLY with an ephemeral store: the persistent store mirrors to the developer's real iCloud.
     public static func seedsLongRide(arguments: [String]) -> Bool {
         arguments.contains("-auraSeedLongRide")
     }
 ```
 
-and beside the other `current…` statics:
+and beside the other `current…` statics: `@MainActor public static let currentSeedsLongRide = seedsLongRide(arguments: ProcessInfo.processInfo.arguments)`. Run the config suite green.
 
-```swift
-    @MainActor public static let currentSeedsLongRide =
-        seedsLongRide(arguments: ProcessInfo.processInfo.arguments)
-```
+- [ ] **Step 3: Seed in the app, ephemeral store only**
 
-Give the synthetic ride a fixed id so re-launching does not duplicate it: in `SyntheticRide.threeHour`, pass `id: UUID(uuidString: "00000000-0000-0000-0000-00000000C0DE")!` to the `Ride` initializer (the first parameter). Run the config suite and the scale suite; both green.
-
-- [ ] **Step 3: Seed in the app**
-
-In `AuraApp.swift`, directly after `let store = AuraApp.makeRideStore()`:
+Directly after `let store = AuraApp.makeRideStore()` in `AuraApp.swift`:
 
 ```swift
         #if DEBUG
-        if SimulatedRideConfig.currentSeedsLongRide {
+        // Never into the persistent store: it mirrors to iCloud (RideStore.persistent()).
+        if SimulatedRideConfig.currentSeedsLongRide, store.isEphemeral {
             try? store.save(SyntheticRide.threeHour(startingAt: Date().addingTimeInterval(-4 * 3600)))
         }
         #endif
 ```
 
-`AuraApp.swift` imports `AuraCore` and `AuraKit` already; verify with `grep -n "^import" Aura/Sources/AuraApp.swift`.
-
-- [ ] **Step 4: Write the entry modifier**
-
-`Aura/Sources/Ride/Replay/RideReplayEntry.swift`:
+- [ ] **Step 4: The entry modifier**
 
 ```swift
 import SwiftUI
+import CoreLocation
 import AuraCore
 import AuraKit
 
-/// The summary's way into replay (spec D1): a Replay pill over the map, and the cover. Applied
-/// to `StaticRouteMap` before the summary's own frame/clip/opacity modifiers, so the pill is
-/// clipped with the map and fades in with it. The map itself stays inert — ROH-84 taught riders
-/// that tapping a map makes it live, and this map does not.
+/// The summary's way into replay (spec D1): a Replay pill over the map, and the cover. Applied to
+/// `StaticRouteMap` before the summary's own frame/clip/opacity modifiers, so the pill is clipped
+/// with the map and fades in with it. The map itself stays inert (ROH-84 taught riders that
+/// tapping a map makes it live).
 ///
-/// The timeline and band are built once, off the main actor, and gate the pill: no timeline,
-/// or not replayable, and nothing is drawn.
+/// Everything the cover needs — timeline, band, drawable lines — is built here, once, off the
+/// main actor, and passed down; no `View.init` or `body` walks `ride.segments` again.
 private struct ReplayEntryModifier: ViewModifier {
     let ride: Ride
-    @State private var timeline: ReplayTimeline?
-    @State private var band: ReplayBandContent?
+    @State private var built: Built?
     @State private var isPresented = false
+
+    struct Built: Sendable {
+        var timeline: ReplayTimeline
+        var band: ReplayBandContent
+        var lines: [[CLLocationCoordinate2D]]
+    }
 
     func body(content: Content) -> some View {
         content
             .overlay(alignment: .bottomTrailing) {
-                if let timeline, timeline.isReplayable, band != nil {
+                if let built, built.timeline.isReplayable {
                     Button { isPresented = true } label: {
                         Label("Replay", systemImage: "play.fill")
                             .font(.subheadline.weight(.semibold))
@@ -2450,18 +2667,19 @@ private struct ReplayEntryModifier: ViewModifier {
                 }
             }
             .fullScreenCover(isPresented: $isPresented) {
-                if let timeline, let band {
-                    RideReplayView(ride: ride, timeline: timeline, band: band)
+                if let built {
+                    RideReplayView(ride: ride, timeline: built.timeline, band: built.band, lines: built.lines)
                 }
             }
             .task(id: ride.id) {
                 let ride = ride
-                let built = await Task.detached(priority: .userInitiated) {
+                built = await Task.detached(priority: .userInitiated) {
                     let timeline = ReplayTimeline(segments: ride.segments)
-                    return (timeline, ReplayBandContent(ride: ride, timeline: timeline))
+                    let lines = timeline.drawableLines.map { line in
+                        line.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+                    }
+                    return Built(timeline: timeline, band: ReplayBandContent(ride: ride, timeline: timeline), lines: lines)
                 }.value
-                timeline = built.0
-                band = built.1
             }
     }
 }
@@ -2474,65 +2692,76 @@ extension View {
 }
 ```
 
+`CLLocationCoordinate2D` is `Sendable` in the iOS 17 SDK; if the compiler disagrees inside `Task.detached`, build `lines` on the main actor after the `await` from `timeline.drawableLines` instead (it is a trivial map).
+
 - [ ] **Step 5: The one line**
 
-In `RideSummaryView.swift`, change
+`RideSummaryView.swift:76`: `StaticRouteMap(segments: segs)` → `StaticRouteMap(segments: segs).replayEntry(ride: ride)`. Confirm with `git diff --stat` that exactly one line changed in that file.
 
-```swift
-                    StaticRouteMap(segments: segs)
-```
+- [ ] **Step 6: Lint, package suites, commit; orchestrator builds**
 
-to
-
-```swift
-                    StaticRouteMap(segments: segs).replayEntry(ride: ride)
-```
-
-Confirm with `git diff --stat Aura/Sources/Ride/RideSummaryView.swift` that exactly one line changed.
-
-- [ ] **Step 6: Lint, run the two package suites, commit**
-
-Run from the root: `swiftlint lint --strict --quiet`. Run: `cd AuraCore && swift test --no-parallel --filter "SimulatedRideConfig|ReplayTimelineScaleTests"`.
+Run: `swiftlint lint --strict --quiet`; `cd AuraCore && swift test --no-parallel --filter "SimulatedRideConfig|ReplayTimelineScaleTests"`.
 
 ```bash
-git add Aura/Sources/Ride/Replay/RideReplayEntry.swift Aura/Sources/Ride/RideSummaryView.swift AuraCore/Sources/AuraKit/Testing/SimulatedRideConfig.swift AuraCore/Sources/AuraCore/Replay/SyntheticRide.swift Aura/Sources/AuraApp.swift AuraCore/Tests/AuraKitTests
+git add Aura/Sources/Ride/Replay/RideReplayEntry.swift Aura/Sources/Ride/RideSummaryView.swift AuraCore/Sources/AuraKit/Testing/SimulatedRideConfig.swift Aura/Sources/AuraApp.swift AuraCore/Tests/AuraKitTests
 git commit -m "feat(roh-239): Replay pill on the summary map, and a DEBUG seed for the cap regime
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 ```
 
-**Orchestrator step:** builder agent build, then the simulator pass (Task 12).
-
 ---
 
 ### Task 12: Simulator verification, board, PR (orchestrator)
 
-**Files:**
-- Create: `docs/evidence/roh-239/` screenshots
-- Modify: none in code unless the pass finds a defect (then a fix commit with its own test where the rule is pure)
-
-- [ ] **Step 1: Seeded long ride, cap regime**
-
-Build and launch on the iPhone 17 simulator with `-auraSeedLongRide -auraInMemoryRideStore`. Home → History → the seeded ride (4 hours ago) → summary. Screenshot: the Replay pill over the map (`summary-pill-history.png`). Tap Replay. Screenshots: fraction 0 with the disc/triangle on the first vertex (`replay-start.png`); tap play and capture mid-ride (`replay-moving.png`); scrub into the first hold (5 min stop at 0:30) and capture the capsule "Stopped · 5 min", the disc, the strip, its caption (`replay-hold.png`); let it run to the end (`replay-ended.png`); pinch, confirm the recenter control appears, tap it (`replay-recenter.png`).
-
-- [ ] **Step 2: Golden and paused fixtures, floor regime**
-
-Run `scripts/golden-ride.sh` (or launch with `-auraSimulatedRide golden`) to land a real recorded ride; open it from the post-ride summary and confirm the pill and the cover (`summary-pill-postride.png`, `replay-golden.png`). Same with the paused fixture: one `.paused` hold, "Paused · N min" (`replay-paused-fixture.png`).
-
-- [ ] **Step 3: Accessibility states**
-
-Settings → Accessibility → Reduce Motion on: play; confirm the glide continues and the pointer snaps in 45° steps (`replay-reduce-motion.png`). Dynamic Type AX3: the row wraps, the band and button do not clip (`replay-ax3.png`). VoiceOver via the accessibility inspector: the band reads "Ride scrubber", its value is the short readout, adjust moves between events.
-
-- [ ] **Step 4: Board and PR**
-
-Move ROH-239 to In Review. File a `Verification`-labeled issue in Device Verification: "Device pass: ride replay on a 3-hour ride — memory under the cover, marker smoothness at 60 Hz and under pinch, no map stutter" (spec §9). Push the branch, open the PR against `main` with `Verification: Tier 1` and the screenshots, linking the Verification issue and ROH-239. Do not merge until the whole-branch review (pipeline step 6) has run.
+- [ ] **Step 1: Seeded long ride, cap regime.** Launch on the iPhone 17 simulator with `-auraSeedLongRide -auraInMemoryRideStore` (both; the seed refuses a persistent store). Home → History → the seeded ride → summary. Screenshots into `docs/evidence/roh-239/`: `summary-pill-history.png`; then Replay: `replay-start.png` (marker on the first vertex), `replay-moving.png`, `replay-hold.png` (scrub into the 5-minute stop: capsule "Stopped · 5 min", disc, strip, caption), `replay-ended.png`, `replay-recenter.png` (after a pinch). **Also:** open the cover, wait 30 s, tap Play, confirm playback starts at 0 (the v1 clock defect). **PO eyeball owed:** strip color and z-order (D6).
+- [ ] **Step 2: Golden and paused fixtures, floor regime.** `scripts/golden-ride.sh` or `-auraSimulatedRide golden`: post-ride summary pill (`summary-pill-postride.png`), cover (`replay-golden.png`). Paused fixture: `replay-paused-fixture.png` with "Paused · N min". Also a no-elevation ride if a fixture exists: the rail, and a drag to the far right end lands at fraction 1.
+- [ ] **Step 3: Accessibility.** Reduce Motion on: glide continues, pointer in 45° steps (`replay-reduce-motion.png`). AX3: row wraps, band and button do not clip, map ≥ 200 pt (`replay-ax3.png`). Accessibility inspector: the band reads "Ride scrubber", value is the short readout, adjust steps between events.
+- [ ] **Step 4: Board and PR.** ROH-239 → In Review. File the Device Verification issue (spec §9). Push, open the PR against `main` with `Verification: Tier 1`, the screenshots, and links. Do not merge before the whole-branch review (pipeline step 6).
 
 ---
 
-## Self-review
+## Self-review (v2)
 
-**Spec coverage.** D1 → Task 11. D2 → Tasks 1, 3. D3 → Task 3 (+ capsule in Task 8, strips in Task 9). D4 → Tasks 6, 9. D5 → Tasks 4, 7, 10. D6 → Tasks 4, 7, 9. D7 → Tasks 8, 10, 11 (`isReplayable` gate in 1 and 11). D8 → Task 8. D9 → Tasks 1, 2. D10 → Tasks 8 (45° rounding), 9 (no animation under Reduce Motion), 8 (snap recenter). D11 → Tasks 6, 7, 10. §4.1–4.14 → Tasks 1–7 as labeled. §5 → Tasks 9, 10. §6 file list → matches the file map; `RideTestID` in Task 7; `RouteStroke` in Task 8. §9 → Tasks 5, 11, 12.
+**Spec coverage.** D1 → 11. D2 → 1. D3 → 1, 3, 8 (capsule), 9 (strips). D4 → 6, 9. D5 → 1, 4, 7, 10. D6 → 4, 7, 9. D7 → 8, 10, 11. D8 → 8. D9 → 1, 2. D10 → 7 (`ReplayMarkerStyle`), 8, 9. D11 → 6, 7, 10, 11. §4.1–4.12 → 1–5; §4.13 → 6; §4.14–4.16 → 7. §5 → 9, 10. §6 → file map. §9 → 5, 11, 12.
 
-**Placeholder scan.** None. Every code step has its code.
+**Type consistency.** `ReplayPhase.hold(ReplayHold.Kind, seconds:)` everywhere. `ReplayPlayback`: `beginScrub(now:)`, `scrub(to:)`, `endScrub(now:)`, `tap(to:now:)`, `cancelScrub()`, `togglePlay(now:)`, `settle()`, `hasEnded(at:)`, `fraction(at:)`, `isScrubbing`, `isPlaying` — Tasks 6, 9, 10 agree. `ReplayBandGeometry(width:thumb:strokeInset:)`, `x(_:)`, `fraction(atX:)`, `thumbY(fraction:samples:height:)`, `stripFrame(_:)` → `Frame{x,width}`, `captionCenters(holds:captionWidth:minSeconds:)` → `[Caption{center,seconds}]` — Tasks 7, 9 agree. `ReplayScrubBand(content:timeline:playback:readout:fraction:)` — Tasks 9, 10. `ReplayMap(timeline:lines:playback:)` — 8, 10. `RideReplayView(ride:timeline:band:lines:)` — 10, 11. `ReplayTimeline.drawableLines`, `.speedWindowSeconds` — 1, 4, 11. `SyntheticRide.threeHour(startingAt:)`, `.threeHourID` — 5, 11. `AuraTheme.RouteStroke`, `.replayHoldStrip` — 8, 9.
 
-**Type consistency.** `ReplayPhase.hold(ReplayHold.Kind, seconds:)` is used identically in Tasks 1, 3, 5, 7, 8, 10. `ReplayPlayback` method names in Task 6 match every call in Tasks 9 and 10 (`beginScrub(now:)`, `scrub(to:)`, `endScrub(now:)`, `jump(to:)`, `togglePlay(now:)`, `settle(now:)`, `hasEnded(at:)`, `fraction(at:)`, `isScrubbing`, `isPlaying`). `ReplayReadout` members in Task 7 match Task 9 (`elevationText`, `accessibilityValue`, `holdText`) and Task 10 (`speedText`, `speedUnit`, `distanceText`, `distanceUnit`, `timeText`, `accessibilityLabel`). `ReplayBandContent.kind` cases `.silhouette([Double])` / `.rail` and `.holds` match Task 9. `ReplayScrubBand.init` parameters `(content:timeline:playback:readout:fraction:now:)` match Task 10. `ReplayMap.init` `(timeline:lines:playback:)` matches Task 10. `AuraTheme.RouteStroke.width`/`.casingWidth` match Task 8's two uses. `SyntheticRide.threeHour(startingAt:)` matches Tasks 5 and 11.
+**Placeholders.** None.
+
+## Reconciliation log (v1 → v2)
+
+Two independent reviewers (`review-skeptic` on the pure layer, `review-architecture` on the app layer), refuting stance, 2026-09-11. The skeptic reconstructed Tasks 1–7 in a scratch SwiftPM package and ran them; the architect type-checked the app-layer expressions against the SDK.
+
+| # | Finding | Resolution |
+|---|---|---|
+| S1 | Tuple stored properties break `Equatable` synthesis (compile error) | `Endpoint` struct |
+| S2 | Five SwiftLint rules fire (`type_name` "F", `type_body_length`, `function_body_length`, `cyclomatic_complexity`, `nesting`) | `typealias Fixtures`; `SpanContent` hoisted; `init` → `layout(items:config:)`; sampling in an extension file; `Builder.classify`/`addPauseGap` split out; rules listed in Global Constraints |
+| S3 | Searching spans on seconds put a hold's exclusive end inside the hold (94/115 gaps) | `Span.fractionStart`, search on fractions; sweep test over 115 gaps |
+| S4 | `backwardsStamp` expected 198, code gives 239, and the fixture accidentally made a hold | Fixture restamps 1 s before its predecessor; expects 201 and no hold |
+| S5 | Fixture used 111 320 m/° against haversine's 6 371 000 m sphere; 3 tolerances failed | `metersPerDegree = 6_371_000 × π/180`; tolerances 0.01 m |
+| S6 | `totalSeconds` is Σ leg dt, not Σ segment spans | Spec §3/D5.3 corrected to Σ normalized leg dt; sample doc says so |
+| S7 | km/mi marks inside a hold's folded distance were dropped | `events` walks holds too, mark lands on the hold's start; test |
+| S8 | `playbackDuration == 10` on an accumulated double | `duration` is the exact sum; tolerances anyway |
+| S9 | "Expected: all pass" claims were false; Tasks 2–4 had no red target | Expectations corrected from executed values; hint text rewritten |
+| S10 | `holdsAreCarried` was `[] == []` | Two-segment fixture with a pause |
+| S11 | `speedWindow` test re-derived the formula | `speedWindowSeconds` public; straddling-window negative control (4.5 m/s) |
+| S12 | Untested: zero-width later point (unfalsifiable, dropped from spec §4.2); pause chord; speed after a lost leg (spec contradiction) | Pause-chord test with a northward second segment; `windowFloor` barrier so the window never crosses a hold; test |
+| S13 | `SyntheticRide` prose wrong (601 s pause; lost leg is in segment 2) | Doc comment corrected; test pins 601 |
+| S14 | Generator ships in the release library | `#if DEBUG`; deviation stated |
+| S15 | Stale line refs; "two identifiers" | 38/40, 362/364, 76; three identifiers (spec fixed) |
+| S-susp | `fraction(at:)` no lower clamp; dedupe can drop 1.0; zero-dt teleport folded into a run | Clamped; 1 appended last after filtering; teleport breaks the run + test |
+| A1 | Paused `TimelineView` date drove `play`/`endScrub` → replay jumps to wherever the rider hesitated | Global constraint; `Date()` in every handler; band drops `now`; `playAfterALongPauseStartsAtZero` test; Task 12 checks it |
+| A2 | `.equatable()` inside `body` is a compile error | At the call site |
+| A3 | Seed wrote into the CloudKit-mirrored store | Gated on `store.isEphemeral`; Task 12 passes both flags |
+| A4 | Rail-mode hit area 32 pt narrower than the band | `.frame(width:height:alignment:)` on the ZStack |
+| A5 | Strips under the silhouette fill at 14% white | Strips above; `AuraTheme.replayHoldStrip` 0.28; PO eyeball queued |
+| A6 | Per-leg bearing = 120 heading changes per playback second | Bearing over the trailing window in the pure layer; zig-zag test |
+| A7 | Tap rule was an untested call ordering | `ReplayPlayback.tap(to:now:)` + test |
+| A8 | Pixel math, caption rule, thumb y, 45° rounding lived in the app target | `ReplayBandGeometry`, `ReplayMarkerStyle` in AuraKit with suites; `@ScaledMetric` caption width |
+| A9 | `lines` derived twice and per `View.init` | `ReplayTimeline.drawableLines`; built once in the modifier's task |
+| A10 | Map could squeeze to nothing at AX sizes | `minHeight: 200`; hero capped at 56 |
+| A11 | No compile-error loop | Global constraint: orchestrator builds, implementer amends |
+| A12 | Elevation tag/spoken value from the 4 Hz sample, thumb from the frame | Second readout at the band's fraction |
+| A13–23 | Line refs; `RouteStroke` scope; repeated-hold announcement; `holdUnderThumb` churn; lower clamp; scrub latch; `isIdle` semantics; forbidden-file name; identifiers; 32 vs 34 pt canvases; Task 1 lint | All applied: `RoutePreviewView` included; announcement reset; guarded write; `cancelScrub` on disappear; `isIdle` caveat in code + spec §10; real file names; fixed 34 pt marker frame |
+
+Not adopted: the architect's suggestion to prefer `MapViewAnnotation` was already v2 of the spec; the skeptic's note that `profile(sampleCount: 1)` conflates two nils is unreachable (`sampleCount` is a constant 240) and left as is.

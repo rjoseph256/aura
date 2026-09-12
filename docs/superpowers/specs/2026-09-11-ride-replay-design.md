@@ -1,7 +1,8 @@
 # Ride replay — scrub a finished ride back (design)
 
-**Date:** 2026-09-11 (v2, reconciled after the 3-reviewer adversarial spec gate; v1 was
-PO-approved in chat the same day)
+**Date:** 2026-09-11 (v2.1: v2 was reconciled after the 3-reviewer adversarial spec gate; v1 was
+PO-approved in chat the same day; v2.1 folds in the rule changes the two-reviewer plan gate
+forced, each marked **(v2.1)** — the plan's reconciliation log has the findings)
 **Epic:** Summary & Map Polish — [ROH-239](https://linear.app/rohun/issue/ROH-239)
 **Verification:** Tier 1, with one queued Verification issue for device smoothness and memory
 on a long ride (§9)
@@ -164,8 +165,13 @@ draws and `sample(at:).phase` is computed from the same ranges; §4 pins that th
 The screen opens paused at fraction 0. One accent control, play/pause, centered under the
 band. Dragging the band scrubs; if playback was running when the drag began, it **resumes**
 when the drag ends **(v2)**, as every media scrubber the rider knows does. Tapping the band
-(no drag) jumps the playhead there and leaves playback paused. Playing to the end stops at
-fraction 1; tapping play there restarts from 0.
+(no drag) jumps the playhead there and leaves playback paused; **(v2.1)** that is one
+`ReplayPlayback.tap(to:now:)` call, not an ordering of two, so the rule is tested. Playing
+to the end stops at fraction 1; tapping play there restarts from 0.
+
+**(v2.1)** Every playback event takes the live `Date()` from its handler. A `TimelineView`'s
+`context.date` is for rendering only: a paused schedule's date is frozen, and anchoring
+playback on it starts the ride from wherever the rider hesitated to.
 
 ### D5. What rides with the playhead
 
@@ -175,7 +181,10 @@ Three readouts in an instrument row between the map and the band:
    mean** **(v2)**: the sum of leg distances between the points bracketing `[T − w, T]`
    within the current segment, divided by their timestamp span, with
    `w = max(Config.speedWindowFloor (5 s), rate × Config.speedWindowPlayback (0.1 s))`
-   (12 s at 120×). It trails rather than centers so the number never anticipates the marker.
+   (12 s at 120×; exposed as `speedWindowSeconds`). It trails rather than centers so the
+   number never anticipates the marker. **(v2.1)** The window never reaches back across an
+   in-segment hold: a lost-signal leg's 900 m over 120 s is not a speed, and D3 forbids
+   treating it as one. For the first `w` seconds after a hold the readout is "—".
    It never reads `TrackPoint.speedMetersPerSecond`, so GPX and simulated rides degrade
    identically. It is nil, rendered "—", inside a hold, at `.ended`, at fraction 0, or when
    the window holds fewer than two points with a positive span. It is smoother than the
@@ -185,8 +194,10 @@ Three readouts in an instrument row between the map and the band:
    Cumulative `Geo.distance` over legs within segments up to T, interpolated inside the
    current leg. At fraction 1 it equals `RideStats.distanceMeters` for the same segments.
 3. **Time**, with the total beside it **(v2)**: "14:08 / 1:02:11". Ride time elapsed within
-   segments up to T (Σ segment spans, normalized as in D2), which excludes pause gaps and
-   includes in-segment stops. It is deliberately **not** called active time: the repo has one
+   segments up to T: **(v2.1)** Σ of normalized leg `dt` (D2), which excludes pause gaps,
+   includes in-segment stops, and counts a backwards stamp as zero for its own leg and in
+   full for the leg after it. This is the per-leg clock the readout advances by; it is not
+   Σ of segment spans, and on a ride with a backwards stamp the two differ. It is deliberately **not** called active time: the repo has one
    definition of active time (`RideDuration`), guarded by
    `scripts/check-single-active-definition.sh`, and this is a different quantity. Formatted
    by `PauseControlCopy.clock`, which already grows an hours field and clamps negatives.
@@ -211,10 +222,13 @@ One band, `ReplayScrubBand`, spanning the playback axis:
 - `.flat` or `.unavailable` → a **scrubber rail** **(v2)**: a full-width dim track with the
   traversed portion filled accent, same height, same strips, same thumb. It reads as a
   control, not as a chart that failed.
-- Holds are strips: `AuraTheme.hairline`-strength fill (not 12% of secondary text, which
-  this repo already found too faint), minimum 12 pt wide. A hold of ≥ 120 s gets its
-  duration as a caption centered beneath its strip; captions are laid out left to right and
-  a caption whose frame would intersect the previous one is dropped. **(v2)**
+- Holds are strips, minimum 12 pt wide, drawn **above** the silhouette in their own token,
+  `AuraTheme.replayHoldStrip` (white at 28%) **(v2.1)**: a hairline-strength fill under the
+  silhouette's 18% mint wash collapsed to ~11% and was invisible. PO eyeball owed on the
+  simulator pass. A hold of ≥ 120 s gets its duration as a caption centered beneath its
+  strip; captions are laid out left to right and a caption whose frame would intersect the
+  previous one is dropped **(v2)**. The strip, caption, thumb, and pixel↔fraction rules live
+  in `ReplayBandGeometry` (AuraKit) and are tested.
 - The playhead is a 2 pt accent line with a **28 pt thumb** at the silhouette **(v2)**, and
   the band is inset horizontally by half the thumb so the thumb never clips at 0 or 1. A
   small elevation tag (`ReplayReadout.elevation`) sits beside the thumb on the silhouette
@@ -303,11 +317,15 @@ mirrored raster would be obvious against the drawn line.
 
 ### D9. Bearing
 
-Bearing at T is `PeerBearing.heading` from the earlier bracketing point to the later one.
-When the two are within `Config.coincidentMeters (0.5 m)` (the `PeerInterpolator` rule) the
-bearing holds its previous value; at a segment's first sample it takes the first
-non-coincident leg's course, or nil, in which case the marker draws the disc. The pure
-bearing is raw; rounding is the view's.
+**(v2.1)** Bearing at T is the course between the endpoints of the same trailing window
+D5.1 uses, `PeerBearing.heading(from: p[i], to: p[j])`, when those endpoints are at least
+`Config.coincidentMeters (0.5 m)` apart. A per-leg course was 120 heading changes per
+playback second at 120×, each the raw course of one 6 m GPS leg; the peer pointer already
+applies a deadband for less. Before the window holds two points the sample falls back to
+the leg's own course, which holds its previous value across coincident points (the
+`PeerInterpolator` rule) and is nil before the first non-coincident leg, in which case the
+marker draws the disc. The pure bearing is raw; the 45° Reduce Motion rounding is
+`ReplayMarkerStyle` in AuraKit, tested.
 
 ### D10. Reduce Motion
 
@@ -359,7 +377,9 @@ public struct ReplayTimeline: Sendable, Equatable {
     public var playbackDuration: TimeInterval
     public var rate: Double
     public var totalDistanceMeters: Double
-    public var totalSeconds: TimeInterval               // Σ normalized segment spans
+    public var totalSeconds: TimeInterval               // Σ normalized leg dt (v2.1)
+    public var speedWindowSeconds: TimeInterval         // D5.1 (v2.1)
+    public var drawableLines: [[Coordinate]]            // the one definition of "drawable" (v2.1)
     public var holds: [ReplayHold]                       // in playback order
     public func sample(at fraction: Double) -> ReplaySample   // total; fraction clamped to 0…1
     public func profile(sampleCount: Int) -> [Double]?         // nil when no point has elevation
@@ -407,9 +427,10 @@ Each is a test that can fail. Fixtures are synthetic and named for what they exe
    30-second pauses on a 20-minute ride (Σ hold widths == 0.25 × movingPlayback exactly).
 2. **Normalization (D2):** a segment whose points all share one timestamp is drawable, has
    `movingSpan == 0`, is not replayable, and still samples without NaN at every fraction; a
-   segment with one backwards stamp samples monotonically in `distanceMeters` and `seconds`
-   and never produces a negative rate; the search lands on the later point of a zero-width
-   leg.
+   segment with one backwards stamp samples monotonically in `distanceMeters` and `seconds`,
+   never produces a negative rate, keeps the zero-width leg's distance, and lengthens the leg
+   after the stamp **(v2.1)**. A zero-width leg with a real displacement breaks a stationary
+   run rather than joining it.
 3. **Holds are what the sample says (D3):** for every hold, `sample(at: range.lowerBound)`
    and `sample(at: mid)` have `phase == .hold(kind, seconds)` with the hold's values and
    `coordinate` equal to the anchor point, `speedMetersPerSecond == nil`, and
@@ -435,7 +456,8 @@ Each is a test that can fail. Fixtures are synthetic and named for what they exe
    elevation through a hold, carries the last value across a nil, is nil for a no-elevation
    ride, and the sample at index `k` equals the elevation `sample(at: k/239)` reports.
 10. **Events (D10/§5):** sorted, deduplicated, start with 0 and end with 1, contain every
-    hold's `lowerBound` and `upperBound`, and contain a fraction at each whole km and mi.
+    hold's `lowerBound` and `upperBound`, and contain a fraction at each whole km and mi; a
+    mark that falls inside a hold's folded distance lands on the hold's start **(v2.1)**.
 11. **Replayable (D7):** false for < 60 s moving span, false for < 200 m, false with no
     drawable segment, true for the golden-ride fixture (445 s, > 200 m).
 12. **Scale:** a synthetic 10,800-point, 3-hour ride with 4 stops builds, is replayable, and
@@ -448,6 +470,12 @@ Each is a test that can fail. Fixtures are synthetic and named for what they exe
     time, "Stopped · 10 min", "Paused · 45 s", "No signal · 3 min", the elevation tag with
     unit, the three-valued subtitle, and the VoiceOver value ("4.2 miles, 22 minutes") and
     label.
+15. **Band geometry (D6) (v2.1):** `x(0)`/`x(1)` are inset by half the thumb plus the stroke;
+    `fraction(atX:)` inverts `x` and clamps; a degenerate width divides by nothing; the thumb's
+    y follows the silhouette and centers on the rail; strips have a 12 pt minimum; captions
+    skip holds under 120 s and drop on overlap.
+16. **Marker style (D10) (v2.1):** Reduce Motion rounds 100 → 90, 113 → 135, 359 → 0; nil
+    stays nil; without Reduce Motion the raw value passes through.
 
 ## 5. Interaction and accessibility
 
@@ -471,12 +499,15 @@ Each is a test that can fail. Fixtures are synthetic and named for what they exe
 
 New:
 
-- `AuraCore/Sources/AuraCore/Replay/ReplayTimeline.swift`, `ReplaySample.swift`
-- `AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift`,
-  `ReplayFixtures.swift` (synthetic ride builders, including the 10,800-point one)
+- `AuraCore/Sources/AuraCore/Replay/ReplayTimeline.swift`, `ReplayTimeline+Sample.swift`,
+  `ReplaySample.swift`, and `SyntheticRide.swift` **(v2.1)**: the 10,800-point builder lives
+  in the library under `#if DEBUG`, not the test target, because the DEBUG seed inserts it
+  into the store.
+- `AuraCore/Tests/AuraCoreTests/Replay/ReplayTimelineTests.swift`, `ReplayFixtures.swift`
 - `AuraCore/Sources/AuraKit/Replay/ReplayReadout.swift`, `ReplayBandContent.swift`,
-  `ReplayPlayback.swift`
-- `AuraCore/Tests/AuraKitTests/Replay/ReplayReadoutTests.swift`, `ReplayPlaybackTests.swift`
+  `ReplayBandGeometry.swift`, `ReplayMarkerStyle.swift`, `ReplayPlayback.swift`
+- `AuraCore/Tests/AuraKitTests/Replay/ReplayReadoutTests.swift`, `ReplayBandGeometryTests.swift`,
+  `ReplayPlaybackTests.swift`
 - `Aura/Sources/Ride/Replay/RideReplayView.swift`, `ReplayMap.swift`,
   `ReplayMarkerView.swift`, `ReplayScrubBand.swift`, `ReplayInstrumentRow.swift`,
   `RideReplayEntry.swift`
@@ -486,8 +517,14 @@ Changed:
 - `Aura/Sources/Ride/RideSummaryView.swift`: one line.
 - `Aura/Sources/Theme/AuraTheme.swift` (or a new `RouteStroke.swift` beside it): the route
   casing constants.
-- `Aura/Sources/Ride/StaticRouteMap.swift`: reads those constants; no behavior change.
-- `AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift`: two identifiers.
+- `Aura/Sources/Ride/StaticRouteMap.swift` and `Aura/Sources/Plan/RoutePreviewView.swift`:
+  read those constants; no behavior change. (The share card's `ShareCardLayout` stroke is a
+  Core Graphics centered stroke expressing the same 5 pt core; it stays separate. **(v2.1)**)
+- `AuraCore/Sources/AuraKit/Testing/RideTestSupport.swift`: three identifiers
+  (`replayEntry`, `replayPlay`, `replayBand`).
+- `AuraCore/Sources/AuraKit/Testing/SimulatedRideConfig.swift`: the `-auraSeedLongRide` flag.
+- `Aura/Sources/AuraApp.swift`: the DEBUG seed, **ephemeral store only** **(v2.1)**: the
+  persistent store mirrors to the developer's real iCloud.
 
 Untouched: `NavigateHUDView`, `RideMapView`, `RideSummaryView+ShareUpgrade`, all group-ride
 crew files, `AppRoute`, `SimulatedRideSupport`, `HistoryView`.
@@ -519,9 +556,10 @@ Tier 1, plus one queued Verification issue.
 - Package suites in §4 green in the gate.
 - Simulator, two rides: the golden-ride fixture (445 s moving, floor regime, ~44×) and the
   paused fixture (290 s, one pause). Both land on the floor, so they exercise the floor branch
-  and the hold path but not the cap. For the cap regime, a DEBUG launch argument seeds the
-  synthetic 3-hour ride from `ReplayFixtures` into the store (the plan checks for an existing
-  seeding hook before adding one). Screenshots: replay at fraction 0 with the marker on the
+  and the hold path but not the cap. For the cap regime, `-auraSeedLongRide` together with
+  `-auraInMemoryRideStore` seeds `SyntheticRide.threeHour` into the in-memory store; the seed
+  refuses a persistent store **(v2.1)**. The pass also opens the cover, waits 30 s, taps
+  Play, and confirms playback starts at 0. Screenshots: replay at fraction 0 with the marker on the
   first vertex, mid-ride moving with the triangle on the line, mid-hold (capsule, disc,
   strip, caption), `.ended`, after a pinch with the recenter control showing, Reduce Motion
   mid-glide with the 45° pointer, AX3 Dynamic Type, and the summary with the Replay pill in
@@ -541,3 +579,7 @@ Tier 1, plus one queued Verification issue.
   fallback is `.animation(minimumInterval: 1/30)`.
 - **A hold caption collides with the thumb.** Captions sit below the band's baseline, the
   thumb sits on the silhouette; they share no vertical space.
+- **`viewport.isIdle` means "the viewport manager went idle for any reason"** **(v2.1)**, not
+  only a rider gesture. A failed initial fit (empty geometry, zero-size first layout) would
+  show the recenter control over an unframed map. Low probability, accepted; the simulator
+  pass looks for it at fraction 0.
