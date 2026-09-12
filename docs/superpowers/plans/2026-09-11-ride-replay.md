@@ -1319,7 +1319,7 @@ public enum SyntheticRide {
         }
         let segments = [RideSegment(points: first), RideSegment(points: second)]
         return Ride(id: threeHourID, kind: .freeRide, startedAt: start, endedAt: second[second.count - 1].timestamp,
-                    segments: segments, stats: RideStatsCalculator.stats(segments: segments), pausedSeconds: 600,
+                    segments: segments, stats: RideStatsCalculator.stats(segments: segments), pausedSeconds: 601,
                     destinationName: nil, routeId: nil, destinationPlaceId: nil)
     }
 }
