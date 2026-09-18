@@ -29,8 +29,14 @@ Any change whose correctness is visible in a screen state or drivable by tap:
   `simctl location` / GPX recipe), not by staring at a static screen
 
 **Evidence:** simulator screenshots of the states the change is about — the changed state
-itself, plus dark mode / large Dynamic Type when the change plausibly interacts with them —
-attached to the PR. Where a golden-ride or XCUITest already covers the flow, cite it.
+itself, plus dark mode when the change plausibly interacts with it — attached to the PR, shot
+at the default text size. Where a golden-ride or XCUITest already covers the flow, cite it.
+
+The accessibility text sizes (AX1–AX5, behind Settings' "Larger Accessibility Sizes") are not
+an Aura use case: the app is for Rohun and his friends, and none of them use those sizes (PO,
+2026-09-18, ROH-258). Don't shoot them, don't add UI tests for them, and don't file layout bugs
+that only show there. Check a larger size on the standard slider only when the change is about
+text size itself.
 
 **Merge:** on CI green. No device pass is owed. Rohun can always ask for a device look at
 anything; that request never needs justifying.
