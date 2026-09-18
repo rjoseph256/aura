@@ -56,10 +56,13 @@ struct HistoryView: View {
             // ride's directory — and the sweep spares the ride it thinks is current.
             RideSummaryView(ride: ride).id(ride.id)
         }
-        .confirmationDialog("Delete this ride?",
-                            isPresented: Binding(get: { pendingDelete != nil },
-                                                 set: { if !$0 { pendingDelete = nil } }),
-                            presenting: pendingDelete) { summary in
+        // An alert, not a confirmationDialog (ROH-127): raised from a swipe action, iOS 26 turns
+        // the dialog into a popover anchored to the row, which drops the title and the cancel
+        // button and leaves "Delete ride" as the only visible action on an irreversible delete.
+        .alert("Delete this ride?",
+               isPresented: Binding(get: { pendingDelete != nil },
+                                    set: { if !$0 { pendingDelete = nil } }),
+               presenting: pendingDelete) { summary in
             Button("Delete ride", role: .destructive) { delete(summary); pendingDelete = nil }
             Button("Keep", role: .cancel) { pendingDelete = nil }
         } message: { summary in
