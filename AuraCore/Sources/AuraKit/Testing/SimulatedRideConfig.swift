@@ -66,6 +66,13 @@ public struct SimulatedRideConfig: Equatable, Sendable {
         arguments.contains("-auraSeedLongRide")
     }
 
+    /// "-auraSeedUnfinishedRide" → DEBUG builds insert `SyntheticRide.unfinished` at launch, so
+    /// History's unfinished-ride delete confirmation (ROH-127) is reachable from a UI test. Same
+    /// ephemeral-store-only rule as the long-ride seed.
+    public static func seedsUnfinishedRide(arguments: [String]) -> Bool {
+        arguments.contains("-auraSeedUnfinishedRide")
+    }
+
     /// Process-wide values, parsed once. MainActor confines the lazy statics under Swift 6.
     @MainActor public static let current = parse(arguments: ProcessInfo.processInfo.arguments)
     @MainActor public static let currentForcesInMemoryStore =
@@ -75,4 +82,6 @@ public struct SimulatedRideConfig: Equatable, Sendable {
     @MainActor public static let currentSuppressesLaunchOrphanSweep =
         suppressesLaunchOrphanSweep(arguments: ProcessInfo.processInfo.arguments)
     @MainActor public static let currentSeedsLongRide = seedsLongRide(arguments: ProcessInfo.processInfo.arguments)
+    @MainActor public static let currentSeedsUnfinishedRide =
+        seedsUnfinishedRide(arguments: ProcessInfo.processInfo.arguments)
 }

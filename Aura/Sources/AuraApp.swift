@@ -25,6 +25,9 @@ struct AuraApp: App {
         if SimulatedRideConfig.currentSeedsLongRide, store.isEphemeral {
             try? store.save(SyntheticRide.threeHour(startingAt: Date().addingTimeInterval(-4 * 3600)))
         }
+        if SimulatedRideConfig.currentSeedsUnfinishedRide, store.isEphemeral {
+            try? store.save(SyntheticRide.unfinished(startingAt: Date().addingTimeInterval(-2 * 3600)))
+        }
         #endif
         _rideStore = State(initialValue: store)
         _savedPlaces = State(initialValue: SavedPlacesStore(container: store.container))

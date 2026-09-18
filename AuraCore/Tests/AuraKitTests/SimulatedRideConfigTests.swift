@@ -71,4 +71,11 @@ struct SimulatedRideConfigTests {
         #expect(SimulatedRideConfig.seedsLongRide(arguments: ["-auraSeedLongRide"]))
         #expect(SimulatedRideConfig.seedsLongRide(arguments: []) == false)
     }
+
+    @Test func seedUnfinishedRideFlag() {
+        #expect(SimulatedRideConfig.seedsUnfinishedRide(arguments: ["-auraSeedUnfinishedRide"]))
+        #expect(SimulatedRideConfig.seedsUnfinishedRide(arguments: []) == false)
+        // Independent of the long-ride seed: neither flag implies the other.
+        #expect(SimulatedRideConfig.seedsUnfinishedRide(arguments: ["-auraSeedLongRide"]) == false)
+    }
 }

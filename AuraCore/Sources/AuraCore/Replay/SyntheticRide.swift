@@ -62,5 +62,24 @@ public enum SyntheticRide {
                     segments: segments, stats: RideStatsCalculator.stats(segments: segments), pausedSeconds: 601,
                     destinationName: nil, routeId: nil, destinationPlaceId: nil)
     }
+
+    public static let unfinishedID = UUID(uuidString: "00000000-0000-0000-0000-00000000F00D")!
+
+    /// 10 minutes out along a straight line at 6 m/s, left behind at a pause checkpoint: the row
+    /// History badges as unfinished and guards with a delete confirmation (ROH-107, ROH-127).
+    /// `endedAt` is the pause-instant stamp and `checkpointedAt` the marker, as the recorder writes it.
+    public static func unfinished(startingAt start: Date) -> Ride {
+        let metersPerDegreeLat = 6_371_000 * Double.pi / 180
+        let points = (0..<600).map { i in
+            TrackPoint(coordinate: Coordinate(latitude: center.latitude + 6.0 * Double(i) / metersPerDegreeLat,
+                                              longitude: center.longitude),
+                       elevation: 300, timestamp: start.addingTimeInterval(Double(i)))
+        }
+        let segments = [RideSegment(points: points)]
+        let end = points[points.count - 1].timestamp
+        return Ride(id: unfinishedID, kind: .freeRide, startedAt: start, endedAt: end,
+                    segments: segments, stats: RideStatsCalculator.stats(segments: segments), pausedSeconds: 0,
+                    checkpointedAt: end, destinationName: nil, routeId: nil, destinationPlaceId: nil)
+    }
 }
 #endif
