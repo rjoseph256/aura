@@ -136,9 +136,15 @@ files="$(changed)"
 # survey emptiness. A branch name discriminates nothing: a feature branch
 # pushed straight to origin/main is byte-identical in git to one that got there
 # by a reviewed merge, and a detached HEAD at the tip is the same state with no
-# name at all. And emptiness self-disarms: the gate's own `swift test` dirties
-# AuraCore/Package.resolved (ROH-182), and that one stray non-Swift line would
-# otherwise suppress the fallback forever on the primary checkout.
+# name at all. And emptiness self-disarms: any single stray non-Swift line in
+# the survey would suppress the fallback forever on the primary checkout. The
+# worked example used to be live — the gate's own `swift test` dirtied
+# AuraCore/Package.resolved on every run (ROH-182) because a snapshot of the
+# app's 19-pin graph had been committed into a package that declares one
+# dependency. That file now holds its true standalone resolution and CI guards
+# it (ROH-270), so the churn is gone. The SHA trigger stays: it does not depend on the
+# survey being empty for the right reason, which is exactly why it survived the
+# thing it was chosen to tolerate.
 #
 # Costs, decided deliberately: any task completed at the published tip — the
 # post-merge fast-forwarded main checkout included — pays the full suite, and a

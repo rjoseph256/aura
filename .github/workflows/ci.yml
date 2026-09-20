@@ -48,6 +48,35 @@ jobs:
       - name: Run AuraCore + AuraKit tests
         working-directory: AuraCore
         run: swift test --no-parallel
+      # ROH-270. AuraCore declares exactly one dependency (swift-snapshot-testing), so a standalone
+      # resolve can only ever produce its four pins. Twice — 2026-07-21 and again 2026-08-01
+      # — a 19-pin snapshot of the APP's graph (Mapbox, Supabase and their transitives) was
+      # committed here by accident and then mistaken for the baseline, after which every
+      # honest `swift test` looked like damage and got hand-reverted. Three reverts, two of
+      # them restoring the accident. Nothing ever read those pins: the app resolves from
+      # `Aura/project.yml`, whose Mapbox exact-versions are the real pin contract, and its
+      # own lockfile lives in the gitignored `Aura/Aura.xcodeproj`. This step fails the
+      # build rather than letting the app graph drift back in unnoticed.
+      #
+      # `swift test` above has already resolved, so a diff here means the lockfile does not
+      # match `Package.swift`. That is also the correct, expected failure immediately after
+      # a manifest change: `originHash` is a checksum over the manifest's tools version,
+      # platforms and dependencies, so editing any of the three invalidates it and the
+      # lockfile has to be re-resolved in the same commit.
+      #
+      # Deliberately not in `toolchain-canary`: a SwiftPM ahead of our pin may compute
+      # `originHash` differently, and a red canary should mean the compiler broke us.
+      - name: Guard Package.resolved against app-graph drift
+        working-directory: AuraCore
+        run: |
+          if ! git diff --exit-code -- Package.resolved; then
+            echo "::error file=AuraCore/Package.resolved::Package.resolved does not match Package.swift"
+            echo "Fix: run 'swift package resolve' in AuraCore/ and commit the result."
+            echo "Expect 4 pins (swift-snapshot-testing + transitives). Mapbox or Supabase"
+            echo "pins here mean an app-graph resolution leaked in — the app does NOT"
+            echo "resolve through this package, so they are never correct in this file."
+            exit 1
+          fi
 
   app-build:
     # Keep the original display name — branch protection / required checks key on it.

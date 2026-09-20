@@ -156,6 +156,21 @@ in as rider 2 while the owner's phone is rider 1. See [DEVICE-TESTING.md](DEVICE
 
   CI runs the same on every push (`.github/workflows/ci.yml`).
 
+  `AuraCore/Package.resolved` is the package's own lockfile and the only pin file in git.
+  It should hold **exactly four pins** — `swift-snapshot-testing` and its transitives —
+  because that is the single dependency `AuraCore/Package.swift` declares. If you ever see
+  Mapbox or Supabase pins in it, an app-graph resolution has leaked in: the app resolves
+  from `Aura/project.yml`, not through this package, and its own lockfile lives inside the
+  gitignored `Aura/Aura.xcodeproj`. That leak happened twice and was hand-reverted three
+  times before CI started guarding it; do not "restore" the Mapbox pins.
+
+  A `swift test` or `swift build` that leaves the file dirty means it no longer matches
+  `Package.swift` — `originHash` is a checksum over the manifest's tools version, platforms
+  and dependencies, so changing any of those invalidates it. The fix is to re-resolve and
+  commit the result in the same change, not to revert it:
+
+      cd AuraCore && swift package resolve && git add Package.resolved
+
 ## 6. Repo, Linear, and backend access
 
 The Apple team invite in [§4](#4-apple-signing--add-the-collaborator-to-your-team) covers
