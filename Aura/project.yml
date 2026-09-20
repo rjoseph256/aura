@@ -2,7 +2,7 @@ name: Aura
 options:
   bundleIdPrefix: com.rohunjoseph
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "26.0"
 packages:
   AuraCore:
     path: ../AuraCore
@@ -29,6 +29,11 @@ settings:
   base:
     DEVELOPMENT_TEAM: C3LFTV2QYK
     CODE_SIGN_STYLE: Automatic
+    # Pinned at project level too. Every target already sets this, but without a
+    # project-level value XcodeGen writes its own default (5.0) into the generated
+    # Debug/Release configs, which reads like a real mixed-language-mode setup when
+    # you grep the .pbxproj. It never reached compiled code; this removes the signal.
+    SWIFT_VERSION: "6.0"
 targets:
   Aura:
     type: application

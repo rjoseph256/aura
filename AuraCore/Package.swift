@@ -1,9 +1,12 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
     name: "AuraCore",
-    platforms: [.iOS(.v17), .macOS(.v14)],
+    // iOS floor is 26 (see ROH-269). macOS stays at 14 on purpose: the CI
+    // `package-tests` job runs `swift test` on a macos-15 runner, which could not
+    // execute a macOS 26 binary. The two floors are independent.
+    platforms: [.iOS(.v26), .macOS(.v14)],
     products: [
         .library(name: "AuraCore", targets: ["AuraCore"]),
         .library(name: "AuraKit", targets: ["AuraKit"]),

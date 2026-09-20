@@ -78,6 +78,19 @@ shape and concurrency rules move faster than any model's memory of them. Delegat
 tests to the `apple-platform-build-tools` builder subagent, which absorbs xcodebuild output
 instead of filling the session with it.
 
+**A live debugger is available — prefer it to print-and-rebuild.** Sentry's
+[XcodeBuildMCP](https://github.com/getsentry/XcodeBuildMCP) is installed as a CLI
+(`npm install -g xcodebuildmcp`), deliberately *not* registered as an MCP server. Its LLDB
+group gives the builder subagent a stateful debug session: `xcodebuildmcp debugging attach`,
+then `add-breakpoint`, `continue`, `stack`, `variables`, `lldb-command`, `detach`. Dispatch
+the builder with the symptom and let it drive, the same way builds go there — the point is
+that backtraces and frame dumps stay out of the main context. Reach for it when a bug turns
+on state at a moment in time: a HUD value that is only wrong mid-ride, a Mapbox callback
+firing with the wrong argument, a crash whose stack the logs truncate. It stays CLI-only
+because `ios-simulator-mcp` and the built-in simulator control already cover taps, swipes,
+screenshots, and the accessibility tree; a fourth simulator server would add schemas and no
+capability.
+
 **UI work is verified by running it, at the tier [docs/VERIFICATION.md](docs/VERIFICATION.md)
 assigns — never asserted from a clean build.** The Terrain-RGB elevation bug compiled fine
 and returned flat everywhere. Most visual and interactive changes are Tier 1: Claude drives
