@@ -1,9 +1,13 @@
 {
   "enabledPlugins": {
     "superpowers@claude-plugins-official": true,
-    "all-ios-skills@swift-ios-skills": true,
     "apple-platform-build-tools@apple-platform-build-tools": true,
-    "ios-build-verify@ios-build-verify": true
+    "ios-build-verify@ios-build-verify": true,
+    "swiftui-skills@swift-ios-skills": true,
+    "swift-core-skills@swift-ios-skills": true,
+    "ios-engineering-skills@swift-ios-skills": true,
+    "ios-app-framework-skills@swift-ios-skills": true,
+    "ios-data-framework-skills@swift-ios-skills": true
   },
   "extraKnownMarketplaces": {
     "claude-plugins-official": {

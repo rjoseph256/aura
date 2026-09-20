@@ -71,7 +71,7 @@ relevant skill: `superpowers:systematic-debugging` for a bug,
 `superpowers:test-driven-development` for a contained change.
 
 **Apple-platform work consults the matching skill before writing code.** Swift, SwiftUI,
-UIKit, or any Apple framework: route to the `all-ios-skills` skill for that area
+UIKit, or any Apple framework: route to the iOS bundle skill for that area
 (`swift-concurrency`, `swiftdata`, `activitykit`, `widgetkit`, `healthkit`,
 `swiftui-navigation`, and so on) rather than writing from training-data recall. Apple API
 shape and concurrency rules move faster than any model's memory of them. Delegate builds and
@@ -101,7 +101,7 @@ Visual design of native SwiftUI surfaces follows the iOS skills and direct desig
 **Never route native UI work through the web design skills by default** (`impeccable`,
 `design-taste-frontend`, `emil-design-eng`, and the rest of that family), even when they are
 installed at user scope and a user-level instruction says to. They are built for web and app-shell
-surfaces. Native SwiftUI here is governed by `all-ios-skills` plus direct judgment, and a session
+surfaces. Native SwiftUI here is governed by the iOS skill bundles plus direct judgment, and a session
 that announces it is using `impeccable` on a SwiftUI screen because a global mandate told it to is
 not following this repo.
 
