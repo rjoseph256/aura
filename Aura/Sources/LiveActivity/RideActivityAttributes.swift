@@ -20,7 +20,12 @@ public enum RideActivityMode: String, Codable, Hashable, Sendable {
 /// for two reasons: the widget formats them unit-aware with `RideStatsFormatter` so the
 /// activity honors the distance-units setting, and the elapsed clock ticks on-device via
 /// `Text(_, style: .timer)` from `startedAt` rather than being pushed every second.
-public struct RideActivityAttributes: ActivityAttributes {
+///
+/// `nonisolated` so its `ActivityAttributes` conformance is too. Both targets that compile this
+/// file default to MainActor isolation, which would make the conformance main-actor-isolated,
+/// and ActivityKit's `update` / `end` use it from a `@concurrent` context. Xcode 27 rejects
+/// that (ROH-274). Every stored property is a nonisolated, `Sendable` package type.
+public nonisolated struct RideActivityAttributes: ActivityAttributes {
     /// **Every field added here from now on must be `Optional` or defaulted.** `ContentState` is
     /// `Codable` and re-serialized on every update, so an activity in flight across an app update
     /// is decoded by the *new* binary from bytes the *old* one wrote. Swift's synthesized

@@ -132,7 +132,11 @@ struct PeerDotView: View {
 }
 
 /// A minimal upward-pointing triangle, used as the peer's heading cone.
-private struct Triangle: Shape {
+///
+/// `nonisolated` like SwiftUI's own shapes: `Shape` is a nonisolated, `Sendable` protocol, so
+/// under this target's default MainActor isolation an unannotated `path(in:)` would be
+/// main-actor-isolated and could not satisfy it. Xcode 27 rejects that (ROH-274).
+private nonisolated struct Triangle: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: CGPoint(x: rect.midX, y: rect.minY))
